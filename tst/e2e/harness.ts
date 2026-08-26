@@ -277,6 +277,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
                 resourceLoader: { loadBytes: async () => new Uint8Array() },
                 driver: {
                     matchmake: () => {},
+                    portal: async () => false,
                     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
                     user: { id: 'test', username: 'test', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
                 },

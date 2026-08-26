@@ -2,7 +2,7 @@ import * as Ads from '../client/ads';
 import type { ScriptContext } from '../core/scene/scripts';
 
 /**
- * Game-facing bridge to the active host portal (CrazyGames / Poki / none).
+ * Game-facing bridge to the active host platform (CrazyGames / Poki / none).
  * Client-only. The transport lives on the ClientDriver supplied at engine init,
  * this just hands off to it. Standalone / bongle-dev hosts wire these to an
  * inert impl, so a game can call them unconditionally regardless of where it's
@@ -15,7 +15,7 @@ import type { ScriptContext } from '../core/scene/scripts';
  */
 export const platform = {
     /** Show an interstitial at a natural break. Resolves when the ad finishes
-     *  or is skipped (or immediately when there's no portal). */
+     *  or is skipped (or immediately when there's no host platform). */
     commercialBreak(ctx: ScriptContext): Promise<void> {
         const client = ctx.client;
         if (!client?.state) throw new Error('[bongle] platform.commercialBreak: client-only');
@@ -23,7 +23,7 @@ export const platform = {
         return Ads.whileShowing(state.ads, () => state.driver.platform.commercialBreak());
     },
     /** Offer an opt-in rewarded ad. Resolves whether the reward was earned
-     *  (false when there's no portal). */
+     *  (false when there's no host platform). */
     rewardedBreak(ctx: ScriptContext): Promise<boolean> {
         const client = ctx.client;
         if (!client?.state) throw new Error('[bongle] platform.rewardedBreak: client-only');

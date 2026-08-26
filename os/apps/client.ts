@@ -3,6 +3,7 @@ import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface'
 import { createNetSim } from '../../build/dev/net-sim';
 import { exposeDevtools } from '../devtools';
 import type { App, EditorSession, Filesystem, Runner } from '../interface';
+import { editorPortalPrompt } from './client/portal-prompt';
 
 // The edit-mode client — ONE implementation of "render the game in an editable
 // preview", used two ways:
@@ -74,6 +75,9 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
 
         const driver: ClientDriver = {
             matchmake() {},
+            portal({ slug, options, joinData }) {
+                return editorPortalPrompt(surface, slug, options, (joinData ?? {}) as Record<string, string | number | boolean>);
+            },
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             user,
         };

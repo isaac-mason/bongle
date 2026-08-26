@@ -25,6 +25,11 @@ export async function start(opts: StartClientOptions): Promise<void> {
     // dev has no host portal: matchmake is a no-op, platform verbs inert.
     const driver: ClientDriver = {
         matchmake() {},
+        // local dev has no website to navigate to; say so rather than fail silently.
+        async portal({ slug }) {
+            console.warn(`[bongle] client.portal('${slug}'): no platform in local dev, staying here`);
+            return false;
+        },
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         // dev play: a stand-in local identity + builtin avatar (no session/account).
         user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },

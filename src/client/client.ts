@@ -487,7 +487,7 @@ export function update(state: EngineClient, delta: number) {
 
     Manifest.sync(state.manifest, state.net);
 
-    // silence the game while a portal ad shows; no-ops unless the value changed.
+    // silence the game while a platform ad shows; no-ops unless the value changed.
     if (state.audioResources) Audio.setOutputMuted(state.audioResources, state.ads.active);
 
     const activeRoom = Rooms.getActiveRoom(state.rooms);

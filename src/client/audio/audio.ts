@@ -104,7 +104,7 @@ export type AudioResources = {
     context: AudioContext;
     /** engine-global output bus, every room's `masterGain` feeds this, and
      *  this feeds the context destination. Ramping it to 0 (`setOutputMuted`)
-     *  silences all rooms at once; used to auto-mute the game during portal
+     *  silences all rooms at once; used to auto-mute the game during platform
      *  ads without games having to do anything. */
     outputGain: GainNode;
     /** last-applied output mute, lets `setOutputMuted` be called every frame
@@ -128,7 +128,7 @@ function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>, 
 
 /** Mute/unmute all engine audio at the output bus, ramping (to avoid clicks)
  *  only on a real change. Called every frame from the client update loop,
- *  reconciling against `state.ads.active`, muting during a portal ad is built-in,
+ *  reconciling against `state.ads.active`, muting during a platform ad is built-in,
  *  no game code involved. */
 export function setOutputMuted(resources: AudioResources, muted: boolean): void {
     if (resources.muted === muted) return;

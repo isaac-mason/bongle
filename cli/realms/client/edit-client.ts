@@ -30,6 +30,12 @@ export async function start(opts: StartClientOptions): Promise<void> {
 
     const driver: ClientDriver = {
         matchmake() {},
+        // the editor is not a play page: a portal opens the target in a new tab
+        // instead of navigating, so the editing session survives.
+        async portal({ slug }) {
+            console.warn(`[bongle] client.portal('${slug}'): not wired in the editor yet, staying here`);
+            return false;
+        },
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         // dev editor: a stand-in local identity + builtin avatar (no session/account).
         user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },

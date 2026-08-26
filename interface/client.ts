@@ -9,10 +9,17 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: s
 export type ClientUser = { id: string; username: string; avatar: ResolvedAvatar };
 
 export type ClientDriver = {
-    matchmake(opts: {
+    matchmake(opts: { options: Record<string, string | number | boolean>; joinData?: Record<string, JsonValue> }): void;
+    /** Send this player to a DIFFERENT project, subject to the host asking them
+     *  first. Resolves false whenever the player stays (declined, target
+     *  unavailable, or a host with nowhere to send them); true means the host is
+     *  navigating away and this session is over. Hosts with no platform around
+     *  them resolve false. */
+    portal(req: {
+        slug: string;
         options: Record<string, string | number | boolean>;
         joinData?: Record<string, JsonValue>;
-    }): void;
+    }): Promise<boolean>;
     platform: Platform;
     user: ClientUser;
 };
