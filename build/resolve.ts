@@ -27,6 +27,8 @@
 // through `stat().kind` — never `exists` — to avoid resolving a specifier to a
 // directory that merely shares its name.
 
+import type { Fs as ShakeupFs } from 'shakeup';
+
 /** the narrow filesystem surface resolution needs (a subset of `Filesystem`). */
 export type ResolveFs = {
     /** immediate children of a dir as name→kind (see Filesystem.readDir) — the
@@ -43,6 +45,35 @@ export type BuildFs = ResolveFs & {
     read(path: string): Promise<Uint8Array>;
     list(dir?: string, opts?: { recursive?: boolean }): Promise<{ path: string; kind: 'file' | 'dir' }[]>;
 };
+
+/** Present `BuildFs` as shakeup's `Fs`.
+ *
+ *  shakeup's own resolver is a fallback here — `createBonglePlugin.resolveId` resolves
+ *  every specifier itself and `load` reads every module — but `bundle()` requires an
+ *  `fs`, and a probe that throws would surface as a bundle error rather than a miss.
+ *  So `read` maps a missing file to null and `exists` goes through the parent's cached
+ *  `readDir`, the same rule the dev host's OPFS adapter uses. */
+export function shakeupFs(fs: BuildFs): ShakeupFs {
+    return {
+        read: async (id) => {
+            try {
+                return await fs.readText(id);
+            } catch {
+                return null;
+            }
+        },
+        exists: async (id) => {
+            const slash = id.lastIndexOf('/');
+            const name = slash === -1 ? id : id.slice(slash + 1);
+            if (name === '') return false;
+            try {
+                return (await fs.readDir(slash === -1 ? '' : id.slice(0, slash))).get(name) === 'file';
+            } catch {
+                return false;
+            }
+        },
+    };
+}
 
 /** the package.json fields this resolver reads. */
 export type PackageJson = { main?: string; module?: string; exports?: unknown };

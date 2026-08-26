@@ -1,45 +1,41 @@
-// lib/build/bongle-plugin.ts — the rolldown plugin that compiles bongle (+ the
+// lib/build/bongle-plugin.ts — the shakeup plugin that compiles bongle (+ the
 // user's game) SOURCE into a module graph, used by the publish build (bundle.ts)
 // and by worker bundling. ONE resolver (resolve.ts, World C), one set of concerns:
 //   - resolve relative + bare (package.json exports) + `/`-absolute + a virtual
 //     entry; node: (and caller externals like sharp) stay external;
-//   - load with the right `moduleType` (bongle ships .ts SOURCE — rolldown must
-//     strip types), `.css` → empty side-effect module, `?worker` → a
-//     self-contained blob (bundled here, then vite's WorkerWrapper);
+//   - load: `.css` → empty side-effect module, `?worker` → a self-contained blob;
 //   - bake env (replaceEnv) + a caller-specific transform hook.
 //
-// Host-neutral: the `rolldown` impl is INJECTED (`@rolldown/browser`'s is the same
-// shape as node `rolldown`), so this runs in the browser editor or a node CLI.
-// The dev path (dev/shakeup-host.ts) doesn't use this — it drives shakeup's dev
-// server, not rolldown — but shares resolve.ts + the worker helpers below.
+// Host-neutral by construction now: shakeup is pure JS, so the SAME code runs in
+// the browser editor and the node CLI with no injected bundler and no host prep.
+// The dev path (dev/shakeup-host.ts) drives shakeup's dev server over the same
+// resolve.ts; this is its build-time twin.
+//
+// The hooks are shakeup-shaped (ctx-first). `asRolldownPlugin` below adapts the SAME
+// definition for the rolldown path the CLI still uses — see the note there.
+//
+// `moduleType` is still reported on load: shakeup ignores it (it parses everything as
+// TS and picks JSX off the id's extension), but rolldown needs it to know a `.ts` file
+// carries types. Likewise `.json` is converted here rather than by shakeup's `json()`
+// plugin, so one definition serves both bundlers.
 
-import type { Plugin } from 'rolldown';
+import { bundle, type Plugin } from 'shakeup';
 import { type EnvValues, replaceEnv } from '../env-replace';
-import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule } from '../resolve';
+import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule, shakeupFs } from '../resolve';
 
 // bongle resolves to its BUILT dist (default import/default conditions), like any
 // consumer — the dist is env-neutral, so replaceEnv below still bakes env for DCE.
 // (The browser editor's vfs only ships dist, not src; and the `source` condition
 // is reserved for tooling that has the source tree, e.g. lib's own tsgo.)
 
-export type RolldownFn = typeof import('rolldown').rolldown;
-
-/** the injected bundler: a `rolldown` impl (`@rolldown/browser`'s or node's) plus
- *  an optional host prep hook (the browser installs a `process` shim; node no-ops). */
-export type Bundler = {
-    rolldown: RolldownFn;
-    /** run once before a rolldown build (browser: ensureProcessShim; node: omit). */
-    prepare?: () => void;
-};
-
-/** `?worker` imports resolve to this-prefixed ids; load() bundles + wraps them. */
-const WORKER_PREFIX = '\0worker:';
-
 type ModuleType = 'ts' | 'tsx' | 'jsx' | 'js';
 function moduleTypeOf(id: string): ModuleType {
     const ext = id.slice(id.lastIndexOf('.') + 1);
     return ext === 'tsx' ? 'tsx' : ext === 'ts' ? 'ts' : ext === 'jsx' ? 'jsx' : 'js';
 }
+
+/** `?worker` imports resolve to this-prefixed ids; load() bundles + wraps them. */
+const WORKER_PREFIX = '\0worker:';
 
 export type BonglePluginOptions = {
     /** env values baked into every module (replaceEnv). */
@@ -49,18 +45,17 @@ export type BonglePluginOptions = {
     entry?: { id: string; code: string };
     /** bare specifiers to externalize beyond node: (e.g. sharp for the server). */
     external?: (source: string) => boolean;
-    /** PRE-BUILT `?worker` bundles (entry id → self-contained code). Required for
-     *  any `?worker` in the graph: @rolldown/browser can't bundle a nested build
-     *  from inside a plugin hook (main-thread Atomics.wait), so workers are built
-     *  BEFORE the main bundle (see bundleWorkers) and looked up here. */
-    workers?: Map<string, string>;
+    /** extra plugins for the nested `?worker` bundle (the caller's `json()` etc.). */
+    workerPlugins?: Plugin[];
 };
 
-/** the rolldown plugin that compiles bongle (+ game) source into a module graph. */
+/** the shakeup plugin that compiles bongle (+ game) source into a module graph. */
 export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plugin {
+    // one nested bundle per worker entry, however many modules import it.
+    const workerCache = new Map<string, string>();
     return {
         name: 'bongle:source',
-        async resolveId(source, importer) {
+        async resolveId(_ctx, source, importer) {
             if (opts.entry && source === opts.entry.id) return opts.entry.id;
             if (source.startsWith('node:')) return { id: source, external: true };
             if (opts.external?.(source)) return { id: source, external: true };
@@ -72,7 +67,7 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
                 const baseId =
                     base.startsWith('.') && importer
                         ? ((await resolveFile(fs, posixJoin(dirOf(importer), base))) ?? posixJoin(dirOf(importer), base))
-                        : ((await resolveModule(fs, base, importer)) ?? base);
+                        : ((await resolveModule(fs, base, importer ?? undefined)) ?? base);
                 return `${WORKER_PREFIX}${baseId}`;
             }
 
@@ -82,30 +77,35 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
                 const rooted = clean.replace(/^\/+/, '');
                 return (await resolveFile(fs, rooted)) ?? rooted;
             }
-            return resolveModule(fs, clean, importer); // relative + bare (exports)
+            return resolveModule(fs, clean, importer ?? undefined); // relative + bare (exports)
         },
-        async load(id) {
+        async load(_ctx, id) {
             if (opts.entry && id === opts.entry.id) return { code: opts.entry.code, moduleType: 'js' };
             if (id.startsWith(WORKER_PREFIX)) {
                 const entryId = id.slice(WORKER_PREFIX.length);
-                const jsContent = opts.workers?.get(entryId);
+                // Bundled RIGHT HERE, nested inside this load hook. Under rolldown this
+                // was impossible — @rolldown/browser is one wasm instance over a shared
+                // WASI pool, so a nested build deadlocked on main-thread Atomics.wait,
+                // which forced a whole discovery pre-pass (scan every source file for
+                // `?worker` strings, bundle each ahead of time, thread a map through).
+                // shakeup is pure JS and reentrant, so the pre-pass is gone.
+                let jsContent = workerCache.get(entryId);
                 if (jsContent === undefined) {
-                    throw new Error(
-                        `[bongle-plugin] worker not pre-bundled: ${entryId} — call bundleWorkers() before the main build (nested @rolldown/browser deadlocks).`,
-                    );
+                    jsContent = await bundleWorkerEntry(fs, entryId, opts.env, opts.workerPlugins);
+                    workerCache.set(entryId, jsContent);
                 }
                 return { code: workerWrapperModule(jsContent), moduleType: 'js' };
             }
             // styles ship prebuilt (bongle.css); the import is a harmless no-op.
             if (id.endsWith('.css')) return { code: '', moduleType: 'js' };
-            // .json imports — the standalone scene barrel statically imports
-            // content/scenes/*.json (default export = parsed data). moduleTypeOf would
-            // load it as 'js' and rolldown would choke parsing raw JSON as a program, so
-            // wrap it as a JS default export. Mirrors the dev transform's .json handling.
+            // the standalone scene barrel statically imports content/scenes/*.json.
+            // Converted here rather than via shakeup's `json()` plugin so the same
+            // definition also serves rolldown (which would otherwise parse raw JSON as
+            // a program). Verified against shakeup's bundler too.
             if (id.endsWith('.json')) return { code: `export default ${await fs.readText(id)}`, moduleType: 'js' };
             return { code: await fs.readText(id), moduleType: moduleTypeOf(id) };
         },
-        transform(code, id) {
+        transform(_ctx, code, id) {
             if (opts.entry && id === opts.entry.id) return null;
             const out = replaceEnv(code, opts.env);
             return out === code ? null : out;
@@ -115,48 +115,29 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
 
 // ── worker bundling (vite's ?worker&inline, over the vfs) ────────────────────
 
-/** discover every `?worker` import across the project + engine source and bundle
- *  each entry AHEAD of the main build (standalone, non-nested rolldown calls) →
- *  a map the createBonglePlugin `?worker` load looks up. */
-export async function bundleWorkers(fs: BuildFs, env: EnvValues, bundler: Bundler): Promise<Map<string, string>> {
-    const workers = new Map<string, string>();
-    for (const dir of ['src', 'node_modules/bongle/src']) {
-        const files = await fs.list(dir, { recursive: true }).catch(() => []);
-        for (const f of files) {
-            if (f.kind !== 'file' || !/\.tsx?$/.test(f.path)) continue;
-            const code = await fs.readText(f.path);
-            if (!code.includes('?worker')) continue;
-            for (const m of code.matchAll(/from\s*['"]([^'"]*\?worker[^'"]*)['"]/g)) {
-                const spec = m[1].replace(/\?.*$/, '');
-                if (!spec.startsWith('.')) continue; // relative worker entries only (our case)
-                const entryId = await resolveFile(fs, posixJoin(dirOf(f.path), spec));
-                if (!entryId || workers.has(entryId)) continue;
-                workers.set(entryId, await bundleWorkerEntry(fs, entryId, env, bundler));
-            }
-        }
-    }
-    return workers;
-}
-
 /** bundle a vfs worker entry → one self-contained ESM string, ready to blob. */
-export async function bundleWorkerEntry(fs: BuildFs, entryId: string, env: EnvValues, bundler: Bundler): Promise<string> {
-    bundler.prepare?.(); // browser: @rolldown/browser reads `process` in bindingifyInputOptions
-    const bundle = await bundler.rolldown({
+export async function bundleWorkerEntry(
+    fs: BuildFs,
+    entryId: string,
+    env: EnvValues,
+    extraPlugins: Plugin[] = [],
+): Promise<string> {
+    const r = await bundle({
         input: { worker: entryId },
-        plugins: [createBonglePlugin(fs, { env })],
-        external: [/^node:/],
+        fs: shakeupFs(fs),
+        plugins: [createBonglePlugin(fs, { env }), ...extraPlugins],
+        external: (s) => s.startsWith('node:'),
         platform: 'browser',
-        onLog: (level, log, handler) => {
-            if (log.code === 'INEFFECTIVE_DYNAMIC_IMPORT' || log.code === 'CIRCULAR_DEPENDENCY') return;
-            handler(level, log);
+        output: {
+            // a Worker blob can't fetch sibling code-split chunks off a blob: url,
+            // so inline any dynamic imports.
+            inlineDynamicImports: true,
+            minify: true,
         },
     });
-    // one chunk: a Worker blob can't fetch sibling code-split chunks off a blob:
-    // url, so inline any dynamic imports.
-    const { output } = await bundle.generate({ format: 'es', inlineDynamicImports: true, minify: true });
-    await bundle.close();
-    const entry = output.find((o) => o.type === 'chunk' && o.isEntry);
-    if (!entry || entry.type !== 'chunk') throw new Error(`[bongle-plugin] no worker entry chunk for ${entryId}`);
+    if (r.errors.length > 0) throw new Error(`[bongle-plugin] worker bundle failed for ${entryId}:\n${r.errors.join('\n')}`);
+    const entry = r.chunks.find((c) => c.isEntry);
+    if (!entry) throw new Error(`[bongle-plugin] no worker entry chunk for ${entryId}`);
     return entry.code;
 }
 
@@ -178,4 +159,44 @@ export default function WorkerWrapper(options) {
     }
 }
 `;
+}
+
+// ── TEMPORARY: rolldown adapter (CLI only) ──────────────────────────────────
+//
+// The editor builds on shakeup. The node CLI does NOT yet, for one reason:
+// shakeup has no CommonJS support, and a real `node_modules` tree is full of it
+// (`react/index.js` is `module.exports = require(...)`, reached via zustand). The
+// editor never meets that — its vfs is seeded with PREBUNDLED ESM deps, which is
+// exactly why scripts/build-deps.mjs exists.
+//
+// So the CLI keeps rolldown until shakeup can eat CJS. This adapter exists so that
+// is the ONLY difference: one plugin definition, two call shapes. shakeup's hooks
+// are ctx-first; rolldown's are not, and the bongle plugin ignores ctx entirely.
+//
+// DELETE THIS, and the `bundler` option it serves, once shakeup handles CJS.
+// See llm/plan-shakeup-prod-build.md.
+
+/** rolldown's plugin shape, structurally — avoids a type dep on rolldown here. */
+type RolldownPlugin = {
+    name: string;
+    resolveId(source: string, importer?: string): unknown;
+    load(id: string): unknown;
+    transform(code: string, id: string): unknown;
+};
+
+export function asRolldownPlugin(p: Plugin): RolldownPlugin {
+    // the bongle plugin never reads ctx (its hooks take `_ctx`), so a stub is honest
+    // here rather than a landmine — a plugin that DID use ctx must not go through this.
+    const ctx = {} as never;
+    const fn = <T>(h: T | { handler: T } | undefined): T | undefined =>
+        h !== undefined && typeof h === 'object' && h !== null && 'handler' in h
+            ? (h as { handler: T }).handler
+            : (h as T | undefined);
+    return {
+        name: p.name,
+        resolveId: (source, importer) =>
+            fn(p.resolveId)?.(ctx, source, importer ?? null, { isEntry: false, kind: 'import-statement' }),
+        load: (id) => fn(p.load)?.(ctx, id),
+        transform: (code, id) => fn(p.transform)?.(ctx, code, id),
+    };
 }

@@ -10,9 +10,10 @@
 // server resources, no content copy, and no manifest `server` entry. Multiplayer
 // (`config({ server })`) builds both targets exactly as before.
 //
-// The `rolldown` impl is INJECTED (see Bundler): the browser editor passes
-// @rolldown/browser (its wasm lives in a library-managed worker); a node CLI
-// passes node `rolldown`. Same graph, same output.
+// Bundled by shakeup — the same bundler the dev server runs, so dev and publish
+// share one graph, one resolver and one set of semantics. shakeup is pure JS, so
+// the browser editor and the node CLI run this identical code with no injected
+// bundler and no host prep.
 //
 // The bundle is byte-shaped for the platform's ingest (client/index.js +
 // server/index.js + bongle.json required). The server entry (PLAY_SERVER) wires
@@ -20,17 +21,18 @@
 // unpacked bundle, and scenes seeded from content/.
 
 import { zipSync } from 'fflate';
+import { bundle } from 'shakeup';
 import { INTERFACE_VERSION } from '../../interface/index';
 import type { Config } from '../../os/interface';
 import { BONGLE_VERSION } from '../../src/build-info';
 import { isStandalone, serverMaxPlayers } from '../../src/core/config';
 import type { EnvValues } from '../env-replace';
-import type { BuildFs } from '../resolve';
-import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
+import { type BuildFs, shakeupFs } from '../resolve';
+import { asRolldownPlugin, createBonglePlugin } from './bongle-plugin';
 
 type Target = 'client' | 'server';
 
-/** virtual entry id (per build call — a fresh rolldown graph per target). */
+/** virtual entry id (per build call — a fresh graph per target). */
 const ENTRY_ID = '\0bongle:build-entry';
 
 /** bumped when the bundle layout the platform expects changes. */
@@ -124,12 +126,11 @@ async function entrySource(fs: BuildFs, target: Target): Promise<string> {
 // backed). The build only supplies the per-target specifics: the virtual play
 // entry and the sharp external (server). Generated barrels import their registry
 // primitives (registerModel/…) from bongle/internal directly, so no prelude.
-function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: Map<string, string>) {
+function buildTargetPlugin(fs: BuildFs, target: Target, entry: string) {
     return createBonglePlugin(fs, {
         env: envFor(target),
         entry: { id: ENTRY_ID, code: entry },
         external: (source) => target === 'server' && source === 'sharp',
-        workers,
     });
 }
 
@@ -138,43 +139,85 @@ function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: 
 async function buildTarget(
     fs: BuildFs,
     target: Target,
-    workers: Map<string, string>,
-    bundler: Bundler,
     progress: (label: string) => void = () => {},
+    bundler?: Bundler,
 ): Promise<Record<string, Uint8Array>> {
-    bundler.prepare?.(); // browser: @rolldown/browser reads `process` in bindingifyInputOptions
     const entry = await entrySource(fs, target);
     progress(`Bundling ${target}`);
-    const bundle = await bundler.rolldown({
+    if (bundler !== undefined) return buildTargetWithRolldown(fs, target, entry, bundler);
+    const r = await bundle({
         input: { index: ENTRY_ID },
-        plugins: [buildTargetPlugin(fs, target, entry, workers)],
-        external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
+        fs: shakeupFs(fs),
+        plugins: [buildTargetPlugin(fs, target, entry)],
+        external: (s) => s.startsWith('node:') || (target === 'server' && s === 'sharp'),
         // NODE_ENV is already build-defined into the prebundled engine dist (where
         // React lives); user + play-shell code don't read process.env, so no define.
         // server is host-neutral: it runs in a node process (deploy) AND a browser
         // worker (solo/editor), injecting node/browser capabilities per host.
         platform: target === 'server' ? 'neutral' : 'browser',
-        // bongle/index is both statically (our entry) + dynamically (engine-server)
-        // imported — an expected, harmless chunking note; drop it, surface the rest.
-        onLog: (level, log, handler) => {
+        output: {
+            entryFileNames: 'index.js',
+            chunkFileNames: 'assets/[name]-[hash].js',
+            assetFileNames: 'assets/[name]-[hash][extname]',
+            // the server must be one self-contained file: the solo host blob-imports
+            // server/index.js, and a blob URL can't resolve relative ./assets chunks.
+            // (Practically the server graph has no runtime dynamic imports, so this is a
+            // guarantee, not a reshape.) Deploy is unaffected — node imports it from disk.
+            inlineDynamicImports: target === 'server',
+            minify: true,
+        },
+    });
+    if (r.errors.length > 0) throw new Error(`[bongle] ${target} bundle failed:\n${r.errors.join('\n')}`);
+
+    const enc = new TextEncoder();
+    const files: Record<string, Uint8Array> = {};
+    for (const c of r.chunks) files[c.fileName] = enc.encode(c.code);
+    for (const a of r.assets ?? []) {
+        files[a.fileName] = typeof a.source === 'string' ? enc.encode(a.source) : (a.source as Uint8Array);
+    }
+    return files;
+}
+
+// ── TEMPORARY: the CLI's rolldown path ──────────────────────────────────────
+//
+// Identical output shaping to the shakeup path above; only the engine differs.
+// Exists because shakeup has no CommonJS support and a node project's node_modules
+// is full of it. DELETE with `Bundler` + `asRolldownPlugin` once that lands.
+// See llm/plan-shakeup-prod-build.md.
+
+/** the injected rolldown impl (node's), plus an optional host prep hook. */
+export type Bundler = {
+    // biome-ignore lint/suspicious/noExplicitAny: rolldown's types are not a dep of this file.
+    rolldown: (opts: any) => Promise<any>;
+    prepare?: () => void;
+};
+
+async function buildTargetWithRolldown(
+    fs: BuildFs,
+    target: Target,
+    entry: string,
+    bundler: Bundler,
+): Promise<Record<string, Uint8Array>> {
+    bundler.prepare?.();
+    const bundled = await bundler.rolldown({
+        input: { index: ENTRY_ID },
+        plugins: [asRolldownPlugin(buildTargetPlugin(fs, target, entry))],
+        external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
+        platform: target === 'server' ? 'neutral' : 'browser',
+        onLog: (level: string, log: { code?: string }, handler: (l: string, g: unknown) => void) => {
             if (log.code === 'INEFFECTIVE_DYNAMIC_IMPORT') return;
             handler(level, log);
         },
     });
-    const { output } = await bundle.generate({
+    const { output } = await bundled.generate({
         format: 'es',
         entryFileNames: 'index.js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
-        // the server must be one self-contained file: the solo host blob-imports
-        // server/index.js, and a blob URL can't resolve relative ./assets chunks.
-        // (Practically the server graph has no runtime dynamic imports, so this is a
-        // guarantee, not a reshape.) Deploy is unaffected — node imports it from disk.
         inlineDynamicImports: target === 'server',
         minify: true,
     });
-    await bundle.close();
-
+    await bundled.close();
     const enc = new TextEncoder();
     const files: Record<string, Uint8Array> = {};
     for (const o of output) {
@@ -211,27 +254,24 @@ export type BuildOptions = {
     config: Config;
     /** phase label callback for the progress UI. */
     onProgress?: (label: string) => void;
+    /** TEMPORARY: pass node `rolldown` to build with it instead of shakeup. Only the
+     *  CLI does, and only until shakeup handles CommonJS — see the note above
+     *  `buildTargetWithRolldown`. */
+    bundler?: Bundler;
 };
 
-/** build the whole bundle → zip bytes (client/ + server/ + bongle.json). The
- *  `bundler` (rolldown impl + host prep) is injected — see Bundler. */
-export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOptions): Promise<Uint8Array> {
+/** build the whole bundle → zip bytes (client/ + server/ + bongle.json). */
+export async function buildBundle(fs: BuildFs, opts: BuildOptions): Promise<Uint8Array> {
     const progress = opts.onProgress ?? (() => {});
     // a standalone game is client-only: no server bundle, no server resources,
     // no content copy, no manifest `server` entry (the "no double chunks" win).
     const standalone = isStandalone(opts.config);
-    // workers first: `?worker` entries (mesh worker) bundle standalone BEFORE the
-    // main build — a nested @rolldown/browser build from inside a plugin hook
-    // deadlocks on main-thread Atomics.wait. They're client-side compute.
-    progress('Bundling workers');
-    const workers = await bundleWorkers(fs, envFor('client'), bundler);
-    // sequential, NOT Promise.all: the browser bundler (@rolldown/browser) is one
-    // wasm instance over a shared WASI thread pool — two concurrent rolldown()
-    // bundles deadlock its async runtime (one finishes, the other hangs). Native
-    // node rolldown is reentrant and wouldn't care, but the core is host-neutral,
-    // and the server graph is tiny so serializing costs ~nothing.
-    const clientFiles = await buildTarget(fs, 'client', workers, bundler, progress);
-    const serverFiles = standalone ? {} : await buildTarget(fs, 'server', workers, bundler, progress);
+    // `?worker` entries are bundled inline by the plugin's load hook now (shakeup is
+    // reentrant), so there is no pre-pass — and no reason to serialize the targets.
+    const [clientFiles, serverFiles] = await Promise.all([
+        buildTarget(fs, 'client', progress, opts.bundler),
+        standalone ? Promise.resolve({} as Record<string, Uint8Array>) : buildTarget(fs, 'server', progress, opts.bundler),
+    ]);
 
     const zip: Record<string, Uint8Array> = {};
     for (const [name, bytes] of Object.entries(clientFiles)) zip[`client/${name}`] = bytes;

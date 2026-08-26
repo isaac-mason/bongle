@@ -1,8 +1,9 @@
 // lib/build — bongle's HOST-NEUTRAL build: "how bongle source becomes a runnable
-// bundle", independent of who runs the bundler. The one host dependency — the
-// `rolldown` impl — is INJECTED (see Bundler): @rolldown/browser (browser editor)
-// and node `rolldown` share an API, so the same code runs in both. A future
-// `bongle build` CLI is `openNodeFs → buildBundle(fs, { rolldown }, opts)`.
+// bundle", independent of who runs it. Bundling is shakeup — the SAME bundler the
+// dev server runs, so dev and publish share one graph, one resolver and one set of
+// semantics. shakeup is pure JS, so the browser editor and the node CLI run this
+// identical code with nothing injected and no host prep.
+// `bongle build` is `openNodeFs → buildBundle(fs, opts)`.
 //
 // What lives here:
 //   - the PROD build (bundle.ts): env-DCE'd client/server bundles + manifest + zip.
@@ -18,7 +19,7 @@
 //   - the relay conduit (relay-link.ts) + net-sim: host-neutral framed transport for
 //     multiplayer / bongle-server.
 
-export { type Bundler, bundleWorkerEntry, bundleWorkers, createBonglePlugin, workerWrapperModule } from './bundle/bongle-plugin';
+export { bundleWorkerEntry, createBonglePlugin, workerWrapperModule } from './bundle/bongle-plugin';
 export { type BuildOptions, buildBundle } from './bundle/bundle';
 export { wrapModuleDeps } from './capture/capture-native';
 export { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, type CapturePluginOptions, capturePlugin } from './capture/capture-plugin';

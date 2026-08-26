@@ -187,7 +187,6 @@
         "@dnd-kit/state": "^0.3.2",
         "@gltf-transform/core": "^4.3.0",
         "@gltf-transform/functions": "^4.3.0",
-        "@rolldown/browser": "^1.1.5",
         "@tailwindcss/vite": "^4.2.2",
         "@tanstack/react-virtual": "^3.13.24",
         "archiver": "^7.0.1",

@@ -173,8 +173,8 @@ const quietLog = (level, log, next) => {
 // react rather than import it). This is what rolldown's builtin
 // `esm-external-require` does; its JS wrapper (`esmExternalRequirePlugin`) only
 // ships in rolldown >=1.1.5 (blocked here by minimumReleaseAge), so it's
-// hand-rolled for the prebundle. The publish build (@rolldown/browser 1.1.5) can
-// use the builtin directly.
+// hand-rolled for the prebundle. (This dep PREBUNDLE still uses node rolldown; the
+// publish build does not — that moved to shakeup. See llm/plan-shakeup-prod-build.md.)
 const esmExternalRequire = (patterns) => ({
     name: 'esm-external-require',
     transform(code) {
