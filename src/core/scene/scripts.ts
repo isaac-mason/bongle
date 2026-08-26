@@ -7,8 +7,8 @@ import type { EngineClient } from '../../client/client';
 import type { Input } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
 import { env } from '../../env';
-import type { EngineServer } from '../../server/server';
 import type { Room } from '../../server/rooms';
+import type { EngineServer } from '../../server/server';
 import type { Avatar } from '../avatar/avatar';
 import type { DepHandle } from '../capture/dep-graph';
 import { setDeps } from '../capture/dep-graph';
@@ -384,6 +384,14 @@ export type ScriptInstance = {
      *  queries are evicted from the scene tree's query map. */
     queries: Set<SceneTree.Query<any>>;
 
+    /** query membership handlers owned by this instance. each record is the
+     *  data needed to take the entry back off the query: which query, which
+     *  half, and the wrapper actually registered on the topic.
+     *  disposeScriptInstance walks this and calls off*, which is what fires
+     *  the closing exit for every node still matching. same data-driven shape
+     *  as `netListeners`, no closure-based unsubscribes stored anywhere. */
+    queryHooks: Array<{ q: SceneTree.Query<any>; kind: 'enter' | 'exit'; fn: (...args: any[]) => void }>;
+
     /** rpc listener registrations owned by this instance, each record is
      *  the data needed to remove the entry from `runtime.rpc.listeners`:
      *  the commandId it's keyed under, and the ListenerEntry reference
@@ -509,6 +517,101 @@ export function query<const Args extends SceneTree.ConditionArgs[]>(
         SceneTree.acquireQuery(ctx.scene, q);
     }
     return q;
+}
+
+/**
+ * react to a node **starting** to match `q`.
+ *
+ * `q` must come from `query(ctx, ...)`, so this instance holds it. the handler
+ * receives the same trait tuple `q.matches` yields, spread.
+ *
+ * **subscribing is itself an enter**: the handler fires straight away for every
+ * node already matching. a system registered after the scene loaded (the normal
+ * case, and every case after a hot reload) therefore sees the whole set, with no
+ * hand-written backfill loop over `q.matches`.
+ *
+ * fires once the node is fully live: its subtree is registered and its own
+ * scripts have run `onInit`. paired with `onQueryExit`, exactly one exit follows
+ * every enter, so a per-node resource opened here cannot leak.
+ *
+ * @example
+ * ```ts
+ * system('spawn-markers', (ctx) => {
+ *     const q = query(ctx, [SpawnPointTrait, TransformTrait]);
+ *     const markers = new Map<SpawnPointTrait, Marker>();
+ *     onQueryEnter(ctx, q, (spawn, transform) => markers.set(spawn, addMarker(transform)));
+ *     onQueryExit(ctx, q, (spawn) => {
+ *         removeMarker(markers.get(spawn)!);
+ *         markers.delete(spawn);
+ *     });
+ * });
+ * ```
+ */
+export function onQueryEnter<Conditions extends SceneTree.Condition[]>(
+    ctx: ScriptContext,
+    q: SceneTree.Query<Conditions>,
+    fn: QueryListener<Conditions>,
+): Unsubscribe {
+    return addQueryHook(ctx, q, 'enter', fn);
+}
+
+/**
+ * react to a node **stopping** matching `q`. mirror of {@link onQueryEnter}.
+ *
+ * **unsubscribing is itself an exit**: when the returned function is called, or
+ * when this script instance disposes, the handler fires one last time for every
+ * node still matching. that is what makes teardown and hot reload safe, the
+ * instance going away closes everything it opened.
+ */
+export function onQueryExit<Conditions extends SceneTree.Condition[]>(
+    ctx: ScriptContext,
+    q: SceneTree.Query<Conditions>,
+    fn: QueryListener<Conditions>,
+): Unsubscribe {
+    return addQueryHook(ctx, q, 'exit', fn);
+}
+
+type QueryListener<Conditions extends SceneTree.Condition[]> = Parameters<typeof SceneTree.onQueryEnter<Conditions>>[1];
+
+function addQueryHook<Conditions extends SceneTree.Condition[]>(
+    ctx: ScriptContext,
+    q: SceneTree.Query<Conditions>,
+    kind: 'enter' | 'exit',
+    fn: QueryListener<Conditions>,
+): Unsubscribe {
+    const instance = ctx._instance;
+    if (!instance) return noop;
+    if (ctx.mode === 'edit' && !instance.def.editor) return noop;
+
+    // wrapped once here so a throwing handler is reported with the script's own
+    // identity, and never escapes into the scene-tree mutation that fired it.
+    const wrapped = (...args: unknown[]): void => {
+        try {
+            (fn as (...a: unknown[]) => void)(...args);
+        } catch (err) {
+            logScriptError(`script '${instance.def.key}'.onQuery${kind === 'enter' ? 'Enter' : 'Exit'}`, err);
+        }
+    };
+
+    const record = { q: q as SceneTree.Query<any>, kind, fn: wrapped };
+    instance.queryHooks.push(record);
+
+    if (kind === 'enter') SceneTree.onQueryEnter(q, wrapped as QueryListener<Conditions>);
+    else SceneTree.onQueryExit(q, wrapped as QueryListener<Conditions>);
+
+    return () => {
+        const i = instance.queryHooks.indexOf(record);
+        if (i === -1) return;
+        instance.queryHooks.splice(i, 1);
+        releaseQueryHook(record);
+    };
+}
+
+/** take one hook back off its query. for an exit hook this is what drains the
+ *  closing exits, see `SceneTree.offQueryExit`. */
+function releaseQueryHook(record: ScriptInstance['queryHooks'][number]): void {
+    if (record.kind === 'enter') SceneTree.offQueryEnter(record.q, record.fn);
+    else SceneTree.offQueryExit(record.q, record.fn);
 }
 
 export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[] {
@@ -961,6 +1064,7 @@ export function createScriptInstance(
         onPhysicsBodyPairValidate: new Set(),
         onSwap: null,
         queries: new Set(),
+        queryHooks: [],
         netListeners: [],
         initialized: false,
         _runtime: runtime,
@@ -1035,6 +1139,16 @@ export function initScriptInstance(instance: ScriptInstance): void {
 export function disposeScriptInstance(instance: ScriptInstance): void {
     const id = instance.def.key;
     const nodeId = instance.node.id;
+
+    // query membership hooks FIRST: each exit hook fires once more for every
+    // node still matching, so anything this instance opened per node is closed
+    // before its own onDispose runs (and before releaseQuery can evict the
+    // query out from under the drain). this is the half that makes a hot
+    // reload leak-free, the rebuilt instance re-enters the same set.
+    for (const record of instance.queryHooks) {
+        releaseQueryHook(record);
+    }
+    instance.queryHooks.length = 0;
 
     // onDispose hook
     for (const fn of instance.onDispose) {

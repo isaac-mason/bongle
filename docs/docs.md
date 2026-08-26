@@ -70,7 +70,7 @@ First, register content and size the room:
 use(blocks);
 
 // cap how many players matchmaking puts in one room
-matchmaking({ maxPlayers: 32 });
+config({ server: { maxPlayers: 32 } });
 ```
 
 `use(blocks)` pulls in the kit block set so those block types are registered
@@ -1772,9 +1772,33 @@ parent the authoring tool produced; the rig contract only requires the seven bon
 present somewhere reachable, so resolve any of them by name with
 `findByName(node, 'head')`. The three sockets are always built as persistent rig
 nodes for mounting held items and back-mounted props; when an avatar doesn't author
-one, the engine derives its rest position from the parent bone's geometry, so
+one, the engine derives its rest transform from the parent bone's geometry, so
 creators get usable mount points for free, while an authored socket keeps its own
 transform.
+
+**The derived hand sockets are rotated, not just positioned.** `hand_left` and
+`hand_right` are given a **+90° rotation about X** — a grip convention, so a model
+authored lying along its own `+Y` ends up gripped rather than sticking out of the
+fist. `back` gets no rotation. This matters the moment you mount something and pose
+the arm yourself, because the socket's rotation sits between the two:
+
+```text
+world = (arm bone rotation) · Rx(90°) · (your item's local rotation)
+```
+
+So an item parented to a hand is already rotated by `armPitch + 90°` before its own
+transform applies. If you pose the arm — raising it to aim, for instance — give the
+item a local rotation that cancels the total, or it will be held at that angle:
+
+```ts
+// arm posed 92° forward to aim; socket adds 90°
+setQuaternion(getTrait(gun, TransformTrait)!, quat.setAxisAngle(quat.create(), [1, 0, 0], -degreesToRadians(92 + 90)));
+```
+
+Deriving that from the same constant you pose the arm with keeps the two in step, so
+retuning the pose can't silently rotate the item. If you're only mounting gear and
+letting the engine's own locomotion move the arms, you don't need any of this — the
+convention already holds the item correctly.
 
 You author character models in the [bongle editor](https://bongle.io/editor/a/new),
 which embeds a build of [Blockbench](https://www.blockbench.net/) set up for bongle. It
@@ -2987,44 +3011,47 @@ it. That `launch` helper is the whole trick; the rest is deciding when to call i
 // state.velocity and the controller integrates it next tick. add (don't overwrite)
 // so successive launches stack (chained rocket jumps), and clear `grounded` so
 // ground friction doesn't eat a horizontal kick the same tick.
-export function launch(controller: CharacterControllerTrait, impulse: Vec3): void {
+export function launch(node: Node, impulse: Vec3): void {
+    const controller = getTrait(node, CharacterControllerTrait);
+    if (!controller) return;
     vec3.add(controller.state.velocity, controller.state.velocity, impulse);
     controller.state.grounded = false;
 }
 ```
 
 Make the pad a real block and every cell of it flings, with no per-pad wiring: drop
-the block anywhere in the world and it just works. Give the character a `ContactsTrait`
-and each tick it reports the surfaces it just touched in `contacts.added`; a `voxel`
-contact carries the `stateId` it hit. Resolve that id back to its block with
-`stateToBlock(ctx.blocks, id)` and compare by identity against `LaunchPadBlock`.
+the block anywhere in the world and it just works. The controller already samples
+the block under the feet each tick and hands it to you as `state.groundBlockState`
+(the standing block's **state id** while grounded). Resolve that id back to its block
+with `stateToBlock(ctx.blocks, id)` and compare by identity against `LaunchPadBlock`.
 Matching the block, not one exact `defaultId()`, means every state of the pad counts,
 rotations, variants, an on/off toggle, so the check stays correct the moment the pad
-grows [block states](#block-states). Movement is owner authoritative: only the peer
-that owns a character simulates it, so gate the launch on `isOwner` and the new
-velocity replicates out to everyone else.
+grows [block states](#block-states).
 
 ```ts
-const LaunchPadBlock = block('obby:launch_pad', {
+// a launch pad block. place LaunchPadBlock anywhere in the voxel grid and every
+// cell of it becomes a pad, no per-pad wiring. the controller already samples
+// the block under the feet each tick and exposes it as `state.groundBlockState`
+// (the standing block's state id when grounded).
+const LaunchPadBlock = block('demo:launch_pad', {
     model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.slime } } }),
     sounds: blockSoundPresets.grass,
 });
 
-const _launchImpulse = vec3.create();
-
 system('launch-pad-block', (ctx) => {
-    const characters = query(ctx, [CharacterControllerTrait, ContactsTrait]);
+    if (!env.server) return; // launch on the server; the result replicates
+
+    const characters = query(ctx, [CharacterControllerTrait]);
 
     onTick(ctx, () => {
-        for (const [controller, contacts] of characters) {
-            if (!isOwner(ctx, controller._node)) continue;
-
-            for (const contact of contacts.added) {
-                if (contact.type !== 'voxel') continue;
-                if (stateToBlock(ctx.blocks, contact.stateId) !== LaunchPadBlock) continue;
-
-                vec3.scale(_launchImpulse, contact.normal, -20);
-                launch(controller, _launchImpulse);
+        for (const [controller] of characters) {
+            if (!controller.state.grounded) continue;
+            // resolve the state id back to the block that owns it, then compare
+            // by block identity. this matches EVERY state of the pad (rotations,
+            // variants, on/off) — not just one exact `defaultId()` — so it stays
+            // correct the moment the pad grows block-states. this is the way.
+            if (stateToBlock(ctx.blocks, controller.state.groundBlockState) === LaunchPadBlock) {
+                launch(controller._node, [0, 14, 0]);
             }
         }
     });
@@ -3037,9 +3064,8 @@ When the pad is an object rather than terrain, floating off the grid or moving, 
 it a body and a model instead. A prefab bundles the launch-pad model, a static
 sensor box, and its own `ContactsTrait` into one placeable template; each instance
 reads its own contacts and flings any player whose body shows up in them, matched by
-`nodeId`, reusing the same `launch` helper. Movement stays owner authoritative, so
-only the peer that owns a player applies the impulse to it. This is the same
-contact-driven shape as a coin pickup.
+`nodeId`, reusing the same `launch` helper. This is the same contact-driven shape as
+a coin pickup.
 
 ```ts
 // a launch pad node. use this when the pad is an object rather than terrain,
@@ -3067,6 +3093,8 @@ const LaunchPadPrefab = prefab('launch-pad', {
 });
 
 system('launch-pad-node', (ctx) => {
+    if (!env.server) return;
+
     const pads = query(ctx, [LaunchPadTrait, ContactsTrait]);
     const players = query(ctx, [PlayerTrait]);
 
@@ -3087,12 +3115,7 @@ system('launch-pad-node', (ctx) => {
             for (const c of contacts.added) {
                 if (c.type !== 'rigidBody') continue;
                 const player = playerByNodeId.get(c.nodeId);
-                if (!player) continue;
-                // movement is owner authoritative: only launch the player you own,
-                // so the impulse lands once on the simulating peer and replicates.
-                if (!isOwner(ctx, player)) continue;
-                const controller = getTrait(player, CharacterControllerTrait);
-                if (controller) launch(controller, [0, 14, 0]);
+                if (player) launch(player, [0, 14, 0]);
             }
         }
     });

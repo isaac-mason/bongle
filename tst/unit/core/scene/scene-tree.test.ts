@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createTestServer } from '../../../integration/server-integration-test';
 import { __popModule, __pushModule } from '../../../../src/core/capture/module-scope';
 import { registry } from '../../../../src/core/registry';
+import { prop } from '../../../../src/core/scene/prop';
+import { packSceneTree, unpackSceneTree } from '../../../../src/core/scene/scene-pack';
 import {
     acquireQuery,
     addChild,
@@ -17,6 +18,8 @@ import {
     loadSceneTree,
     type Node,
     Not,
+    onQueryEnter,
+    onQueryExit,
     query,
     releaseQuery,
     removeTrait,
@@ -25,10 +28,18 @@ import {
     saveSceneTree,
     serializeNode,
 } from '../../../../src/core/scene/scene-tree';
-import { prop } from '../../../../src/core/scene/prop';
-import { packSceneTree, unpackSceneTree } from '../../../../src/core/scene/scene-pack';
-import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, script, query as scriptQuery } from '../../../../src/core/scene/scripts';
+import {
+    applyTraitSwap,
+    onDispose,
+    onInit,
+    pruneRemovedScript,
+    script,
+    onQueryEnter as scriptOnQueryEnter,
+    onQueryExit as scriptOnQueryExit,
+    query as scriptQuery,
+} from '../../../../src/core/scene/scripts';
 import { control, type TraitType, trait } from '../../../../src/core/scene/traits';
+import { createTestServer } from '../../../integration/server-integration-test';
 
 /* ── test traits ── */
 
@@ -120,6 +131,35 @@ script(TrackedTwice, 'track', (ctx) => {
     scriptQuery(ctx, [RigidBody]);
 });
 
+// trait whose script owns a per-node resource through the membership hooks.
+// `WATCHED_LIVE` is the count of resources currently open, so a test can assert
+// the enter/exit pairing survives instance dispose.
+const WATCHED_LIVE = { count: 0 };
+const Watcher = trait('test/watcher', {}, { persist: false });
+script(
+    Watcher,
+    'watch',
+    (ctx) => {
+        const q = scriptQuery(ctx, [RigidBody]);
+        scriptOnQueryEnter(ctx, q, () => WATCHED_LIVE.count++);
+        scriptOnQueryExit(ctx, q, () => WATCHED_LIVE.count--);
+    },
+    { editor: true },
+);
+
+// trait whose script records when it inits, so a membership test can assert
+// that a query enter arrives AFTER the node's own scripts are up.
+const ORDER_LOG: string[] = [];
+const Ordered = trait('test/ordered', {}, { persist: false });
+script(
+    Ordered,
+    'ordered',
+    (ctx) => {
+        onInit(ctx, () => ORDER_LOG.push('init'));
+    },
+    { editor: true },
+);
+
 /* ── capture test module ── */
 
 const server = createTestServer();
@@ -188,31 +228,31 @@ describe('query — With / Not (existing behaviour)', () => {
     });
 });
 
-/* ── onAdd / onRemove callbacks ── */
+/* ── query membership hooks ── */
 
-describe('query — onAdd / onRemove callbacks', () => {
-    it('onAdd fires with correct values', () => {
+describe('query — onQueryEnter / onQueryExit', () => {
+    it('enter fires with correct values', () => {
         const sceneTree = setup();
 
         const q = query(sceneTree, [RigidBody, Transform]);
 
-        const added: any[] = [];
-        q.onAdd.add((...args) => added.push(args));
+        const entered: any[] = [];
+        onQueryEnter(q, (...args) => entered.push(args));
 
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
         addTrait(node, RigidBody, { mass: 7 });
         addTrait(node, Transform);
 
-        expect(added.length).toBe(1);
-        expect(added[0][0]).toBeDefined();
-        expect((added[0][0] as RigidBody).mass).toBe(7);
-        expect(added[0][1]).toBeDefined();
-        expect((added[0][1] as Transform).x).toBe(0);
-        expect((added[0][1] as Transform).y).toBe(0);
+        expect(entered.length).toBe(1);
+        expect(entered[0][0]).toBeDefined();
+        expect((entered[0][0] as RigidBody).mass).toBe(7);
+        expect(entered[0][1]).toBeDefined();
+        expect((entered[0][1] as Transform).x).toBe(0);
+        expect((entered[0][1] as Transform).y).toBe(0);
     });
 
-    it('onRemove fires when trait is removed', () => {
+    it('exit fires when a trait is removed', () => {
         const sceneTree = setup();
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
@@ -221,13 +261,134 @@ describe('query — onAdd / onRemove callbacks', () => {
         const q = query(sceneTree, [RigidBody]);
         expect(q.matches.length).toBe(1);
 
-        const removed: any[] = [];
-        q.onRemove.add((...args) => removed.push(args));
+        const exited: any[] = [];
+        onQueryExit(q, (...args) => exited.push(args));
 
         removeTrait(node, RigidBody);
         expect(q.matches.length).toBe(0);
-        expect(removed.length).toBe(1);
-        expect(removed[0][0]).toBeDefined();
+        expect(exited.length).toBe(1);
+        expect(exited[0][0]).toBeDefined();
+    });
+
+    it('subscribing is itself an enter: pre-existing matches fire immediately', () => {
+        const sceneTree = setup();
+        for (const name of ['A', 'B']) {
+            const node = createNode({ name });
+            addChild(sceneTree.root, node);
+            addTrait(node, RigidBody, { mass: 3 });
+        }
+
+        const q = query(sceneTree, [RigidBody]);
+        expect(q.matches.length).toBe(2);
+
+        const entered: any[] = [];
+        onQueryEnter(q, (rb) => entered.push(rb));
+
+        expect(entered.length).toBe(2);
+        expect((entered[0] as RigidBody).mass).toBe(3);
+    });
+
+    it('unsubscribing is itself an exit: remaining matches fire, once', () => {
+        const sceneTree = setup();
+        const node = createNode({ name: 'A' });
+        addChild(sceneTree.root, node);
+        addTrait(node, RigidBody);
+
+        const q = query(sceneTree, [RigidBody]);
+        const exited: any[] = [];
+        const unsubscribe = onQueryExit(q, (rb) => exited.push(rb));
+
+        expect(exited.length).toBe(0);
+        unsubscribe();
+        expect(exited.length).toBe(1);
+
+        // idempotent, and detached from the query afterwards
+        unsubscribe();
+        expect(exited.length).toBe(1);
+        removeTrait(node, RigidBody);
+        expect(exited.length).toBe(1);
+    });
+
+    it('enter and exit stay balanced across attach, trait churn and destroy', () => {
+        const sceneTree = setup();
+        const q = query(sceneTree, [RigidBody, Transform]);
+
+        let live = 0;
+        onQueryEnter(q, () => live++);
+        onQueryExit(q, () => live--);
+
+        const node = createNode({ name: 'A' });
+        addTrait(node, RigidBody);
+        addTrait(node, Transform);
+        expect(live).toBe(0); // detached, not in the tree yet
+
+        addChild(sceneTree.root, node);
+        expect(live).toBe(1);
+
+        removeTrait(node, Transform);
+        expect(live).toBe(0);
+
+        addTrait(node, Transform);
+        expect(live).toBe(1);
+
+        const moved = createNode({ name: 'B' });
+        addChild(sceneTree.root, moved);
+        reparent(node, moved);
+        expect(live).toBe(1); // reparent is not a membership change
+
+        destroyNode(sceneTree, moved);
+        expect(live).toBe(0);
+    });
+
+    it('a node entering the tree fires enter after its own scripts have inited', () => {
+        const sceneTree = server.room.scene;
+
+        const q = query(sceneTree, [Ordered]);
+        const order: string[] = [];
+        ORDER_LOG.length = 0;
+        onQueryEnter(q, () => order.push('enter'));
+
+        const node = createNode({ name: 'A' });
+        addTrait(node, Ordered);
+        addChild(sceneTree.root, node);
+
+        expect(ORDER_LOG).toEqual(['init']);
+        expect(order).toEqual(['enter']);
+    });
+
+    it('exit does not show the departing node still in matches', () => {
+        const sceneTree = setup();
+        const node = createNode({ name: 'A' });
+        addChild(sceneTree.root, node);
+        addTrait(node, RigidBody);
+
+        const q = query(sceneTree, [RigidBody]);
+        let seen = -1;
+        onQueryExit(q, () => {
+            seen = q.matches.length;
+        });
+
+        removeTrait(node, RigidBody);
+        expect(seen).toBe(0);
+    });
+
+    it('a throwing handler is contained and does not abort the mutation', () => {
+        const sceneTree = setup();
+        const q = query(sceneTree, [RigidBody]);
+
+        const reached: string[] = [];
+        onQueryEnter(q, () => {
+            throw new Error('handler blew up');
+        });
+        onQueryEnter(q, () => reached.push('second'));
+
+        const node = createNode({ name: 'A' });
+        addChild(sceneTree.root, node);
+        expect(() => addTrait(node, RigidBody)).not.toThrow();
+
+        expect(reached).toEqual(['second']);
+        expect(q.matches.length).toBe(1);
+        expect(getTrait(node, RigidBody)).toBeDefined();
     });
 });
 
@@ -845,6 +1006,64 @@ describe('script removal on reload', () => {
 });
 
 /* ── query lifecycle via script instances ── */
+
+describe('query — script-owned membership hooks', () => {
+    it('a disposing instance fires the closing exit for every node still matching', () => {
+        const sceneTree = server.room.scene;
+        WATCHED_LIVE.count = 0;
+
+        const a = createNode({ name: 'A' });
+        addChild(sceneTree.root, a);
+        addTrait(a, RigidBody);
+
+        const watcher = createNode({ name: 'W' });
+        addChild(sceneTree.root, watcher);
+        addTrait(watcher, Watcher);
+
+        // subscribing was itself an enter: the node that already matched counts
+        expect(WATCHED_LIVE.count).toBe(1);
+
+        const b = createNode({ name: 'B' });
+        addChild(sceneTree.root, b);
+        addTrait(b, RigidBody);
+        expect(WATCHED_LIVE.count).toBe(2);
+
+        // the instance goes away while both nodes still match: nothing may leak
+        removeTrait(watcher, Watcher);
+        expect(WATCHED_LIVE.count).toBe(0);
+
+        // and it is really detached, later churn must not move the count
+        removeTrait(a, RigidBody);
+        expect(WATCHED_LIVE.count).toBe(0);
+
+        destroyNode(sceneTree, a);
+        destroyNode(sceneTree, b);
+        destroyNode(sceneTree, watcher);
+    });
+
+    it('a rebuilt instance re-enters the same set (hot-reload shape)', () => {
+        const sceneTree = server.room.scene;
+        WATCHED_LIVE.count = 0;
+
+        const a = createNode({ name: 'A' });
+        addChild(sceneTree.root, a);
+        addTrait(a, RigidBody);
+
+        const watcher = createNode({ name: 'W' });
+        addChild(sceneTree.root, watcher);
+        addTrait(watcher, Watcher);
+        expect(WATCHED_LIVE.count).toBe(1);
+
+        // re-adding a trait is a replace: dispose (drains to 0) then rebuild
+        addTrait(watcher, Watcher);
+        expect(WATCHED_LIVE.count).toBe(1);
+
+        destroyNode(sceneTree, watcher);
+        expect(WATCHED_LIVE.count).toBe(0);
+
+        destroyNode(sceneTree, a);
+    });
+});
 
 describe('query — script-instance lifecycle', () => {
     it('attaching a script-bearing trait registers the query; removing it evicts', () => {

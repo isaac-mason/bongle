@@ -91,6 +91,8 @@ export {
     onPostAnimate,
     onPostPhysicsStep,
     onPrePhysicsStep,
+    onQueryEnter,
+    onQueryExit,
     onSwap,
     onTick,
     onUpdate,

@@ -5,7 +5,7 @@ import * as Debug from '../debug';
 import { registry } from '../registry';
 import type { Bitset } from '../utils/bitset';
 import * as bitset from '../utils/bitset';
-import { type Topic, topic } from '../utils/topic';
+import { type Listener, type Topic, topic, type Unsubscribe } from '../utils/topic';
 import type { Voxels } from '../voxels/voxels';
 import { chunkToRegionCoord, regionKey } from '../voxels/voxels';
 import { getControlCodecs } from './packcat-bridge';
@@ -614,6 +614,10 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
         sceneTree._interpolating.delete(t);
     }
     node.scene = null;
+
+    // recursive: each level flushes once its own node is fully detached, so a
+    // handler always sees a coherent (bottom-up) teardown.
+    flushQueryEvents();
 }
 
 /* trait operations */
@@ -741,6 +745,8 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
                 }
             }
         }
+        // after the new trait's own scripts exist and have inited
+        flushQueryEvents();
     }
 
     return instance;
@@ -836,6 +842,7 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         }
         // now safe to delete the value
         node._traits.delete(traitSlot);
+        flushQueryEvents();
     }
 }
 
@@ -881,6 +888,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
             reindex(scene, node);
         }
         node._traits.delete(traitSlot);
+        flushQueryEvents();
     }
 }
 
@@ -931,6 +939,8 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
             }
         }
     }
+
+    flushQueryEvents();
 
     return instance;
 }
@@ -1060,6 +1070,9 @@ export function addChild(parent: Node, child: Node): void {
     // update parent transform pointers for the attached subtree
     const ancestor = findTransformAncestor(child);
     updateSubtreeTransformPointers(child, ancestor);
+
+    // last, so an enter handler reading a world matrix sees fresh pointers
+    flushQueryEvents();
 }
 
 /**
@@ -1075,6 +1088,7 @@ export function removeChild(parent: Node, child: Node): void {
     }
 
     removeChildInternal(parent, child);
+    flushQueryEvents();
 }
 
 /**
@@ -1137,6 +1151,8 @@ export function reparent(node: Node, newParent: Node): void {
     // update parent transform pointers for the moved subtree
     const ancestor = findTransformAncestor(node);
     updateSubtreeTransformPointers(node, ancestor);
+
+    flushQueryEvents();
 }
 
 /**
@@ -1210,6 +1226,9 @@ function removeChildInternal(parent: Node, child: Node): void {
  *
  * this ensures all nodes in the subtree are registered and all scripts
  * have their state available before any onInit fires.
+ *
+ * query enter events raised in pass 1 are staged, not emitted: the caller
+ * flushes once transform pointers are rebuilt too. see `flushQueryEvents`.
  */
 function registerSubtree(sceneTree: SceneTree, node: Node): void {
     // collect all nodes in the subtree (pre-order)
@@ -1773,6 +1792,9 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
         }
     }
 
+    // the root's own reindex above is staged; drain it before children land
+    flushQueryEvents();
+
     // deserialize children of root (registerSubtree fires via addChild, creating instances)
     for (const nodeData of rootData.children) {
         const child = deserializeNode(nodeData);
@@ -1837,8 +1859,11 @@ export type Query<Conditions extends Array<Condition>> = {
     withoutBitset: Bitset;
     matches: Array<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     nodeToIndex: Map<Node, number>;
-    onAdd: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    onRemove: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
+    /** node started matching. subscribe with {@link onQueryEnter}, never directly:
+     *  the topic alone has no backfill, no error isolation, and no lifetime. */
+    onEnter: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
+    /** node stopped matching. subscribe with {@link onQueryExit}. */
+    onExit: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     /**
      * live ref-count from script instances that called `query(ctx, ...)`.
      * 0 + `acquired` false → engine-persistent (never reaped).
@@ -1936,8 +1961,8 @@ export function query<const Args extends ConditionArgs[]>(
         withoutBitset,
         matches: [],
         nodeToIndex: new Map(),
-        onAdd: topic(),
-        onRemove: topic(),
+        onEnter: topic(),
+        onExit: topic(),
         refcount: 0,
         acquired: false,
         [Symbol.iterator]() {
@@ -1998,6 +2023,124 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
     return result;
 }
 
+/* ── query membership events ──────────────────────────────────────────
+ *
+ * enter/exit are staged, not emitted inline. a node is indexed into queries
+ * partway through `registerSubtree` (before its own scripts exist) and in
+ * `addTrait` (before the new trait's scripts are instantiated), so emitting
+ * at index time would hand handlers a node that is not finished being built.
+ * every public mutation entry point calls `flushQueryEvents` once it has a
+ * consistent tree, which is also the point where nested mutations raised by a
+ * handler drain: `_flushingQueryEvents` makes a nested flush a no-op and the
+ * outer loop picks up whatever was appended.
+ */
+
+type QueryEvent = { topic: Topic<any>; tuple: any[] };
+
+const _pendingQueryEvents: QueryEvent[] = [];
+let _flushingQueryEvents = false;
+
+function callQueryListener(listener: Listener<any>, tuple: any[]): void {
+    try {
+        listener(...tuple);
+    } catch (err) {
+        // script-registered listeners log their own identity and never throw;
+        // this catches engine-side subscribers so one cannot abort the drain.
+        logScriptError('query membership handler', err);
+    }
+}
+
+function emitQueryEvent(t: Topic<any>, tuple: any[]): void {
+    for (const listener of t.listeners) {
+        callQueryListener(listener, tuple);
+    }
+}
+
+/**
+ * emit every staged enter/exit. called at the end of each public mutation
+ * (addChild, removeChild, reparent, destroyNode, addTrait, removeTrait, ...),
+ * once the tree is consistent again.
+ */
+export function flushQueryEvents(): void {
+    if (_flushingQueryEvents) return;
+    _flushingQueryEvents = true;
+    // length is read every iteration on purpose: a handler that mutates the
+    // tree appends to this same queue and gets drained by this loop.
+    for (let i = 0; i < _pendingQueryEvents.length; i++) {
+        const event = _pendingQueryEvents[i]!;
+        emitQueryEvent(event.topic, event.tuple);
+    }
+    _pendingQueryEvents.length = 0;
+    _flushingQueryEvents = false;
+}
+
+/**
+ * subscribe to nodes *starting* to match `q`.
+ *
+ * **subscribing is itself an enter**: the handler fires immediately for every
+ * node already matching, so a subscriber never has to hand-write a backfill
+ * loop over `q.matches` (the classic way to miss everything that loaded before
+ * the subscriber existed).
+ *
+ * fires after the node is fully live: its whole subtree is registered and its
+ * own scripts have run `onInit`. structural changes made inside a handler take
+ * effect immediately, and any membership events they raise drain in the same
+ * flush.
+ */
+export function onQueryEnter<Conditions extends Condition[]>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): Unsubscribe {
+    q.onEnter.add(fn as Listener<any>);
+    // snapshot: a handler is free to mutate the tree, which swap-removes from
+    // `matches` underneath us.
+    for (const tuple of q.matches.slice()) {
+        callQueryListener(fn as Listener<any>, tuple as any[]);
+    }
+    return () => offQueryEnter(q, fn);
+}
+
+/** drop an {@link onQueryEnter} subscription. no exit drain, enter has no
+ *  teardown half. idempotent. */
+export function offQueryEnter<Conditions extends Condition[]>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): void {
+    q.onEnter.remove(fn as Listener<any>);
+}
+
+/**
+ * subscribe to nodes *stopping* matching `q`.
+ *
+ * **unsubscribing is itself an exit**: the handler fires for every node still
+ * matching when the subscription ends. paired with {@link onQueryEnter}'s
+ * backfill that gives one invariant worth relying on, every enter is matched by
+ * exactly one exit, so a per-node resource owned by a handler cannot leak, not
+ * across scene teardown and not across a hot reload.
+ */
+export function onQueryExit<Conditions extends Condition[]>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): Unsubscribe {
+    q.onExit.add(fn as Listener<any>);
+    return () => offQueryExit(q, fn);
+}
+
+/**
+ * drop an {@link onQueryExit} subscription, firing it one last time for every
+ * node still matching. idempotent: a second call drains nothing.
+ */
+export function offQueryExit<Conditions extends Condition[]>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): void {
+    if (!q.onExit.listeners.has(fn as Listener<any>)) return;
+    q.onExit.remove(fn as Listener<any>);
+    for (const tuple of q.matches.slice()) {
+        callQueryListener(fn as Listener<any>, tuple as any[]);
+    }
+}
+
 /* query internals */
 
 function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
@@ -2006,7 +2149,7 @@ function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
     return true;
 }
 
-function addNodeToQuery(q: Query<any>, node: Node): void {
+function buildQueryTuple(q: Query<any>, node: Node): any[] {
     const tuple: any[] = [];
     for (const condition of q.conditions) {
         if (condition.type === ConditionType.WITH) {
@@ -2017,11 +2160,18 @@ function addNodeToQuery(q: Query<any>, node: Node): void {
         }
         // NOT conditions don't contribute to tuple
     }
+    return tuple;
+}
+
+function addNodeToQuery(q: Query<any>, node: Node): void {
+    const tuple = buildQueryTuple(q, node);
     q.nodeToIndex.set(node, q.matches.length);
     q.matches.push(tuple as any);
 
-    if (q.onAdd.listeners.size > 0) {
-        (q.onAdd.emit as any)(...tuple);
+    // the tuple pushed above is the event payload: it stays valid even if a
+    // later swap-remove moves it out of `matches` before the flush.
+    if (q.onEnter.listeners.size > 0) {
+        _pendingQueryEvents.push({ topic: q.onEnter, tuple });
     }
 }
 
@@ -2029,18 +2179,10 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     const index = q.nodeToIndex.get(node);
     if (index === undefined) return;
 
-    if (q.onRemove.listeners.size > 0) {
-        const tuple: any[] = [];
-        for (const condition of q.conditions) {
-            if (condition.type === ConditionType.WITH) {
-                const traitSlot = condition.trait._slot;
-                if (traitSlot !== undefined) {
-                    tuple.push(node._traits.get(traitSlot));
-                }
-            }
-        }
-        (q.onRemove.emit as any)(...tuple);
-    }
+    // capture the payload BEFORE the swap-remove: removeTrait deletes the
+    // trait value from `_traits` right after reindexing, so it has to be read
+    // here, and a handler must never see the departing node still in `matches`.
+    const tuple = q.onExit.listeners.size > 0 ? buildQueryTuple(q, node) : null;
 
     // swap-remove from matches
     const lastIndex = q.matches.length - 1;
@@ -2054,6 +2196,10 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
 
     q.matches.pop();
     q.nodeToIndex.delete(node);
+
+    if (tuple !== null) {
+        _pendingQueryEvents.push({ topic: q.onExit, tuple });
+    }
 }
 
 function reindex(sceneTree: SceneTree, node: Node): void {

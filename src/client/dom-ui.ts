@@ -2,7 +2,7 @@
 //
 // One init/update/dispose handles both kinds. They share enough
 // concerns (mount under `room.viewport`, CSS-px projection, 3D
-// orientation modes, lazy install with `lastSeenFrame` cleanup) that a
+// orientation modes, lazy install with query-driven teardown) that a
 // single module is more honest than two peer dirs.
 //
 // Per-trait responsibilities:
@@ -51,7 +51,8 @@ import { CanvasTrait } from '../builtins/canvas';
 import { HtmlTrait } from '../builtins/html';
 import { getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
 import type { SceneTree } from '../core/scene/scene-tree';
-import { query } from '../core/scene/scene-tree';
+import { onQueryExit, query } from '../core/scene/scene-tree';
+import type { Unsubscribe } from '../core/utils/topic';
 import { UILayer } from './ui/util/ui-layers';
 import type { Viewport } from './viewport';
 
@@ -64,8 +65,6 @@ type CanvasQuadState = {
     canvas: OffscreenCanvas;
     /** The trait's `_version` observed at last config refresh (size, mode, …). */
     versionAtRefresh: number;
-    /** Frame counter, used to detect stale states for cleanup. */
-    lastSeenFrame: number;
     width: number;
     height: number;
 };
@@ -78,7 +77,6 @@ type HtmlState = {
     trait: HtmlTrait;
     /** The `<div>` mounted on the overlay layer. Same ref as `trait.element`. */
     element: HTMLDivElement;
-    lastSeenFrame: number;
     /** Cache last-applied transform string to skip redundant style writes. */
     lastTransform: string;
     lastZIndex: string;
@@ -106,7 +104,7 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, s
     htmlOverlay.style.zIndex = String(UILayer.worldOverlay);
     viewport.appendChild(htmlOverlay);
 
-    return {
+    const domUi = {
         scene,
         sceneDepthNode,
         viewport,
@@ -115,8 +113,25 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, s
         canvasStates: new Map<CanvasTrait, CanvasState>(),
         htmlQuery: query(nodes, [HtmlTrait, TransformTrait]),
         canvasQuery: query(nodes, [CanvasTrait, TransformTrait]),
-        frameId: 0,
+        _unsubscribes: [] as Unsubscribe[],
     };
+
+    // teardown is edge-driven: a panel is torn down the moment its node stops
+    // matching, rather than being noticed a frame later by a sweep. install
+    // stays lazy in `update`, which already walks every match anyway.
+    // DOM work has no phase constraint, so these run inline.
+    domUi._unsubscribes.push(
+        onQueryExit(domUi.htmlQuery, (trait) => {
+            const state = domUi.htmlStates.get(trait);
+            if (state) disposeHtml(domUi, state);
+        }),
+        onQueryExit(domUi.canvasQuery, (trait) => {
+            const state = domUi.canvasStates.get(trait);
+            if (state) disposeCanvas(domUi, state);
+        }),
+    );
+
+    return domUi;
 }
 
 export type DomUi = ReturnType<typeof init>;
@@ -124,19 +139,15 @@ export type DomUi = ReturnType<typeof init>;
 // ── update ─────────────────────────────────────────────────────────
 
 export function update(domUi: DomUi, camera: Camera, viewport: Viewport): void {
-    const frameId = ++domUi.frameId;
-
-    updateHtml(domUi, camera, viewport, frameId);
-    updateCanvas(domUi, camera, frameId);
-
-    cleanup(domUi, frameId);
+    updateHtml(domUi, camera, viewport);
+    updateCanvas(domUi, camera);
 }
 
 // ── HtmlTrait ──────────────────────────────────────────────────────
 
 const _scratchClip: [number, number, number, number] = [0, 0, 0, 0];
 
-function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport, frameId: number): void {
+function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport): void {
     const vw = viewport.width;
     const vh = viewport.height;
     const halfW = vw / 2;
@@ -145,7 +156,6 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport, frameId: n
     for (const [trait, transform] of domUi.htmlQuery) {
         let state = domUi.htmlStates.get(trait);
         if (!state) state = installHtml(domUi, trait);
-        state.lastSeenFrame = frameId;
 
         if (trait.mode !== 'screen') {
             warnHtml3DMode(trait.mode);
@@ -221,7 +231,6 @@ function installHtml(domUi: DomUi, trait: HtmlTrait): HtmlState {
     const state: HtmlState = {
         trait,
         element,
-        lastSeenFrame: 0,
         lastTransform: '',
         lastZIndex: '',
         lastDisplay: '',
@@ -249,11 +258,10 @@ function warnHtml3DMode(mode: string): void {
 
 // ── CanvasTrait ────────────────────────────────────────────────────
 
-function updateCanvas(domUi: DomUi, camera: Camera, frameId: number): void {
+function updateCanvas(domUi: DomUi, camera: Camera): void {
     for (const [trait, transform] of domUi.canvasQuery) {
         let state = domUi.canvasStates.get(trait);
         if (!state) state = installCanvas(domUi, trait);
-        state.lastSeenFrame = frameId;
 
         if (trait._version !== state.versionAtRefresh) {
             refreshCanvasConfig(state, trait);
@@ -293,7 +301,6 @@ function installCanvas(domUi: DomUi, trait: CanvasTrait): CanvasState {
         width: trait.width,
         height: trait.height,
         versionAtRefresh: trait._version,
-        lastSeenFrame: 0,
     };
     domUi.canvasStates.set(trait, state);
     return state;
@@ -482,21 +489,12 @@ function setStyle<S extends { [K in T]: string }, T extends keyof S>(
     state[cacheKey] = value as S[T];
 }
 
-// ── cleanup ────────────────────────────────────────────────────────
-
-function cleanup(domUi: DomUi, frameId: number): void {
-    for (const state of domUi.htmlStates.values()) {
-        if (state.lastSeenFrame !== frameId) disposeHtml(domUi, state);
-    }
-    for (const state of domUi.canvasStates.values()) {
-        if (state.lastSeenFrame !== frameId) disposeCanvas(domUi, state);
-    }
-}
-
 // ── dispose ────────────────────────────────────────────────────────
 
 export function dispose(domUi: DomUi): void {
-    for (const state of [...domUi.htmlStates.values()]) disposeHtml(domUi, state);
-    for (const state of [...domUi.canvasStates.values()]) disposeCanvas(domUi, state);
+    // unsubscribing is itself an exit: each handler fires once more per node
+    // still matching, which is the whole teardown.
+    for (const unsubscribe of domUi._unsubscribes) unsubscribe();
+    domUi._unsubscribes.length = 0;
     domUi.htmlOverlay.remove();
 }
