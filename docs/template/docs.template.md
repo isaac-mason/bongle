@@ -353,6 +353,46 @@ with `trait._node`).
 `filter(ctx, conditions)` is the one-shot version that returns a plain array, and
 `first(ctx, Trait)` returns the nearest ancestor carrying a trait.
 
+#### Reacting to a query changing
+
+Iterating covers "do something with every match this tick". When you need to run
+setup and teardown as nodes join and leave the set, subscribe instead:
+
+```ts
+system('spawn-markers', (ctx) => {
+    const spawns = query(ctx, [SpawnPointTrait, TransformTrait]);
+    const markers = new Map<SpawnPointTrait, Marker>();
+
+    onQueryEnter(ctx, spawns, (spawn, transform) => {
+        markers.set(spawn, addMarker(transform));
+    });
+    onQueryExit(ctx, spawns, (spawn) => {
+        removeMarker(markers.get(spawn)!);
+        markers.delete(spawn);
+    });
+});
+```
+
+Two rules make this safe to build on:
+
+- **Subscribing is itself an enter.** The handler fires immediately for every
+  node already matching, so a system registered after the scene loaded still
+  sees the whole set. You never write a backfill loop.
+- **Unsubscribing is itself an exit.** When the script instance disposes, each
+  exit handler fires one last time for every node still matching.
+
+Together those mean every enter is followed by exactly one exit, so a per-node
+resource opened in an enter handler cannot leak, not on scene teardown and not
+across a hot reload (the rebuilt instance simply re-enters the same set).
+
+An enter fires once the node is fully live: its subtree is registered and its own
+scripts have run their `onInit`. Adding or removing traits from inside a handler
+takes effect immediately.
+
+There is no `onQueryChange`. Traits are plain mutable objects with no write
+barrier, so nothing can observe a field being assigned. Poll the value in
+`onTick`, or have whatever writes it announce the change.
+
 ### Systems and actors
 
 These primitives support two ways to organize logic, and you can mix them.
@@ -586,10 +626,18 @@ opens a new one only when they are all at `maxPlayers`.
 server in the player's region, the one running the fewest rooms, so rooms fan out
 across the fleet instead of piling onto one machine.
 
-A client can re-enter matchmaking itself with `client.matchmake`, handing over new
+A client can re-enter matchmaking itself with `client.transfer`, handing over new
 `options` to switch gamemodes or move from a lobby into a match.
 
 <Snippet source="multiplayer.snippet.ts" select="rematch" />
+
+Naming a `project` sends the player to a **different** project instead. That is
+not something a game may do silently, so the platform asks them first and shows
+them what they are being sent to; the call resolves whether they went. A refused
+target rests for a few seconds, so the natural spelling — ask while the player
+stands on the pad — does not re-ask every tick.
+
+<Snippet source="multiplayer.snippet.ts" select="transfer-project" />
 
 ### Rooms
 

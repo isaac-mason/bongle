@@ -28,7 +28,19 @@ system('weapon-rpc', (ctx) => {
 // move this client into another gamemode by re-entering matchmaking
 system('switch-mode', (ctx) => {
     onInit(ctx, () => {
-        if (ctx.client) client.matchmake(ctx, { options: { mode: 'ffa' } });
+        if (ctx.client) void client.transfer(ctx, { options: { mode: 'ffa' } });
     });
 });
 /* SNIPPET_END: rematch */
+
+/* SNIPPET_START: transfer-project */
+// send this player to a DIFFERENT project. the platform asks them first, so
+// resolve tells you whether they actually went.
+system('portal-pad', (ctx) => {
+    onInit(ctx, async () => {
+        if (!ctx.client) return;
+        const went = await client.transfer(ctx, { project: 'neon-drift', joinData: { from: 'lobby' } });
+        if (!went) console.log('they stayed');
+    });
+});
+/* SNIPPET_END: transfer-project */

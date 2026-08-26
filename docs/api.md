@@ -212,6 +212,12 @@ export function cloneNode(node: Node): Node;
  * each mesh's own geometry, so there's nothing cull-related for the caller to
  * supply or maintain. If the source already has a `ModelTrait`, the existing
  * one is left in place.
+ *
+ * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
+ * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
+ * TransformTrait]` pair each frame, so without one the model would silently
+ * never be lit (stuck full-bright, `lightOffset` dead). An added identity
+ * transform is faithful, that's exactly the TRS the bake elided.
  */
 export function cloneModel(node: Node): Node;
 ```
@@ -1229,7 +1235,7 @@ export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToCo
 
 ```ts
 export type ClientContext = {
-    scene: Scene;
+    render: RenderScenes;
     subject: SceneTree.Node | null;
     player: SceneTree.Node;
     camera: SceneTree.Node;
@@ -1338,7 +1344,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     mode: 'edit' | 'play';
     trait: T;
     node: SceneTree.Node;
-    nodes: SceneTree.SceneTree;
+    scene: SceneTree.SceneTree;
     voxels: Voxels;
     physics: Physics;
     clock: Clock;
@@ -1437,7 +1443,8 @@ export function listen<S extends Scripts.Schema>(ctx: ScriptContext, handle: Com
 ```ts
 /**
  * register a callback that fires when a block of `block`'s type is broken
- * (replaced with air or a different block). server-only.
+ * (replaced with air or a different block). authority-only (server room or
+ * local/standalone room).
  */
 export function onBlockBreak(ctx: ScriptContext, block: import('../voxels/blocks').BlockHandle, fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void): Unsubscribe;
 ```
@@ -1447,8 +1454,8 @@ export function onBlockBreak(ctx: ScriptContext, block: import('../voxels/blocks
 ```ts
 /**
  * register a callback that fires when a block of `block`'s type is built
- * (placed where air or a different block was). server-only, no-op on the
- * client. handler receives the world coords + new state id; close over
+ * (placed where air or a different block was). authority-only (server room
+ * or local/standalone room). handler receives the world coords + new state id; close over
  * `ctx` for scene/room access (e.g. spawn an item, play a sound).
  */
 export function onBlockBuild(ctx: ScriptContext, block: import('../voxels/blocks').BlockHandle, fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void): Unsubscribe;
@@ -1459,7 +1466,8 @@ export function onBlockBuild(ctx: ScriptContext, block: import('../voxels/blocks
 ```ts
 /**
  * register a callback that fires when a block of `block`'s type changes
- * state in place (same block-type, different stateId). server-only.
+ * state in place (same block-type, different stateId). authority-only (server
+ * room or local/standalone room).
  * handler receives both old and new state ids on the event payload.
  */
 export function onBlockStateChange(ctx: ScriptContext, block: import('../voxels/blocks').BlockHandle, fn: (ev: import('../voxels/blocks').BlockStateChangeCtx) => void): Unsubscribe;
@@ -1523,7 +1531,8 @@ export function onInput(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsu
 ```ts
 /**
  * register a callback that fires when a client joins the room.
- * server-only, no-op on the client.
+ * authority-only: runs on the server room, or on a client-only
+ * local/standalone room; a no-op on a client connected to a remote server.
  */
 export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubscribe;
 ```
@@ -1533,7 +1542,8 @@ export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubs
 ```ts
 /**
  * register a callback that fires when a client leaves the room.
- * server-only, no-op on the client.
+ * authority-only: runs on the server room, or on a client-only
+ * local/standalone room; a no-op on a client connected to a remote server.
  */
 export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsubscribe;
 ```
@@ -1592,6 +1602,54 @@ export function onPostPhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => vo
  * before the physics world is stepped.
  */
 export function onPrePhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe;
+```
+
+#### `onQueryEnter`
+
+```ts
+/**
+ * react to a node **starting** to match `q`.
+ *
+ * `q` must come from `query(ctx, ...)`, so this instance holds it. the handler
+ * receives the same trait tuple `q.matches` yields, spread.
+ *
+ * **subscribing is itself an enter**: the handler fires straight away for every
+ * node already matching. a system registered after the scene loaded (the normal
+ * case, and every case after a hot reload) therefore sees the whole set, with no
+ * hand-written backfill loop over `q.matches`.
+ *
+ * fires once the node is fully live: its subtree is registered and its own
+ * scripts have run `onInit`. paired with `onQueryExit`, exactly one exit follows
+ * every enter, so a per-node resource opened here cannot leak.
+ *
+ * @example
+ * ```ts
+ * system('spawn-markers', (ctx) => {
+ *     const q = query(ctx, [SpawnPointTrait, TransformTrait]);
+ *     const markers = new Map<SpawnPointTrait, Marker>();
+ *     onQueryEnter(ctx, q, (spawn, transform) => markers.set(spawn, addMarker(transform)));
+ *     onQueryExit(ctx, q, (spawn) => {
+ *         removeMarker(markers.get(spawn)!);
+ *         markers.delete(spawn);
+ *     });
+ * });
+ * ```
+ */
+export function onQueryEnter<Conditions extends SceneTree.Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
+```
+
+#### `onQueryExit`
+
+```ts
+/**
+ * react to a node **stopping** matching `q`. mirror of {@link onQueryEnter}.
+ *
+ * **unsubscribing is itself an exit**: when the returned function is called, or
+ * when this script instance disposes, the handler fires one last time for every
+ * node still matching. that is what makes teardown and hot reload safe, the
+ * instance going away closes everything it opened.
+ */
+export function onQueryExit<Conditions extends SceneTree.Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
 ```
 
 #### `onSwap`
@@ -1736,7 +1794,7 @@ export const env: {
 
 ```ts
 /**
- * Game-facing bridge to the active host portal (CrazyGames / Poki / none).
+ * Game-facing bridge to the active host platform (CrazyGames / Poki / none).
  * Client-only. The transport lives on the ClientDriver supplied at engine init,
  * this just hands off to it. Standalone / bongle-dev hosts wire these to an
  * inert impl, so a game can call them unconditionally regardless of where it's
@@ -1744,11 +1802,8 @@ export const env: {
  *
  * Loading/gameplay lifecycle is NOT here, the host infers that from the
  * connection. These are the ad moments only the game knows the timing of
- * (between rounds, on death, etc.).
- *
- * Audio is muted for the duration of every ad automatically: we set
- * `state.adActive` while the ad runs, and the client update loop reconciles the
- * engine's audio output mute against it each frame. Games don't think about it.
+ * (between rounds, on death, etc.). Audio muting for the ad's duration is
+ * handled by `Ads` + the update loop, so games don't think about it.
  */
 export const platform: {
     commercialBreak(ctx: ScriptContext): Promise<void>;
@@ -3742,8 +3797,10 @@ export type Voxels = {
         removed: Set<string>;
     };
     columns: Map<string, Chunk[]>;
+    regions: Map<string, Set<Chunk>>;
     registry: Blocks;
     authority: VoxelsAuthority | null;
+    lighting: VoxelsLighting;
 };
 ```
 
@@ -3760,7 +3817,6 @@ export type Voxels = {
 export type VoxelsAuthority = {
     changes: VoxelChanges;
     observers: Map<number, BlockObserverEntry> | null;
-    floodFillLighting: FloodFillLightingState;
     hookDepth: number;
 };
 ```
@@ -3787,6 +3843,59 @@ export const CHUNK_SIZE_SQ;
 
 ```ts
 export const CHUNK_VOLUME;
+```
+
+#### `REGION_CHUNK_SHIFT`
+
+```ts
+/** region = the AOI/streaming unit, a cube of REGION_CHUNKS_PER_AXIS³ chunks.
+ *  decoupled from CHUNK_SIZE on purpose: storage/mesh/light stay chunk-sized
+ *  (good locality for those), while discovery/eviction/entity-presence walk
+ *  regions instead, so their per-tick cost scales with a much smaller sphere.
+ *  v1: 4 chunks/axis = 64 blocks/axis. tune by changing this one constant. */
+export const REGION_CHUNK_SHIFT;
+```
+
+#### `REGION_CHUNKS_PER_AXIS`
+
+```ts
+export const REGION_CHUNKS_PER_AXIS;
+```
+
+#### `REGION_BITS`
+
+```ts
+export const REGION_BITS;
+```
+
+#### `REGION_SIZE`
+
+```ts
+export const REGION_SIZE;
+```
+
+#### `REGION_VOLUME`
+
+```ts
+/** chunk slots in one region cube (REGION_CHUNKS_PER_AXIS³). shared by client
+ *  and server: it's the length of a voxel_region_full message's `occupied`
+ *  presence tuple, so both sides must agree on it exactly. */
+export const REGION_VOLUME;
+```
+
+#### `REGION_LOCAL_CHUNK_OFFSETS`
+
+```ts
+/** every local (dx,dy,dz) chunk offset inside one region cube, relative to the
+ *  region's minimum corner, in a fixed raster order. shared by client and
+ *  server: a voxel_region_full message's `occupied`/`chunks` positions are
+ *  implicit indices into this same order, so both sides must walk it
+ *  identically to agree on which slot is which chunk. */
+export const REGION_LOCAL_CHUNK_OFFSETS: [
+    number,
+    number,
+    number
+][];
 ```
 
 #### `BLOCK_AIR`
@@ -3819,11 +3928,35 @@ export function chunkKey(cx: number, cy: number, cz: number): string;
 export function chunkColumnKey(cx: number, cz: number): string;
 ```
 
+#### `regionKey`
+
+```ts
+/** region coordinate key, used by voxels.regions (AOI occupancy index) and by
+ *  discovery/entity-presence's region-keyed knowledge sets. same string
+ *  convention as chunkKey, one level coarser. */
+export function regionKey(rx: number, ry: number, rz: number): string;
+```
+
 #### `toChunkCoord`
 
 ```ts
 /** world position → chunk coordinate (floored division). */
 export function toChunkCoord(worldCoord: number): number;
+```
+
+#### `chunkToRegionCoord`
+
+```ts
+/** chunk coordinate → region coordinate (floored division by REGION_CHUNKS_PER_AXIS). */
+export function chunkToRegionCoord(chunkCoord: number): number;
+```
+
+#### `toRegionCoord`
+
+```ts
+/** world position → region coordinate directly, without the intermediate
+ *  chunk coordinate. caller floors first, same convention as toChunkCoord. */
+export function toRegionCoord(worldCoord: number): number;
 ```
 
 #### `toLocalCoord`
@@ -3961,7 +4094,11 @@ export function loadChunk(voxels: Voxels, cx: number, cy: number, cz: number, ve
 #### `removeChunk`
 
 ```ts
-/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph. */
+/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph.
+ *  also removes it from `voxels.regions` (an under-count there would be a real
+ *  bug — a region wrongly treated as permanently empty — unlike `columns`,
+ *  which has no removal path today and is left alone here; over-counting is
+ *  merely conservative, not incorrect). */
 export function removeChunk(voxels: Voxels, cx: number, cy: number, cz: number): void;
 ```
 
@@ -4007,19 +4144,6 @@ export function chunkData(chunk: Chunk): Uint16Array;
 #### `setChunkBlock`
 
 ```ts
-/**
- * set a block at a chunk-local position — the meat of a voxel write. resolves
- * the palette slot, writes the cell, maintains nonAir/solid counts + mesh gen,
- * registers the chunk mesh-dirty, and (when `voxels` is authoritative) records
- * the op and routes lighting by flag:
- *   DEFAULT → per-block incremental (pendingLight) + inline hook drain
- *   BULK    → whole-chunk relight (staleLightChunks) + skip inline hooks
- * All authority-side work no-ops when `voxels.authority` is null (client mirror,
- * bare test fixtures) — those get just the data + palette + counts.
- *
- * `setBlock` is a thin wrapper over this that resolves world coords → chunk.
- * no bounds checking, caller ensures 0 <= x,y,z < CHUNK_SIZE.
- */
 export function setChunkBlock(voxels: Voxels, chunk: Chunk, x: number, y: number, z: number, key: string, flags: number = SetBlockFlags.DEFAULT): void;
 ```
 
@@ -4031,7 +4155,7 @@ export function setChunkBlock(voxels: Voxels, chunk: Chunk, x: number, y: number
  * nonAir/solid counts from the data + palette, marks the chunk mesh-dirty and
  * schedules its light (a tick-end whole-chunk relight, or an inline flat seed
  * when flood-fill is disabled). No ops, no hooks — the raw-write path trades
- * those away for speed. no-op past the rescan when `voxels.authority` is null.
+ * those away for speed. Light schedules on mirrors too, see `VoxelsLighting`.
  */
 export function invalidateChunk(voxels: Voxels, chunk: Chunk): void;
 ```
@@ -4129,22 +4253,13 @@ export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
  * consumer that drains each part:
  *   - `ops`         → block-hooks (settle, inline per write) + discovery (network)
  *   - `addedChunks` → discovery (streaming)
- *   - `light`       → flushPendingLight (relight)
+ *
+ * light-recompute work is NOT here: it lives in `Voxels.lighting`, which
+ * every Voxels owns, mirrors included. see `VoxelsLighting`.
  */
 export type VoxelChanges = {
     ops: VoxelOp[];
     addedChunks: Set<Chunk>;
-    light: {
-        blocks: Array<{
-            wx: number;
-            wy: number;
-            wz: number;
-            oldStateId: number;
-        }>;
-        chunks: Set<Chunk>;
-        newChunks: Chunk[];
-        epoch: number;
-    };
 };
 ```
 
@@ -4158,9 +4273,7 @@ export function createVoxelChanges(): VoxelChanges;
 
 ```ts
 /**
- * clear the network per-tick state after end-of-tick dispatch. the `light`
- * queues are cleared by their own consumer (flushPendingLight, which runs
- * earlier in the tick); `light.epoch` is monotonic and never cleared.
+ * clear the network per-tick state after end-of-tick dispatch.
  */
 export function clearVoxelChanges(changes: VoxelChanges): void;
 ```
@@ -4175,13 +4288,53 @@ export function clearVoxelChanges(changes: VoxelChanges): void;
  * sky-channel seed for inline writes, `15` keeps the world fully lit,
  * `0` is pitch black except where blocks emit their own light.
  *
- * lives inside `VoxelsAuthority`, only meaningful when this Voxels owns
- * the truth and drives light propagation.
+ * must agree between server and client: a mirror running flood-fill against
+ * a flat server (or a `minLevel` skew) diverges silently. not replicated —
+ * configure it from a shared-realm system so both sides set it identically,
+ * the same way the rest of a game's world setup runs on both realms.
  */
 export type FloodFillLightingState = {
     enabled: boolean;
     minLevel: number;
 };
+```
+
+#### `VoxelsLighting`
+
+```ts
+/**
+ * light-recompute scheduling + config. present on EVERY Voxels, read-only
+ * mirrors included: a networked client propagates light locally for blocks
+ * it writes itself (script-predicted edits) instead of waiting for the
+ * server to ship baked light.
+ *
+ * this is deliberately outside `VoxelsAuthority`. owning the truth governs
+ * whether writes emit ops to peers and fire block hooks; it has nothing to
+ * do with whether this Voxels can derive light from the blocks it holds.
+ *
+ * origin gating falls out of the write paths rather than a flag: the client
+ * receive path (`applyChunkOps` / `applyChunkFull`) writes chunk data and
+ * light directly and never routes through `setChunkBlock` / `ensureChunk` /
+ * `invalidateChunk`, so nothing server-fed ever lands in these queues.
+ */
+export type VoxelsLighting = {
+    floodFill: FloodFillLightingState;
+    blocks: Array<{
+        wx: number;
+        wy: number;
+        wz: number;
+        oldStateId: number;
+    }>;
+    chunks: Set<Chunk>;
+    newChunks: Chunk[];
+    epoch: number;
+};
+```
+
+#### `createVoxelsLighting`
+
+```ts
+export function createVoxelsLighting(): VoxelsLighting;
 ```
 
 #### `createVoxelsAuthority`
@@ -4193,8 +4346,8 @@ export function createVoxelsAuthority(): VoxelsAuthority;
 #### `clearVoxelsAuthority`
 
 ```ts
-/** clear per-tick state inside the authority bundle. observer registry
- *  and lighting config are NOT cleared, they outlive a tick. */
+/** clear per-tick state inside the authority bundle. the observer registry
+ *  is NOT cleared, it outlives a tick. */
 export function clearVoxelsAuthority(authority: VoxelsAuthority): void;
 ```
 
@@ -4223,12 +4376,13 @@ export function markChunkDirty(voxels: Voxels, chunk: Chunk): void;
 export function markChunkLightDirty(voxels: Voxels, chunk: Chunk): void;
 ```
 
-#### `rebuildColumns`
+#### `rebuildSpatialIndexes`
 
 ```ts
-/** rebuild `voxels.columns` from `voxels.chunks`. used by deserialize and as
- *  a defensive reconcile when callers bypass `ensureChunk` (tests/benches). */
-export function rebuildColumns(voxels: Voxels): void;
+/** rebuild `voxels.columns` and `voxels.regions` from `voxels.chunks`. used by
+ *  deserialize and as a defensive reconcile when callers bypass `ensureChunk`
+ *  (tests/benches, savefile load, a full relight). */
+export function rebuildSpatialIndexes(voxels: Voxels): void;
 ```
 
 #### `ensureChunk`
@@ -4455,6 +4609,13 @@ export type EnvironmentConfig = {
         altitude?: number;
         thickness?: number;
     };
+    fog?: {
+        enabled?: boolean;
+        color?: Vec3 | 'sky';
+        end?: number | 'view';
+        start?: number;
+        opacity?: number;
+    };
 };
 ```
 
@@ -4535,6 +4696,9 @@ export function getEnvironmentTime(ctx: ScriptContext): number;
  *   - `stars`    `enabled` toggles stars; `density` is their coverage.
  *   - `clouds`   see `EnvironmentConfig.clouds` for the field meanings
  *                (altitude / thickness / density / wind).
+ *   - `fog`      distance fog, from `start` (a fraction) to `end` (world units
+ *                or `'view'`). On by default at `'view'`, which fades the world
+ *                out at the streamed chunk boundary. See `EnvironmentConfig.fog`.
  *
  * Example, dim the sun and thicken the clouds on some game event:
  *
@@ -6368,55 +6532,7 @@ export function command<S extends pack.Schema, D extends RpcDirection>(id: strin
 ```ts
 export const SERVER_TO_CLIENT;
 ```
-#### `MatchmakingConfig`
-
-```ts
-export type MatchmakingConfig = {
-    dependency: {
-        registry: 'matchmaking';
-        id: string;
-    };
-    maxPlayers: number;
-};
-```
-
-#### `MatchmakingOptions`
-
-```ts
-export type MatchmakingOptions = {
-    maxPlayers?: number;
-};
-```
-
-#### `DEFAULT_MATCHMAKING_CONFIG`
-
-```ts
-/** Applied when the user didn't call matchmaking(), preserves the
- *  pre-existing platform behavior (rooms cap at 10). */
-export const DEFAULT_MATCHMAKING_CONFIG: MatchmakingConfig;
-```
-
-#### `HARD_MAX_PLAYERS_PER_ROOM`
-
-```ts
-/** Hard ceiling enforced both at the platform (manifest validation) and
- *  here (matchmaking() call). Bumping this is a coordinated change with
- *  apps/service/src/matchmaking. */
-export const HARD_MAX_PLAYERS_PER_ROOM;
-```
-
-#### `matchmaking`
-
-```ts
-/**
- * declare per-game matchmaking config. call once at module scope, before
- * scripts/traits/etc. only the first call wins, a second call throws so
- * conflicts don't sit hidden.
- */
-export function matchmaking(opts: MatchmakingOptions = {
-
-}): MatchmakingConfig;
-```
+<!-- RenderModule: module not found: api/matchmaking -->
 #### `rooms.create`
 
 ```ts
@@ -6672,18 +6788,21 @@ Also exported: `chat.ArgType`, `chat.CommandHandle`, `chat.CommandInvocation`, `
 
 ```ts
 /**
- * Drop this client from the current allocation and re-enter the matchmaker
- * with new options / joinData. Client-only. The transport (engine
- * `play` message in dev, iframe-bridge re-enqueue in deployed) lives on the
- * ClientDriver supplied at engine init, this just hands off to it.
+ * Where this client is playing. One verb covers both moves, because they differ
+ * only in the destination: a new server of the project they are in, or another
+ * project entirely.
  *
- * Use cases: gamemode switches, team splits, lobby→game transitions.
+ * The transport lives on the `ClientDriver` supplied at engine init — the engine
+ * knows a project slug and nothing else. Whether to ask, what the card says, and
+ * whether "going" is a navigation or a new tab are all the host's, since routes
+ * and navigation are platform knowledge this layer deliberately does not hold.
  */
 export const client: {
-    matchmake(ctx: ScriptContext, opts: {
-        options: Record<string, string | number | boolean>;
+    transfer(ctx: ScriptContext, o?: {
+        project?: string;
+        options?: Record<string, string | number | boolean>;
         joinData?: Record<string, JsonValue>;
-    }): void;
+    }): Promise<boolean>;
 };
 ```
 #### `clientToUser`
