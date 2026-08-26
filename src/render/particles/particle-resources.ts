@@ -42,6 +42,7 @@ import {
 import type { TextureNode } from 'gpucat/dist/nodes/nodes';
 import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 
 // ── shared gpu structs ──────────────────────────────────────────────
 //
@@ -243,9 +244,10 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const light = max(voxelLight, glowFloor).toVar('pvLight');
     const shaded = mul(sampled.rgb, light).toVar('pvShaded');
     const tintedRgb = mul(shaded, vTint.rgb).toVar('pvTintedRgb');
+    const foggedRgb = applyFog(env, tintedRgb, fogDistance(worldPos3, 'pvFogDist'));
     // overall opacity = texture alpha × tint alpha (the lifetime fade knob).
     const finalAlpha = mul(sampled.a, vTint.w).toVar('pvFinalAlpha');
-    const color = vec4f(tintedRgb, finalAlpha).toVar('pvColor');
+    const color = vec4f(foggedRgb, finalAlpha).toVar('pvColor');
 
     // dithered opacity, not blended: the full transparency drives an
     // interleaved screen-door so coverage tracks the old blend alpha exactly,

@@ -72,6 +72,7 @@ import type { ModelPayload, Resources } from '../../core/resources';
 import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 import * as ModelAtlas from './model-atlas';
 
 // ── gpu structs ─────────────────────────────────────────────────────
@@ -944,7 +945,8 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas, env: EnvironmentResou
     const light = max(mul(voxelLight, sunShade), ambientMinimum).toVar('mvLight');
 
     const litRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
-    const fragColor = vec4(litRgb, texColor.a).toVar('mvFragColor');
+    const foggedRgb = applyFog(env, litRgb, fogDistance(worldPos.xyz, 'mvFogDist'));
+    const fragColor = vec4(foggedRgb, texColor.a).toVar('mvFragColor');
 
     // cutout + screen-door fade: the dither knob feeds the shared discard.
     const fragment = ditherDiscard(fragColor, texColor.a, vDither).toVar('mvFragment');

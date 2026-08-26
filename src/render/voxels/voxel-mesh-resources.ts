@@ -359,6 +359,7 @@ export type VoxelMeshResources = {
 };
 
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 
 export function init(
     atlas: ArrayTexture,
@@ -516,7 +517,8 @@ function createBakedMeshMaterial(
     );
 
     const tintedRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
-    const bakedColor = vec4(tintedRgb, texColor.a).toVar('bakedColor');
+    const foggedRgb = applyFog(env, tintedRgb, fogDistance(worldPos.xyz, 'vmFogDist'));
+    const bakedColor = vec4(foggedRgb, texColor.a).toVar('bakedColor');
 
     // cutout + screen-door pass: the dither knob feeds the shared discard
     // via makePassMaterial.

@@ -10,7 +10,7 @@
 // `_config` / `_sky` are the CPU shadows in the shape the renderer's env UBOs
 // consume (plain numbers, no GPU types); the renderer pushes them on dirty.
 
-import type { Vec2 } from 'math';
+import type { Vec2, Vec3 } from 'math';
 import type { EnvironmentConfig, SkyPreset, SkyStop } from '../api/environment';
 
 /** number of sky LUT stops (zenith/horizon/nadir each), padded to this. */
@@ -24,6 +24,7 @@ export type ResolvedEnvironment = {
     moon: { enabled: boolean };
     stars: { enabled: boolean; density: number };
     clouds: { enabled: boolean; density: number; wind: Vec2; altitude: number; thickness: number };
+    fog: { enabled: boolean; color: Vec3 | 'sky'; end: number | 'view'; start: number; opacity: number };
 };
 
 /** the rarely-changing config as a plain `Infer<EnvConfig>`-shaped object (the
@@ -41,6 +42,8 @@ export type EnvConfigValue = {
     cloudsWindY: number;
     cloudsAltitude: number;
     cloudsThickness: number;
+    fogEnabled: number;
+    fogOpacity: number;
 };
 
 /**
@@ -85,6 +88,8 @@ export function buildConfigObject(config: ResolvedEnvironment): EnvConfigValue {
         cloudsWindY: config.clouds.wind[1],
         cloudsAltitude: config.clouds.altitude,
         cloudsThickness: config.clouds.thickness,
+        fogEnabled: config.fog.enabled ? 1 : 0,
+        fogOpacity: config.fog.opacity,
     };
 }
 
@@ -163,6 +168,13 @@ export function applyConfig(env: Environment, input: EnvironmentConfig, presets:
         if (input.clouds.altitude !== undefined) cfg.clouds.altitude = input.clouds.altitude;
         if (input.clouds.thickness !== undefined) cfg.clouds.thickness = input.clouds.thickness;
     }
+    if (input.fog) {
+        if (input.fog.enabled !== undefined) cfg.fog.enabled = input.fog.enabled;
+        if (input.fog.color !== undefined) cfg.fog.color = input.fog.color;
+        if (input.fog.end !== undefined) cfg.fog.end = input.fog.end;
+        if (input.fog.start !== undefined) cfg.fog.start = input.fog.start;
+        if (input.fog.opacity !== undefined) cfg.fog.opacity = input.fog.opacity;
+    }
 
     // master `enabled` also toggles sky/cloud MESH visibility, but those are render
     // state (EnvVisuals); the renderer syncs them from `config.enabled` each frame.
@@ -189,6 +201,13 @@ function cloneConfig(c: ResolvedEnvironment): ResolvedEnvironment {
             wind: [c.clouds.wind[0], c.clouds.wind[1]],
             altitude: c.clouds.altitude,
             thickness: c.clouds.thickness,
+        },
+        fog: {
+            enabled: c.fog.enabled,
+            color: c.fog.color === 'sky' ? 'sky' : [c.fog.color[0], c.fog.color[1], c.fog.color[2]],
+            end: c.fog.end,
+            start: c.fog.start,
+            opacity: c.fog.opacity,
         },
     };
 }

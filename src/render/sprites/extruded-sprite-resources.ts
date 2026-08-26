@@ -71,6 +71,7 @@ import type { TextureNode } from 'gpucat/dist/nodes/nodes';
 import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 import { bakeExtrudedSpriteMesh } from './sprite-extrusion';
 import type { SpriteResources } from './sprite-resources';
 
@@ -629,7 +630,8 @@ function createExtrudedSpriteMaterial(
     const light = max(voxelLight, ambientMinimum).toVar('esLight');
 
     const litRgb = shadeTinted(sampled.rgb, vTint, vFlash, light, vGlow, vUnlit);
-    const tinted = vec4f(litRgb, sampled.a).toVar('esTinted');
+    const foggedRgb = applyFog(env, litRgb, fogDistance(worldPos.xyz, 'esFogDist'));
+    const tinted = vec4f(foggedRgb, sampled.a).toVar('esTinted');
 
     // cutout + screen-door fade: the dither knob feeds the shared discard.
     const fragment = ditherDiscard(tinted, sampled.a, vDither).toVar('esFragment');

@@ -38,6 +38,7 @@ import { srgbBytesToLinear } from '../../core/color';
 import type { TimeResources } from '../time';
 import type * as CloudResources from './clouds/cloud-resources';
 import * as CloudVisuals from './clouds/cloud-visuals';
+import * as Fog from './fog';
 
 /* ── types ────────────────────────────────────────────────────────── */
 
@@ -81,6 +82,16 @@ export type EnvVisuals = {
 export const EnvTime = gpu.struct('EnvTime', {
     time: gpu.d.f32,
     wallTime: gpu.d.f32,
+    /** fog colour resolved on the CPU each frame (see `fog.resolveFogColor`);
+     *  the `'sky'` vs authored-colour choice never reaches the GPU. */
+    fogColor: gpu.d.vec3f,
+    /** fog bands, both resolved on the CPU each frame (see `fog.resolveFogBands`):
+     *  the spherical one a game pins with a numeric `fog.end`, and the cylindrical
+     *  one sized from this client's view radius. */
+    fogStart: gpu.d.f32,
+    fogEnd: gpu.d.f32,
+    renderFogStart: gpu.d.f32,
+    renderFogEnd: gpu.d.f32,
 });
 
 /** rarely-changing env config (updated only on `setEnvironment`/`setTime`). */
@@ -97,6 +108,8 @@ export const EnvConfig = gpu.struct('EnvConfig', {
     cloudsWindY: gpu.d.f32,
     cloudsAltitude: gpu.d.f32,
     cloudsThickness: gpu.d.f32,
+    fogEnabled: gpu.d.u32,
+    fogOpacity: gpu.d.f32,
 });
 
 const SKY_VEC3_PER_STOP = 3; // zenith, horizon, nadir
@@ -191,7 +204,11 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
     // structured values (objects / nested arrays); gpucat packs each per backend
     // at bind ('wgsl-uniform' on WebGPU, 'std140' on WebGL). `time`/`wallTime` are
     // split into their own tiny UBO so only those re-pack every frame.
-    const envTime = new gpu.Uniform(EnvTime, { time: 0.6, wallTime: 0 }, gpu.frameGroup);
+    const envTime = new gpu.Uniform(
+        EnvTime,
+        { time: 0.6, wallTime: 0, fogColor: [0, 0, 0], fogStart: 0, fogEnd: 0, renderFogStart: 0, renderFogEnd: 0 },
+        gpu.frameGroup,
+    );
     const envConfig = new gpu.Uniform(EnvConfig, buildConfigObject(initial), gpu.frameGroup);
     const envSky = new gpu.Uniform(skyArraySchema(), buildSkyValue(initial.sky.stops), gpu.frameGroup);
 
@@ -212,7 +229,24 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
     const skyBodyMaterial = buildSkyBodyMaterial(timeNode, cfgNode, skyBodyData);
     const starMaterial = buildStarMaterial(timeNode, cfgNode, starData);
 
-    return { envTime, envConfig, envSky, timeNode, cfgNode, skyNode, skyMaterial, skyBodyMaterial, starMaterial };
+    // resolved fog bands, recomputed each frame in `updateForCamera` from the
+    // room config + the client's visual chunk radius. held here so `flushActive`
+    // (room activation, offline icon renders) reuses them instead of flashing
+    // fog off for a frame.
+    const fogBands = Fog.createFogBands();
+
+    return {
+        envTime,
+        envConfig,
+        envSky,
+        timeNode,
+        cfgNode,
+        skyNode,
+        skyMaterial,
+        skyBodyMaterial,
+        starMaterial,
+        fogBands,
+    };
 }
 
 export function disposeResources(_res: EnvironmentResources): void {
@@ -622,9 +656,16 @@ export function updateForCamera(
     cloudResources: CloudResources.CloudResources,
     camera: gpu.Camera,
     time: TimeResources,
+    viewChunkRadius: number,
 ): void {
     syncEnvVisibility(vis, env);
     CloudVisuals.update(vis.clouds, cloudResources, env, camera, time);
+
+    // fog's default `end: 'view'` tracks the client's own visual radius (a
+    // perf-tier setting a script can't know), so the bands resolve here where
+    // both the room config and the radius are in hand.
+    Fog.resolveFogBands(resources.fogBands, env.config, viewChunkRadius);
+
     flush(env, resources);
 }
 
@@ -649,6 +690,8 @@ export function flushActive(env: Environment, resources: EnvironmentResources): 
     flush(env, resources);
 }
 
+const _fogColorScratch: Vec3 = [0, 0, 0];
+
 function flush(env: Environment, resources: EnvironmentResources): void {
     // point the engine-global frameGroup UBOs at this (active) room's CPU shadow;
     // gpucat re-packs from `.value` per backend. only the active room flushes, so
@@ -656,7 +699,16 @@ function flush(env: Environment, resources: EnvironmentResources): void {
     //
     // time/wallTime are per-frame — set the small time UBO every tick. config/sky
     // are rarely-changing — set only when dirty.
-    resources.envTime.value = { time: env.time, wallTime: (performance.now() - env._wallStartMs) / 1000 };
+    Fog.resolveFogColor(_fogColorScratch, env);
+    resources.envTime.value = {
+        time: env.time,
+        wallTime: (performance.now() - env._wallStartMs) / 1000,
+        fogColor: _fogColorScratch,
+        fogStart: resources.fogBands.start,
+        fogEnd: resources.fogBands.end,
+        renderFogStart: resources.fogBands.renderStart,
+        renderFogEnd: resources.fogBands.renderEnd,
+    };
     if (env._configDirty) {
         resources.envConfig.value = env._config;
         env._configDirty = false;

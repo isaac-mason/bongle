@@ -65,6 +65,7 @@ import type { SpriteAtlasMetadata } from '../../core/sprites/atlas';
 import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 
 // ── runtime LUT shape, pixel uvs normalized into 0..1 sampler space ──
 
@@ -535,7 +536,8 @@ function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { mate
     const light = max(voxelLight, ambientMinimum).toVar('svLight');
 
     const litRgb = shadeTinted(sampled.rgb, vTint, vFlash, light, vGlow, vUnlit);
-    const tinted = vec4f(litRgb, sampled.a).toVar('svTinted');
+    const foggedRgb = applyFog(env, litRgb, fogDistance(worldPos3, 'svFogDist'));
+    const tinted = vec4f(foggedRgb, sampled.a).toVar('svTinted');
 
     // cutout + screen-door fade: the dither knob feeds the shared discard.
     const fragment = ditherDiscard(tinted, sampled.a, vDither).toVar('svFragment');

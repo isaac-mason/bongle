@@ -227,6 +227,7 @@ export function render(state: WebGlState, voxelViewChunkRadius: number): void {
         state.resources.cloud,
         camera,
         state.timeResources,
+        voxelViewChunkRadius,
     );
 
     // point the engine-global pass at this room's scene before render,

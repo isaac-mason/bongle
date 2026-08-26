@@ -167,6 +167,7 @@ export function render(state: WebGpuState, voxelViewChunkRadius: number): void {
         state.resources.cloud,
         camera,
         state.timeResources,
+        voxelViewChunkRadius,
     );
     VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius);
 

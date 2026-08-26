@@ -35,6 +35,34 @@ export type EnvironmentConfig = {
      * field over `envTime`.
      */
     clouds?: { enabled?: boolean; density?: number; wind?: Vec2; altitude?: number; thickness?: number };
+    /**
+     * distance fog. fog runs from `start` to `end`, and by default `end` is
+     * however far this client can actually see.
+     *
+     *   `end`     world units, or `'view'` (the default) to track the client's
+     *             own view radius. `'view'` is what fades the world out at the
+     *             streamed chunk boundary, and it is per-client, since view
+     *             radius is a device performance setting a script can't know.
+     *   `start`   FRACTION of `end` where the fade begins, not world units, so
+     *             authoring never depends on knowing the view radius. 0.9 is a
+     *             narrow lip at the boundary; 0.1 is fog across the whole view.
+     *   `color`   `'sky'` tracks the sky LUT's horizon at the current time of
+     *             day (so sunsets and night work unauthored), or a linear rgb
+     *             triple pins it.
+     *   `opacity` how opaque fog gets at `end`. 1 fully replaces the colour.
+     *
+     * Shaped after luanti's `set_sky{fog = {fog_distance, fog_start}}`, where
+     * distance is client-controlled by default and start is a fraction of the
+     * visible range (doc/lua_api.md).
+     *
+     * Setting a numeric `end` NEARER than the view radius does not re-expose the
+     * chunk boundary: fog is already saturated well before it. Setting one
+     * further out leaves the engine's own boundary fade in place underneath.
+     *
+     *   { end: 30, start: 0.1 }   near, thick, atmospheric fog
+     *   { enabled: false }        no fog, world stops hard at the boundary
+     */
+    fog?: { enabled?: boolean; color?: Vec3 | 'sky'; end?: number | 'view'; start?: number; opacity?: number };
 };
 
 /* ── presets ──────────────────────────────────────────────────────── */
@@ -70,6 +98,23 @@ export const PRESETS: Record<SkyPreset, SkyStop[]> = {
     overworld: OVERWORLD,
 };
 
+/**
+ * fog defaults: fade the world out at whatever the client can see.
+ *
+ * `start: 0.9` is minecraft's terrain-fog band expressed as a fraction. vanilla
+ * computes it as `clamp(renderDistance / 10, 4, 64)` world units back from the
+ * edge (FogRenderer.setupFog), which at both of our tier radii (6 and 12 chunks)
+ * works out to exactly 0.9. the fraction is the luanti form and does not need
+ * the radius to be known at authoring time.
+ */
+const FOG_DEFAULT: ClientEnvironment.ResolvedEnvironment['fog'] = {
+    enabled: true,
+    color: 'sky',
+    end: 'view',
+    start: 0.9,
+    opacity: 1,
+};
+
 /** default config when a room boots. resolved (no optionals). */
 export const ENVIRONMENT_DEFAULT: ClientEnvironment.ResolvedEnvironment = {
     enabled: true,
@@ -78,6 +123,7 @@ export const ENVIRONMENT_DEFAULT: ClientEnvironment.ResolvedEnvironment = {
     moon: { enabled: false },
     stars: { enabled: false, density: 0.005 },
     clouds: { enabled: false, density: 0.5, wind: [1, 0], altitude: 96, thickness: 2 },
+    fog: FOG_DEFAULT,
 };
 
 export const ENVIRONMENT_OVERWORLD: ClientEnvironment.ResolvedEnvironment = {
@@ -87,6 +133,7 @@ export const ENVIRONMENT_OVERWORLD: ClientEnvironment.ResolvedEnvironment = {
     moon: { enabled: true },
     stars: { enabled: true, density: 0.005 },
     clouds: { enabled: true, density: 0.5, wind: [1, 0], altitude: 96, thickness: 2 },
+    fog: FOG_DEFAULT,
 };
 
 /* ── api ──────────────────────────────────────────────────────────── */
@@ -144,6 +191,9 @@ export function getEnvironmentTime(ctx: ScriptContext): number {
  *   - `stars`    `enabled` toggles stars; `density` is their coverage.
  *   - `clouds`   see `EnvironmentConfig.clouds` for the field meanings
  *                (altitude / thickness / density / wind).
+ *   - `fog`      distance fog, from `start` (a fraction) to `end` (world units
+ *                or `'view'`). On by default at `'view'`, which fades the world
+ *                out at the streamed chunk boundary. See `EnvironmentConfig.fog`.
  *
  * Example, dim the sun and thicken the clouds on some game event:
  *

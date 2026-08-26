@@ -91,6 +91,7 @@ import {
 import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
+import { applyFog, fogDistance } from '../environment/fog';
 import { ChunkInfo, VisibleQuad } from './voxel-arena';
 
 // ── env constants ───────────────────────────────────────────────────
@@ -615,11 +616,13 @@ function buildQuadShading(opts: {
         elapsedTime,
     );
 
+    const foggedColor = vec4(applyFog(env, fragColor.rgb, fogDistance(worldPos, 'vFogDist')), fragColor.a).toVar('foggedColor');
+
     return makePassMaterial({
         name: `voxel-quad-${pass}`,
         pass,
         clipPos,
-        fragColor,
+        fragColor: foggedColor,
         texColor,
     });
 }
