@@ -1,5 +1,6 @@
 import type { JsonValue } from 'bongle/interface';
 import type { ScriptContext } from '../core/scene/scripts';
+import { releasePointer } from './pointer-lock';
 
 /**
  * Drop this client from the current allocation and re-enter the matchmaker
@@ -42,7 +43,7 @@ export const client = {
      * The destination receives `joinData` from an arbitrary source project, so
      * a game should treat its own `joinData` as untrusted input.
      */
-    portal(
+    async portal(
         ctx: ScriptContext,
         slug: string,
         o?: {
@@ -52,6 +53,11 @@ export const client = {
     ): Promise<boolean> {
         const client = ctx.client;
         if (!client?.state) throw new Error('[bongle] client.portal: client-only');
-        return client.state.driver.portal({ slug, options: o?.options ?? {}, joinData: o?.joinData });
+        const pointer = releasePointer(ctx);
+        try {
+            return await client.state.driver.portal({ slug, options: o?.options ?? {}, joinData: o?.joinData });
+        } finally {
+            pointer.restore();
+        }
     },
 };
