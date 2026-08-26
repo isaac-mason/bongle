@@ -45,6 +45,7 @@ import * as Replication from './replication';
 import * as Rooms from './rooms';
 import * as ClientRpc from './rpc';
 import * as Telemetry from './telemetry';
+import * as Transfer from './transfer';
 import { useClient } from './ui/stores/client-store';
 import * as Viewport from './viewport';
 import * as VoxelNet from './voxel-net';
@@ -107,6 +108,7 @@ export function init(opts: InitOptions) {
     const manifest = Manifest.init();
     const telemetry = Telemetry.init();
     const ads = Ads.init();
+    const transfer = Transfer.init();
     const metrics = Debug.createMetrics(useClient.getState().debugOpen);
 
     // resolved during load(): the GPU renderer, the decoded audio atlas, the
@@ -139,6 +141,7 @@ export function init(opts: InitOptions) {
         perf,
         telemetry,
         ads,
+        transfer,
     };
 }
 

@@ -3,15 +3,12 @@ import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface'
 import { createNetSim } from '../../build/dev/net-sim';
 import { exposeDevtools } from '../devtools';
 import type { App, EditorSession, Filesystem, Runner } from '../interface';
-import { editorPortalPrompt } from './client/portal-prompt';
 
 // The edit-mode client — ONE implementation of "render the game in an editable
-// preview", used two ways:
-//   - the OS `client` app (default export below): host preview, caps from `env`.
-//   - the guest preview iframe (apps/editor/realms/client): caps from its relay
-//     ports — it imports `bootEditClient` from here.
-// Everything real lives in `bootEditClient`; the two entries only differ in how
-// they obtain fs / runner / the game transport, which is exactly the caps.
+// preview". `bootEditClient` holds everything real and takes its host-varying
+// pieces — fs, runner, the game transport, how to reach the embedding platform —
+// as caps, so an entry point supplies only those. The OS `client` app (default
+// export below) is the one entry today, with caps from `env`.
 //
 // Engine RUNTIME is reached only via runner.import (env flags must be set before
 // engine modules evaluate); statics are leaf utilities bundled at engine build.
@@ -37,6 +34,17 @@ export type ClientBootCaps = {
     err: (...parts: unknown[]) => void;
     /** structured boot status for the task manager (host + guest debugging). */
     progress: (status: unknown) => void;
+    /** the game asked to send this player to another project (`client.portal`).
+     *  Whether to ask, and how to get them there — a route, a new tab, a
+     *  redirect — is entirely the host's business, so this just forwards the
+     *  slug and resolves whether the player went. Required, not optional: a
+     *  boot site that silently answered `false` would look like a player who
+     *  declined, so each one states its answer. */
+    portal: (req: {
+        slug: string;
+        options: Record<string, string | number | boolean>;
+        joinData: Record<string, string | number | boolean>;
+    }) => Promise<boolean>;
     /** register graceful teardown (release WebGPU). Absent where teardown is a
      *  frame reload (the guest). */
     onDispose?: (fn: () => void) => void;
@@ -76,7 +84,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         const driver: ClientDriver = {
             matchmake() {},
             portal({ slug, options, joinData }) {
-                return editorPortalPrompt(surface, slug, options, (joinData ?? {}) as Record<string, string | number | boolean>);
+                return caps.portal({ slug, options, joinData: (joinData ?? {}) as Record<string, string | number | boolean> });
             },
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             user,
@@ -179,12 +187,38 @@ const client: App = async (env) => {
             const chan = await env.connect('game', (data) => onReceive(toU8(data)), { signal: AbortSignal.timeout(10_000) });
             return { send: (bytes) => chan.send(bytes) };
         },
+        // 'platform' is served by the shell when something is embedding the
+        // editor. One dial per request: send the ask, take the single answer,
+        // hang up. Nothing serving it (a bare OS) means nowhere to send the
+        // player, which the timeout resolves to `false`.
+        portal: async (req) => {
+            try {
+                let answer!: (ok: boolean) => void;
+                const answered = new Promise<boolean>((resolve) => {
+                    answer = resolve;
+                });
+                const chan = await env.connect('platform', (m) => answer(!!(m as { ok?: boolean } | null)?.ok), {
+                    signal: AbortSignal.timeout(PORTAL_ASK_TIMEOUT_MS),
+                });
+                chan.send({ type: 'portal', ...req });
+                const ok = await answered;
+                chan.close();
+                return ok;
+            } catch {
+                return false;
+            }
+        },
         log: (...p) => env.log(...p),
         err: (...p) => env.err(...p),
         progress: (status) => env.progress(status),
         onDispose: (fn) => env.onDispose(fn),
     });
 };
+
+/** How long to wait for the shell to answer a portal ask. Generous: the answer
+ *  is a human deciding in a dialog, and a dial parks until the name is served
+ *  at all, so this doubles as the "nothing is embedding us" timeout. */
+const PORTAL_ASK_TIMEOUT_MS = 120_000;
 
 /** the account user the local play-preview joins as (avatar resolution — engine
  *  knowledge, so it lives with the client). */
