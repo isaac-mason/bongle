@@ -251,8 +251,6 @@ export function writeBlockTextureAtlasIntoTextureArray(
                 }
             }
         }
-
-        atlas.addLayerUpdate(layerIdx);
     }
 
     // Build the CPU mip chain from the freshly-written level-0 data and upload
