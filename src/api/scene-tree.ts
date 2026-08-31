@@ -1,8 +1,12 @@
+import { type Box3, box3 } from 'math/shapes';
 import { ModelTrait } from '../builtins/model';
 import { TransformTrait } from '../builtins/transform';
+import { unionSubtreeLocalAabb } from '../core/scene/node-aabb';
 import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/scene-tree';
 import * as SceneTree from '../core/scene/scene-tree';
 import type { TraitBase } from '../core/scene/traits';
+
+const _cloneBounds: Box3 = box3.create();
 
 export type { Node, Realm } from '../core/scene/scene-tree';
 export {
@@ -45,6 +49,11 @@ export function cloneNode(node: Node): Node {
  * supply or maintain. If the source already has a `ModelTrait`, the existing
  * one is left in place.
  *
+ * The new `ModelTrait`'s `lightOffset` is seeded to the centre of the clone's
+ * own mesh AABBs, so voxel light samples from inside the model's body rather
+ * than at its origin (which for a model authored standing on y=0 is the floor
+ * block it sits on). Assign `lightOffset` afterwards to override it.
+ *
  * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
  * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
  * TransformTrait]` pair each frame, so without one the model would silently
@@ -53,8 +62,11 @@ export function cloneNode(node: Node): Node {
  */
 export function cloneModel(node: Node): Node {
     const clone = SceneTree.cloneNode(node);
-    if (!SceneTree.getTrait(clone, ModelTrait)) {
-        SceneTree.addTrait(clone, ModelTrait);
+    let model = SceneTree.getTrait(clone, ModelTrait);
+    if (!model) {
+        model = SceneTree.addTrait(clone, ModelTrait);
+        box3.empty(_cloneBounds);
+        if (unionSubtreeLocalAabb(clone, _cloneBounds)) box3.center(model.lightOffset, _cloneBounds);
     }
     if (!SceneTree.getTrait(clone, TransformTrait)) {
         SceneTree.addTrait(clone, TransformTrait);

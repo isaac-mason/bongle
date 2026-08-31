@@ -34,7 +34,7 @@ export function update(state: ModelLighting, voxels: Voxels): void {
     for (const [model, transform] of state.models) {
         const m = getVisualWorldMatrix(transform);
 
-        // sample at the model-local sampleOffset transformed into world space
+        // sample at the model-local lightOffset transformed into world space
         // (origin + rotation/scale · offset).
         // for the default zero offset this collapses to the translation column m[12..14].
         const o = model.lightOffset;

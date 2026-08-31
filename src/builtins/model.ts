@@ -1,12 +1,12 @@
 // ModelTrait, the shared voxel-light home for everything rendered under
-// this node. `ModelLighting` samples voxel light once per frame at the
-// centroid of the model's visible meshes and writes it here; every MeshTrait
+// this node. `ModelLighting` samples voxel light once per frame at this
+// node's origin plus `lightOffset` and writes it here; every MeshTrait
 // in the subtree reads it via `findModelAncestor`.
 //
 // Sampling per-model (rather than per-mesh) keeps lighting consistent
 // across a rig's limbs, bones whose own world position clips into a
-// solid voxel mid-animation don't pop dark, because the centroid is by
-// construction inside the model body.
+// solid voxel mid-animation don't pop dark, because the sample point is
+// by construction inside the model body.
 //
 // Sits on the model-instance root (rig root for animated models, model
 // root for static multi-mesh, or the mesh node itself for single-mesh
@@ -39,11 +39,14 @@ export const ModelTrait = trait('model', {
     /**
      * Where to sample voxel light, as a model-local offset from this node's
      * origin (transformed by the node's world matrix before sampling).
-     * Defaults to the origin itself, correct for static meshes whose origin
-     * sits inside the body. Models whose origin is on the surface rather than
-     * the interior set this so the sample lands inside the body: a character's
-     * rig root is at its feet, so it sets `[0, ~0.9, 0]` to sample from the
-     * torso center instead of the floor it's standing on.
+     *
+     * `cloneModel` seeds it to the centre of the clone's own mesh AABBs, so
+     * the sample lands inside the body rather than at the origin, which for a
+     * model authored standing on y=0 is the floor block under it. Assign it to
+     * override: a character's rig root is at its feet, so `CharacterTrait`
+     * sets `[0, ~0.9, 0]` to sample from the torso centre. The zero default
+     * survives only on a `ModelTrait` added to a node by hand, which samples
+     * at the node origin.
      */
     lightOffset: (() => [0, 0, 0] as Vec3) as () => Vec3,
 });
