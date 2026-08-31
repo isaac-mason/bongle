@@ -49,7 +49,22 @@ export default defineConfig({
                 'engine-asset-pipeline': entry('src/asset-pipeline/index.ts'),
                 env: entry('src/env.ts'),
                 internal: entry('src/internal.ts'),
+                // kit: the BARREL plus one entry per area. src/kit/index.ts re-exports the areas by
+                // their PUBLIC subpath (`bongle/kit/blocks`), which `external` below keeps external,
+                // so dist/kit.js stays a live re-export. Bundling the barrel instead materializes
+                // each namespace as `__exportAll({ stone: () => stone, … })` — one object literal
+                // naming all ~200 declarations, which nothing downstream can tree-shake through.
+                // Entry names are FLAT (kit-blocks, not kit/blocks): bongle-asset-rewrite rewrites
+                // `asset()` refs to ./assets/<pkgrel> and needs entries at the same depth as chunks,
+                // so a dist/kit/ subdir would send every kit texture and sound one level off.
                 kit: entry('src/kit/index.ts'),
+                'kit-block-sound-presets': entry('src/kit/block-sound-presets.ts'),
+                'kit-block-textures': entry('src/kit/block-textures.ts'),
+                'kit-blocks': entry('src/kit/blocks.ts'),
+                'kit-models': entry('src/kit/models.ts'),
+                'kit-particle-presets': entry('src/kit/particle-presets.ts'),
+                'kit-sounds': entry('src/kit/sounds.ts'),
+                'kit-sprites': entry('src/kit/sprites.ts'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry
                 // the editor-OS apps this engine version provides (bongle/os/apps):
@@ -70,6 +85,10 @@ export default defineConfig({
             // (gpucat, math, packcat, crashcat), and node builtins.
             external: (id) => {
                 if (id.startsWith('.') || id.startsWith('/') || id.startsWith('\0')) return false; // bundle
+                // kit leaves stay EXTERNAL so the barrel emits a live re-export rather than a
+                // materialized namespace object (see the kit entries above). They carry no
+                // singleton state — pure declarations — so there is nothing to double-instance.
+                if (id.startsWith('bongle/kit/')) return true;
                 if (id === 'bongle' || id.startsWith('bongle/')) return false; // self → src, bundle+dedupe
                 if (isBuiltin(id)) return true; // node:* external
                 return true; // every other bare specifier is a dependency → external

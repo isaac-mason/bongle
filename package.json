@@ -84,6 +84,12 @@
             "import": "./dist/kit.js",
             "default": "./dist/kit.js"
         },
+        "./kit/*": {
+            "source": "./src/kit/*.ts",
+            "types": "./dist/types/src/kit/*.d.ts",
+            "import": "./dist/kit-*.js",
+            "default": "./dist/kit-*.js"
+        },
         "./build": {
             "source": "./build/index.ts",
             "default": "./build/index.ts"

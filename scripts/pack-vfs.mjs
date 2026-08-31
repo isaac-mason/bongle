@@ -66,8 +66,32 @@ for (const [key, val] of Object.entries(real.exports)) {
         exportsForSeed[key] = rest;
     }
 }
+// `sideEffects` for the SEEDED manifest, which ships dist/ ONLY. The real package.json's array is
+// SRC-relative (`src/builtins/**`, `src/index.ts`, …) and matches nothing under dist/, so copying it
+// verbatim would declare the whole engine side-effect-free and let a game build drop the builtin
+// registrations. Computed against what we actually pack instead: every dist js is side-effectful
+// EXCEPT the kit area entries, which are pure declaration modules (`export const stone = block(…)`)
+// and are the point of the whole exercise — a game that touches two blocks should ship two, not 198.
+// A NEW chunk is side-effectful by default, which is the safe direction to fail in.
+//
+// The kit targets come off the `./kit/*` exports, so the two can't drift — but the target carries
+// the subpath `*` (`./dist/kit-*.js`), so match it as a pattern rather than a literal.
+const isKitTarget = (() => {
+    const patterns = Object.entries(exportsForSeed)
+        .filter(([subpath]) => subpath.startsWith('./kit/'))
+        .map(([, target]) => (typeof target === 'string' ? target : (target.import ?? target.default)))
+        .map((t) => new RegExp(`^${t.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`));
+    if (patterns.length === 0) throw new Error('pack-vfs: no ./kit/* export — the kit leaves would seed as side-effectful');
+    return (rel) => patterns.some((re) => re.test(rel));
+})();
+const sideEffects = Object.keys(files)
+    .filter((p) => p.startsWith('bongle/dist/') && p.endsWith('.js'))
+    .map((p) => `./${p.slice('bongle/'.length)}`)
+    .filter((rel) => !isKitTarget(rel))
+    .sort();
+
 files['bongle/package.json'] = enc.encode(
-    `${JSON.stringify({ name: 'bongle', version: real.version, type: 'module', exports: exportsForSeed }, null, 2)}\n`,
+    `${JSON.stringify({ name: 'bongle', version: real.version, type: 'module', exports: exportsForSeed, sideEffects }, null, 2)}\n`,
 );
 
 // ── dependency prebundle (scripts/build-deps.mjs → deps-dist/node_modules) ───
