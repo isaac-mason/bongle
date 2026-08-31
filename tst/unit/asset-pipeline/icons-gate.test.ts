@@ -36,6 +36,16 @@ function memFs(): Filesystem & { files: Map<string, string> } {
             return text;
         },
         exists: async (p: FsPath) => files.has(p),
+        readDir: async (dir: FsPath = '') => {
+            const out = new Map<string, 'file' | 'dir'>();
+            for (const p of files.keys()) {
+                if (!p.startsWith(`${dir}/`)) continue;
+                const rest = p.slice(dir.length + 1);
+                const slash = rest.indexOf('/');
+                out.set(slash === -1 ? rest : rest.slice(0, slash), slash === -1 ? 'file' : 'dir');
+            }
+            return out;
+        },
         write: async (p: FsPath, data: Uint8Array | string) => {
             files.set(p, typeof data === 'string' ? data : new TextDecoder().decode(data));
         },

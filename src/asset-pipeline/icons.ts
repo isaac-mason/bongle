@@ -39,6 +39,8 @@ const BLOCK_ICON_JSON = 'resources/client/voxels-icons.json';
  *  id -> def hash. Per-file artifacts, so freshness is per id — this is the one
  *  icon artifact that can't ride a single sidecar hash. */
 const PREFAB_ICON_MANIFEST = 'resources/client/prefab-icons.json';
+/** directory the per-prefab icon pngs live in (`prefabIconRelPath`'s parent). */
+const PREFAB_ICON_DIR = 'resources/client/prefab-icons';
 
 /** FNV-1a string hash → base36, for the prefab-icon freshness manifest. */
 function fnv1a(s: string): string {
@@ -155,6 +157,12 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
     } catch {
         // no manifest yet (first bake) — everything is fresh work.
     }
+    // one listing, not an exists() per prefab: a guest realm reaches the project
+    // disk over the relay, where every call is a round trip (os/remote-fs).
+    const bakedNames = await fs.readDir(PREFAB_ICON_DIR).catch(() => new Map<string, 'file' | 'dir'>());
+    const baked = new Set<string>();
+    for (const name of bakedNames.keys()) baked.add(`prefab-icons/${name}`);
+
     // textures affect every prefab's appearance, so an atlas move re-renders all.
     const atlasMoved = prev.atlas !== (atlasHash ?? '');
     const icons: Record<string, string> = {};
@@ -166,12 +174,7 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
             hash = fnv1a(JSON.stringify(def));
         } catch {}
         icons[id] = hash;
-        const fresh =
-            cache &&
-            hash !== '' &&
-            !atlasMoved &&
-            prev.icons[id] === hash &&
-            (await fs.exists(`resources/client/${prefabIconRelPath(id)}`));
+        const fresh = cache && hash !== '' && !atlasMoved && prev.icons[id] === hash && baked.has(prefabIconRelPath(id));
         if (!fresh) stalePrefabs.push(id);
     }
     const removedPrefabs = Object.keys(prev.icons).filter((id) => !(id in icons));
