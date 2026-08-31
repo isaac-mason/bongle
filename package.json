@@ -38,8 +38,7 @@
         "./engine-server-node": {
             "source": "./src/engine-server-node.ts",
             "types": "./dist/types/src/engine-server-node.d.ts",
-            "import": "./dist/engine-server-node.js",
-            "default": "./dist/engine-server-node.js"
+            "default": "./src/engine-server-node.ts"
         },
         "./engine-client-editor": {
             "source": "./src/engine-client-editor.ts",
