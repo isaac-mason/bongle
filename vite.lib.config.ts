@@ -43,7 +43,6 @@ export default defineConfig({
                 index: entry('src/index.ts'),
                 'engine-client': entry('src/engine-client.ts'),
                 'engine-server': entry('src/engine-server.ts'),
-                'engine-server-node': entry('src/engine-server-node.ts'),
                 'engine-client-editor': entry('src/engine-client-editor.ts'),
                 'engine-server-editor': entry('src/engine-server-editor.ts'),
                 'engine-asset-pipeline': entry('src/asset-pipeline/index.ts'),
@@ -120,10 +119,8 @@ export default defineConfig({
                         // transitively. Rule: LEAF groups that pull nothing (env,
                         // internal) go FIRST so the general subsystems don't
                         // capture them into a bigger chunk; groups that PULL shared
-                        // modules (node imports the avatar rig) go LAST so the leaf
-                        // groups (avatar) claim those shared modules first — else
-                        // `node` grabs rig.ts and drags node:fs into every realm
-                        // that imports rig.
+                        // modules go LAST so the leaf groups claim those shared
+                        // modules first.
                         { name: 'env', test: /\/lib\/src\/env\.ts$/ },
                         { name: 'internal', test: /\/lib\/src\/internal(-runtime)?\.ts$/ },
                         { name: 'core', test: /\/lib\/src\/core\// },
@@ -138,10 +135,6 @@ export default defineConfig({
                         { name: 'server', test: /\/lib\/src\/server\// },
                         { name: 'pipeline', test: /\/lib\/src\/asset-pipeline\// },
                         { name: 'interface', test: /\/lib\/interface\// },
-                        // node-realm code (node:fs/zlib, reachable ONLY via
-                        // engine-server-node) — LAST, its own chunk, so it never
-                        // lands in the browser-safe chunks other realms load.
-                        { name: 'node', test: /\/lib\/src\/node\// },
                     ],
                 },
             },
