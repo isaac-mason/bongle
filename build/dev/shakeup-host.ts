@@ -14,7 +14,11 @@ export type ShakeupHostOptions = {
      *  so the dev server reads it on-demand; no eager mirror or seed step. */
     fs: Fs;
     jsx?: boolean;
-    /** Restrict capture to user project modules (seeded lib / node_modules skip it). */
+    /** Which modules are the user's OWN source. Three things key off it, all asking that one
+     *  question: capture brackets them, an fs edit fans HMR for them, and only they get source
+     *  maps — a seeded package's map would point at its built file, which is worth little and
+     *  costs a full map plus a base64 `sourceMappingURL` on every module body, every boot, in
+     *  every realm. Omit and shakeup applies its own node_modules default. */
     isUserModule?: (id: string) => boolean;
     /** Map a resolved asset path to a served URL, for `?url` imports. In the editor this is
      *  `projectUrl` (the project-fs service worker's `/@project/<path>`); the file is already in the
@@ -58,6 +62,7 @@ export function createShakeupBundlerHost(opts: ShakeupHostOptions): ShakeupBundl
         // JSX HANDLING is keyed on the file extension (.tsx/.jsx) inside shakeup; this only carries
         // the lowering options (importSource, pure). `{}` takes the automatic-runtime defaults.
         jsx: jsx ? {} : undefined,
+        sourcemap: opts.isUserModule,
         warn: opts.reportError,
     });
     const realms = new Map<string, { close(): void }>();
