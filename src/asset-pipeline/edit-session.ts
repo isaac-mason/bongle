@@ -18,6 +18,7 @@
 import type { Filesystem } from '../../os/interface';
 import { registerFlushHandler } from '../core/capture/flush';
 import { type Config, serverMaxPlayers } from '../core/config';
+import { registry, reindexRegistry } from '../core/registry';
 import { createBrowserRaster } from './bake/raster-browser';
 import { createBrowserDecodeAudio } from './decode-audio-browser';
 import * as Icons from './icons';
@@ -157,6 +158,10 @@ async function renderIcons(state: State, atlasHash: string | null): Promise<void
     state.renderingIcons = true;
     const { fs, log, err: reportErr } = state.driver;
     try {
+        // the gate reads the DERIVED block registry, and this worker never calls
+        // engine-client.load(). `buildRenderDeps` reindexes too, but that now runs
+        // after the gate, so do it here or the gate reads a null blockRegistry.
+        reindexRegistry(registry);
         // gate BEFORE the device handshake + atlas upload: most passes change no
         // block and no prefab, and the artifacts on disk are already what we'd draw.
         const plan = await Icons.planIconBake(fs, { atlasHash, cache: state.cache });

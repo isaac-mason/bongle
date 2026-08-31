@@ -138,6 +138,11 @@ async function hashBlockIconInputs(blocks: Blocks, states: number[], atlasHash: 
  * block-icon render inputs against the `voxels-icons.json` sidecar, and diff each
  * prefab's def hash against the manifest. Callers skip the whole render (device
  * handshake, atlas upload and all) when `iconBakeIsNoop`.
+ *
+ * Reads the DERIVED `registry.blockRegistry`, so the caller must have reindexed
+ * since the last declaration flush. This runs ahead of `buildRenderDeps` (whose
+ * own reindex used to be what covered this), and the pipeline worker never calls
+ * `engine-client.load()`, so neither one can be relied on here.
  */
 export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<IconBakePlan> {
     const { atlasHash, cache } = opts;

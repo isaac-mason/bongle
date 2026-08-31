@@ -13,6 +13,7 @@
 import { Canvas } from 'skia-canvas';
 import type { Filesystem } from '../../os/interface';
 import { createClientResourceLoader } from '../../src/asset-pipeline/loader';
+import { registry, reindexRegistry } from '../../src/core/registry';
 import { decodeImageNode } from './decode-image-node';
 
 // Dawn's AsyncRunner self-schedules a setImmediate that pumps ProcessEvents on the
@@ -37,6 +38,9 @@ function skiaEncodePng(pixels: Uint8Array, width: number, height: number): Uint8
 }
 
 export async function renderIcons(fs: Filesystem, Icons: Icons, atlasHash: string | null): Promise<boolean> {
+    // the gate reads the DERIVED block registry, and nothing on this path has built
+    // it yet (`buildRenderDeps` reindexes, but that runs after the gate).
+    reindexRegistry(registry);
     // one-shot bake: `cache: false` always re-renders, matching the data bake's
     // own cache flag (a hit can mask a draw-fn change between invocations).
     const plan = await Icons.planIconBake(fs, { atlasHash, cache: false });
