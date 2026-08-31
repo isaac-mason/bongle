@@ -17,8 +17,8 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Filesystem } from '../../os/interface';
-import type { Config } from '../../src/core/config';
 import { createBakeLoader } from '../../src/asset-pipeline/loader';
+import type { Config } from '../../src/core/config';
 import { openNodeFs } from '../node-fs';
 import { createNodeDecodeAudio } from './decode-audio-node';
 import { renderIcons } from './icons-node';
@@ -80,9 +80,9 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
 
     // GPU icon render (block atlas + per-id prefab thumbnails) — optional, after the
     // data bake wrote the atlas it reads. Own error boundary: an icon failure never
-    // fails the bake. one-shot bake always re-renders prefabs (atlasChanged=true).
+    // fails the bake. one-shot bake, so the icon gate runs uncached (re-renders all).
     try {
-        await renderIcons(fs, Icons, r.atlasChanged);
+        await renderIcons(fs, Icons, r.atlasHash);
     } catch (err) {
         console.log(`  · icons: render failed (skipped) — ${(err as Error).message}`);
     }

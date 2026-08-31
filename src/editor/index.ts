@@ -14,8 +14,8 @@ import { quat, spherical, vec3 } from 'math';
 import * as chat from '../api/chat';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import * as ClientChat from '../client/chat';
-import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/client';
+import { installEditorClientListeners } from '../client/editor';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
@@ -490,13 +490,7 @@ script(
         // (`transformToolState.gizmo.camera = camera`) keeps it pointing
         // at the active POV so swaps don't strand the gizmo on a stale ref.
         const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
-        const transformToolState = TransformTool.createTransformTool(
-            initialCamera,
-            canvas,
-            client.render.scene,
-            room.scene,
-            ctx,
-        );
+        const transformToolState = TransformTool.createTransformTool(initialCamera, canvas, client.render.scene, room.scene, ctx);
         const store = createEditRoomStore({ ctx, room, transformToolState });
         transformToolState.store = store;
         const nodeBodies = NodeBodies.init(store);
@@ -1291,28 +1285,32 @@ export function getEditorClient(): EngineClient | null {
 let currentBlockIconUrl: string | null = null;
 let blockIconRenderInFlight = false;
 const prefabIconInFlight = new Set<string>();
+/** bumped by every prefab-icon invalidation; a load that resolves against a stale
+ *  generation drops its result instead of publishing a url nothing revokes. */
+let prefabIconGeneration = 0;
 
 function loadEditorAssets(): void {
     // Icons are baked by the asset pipeline into resources/client/ (block atlas +
     // per-id prefab pngs) and read back here through the engine resource loader.
     // The boot poll picks up the first bake; later reloads come from the edit
-    // client calling `reloadBakedIcons` when a baked icon file changes on the fs.
+    // client calling `reloadBlockIconAtlas` / `invalidatePrefabIcons` when a baked
+    // icon file changes on the fs.
     void loadBakedBlockIconsWhenReady();
 }
 
-/** Reload every pipeline-baked voxel icon: re-read the block-icon atlas and drop
- *  cached prefab urls so visible thumbnails re-read their (possibly updated) png.
- *  Called by the edit client when a `resources/client/` icon file changes. */
-export function reloadBakedIcons(): void {
+/** Re-read the pipeline-baked block-icon atlas. Called by the edit client when
+ *  `voxels-icons.{png,json}` changes on the fs. */
+export function reloadBlockIconAtlas(): void {
     void loadBakedBlockIcons();
-    invalidatePrefabIcons();
 }
 
 /** Wrap PNG bytes (a baked artifact) in a blob object URL for CSS/img use. */
 function pngBytesToObjectUrl(bytes: Uint8Array): string {
-    // copy into a fresh ArrayBuffer-backed view (Blob rejects a possibly-
-    // SharedArrayBuffer-backed one on some engines).
-    return URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    // Blob rejects a SharedArrayBuffer-backed view on some engines, so those copy
+    // into a fresh ArrayBuffer — but the loader hands back plain views, and these
+    // are whole atlas PNGs, so don't pay for the copy on the common path.
+    const blobSource: BlobPart = bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+    return URL.createObjectURL(new Blob([blobSource], { type: 'image/png' }));
 }
 
 /** The first pipeline bake writes the icon atlas asynchronously after boot, so it
@@ -1374,24 +1372,53 @@ export async function ensurePrefabIcon(prefabId: string): Promise<void> {
     if (!state || !prefabId) return;
     if (useEditor.getState().prefabIconUrls[prefabId] || prefabIconInFlight.has(prefabId)) return;
     prefabIconInFlight.add(prefabId);
+    const generation = prefabIconGeneration;
+    let raced = false;
     try {
         const png = await state.resources.loader.loadBytes(prefabIconRelPath(prefabId));
         const url = pngBytesToObjectUrl(png);
-        useEditor.setState((s) => ({ prefabIconUrls: { ...s.prefabIconUrls, [prefabId]: url } }));
+        if (generation !== prefabIconGeneration) {
+            // an invalidation landed mid-load: these bytes are the ones it dropped,
+            // so let the url go instead of publishing something already stale.
+            URL.revokeObjectURL(url);
+            raced = true;
+        } else {
+            useEditor.setState((s) => {
+                const previous = s.prefabIconUrls[prefabId];
+                if (previous) URL.revokeObjectURL(previous);
+                return { prefabIconUrls: { ...s.prefabIconUrls, [prefabId]: url } };
+            });
+        }
     } catch {
         // not baked yet — a later registry flush + re-display retries.
     } finally {
         prefabIconInFlight.delete(prefabId);
     }
+    // re-read the icon the invalidation dropped, now that the dedupe slot is free.
+    if (raced) await ensurePrefabIcon(prefabId);
 }
 
-/** Drop + revoke all cached prefab icons so visible ones re-render on next
- *  display. Called on a registry flush (prefabs depend on blocks/models/defs). */
-function invalidatePrefabIcons(): void {
+/** Drop + revoke cached prefab icons so visible ones re-read their png on next
+ *  display: the named ids, or all of them when called with none (a registry flush,
+ *  where every prefab's appearance can have moved). */
+export function invalidatePrefabIcons(ids?: readonly string[]): void {
+    prefabIconGeneration++;
     const urls = useEditor.getState().prefabIconUrls;
-    for (const id in urls) URL.revokeObjectURL(urls[id]!);
-    prefabIconInFlight.clear();
-    useEditor.setState({ prefabIconUrls: {} });
+    if (!ids) {
+        for (const id in urls) URL.revokeObjectURL(urls[id]!);
+        useEditor.setState({ prefabIconUrls: {} });
+        return;
+    }
+    const next = { ...urls };
+    let dropped = false;
+    for (const id of ids) {
+        const url = next[id];
+        if (!url) continue;
+        URL.revokeObjectURL(url);
+        delete next[id];
+        dropped = true;
+    }
+    if (dropped) useEditor.setState({ prefabIconUrls: next });
 }
 
 export function registerClient(state: EngineClient): void {

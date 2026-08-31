@@ -11,14 +11,15 @@
 import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
-import { MODEL_NONE } from '../core/voxels/block-registry';
+import { type Blocks, MODEL_NONE } from '../core/voxels/block-registry';
 import { createMeshOutput } from '../core/voxels/chunk-mesher';
 import { ensureChunk, setBlock } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
-const ICON_PX = 128;
+/** icon tile size; part of the icon bake's cache key (see asset-pipeline/icons). */
+export const ICON_PX = 128;
 const CAM_DIST = 64;
 // half-extent of the ortho frustum. a unit cube projects to ~1.4 units wide at
 // 45° azimuth, so 1.0 gives a snug fit with a small margin.
@@ -48,6 +49,20 @@ const EMPTY_ATLAS: BlockIconAtlas = {
     rows: 0,
 };
 
+/** Global state ids that get an icon tile, in atlas order: skips AIR (0),
+ *  MISSING (1), every MODEL_NONE state, and any state with no string key.
+ *  Shared with the icon bake's cache key, so the gate can't drift from what
+ *  actually gets rendered. */
+export function renderableBlockStates(blocks: Blocks): number[] {
+    const states: number[] = [];
+    for (let sid = 2; sid < blocks.totalStates; sid++) {
+        if (blocks.modelType[sid] === MODEL_NONE) continue;
+        if (!blocks.stateToKey[sid]) continue;
+        states.push(sid);
+    }
+    return states;
+}
+
 /**
  * Render every renderable block state into a single icon atlas, in-browser.
  * Synchronous burst (safe to reuse the engine-global cull scratch since the
@@ -57,13 +72,7 @@ const EMPTY_ATLAS: BlockIconAtlas = {
 export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockIconAtlas> {
     const registry = engineRegistry.blockRegistry;
 
-    // renderable states: skip AIR (0), MISSING (1), and any MODEL_NONE state.
-    const renderable: string[] = [];
-    for (let sid = 2; sid < registry.totalStates; sid++) {
-        if (registry.modelType[sid] === MODEL_NONE) continue;
-        const key = registry.stateToKey[sid];
-        if (key) renderable.push(key);
-    }
+    const renderable = renderableBlockStates(registry).map((sid) => registry.stateToKey[sid]!);
     if (renderable.length === 0) return EMPTY_ATLAS;
 
     // `deps` is render-ready when `buildRenderDeps` returns (atlas uploaded +

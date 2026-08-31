@@ -36,7 +36,12 @@ function skiaEncodePng(pixels: Uint8Array, width: number, height: number): Uint8
     return new Uint8Array(canvas.toBufferSync('png'));
 }
 
-export async function renderIcons(fs: Filesystem, Icons: Icons, atlasChanged: boolean): Promise<boolean> {
+export async function renderIcons(fs: Filesystem, Icons: Icons, atlasHash: string | null): Promise<boolean> {
+    // one-shot bake: `cache: false` always re-renders, matching the data bake's
+    // own cache flag (a hit can mask a draw-fn change between invocations).
+    const plan = await Icons.planIconBake(fs, { atlasHash, cache: false });
+    if (Icons.iconBakeIsNoop(plan)) return true;
+
     let webgpu: typeof import('webgpu');
     try {
         webgpu = await import('webgpu');
@@ -61,27 +66,9 @@ export async function renderIcons(fs: Filesystem, Icons: Icons, atlasChanged: bo
     const ctx = await Icons.createHeadlessRenderContext({ device, adapter });
     const { deps, dispose } = await Icons.buildRenderDeps(ctx, iconLoader);
     try {
-        const atlas = await Icons.renderBlockIconAtlas(deps);
-        if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
-            await fs.write('resources/client/voxels-icons.png', skiaEncodePng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight));
-            await fs.write(
-                'resources/client/voxels-icons.json',
-                JSON.stringify({
-                    coords: atlas.coords,
-                    cols: atlas.cols,
-                    rows: atlas.rows,
-                    iconPx: atlas.iconPx,
-                    atlasWidth: atlas.atlasWidth,
-                    atlasHeight: atlas.atlasHeight,
-                }),
-            );
-            console.log('  · icons: wrote voxels-icons.png');
-        } else {
-            console.log('  · icons: no renderable blocks');
-        }
-        // per-id prefab icons (incremental via the shared manifest).
-        const prefabCount = await Icons.bakePrefabIcons(deps, fs, atlasChanged, async (px, w, h) => skiaEncodePng(px, w, h));
-        if (prefabCount > 0) console.log(`  · icons: wrote ${prefabCount} prefab icon(s)`);
+        const result = await Icons.runIconBake(deps, fs, plan, async (px, w, h) => skiaEncodePng(px, w, h));
+        console.log(result.blockAtlas ? '  · icons: wrote voxels-icons.png' : '  · icons: no renderable blocks');
+        if (result.prefabs > 0) console.log(`  · icons: wrote ${result.prefabs} prefab icon(s)`);
         return true;
     } finally {
         dispose();

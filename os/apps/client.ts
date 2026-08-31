@@ -147,22 +147,55 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         progress('live');
 
         // react to fs edits: re-read the matching scene / baked resource. The change
-        // KIND matters (a deleted path isn't a refresh).
-        const applyFsChange = (path: string) => {
+        // KIND matters (a deleted path isn't a refresh). Each refresh is a re-fetch
+        // plus a GPU/DOM rebuild and one bake writes several artifacts at once, so
+        // the batch is folded into a set of refreshes FIRST and applied once — never
+        // once per changed path.
+        type FsRefresh = {
+            scenes: Set<string>;
+            prefabIcons: Set<string>;
+            blockIcons: boolean;
+            blocks: boolean;
+            sprites: boolean;
+            audio: boolean;
+        };
+        const noteFsChange = (refresh: FsRefresh, path: string) => {
             if (path.startsWith('content/scenes/')) {
-                EngineClientEditor.refreshBlueprints();
-                EngineClientEditor.reloadBlueprint(path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
+                refresh.scenes.add(path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
                 return;
             }
             if (!path.startsWith('resources/client/')) return;
-            if (path.includes('voxels-icons') || path.startsWith('resources/client/prefab-icons/'))
-                EngineClientEditor.reloadBakedIcons();
-            else if (path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
-            else if (path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
-            else EngineClient.refreshBlockResources(state).catch(console.error);
+            const prefabId = EngineClientEditor.prefabIdFromIconPath(path);
+            if (prefabId !== null) refresh.prefabIcons.add(prefabId);
+            else if (path.includes('voxels-icons')) refresh.blockIcons = true;
+            else if (path.includes('voxels-atlas')) refresh.blocks = true;
+            else if (path.includes('sprite')) refresh.sprites = true;
+            else if (path.includes('audio')) refresh.audio = true;
+            // anything else under resources/client/ (the prefab-icon manifest, model
+            // bins, scene barrels) is read on demand and needs no live refresh.
+        };
+        const applyFsRefresh = (refresh: FsRefresh) => {
+            if (refresh.scenes.size > 0) {
+                EngineClientEditor.refreshBlueprints();
+                for (const id of refresh.scenes) EngineClientEditor.reloadBlueprint(id);
+            }
+            if (refresh.blockIcons) EngineClientEditor.reloadBlockIconAtlas();
+            if (refresh.prefabIcons.size > 0) EngineClientEditor.invalidatePrefabIcons([...refresh.prefabIcons]);
+            if (refresh.blocks) EngineClient.refreshBlockResources(state).catch(console.error);
+            if (refresh.sprites) EngineClient.refreshSpriteResources(state).catch(console.error);
+            if (refresh.audio) EngineClient.refreshAudioResources(state).catch(console.error);
         };
         fs.watch((changes) => {
-            for (const c of changes) if (c.type !== 'deleted') applyFsChange(c.path);
+            const refresh: FsRefresh = {
+                scenes: new Set(),
+                prefabIcons: new Set(),
+                blockIcons: false,
+                blocks: false,
+                sprites: false,
+                audio: false,
+            };
+            for (const c of changes) if (c.type !== 'deleted') noteFsChange(refresh, c.path);
+            applyFsRefresh(refresh);
         });
 
         log('client realm booted');

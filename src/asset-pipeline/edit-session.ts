@@ -69,6 +69,9 @@ export type State = {
     driver: Driver;
     pipeline: AssetPipeline.State;
     iconLoader: ReturnType<typeof createClientResourceLoader>;
+    /** consult the on-disk hashes and skip fresh work (see `Opts.cache`); the
+     *  icon bake's gate reads it the same way the atlas builders do. */
+    cache: boolean;
     unregisterFlush: () => void;
     /** forced render backend for icon baking (see `Opts.renderer`). */
     renderer: 'webgpu' | 'webgl' | undefined;
@@ -95,6 +98,7 @@ export function init(driver: Driver, opts: Opts): State {
         driver,
         pipeline,
         iconLoader: createClientResourceLoader(fs),
+        cache: opts.cache,
         unregisterFlush: () => {},
         renderer: opts.renderer,
         baking: false,
@@ -120,11 +124,11 @@ export function init(driver: Driver, opts: Opts): State {
 export async function run(state: State, opts: { forceAll?: boolean } = {}): Promise<void> {
     if (state.baking) return;
     state.baking = true;
-    let atlasChanged = false;
+    let atlasHash: string | null = null;
     try {
         const t0 = performance.now();
         const r = await AssetPipeline.run(state.pipeline, { forceAll: opts.forceAll });
-        atlasChanged = r.atlasChanged;
+        atlasHash = r.atlasHash;
         state.driver.log?.(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
         state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
     } catch (err) {
@@ -134,7 +138,7 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
     }
     // icons render after the bake — own error boundary, deliberately NOT awaited: a GPU
     // handshake shouldn't gate the bake result or the caller's initial-bake promise.
-    void renderIcons(state, atlasChanged);
+    void renderIcons(state, atlasHash);
 }
 
 export function dispose(state: State): void {
@@ -148,11 +152,16 @@ export function dispose(state: State): void {
 // shipped alongside the atlas so gameplay (inventory/hotbar) and the editor both read them
 // from the same place. Fully isolated: an icon failure goes to stderr and never disturbs
 // the bake.
-async function renderIcons(state: State, atlasChanged: boolean): Promise<void> {
+async function renderIcons(state: State, atlasHash: string | null): Promise<void> {
     if (state.renderingIcons) return;
     state.renderingIcons = true;
     const { fs, log, err: reportErr } = state.driver;
     try {
+        // gate BEFORE the device handshake + atlas upload: most passes change no
+        // block and no prefab, and the artifacts on disk are already what we'd draw.
+        const plan = await Icons.planIconBake(fs, { atlasHash, cache: state.cache });
+        if (Icons.iconBakeIsNoop(plan)) return;
+
         if (!state.renderCtx) {
             log?.('icons: creating headless render context…');
             state.renderCtx = await Icons.createHeadlessRenderContext(undefined, state.renderer);
@@ -161,31 +170,9 @@ async function renderIcons(state: State, atlasChanged: boolean): Promise<void> {
         log?.('icons: building render deps…');
         const { deps, dispose } = await Icons.buildRenderDeps(state.renderCtx, state.iconLoader);
         try {
-            log?.('icons: rendering block atlas…');
-            const atlas = await Icons.renderBlockIconAtlas(deps);
-            if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
-                log?.(`icons: encoding ${atlas.atlasWidth}x${atlas.atlasHeight} atlas → png…`);
-                const png = await encodeRgbaPng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
-                await fs.write('resources/client/voxels-icons.png', png);
-                await fs.write(
-                    'resources/client/voxels-icons.json',
-                    new TextEncoder().encode(
-                        JSON.stringify({
-                            coords: atlas.coords,
-                            cols: atlas.cols,
-                            rows: atlas.rows,
-                            iconPx: atlas.iconPx,
-                            atlasWidth: atlas.atlasWidth,
-                            atlasHeight: atlas.atlasHeight,
-                        }),
-                    ),
-                );
-                log?.(`icons: wrote resources/client/voxels-icons.png (${(png.byteLength / 1024).toFixed(0)}KB)`);
-            } else {
-                log?.('icons: empty block atlas (no renderable blocks)');
-            }
-            const prefabCount = await Icons.bakePrefabIcons(deps, fs, atlasChanged, encodeRgbaPng);
-            if (prefabCount > 0) log?.(`icons: rendered ${prefabCount} prefab icon(s)`);
+            log?.(`icons: rendering ${plan.blockAtlasStale ? 'block atlas + ' : ''}${plan.stalePrefabs.length} prefab icon(s)…`);
+            const result = await Icons.runIconBake(deps, fs, plan, encodeRgbaPng);
+            log?.(`icons: wrote ${result.blockAtlas ? 'block atlas, ' : ''}${result.prefabs} prefab icon(s)`);
         } finally {
             dispose();
         }
