@@ -2,6 +2,46 @@ import { makeChannel } from './channel';
 import type { ToApp, ToOS } from './control';
 import type { App, Channel, ConnMeta, Env, Filesystem, Link, Process, Runner, Server, Surface } from './interface';
 
+// Mirror the realm's console onto its stdout/stderr, so what an app (and the code
+// it runs — the asset bake, user game code) already console.logs reaches the host's
+// log stream for that service instead of only the worker/frame devtools console
+// nobody has open. A TEE: the original console still fires, so devtools is unchanged.
+const TEED: unique symbol = Symbol.for('bongle.os.console-teed');
+
+function teeConsole(env: Env): void {
+    const c = globalThis.console as (Console & { [TEED]?: true }) | undefined;
+    if (!c) return;
+    // a realm global is patched once. Normally one app owns the global (worker /
+    // frame), but an in-process host can run several through this runtime, and
+    // stacking the patch would multiply every line.
+    if (c[TEED]) return;
+    c[TEED] = true;
+    const text = (parts: unknown[]): string =>
+        parts
+            .map((p) => {
+                if (typeof p === 'string') return p;
+                if (p instanceof Error) return p.stack ?? p.message;
+                try {
+                    return JSON.stringify(p);
+                } catch {
+                    return String(p);
+                }
+            })
+            .join(' ');
+    for (const [method, sink] of [
+        ['log', env.log],
+        ['info', env.log],
+        ['warn', env.err],
+        ['error', env.err],
+    ] as const) {
+        const original = c[method].bind(c);
+        c[method] = (...parts: unknown[]) => {
+            original(...parts);
+            sink(text(parts));
+        };
+    }
+}
+
 // The app-side runtime: builds the Env over a control Link and runs the app. `fs`
 // (the host's concrete impl) and `runner` (built from the spawn-provided conduit
 // port) are injected by the host shim — the runtime is disk- and host-agnostic.
@@ -151,6 +191,8 @@ export async function runApp(
             onStdin = cb;
         },
     };
+
+    teeConsole(env);
 
     try {
         await app(env);
