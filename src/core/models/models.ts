@@ -133,6 +133,7 @@ function createPlaceholderHandle(id: string, src: string, name: string): ModelHa
 
 /* ── registration ── */
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * Declare a model. Called at module scope.
  *

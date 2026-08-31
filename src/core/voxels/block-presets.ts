@@ -152,6 +152,7 @@ export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'mater
 // down to block() directly if you need to override cull, friction, or any
 // other field, this preset deliberately keeps the surface small.
 
+/*#__NO_SIDE_EFFECTS__*/
 export function cube(id: string, { textures: texturesInput, ...options }: CubePresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     return block(id, {
@@ -181,6 +182,7 @@ const AXIS_REMAP: Record<'x' | 'y' | 'z', Record<'x' | 'y' | 'z', 'x' | 'y' | 'z
     z: { x: 'y', y: 'x', z: 'z' },
 };
 
+/*#__NO_SIDE_EFFECTS__*/
 export function column(id: string, { textures, ...options }: ColumnPresetOptions) {
     const end = textures.end;
     const side = textures.side;
@@ -410,6 +412,7 @@ function readStairAt(
     return props.facing as Facing4;
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function stairs(id: string, { textures: texturesInput, ...options }: StairsPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     const topTex = pickTopTexture(textures);
@@ -519,6 +522,7 @@ const SlabState = blockState.create({
 const SLAB_BOTTOM_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 0.5, 1]]);
 const SLAB_TOP_SHAPE = blockShape.aabbs([[0, 0.5, 0, 1, 1, 1]]);
 
+/*#__NO_SIDE_EFFECTS__*/
 export function slab(id: string, { textures: texturesInput, ...options }: SlabPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof SlabState.props>;
@@ -551,6 +555,7 @@ export function slab(id: string, { textures: texturesInput, ...options }: SlabPr
 
 // ── plant (flowers, grass, saplings) ────────────────────────────────
 
+/*#__NO_SIDE_EFFECTS__*/
 export function plant(id: string, { textures: texture, ...options }: PlantPresetOptions) {
     return block(id, {
         ...options,
@@ -567,6 +572,7 @@ export function plant(id: string, { textures: texture, ...options }: PlantPreset
 
 // ── leaves ──────────────────────────────────────────────────────────
 
+/*#__NO_SIDE_EFFECTS__*/
 export function leaves(id: string, { textures: texturesInput, ...options }: LeavesPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     return block(id, {
@@ -597,6 +603,7 @@ const LadderFacingState = blockState.create({
     facing: blockState.enumeration(['north', 'east', 'south', 'west'] as const),
 });
 
+/*#__NO_SIDE_EFFECTS__*/
 export function ladder(id: string, { textures: texture, ...options }: LadderPresetOptions) {
     let handle: BlockHandle<typeof LadderFacingState.props>;
     handle = block(id, {
@@ -686,6 +693,7 @@ export type LiquidHandle = BlockHandle & {
     max(): string;
 };
 
+/*#__NO_SIDE_EFFECTS__*/
 export function liquid(id: string, { textures: texturesInput, ...options }: LiquidPresetOptions): LiquidHandle {
     const textures = resolveCubeTextures(texturesInput);
     const levels = Math.max(1, options?.levels ?? 1);
@@ -818,6 +826,7 @@ function hasGroupConnection(voxels: import('./voxels').Voxels, wx: number, wy: n
     return (voxels.registry.flags[id]! & groupFlag) !== 0;
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function fence(id: string, { textures: texturesInput, ...options }: FencePresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof FenceState.props>;
@@ -889,6 +898,7 @@ function paneShape(p: { north: boolean; east: boolean; south: boolean; west: boo
     return blockShape.aabbs(boxes);
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function pane(id: string, { textures: texturesInput, ...options }: PanePresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof PaneState.props>;
@@ -945,6 +955,7 @@ export function pane(id: string, { textures: texturesInput, ...options }: PanePr
 
 const CARPET_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 1 / 16, 1]]);
 
+/*#__NO_SIDE_EFFECTS__*/
 export function carpet(id: string, { textures: texturesInput, ...options }: CarpetPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     return block(id, {
@@ -1014,6 +1025,7 @@ function trapdoorQuads(
     }
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function trapdoor(id: string, { textures: texturesInput, ...options }: TrapdoorPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof TrapdoorState.props>;
@@ -1082,6 +1094,7 @@ function plateShape(pressed: boolean) {
     return blockShape.aabbs([[PLATE_INSET, 0, PLATE_INSET, 1 - PLATE_INSET, h, 1 - PLATE_INSET]]);
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function plate(id: string, { textures: texture, ...options }: PlatePresetOptions) {
     return block(id, {
         ...options,
@@ -1154,6 +1167,7 @@ function wallQuads(
     return quads;
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function wall(id: string, { textures: texturesInput, ...options }: WallPresetOptions) {
     const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof WallState.props>;
@@ -1364,6 +1378,7 @@ function torchMountFromPlaceCtx(ctx: BlockPlaceCtx): TorchMount {
     return ctx.normalZ >= 0 ? 'north' : 'south';
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function torch(id: string, { textures: texture, ...options }: TorchPresetOptions) {
     let handle: BlockHandle<typeof TorchState.props>;
     handle = block(id, {
@@ -1452,6 +1467,7 @@ function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
     return hinge === 'left' ? [0, 0, 0, DOOR_DEPTH, 1, 1] : [1 - DOOR_DEPTH, 0, 0, 1, 1, 1];
 }
 
+/*#__NO_SIDE_EFFECTS__*/
 export function door(id: string, { textures, ...options }: DoorPresetOptions) {
     let handle: BlockHandle<typeof DoorState.props>;
     handle = block(id, {

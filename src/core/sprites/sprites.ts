@@ -76,6 +76,7 @@ export type SpriteHandle = {
 
 /* ── registration ── */
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * declare a sprite. called at module scope.
  *

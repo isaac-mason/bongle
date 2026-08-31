@@ -77,6 +77,7 @@ export type ImageSource = string | DrawSource;
  *  value that has passed through registration. */
 export type NormalizedImageSource = string | DrawSource;
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * Construct a bake-time draw descriptor. Pure data, `fn` is not
  * executed until the asset-pipeline `draw-textures` pass walks the

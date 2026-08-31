@@ -161,6 +161,7 @@ export type ParticleHandle = {
 
 /* ── registration ── */
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * declare a particle type. called at module scope.
  *

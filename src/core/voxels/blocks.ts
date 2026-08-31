@@ -53,6 +53,7 @@ export type BlockTextureDef = {
     interpolate: boolean;
 };
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * declare a block texture. called at module scope.
  *
@@ -821,6 +822,7 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
 // empty states singleton for stateless blocks
 const EMPTY_STATES = blockState.create({});
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * declare a block type. called at module scope, the definition is
  * captured and frozen into a registry when the module is loaded.

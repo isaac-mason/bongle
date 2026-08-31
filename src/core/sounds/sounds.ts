@@ -154,6 +154,7 @@ function createPlaceholderHandle(id: string, src: string, long: boolean, name: s
 
 /* ── registration ── */
 
+/*#__NO_SIDE_EFFECTS__*/
 /**
  * Declare an audio clip. Called at module scope.
  *
