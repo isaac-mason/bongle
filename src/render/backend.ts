@@ -140,18 +140,24 @@ export function readRendererOverride(): RendererBackendKind | null {
 }
 
 /**
- * Choose the render backend for this session. A `?renderer=` override wins;
- * otherwise pick WebGPU when the platform exposes it, falling back to WebGL2.
+ * Can WebGPU actually stand up here? `navigator.gpu` only means the API is exposed;
+ * the adapter still fails to materialize on a blocklisted GPU, with hardware accel
+ * off, or in a headless/VM context. We make the SAME bare `requestAdapter()` both
+ * backends make at init (gpucat passes no adapter options, and requests a device with
+ * only adapter-advertised features + default limits — which can't fail once the
+ * adapter exists), so a null here reliably predicts their init failure.
  *
- * Sync + presence-only (`navigator.gpu`): it can't tell whether the adapter will
- * actually come up. The browser client doesn't use this — `loadRenderBackend`
- * (render/load) probes the real adapter and falls back to WebGL2. This stays for
- * the offline/bake path (render/offline), which runs where an adapter is injected
- * or known-good, so presence is enough.
+ * Presence alone is NOT a safe substitute: a device that reports `navigator.gpu`
+ * but yields no adapter is a WebGL2 device, and picking WebGPU for it fails outright.
+ * Both selection seams — `loadRenderBackend` (render/load) and `loadOfflineBackend`
+ * (render/offline) — probe through here so the live client and the icon bake can
+ * never land on different backends.
  */
-export function selectBackend(): RendererBackendKind {
-    const override = readRendererOverride();
-    if (override) return override;
-    if (typeof navigator !== 'undefined' && (navigator as Navigator & { gpu?: unknown }).gpu) return 'webgpu';
-    return 'webgl';
+export async function webgpuAvailable(): Promise<boolean> {
+    if (typeof navigator === 'undefined' || !navigator.gpu) return false;
+    try {
+        return (await navigator.gpu.requestAdapter()) !== null;
+    } catch {
+        return false; // requestAdapter itself can throw in locked-down embeddings
+    }
 }

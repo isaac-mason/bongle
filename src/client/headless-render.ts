@@ -1,8 +1,9 @@
 // Headless render context for the pipeline worker's icon bakers. Thin wrapper
 // over the offline render backend seam (`render/offline`): `createHeadlessRenderContext`
-// stands one up (backend chosen by `selectBackend()` — honours a forwarded
-// `?renderer=`), and `buildRenderDeps` rebuilds the per-bake render resources
-// through it. All backend specifics (device, voxel producer, readback) live behind
+// stands one up (backend chosen the same way the live client's is — a forwarded
+// `?renderer=`, else a real adapter probe), and `buildRenderDeps` rebuilds the
+// per-bake render resources through it.
+// All backend specifics (device, voxel producer, readback) live behind
 // the `OfflineRenderer` handle, so block/prefab icon rendering is backend-neutral.
 
 import type { ResourceLoader } from '../core/resource-loader';
@@ -24,7 +25,7 @@ export type HeadlessRenderContext = {
  *  Dawn device (WebGPU); the browser worker leaves it undefined and the backend
  *  acquires its own. `backend` is the pipeline worker's forwarded `?renderer=`
  *  override (its `self.location` can't carry the page query); absent → the offline
- *  seam falls back to `selectBackend()`. */
+ *  seam probes the adapter and picks WebGPU or WebGL2. */
 export async function createHeadlessRenderContext(
     gpu?: { device: GPUDevice; adapter: GPUAdapter },
     backend?: RendererBackendKind,

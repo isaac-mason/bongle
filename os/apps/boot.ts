@@ -23,7 +23,9 @@ const boot: App = async (env) => {
     };
 
     const spawn = (name: 'pipeline' | 'server'): void => {
-        const proc = name === 'server' ? env.spawn('server', env.init) : env.spawn('pipeline');
+        // both services take the session: the server for its identity/entry, the
+        // pipeline for the render-backend override its icon bake can't read itself.
+        const proc = env.spawn(name, env.init);
         procs[name] = proc;
         // an exit we didn't ask for is a crash — tell the shell so it fails fast
         // instead of waiting out its readiness timeout.

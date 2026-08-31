@@ -70,6 +70,12 @@ export type EditorSession = {
     avatarUrl?: string;
     /** the game entry module (project-root-relative); default 'src/index.ts'. */
     entry?: string;
+    /** the host's `?renderer=` render-backend override (the device renderer
+     *  preference, or a QA URL param). Windowed apps read it off their own
+     *  `location.search`, but a WORKER app can't — its `self.location` is the shim
+     *  script's URL — so the shell carries it here for the pipeline's icon bake.
+     *  Absent = let the realm probe (the normal path). */
+    renderer?: 'webgpu' | 'webgl';
 };
 
 /** the project's launch config — DEFINED here because it crosses the boundary:

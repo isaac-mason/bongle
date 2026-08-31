@@ -1,4 +1,4 @@
-import type { App, Channel, Config, PipelineReport } from '../interface';
+import type { App, Channel, Config, EditorSession, PipelineReport } from '../interface';
 
 // The asset-pipeline app. Evaluates the user graph through the runner, drives
 // the engine's EditPipeline bake, then serves "pipeline" as a readiness signal —
@@ -32,8 +32,14 @@ const pipeline: App = async (env) => {
                 for (const conn of subscribers) conn.send(report());
             },
             log: (m: string) => env.log(m),
+            // a bake or icon-render failure is stderr, not another progress line — the
+            // shell renders it as an error, attributed to this pid. Without it an icon
+            // failure only reached this worker's console, which nobody opens.
+            err: (m: string) => env.err(m),
         },
-        { mode: 'edit', cache: true },
+        // `renderer` is the shell's `?renderer=` override: this app is a worker, so
+        // the icon bake can't read it off `self.location` the way a windowed app does.
+        { mode: 'edit', cache: true, renderer: (env.init as EditorSession | undefined)?.renderer },
     );
 
     // asset-file edits re-bake (they bump no registry revision → forceAll).

@@ -15,11 +15,11 @@
 // bake; the flush drives re-bakes on code edits. Browser-only (OffscreenCanvas + the
 // headless GPU icon render) — kept out of the host-neutral `pipeline.ts` core.
 
+import type { Filesystem } from '../../os/interface';
 import { registerFlushHandler } from '../core/capture/flush';
 import { type Config, serverMaxPlayers } from '../core/config';
 import { createBrowserRaster } from './bake/raster-browser';
 import { createBrowserDecodeAudio } from './decode-audio-browser';
-import type { Filesystem } from '../../os/interface';
 import * as Icons from './icons';
 import { createBakeLoader, createClientResourceLoader } from './loader';
 import * as AssetPipeline from './pipeline';
@@ -47,16 +47,21 @@ export type Driver = {
     fs: Filesystem;
     /** called after every bake pass (flush-driven or run()-driven) with the result. */
     onBaked: (report: BakeReport) => void;
-    /** optional progress/error log surfaced to the editor. */
+    /** optional progress log surfaced to the editor. */
     log?: (msg: string) => void;
+    /** optional STDERR surfaced to the editor — a bake or icon-render failure. Kept
+     *  distinct from `log` so a failure reads as one in the editor's log panel
+     *  instead of scrolling past as another progress line (a worker's `console.error`
+     *  reaches nobody). */
+    err?: (msg: string) => void;
 };
 
 export type Opts = {
     mode: 'edit' | 'play';
     cache: boolean;
     /** forced render backend for the icon bake, forwarded from the editor's
-     *  `?renderer=` (the worker's `self.location` can't carry it). Absent → the
-     *  offline seam's `selectBackend()` default. */
+     *  `?renderer=` on the session (the worker's `self.location` can't carry it).
+     *  Absent → the offline seam probes the adapter, as the live client does. */
     renderer?: 'webgpu' | 'webgl';
 };
 
@@ -123,7 +128,7 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
         state.driver.log?.(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
         state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
     } catch (err) {
-        state.driver.log?.(`bake error: ${(err as Error).message}`);
+        state.driver.err?.(`bake error: ${(err as Error).message}`);
     } finally {
         state.baking = false;
     }
@@ -141,11 +146,12 @@ export function dispose(state: State): void {
 // Render block (and prefab) icons for the current registry + baked atlas, written as
 // first-class client assets under resources/client/ (voxels-icons.png + sidecar json) —
 // shipped alongside the atlas so gameplay (inventory/hotbar) and the editor both read them
-// from the same place. Fully isolated: an icon failure logs and never disturbs the bake.
+// from the same place. Fully isolated: an icon failure goes to stderr and never disturbs
+// the bake.
 async function renderIcons(state: State, atlasChanged: boolean): Promise<void> {
     if (state.renderingIcons) return;
     state.renderingIcons = true;
-    const { fs, log } = state.driver;
+    const { fs, log, err: reportErr } = state.driver;
     try {
         if (!state.renderCtx) {
             log?.('icons: creating headless render context…');
@@ -184,8 +190,10 @@ async function renderIcons(state: State, atlasChanged: boolean): Promise<void> {
             dispose();
         }
     } catch (err) {
-        log?.(`icons error: ${(err as Error).message}`);
-        console.error('[edit-pipeline] icon render failed', err);
+        // the icon bake is the ONE part of a pass that can fail on its own (a GPU
+        // handshake, a device-lost mid-render) while the data bake succeeded, so it
+        // must be legible: without block icons the palette just renders empty.
+        reportErr?.(`icons error: ${(err as Error).message}`);
     } finally {
         state.renderingIcons = false;
     }

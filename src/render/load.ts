@@ -5,7 +5,7 @@
 // modules or the selection logic. The dynamic `import()` is the code-split point:
 // only the chosen backend is fetched/parsed for a session.
 
-import { type Renderer, type RenderDeviceCaps, type RendererBackendKind, readRendererOverride } from './backend';
+import { type RenderDeviceCaps, type Renderer, type RendererBackendKind, readRendererOverride, webgpuAvailable } from './backend';
 
 /** create + run the device handshake for one backend. */
 async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Renderer; caps: RenderDeviceCaps }> {
@@ -16,30 +16,12 @@ async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Ren
 }
 
 /**
- * Can WebGPU actually stand up here? `navigator.gpu` only means the API is exposed;
- * the adapter still fails to materialize on a blocklisted GPU, with hardware accel
- * off, or in a headless/VM context. We make the SAME bare `requestAdapter()` the
- * WebGPU backend makes at init (gpucat passes no adapter options, and requests a
- * device with only adapter-advertised features + default limits — which can't fail
- * once the adapter exists), so a null here reliably predicts its init failure. Probe
- * up front rather than build a doomed renderer and catch the throw.
- */
-async function webgpuAvailable(): Promise<boolean> {
-    if (typeof navigator === 'undefined' || !navigator.gpu) return false;
-    try {
-        return (await navigator.gpu.requestAdapter()) !== null;
-    } catch {
-        return false; // requestAdapter itself can throw in locked-down embeddings
-    }
-}
-
-/**
  * Select + dynamically import the render backend, mint its `Renderer` handle, and
  * run the device handshake — returning a renderer that's ready to use plus the
  * adapter caps the client's tier detect needs.
  *
- * Prefer WebGPU when its adapter actually comes up (`webgpuAvailable` probes it),
- * else WebGL2 — the universal floor. A `?renderer=` override forces the backend and
+ * Prefer WebGPU when its adapter actually comes up (`webgpuAvailable` in render/backend
+ * probes it), else WebGL2 — the universal floor. A `?renderer=` override forces the backend and
  * skips the probe (QA wants the exact backend, and a forced WebGPU that can't init
  * should fail loudly, not silently downgrade). The `try/catch` is a backstop for the
  * pathological "adapter probed OK but the device request then loses the race" case;
