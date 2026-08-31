@@ -404,8 +404,8 @@ export function buildVoxelFragment(
     const frameF = floor(t).mod(frameCount).toVar('frameF');
     const nextFrameF = add(frameF, f32(1.0)).mod(frameCount).toVar('nextFrameF');
 
-    const layerA = add(vTexIndex, frameF).toI32().toVar('layerA');
-    const layerB = add(vTexIndex, nextFrameF).toI32().toVar('layerB');
+    const layerA = i32(add(vTexIndex, frameF)).toVar('layerA');
+    const layerB = i32(add(vTexIndex, nextFrameF)).toVar('layerB');
     const interpFrac = fract(t).toVar('interpFrac');
 
     const colorA = arrayTexture(atlas, layerA).sample(vUv).toVar('colorA');
