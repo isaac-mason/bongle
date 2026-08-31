@@ -31,15 +31,44 @@ const ALPHA_REF = 0.5;
 // downsampling must average in linear light, not gamma-encoded bytes,
 // matching what the GPU path does implicitly via its sRGB texture views.
 
-const SRGB_TO_LINEAR = new Float32Array(256);
-for (let i = 0; i < 256; i++) {
-    const c = i / 255;
-    SRGB_TO_LINEAR[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+function srgbToLinear(c: number): number {
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
-function linearToSrgbByte(l: number): number {
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) SRGB_TO_LINEAR[i] = srgbToLinear(i / 255);
+
+// The reverse transfer runs three times per destination texel and its `**` was
+// ~90% of the downsample cost, so it is a table lookup instead. The table is
+// indexed by sqrt(linear) (perceptually even spacing, so the dark end keeps its
+// resolution) and lands within 1 of the correct byte; SRGB_ROUND_EDGE then snaps
+// it, making the result bit-identical to evaluating the transfer directly.
+const LINEAR_TO_SRGB_STEPS = 4096;
+
+/** exact linear -> sRGB byte. Table construction only; the hot path uses the table. */
+function exactLinearToSrgbByte(l: number): number {
     const c = l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055;
     return Math.round(Math.min(1, Math.max(0, c)) * 255);
+}
+
+const LINEAR_TO_SRGB = new Uint8Array(LINEAR_TO_SRGB_STEPS + 1);
+for (let i = 0; i <= LINEAR_TO_SRGB_STEPS; i++) {
+    const s = i / LINEAR_TO_SRGB_STEPS;
+    LINEAR_TO_SRGB[i] = exactLinearToSrgbByte(s * s);
+}
+
+/** linear value at which the rounded sRGB byte flips from i to i + 1. */
+const SRGB_ROUND_EDGE = new Float64Array(256);
+for (let i = 0; i < 255; i++) SRGB_ROUND_EDGE[i] = srgbToLinear((i + 0.5) / 255);
+SRGB_ROUND_EDGE[255] = Number.POSITIVE_INFINITY;
+
+function linearToSrgbByte(l: number): number {
+    if (l <= 0) return 0;
+    if (l >= 1) return 255;
+    let byte = LINEAR_TO_SRGB[(Math.sqrt(l) * LINEAR_TO_SRGB_STEPS) | 0]!;
+    if (l >= SRGB_ROUND_EDGE[byte]!) byte++;
+    else if (byte > 0 && l < SRGB_ROUND_EDGE[byte - 1]!) byte--;
+    return byte;
 }
 
 /**
@@ -76,10 +105,23 @@ export function buildVoxelMipPyramid(
 
     // Pass 2, rescale each cutout layer's alpha per level against the *base*
     // coverage (Castano), independent of the chain, then wrap as a Source.
+    // The target is a property of the base level, so it is the same for every
+    // level of a layer: resolve it once rather than rescanning the base per level.
+    const cutoutLayers: number[] = [];
+    const coverageTargets: number[] = [];
+    for (let layer = 0; layer < layerCount; layer++) {
+        if (!isCutout(layer)) continue;
+        const target = coverageOf(baseData, layer, tileSize, 1);
+        // nothing passes / everything passes → no meaningful scale to solve for.
+        if (target <= 0 || target >= 1) continue;
+        cutoutLayers.push(layer);
+        coverageTargets.push(target);
+    }
+
     const levels: Source[] = [];
     for (const { data, size } of rawLevels) {
-        for (let layer = 0; layer < layerCount; layer++) {
-            if (isCutout(layer)) preserveCoverage(baseData, data, layer, tileSize, size);
+        for (let i = 0; i < cutoutLayers.length; i++) {
+            preserveCoverage(data, cutoutLayers[i]!, size, coverageTargets[i]!);
         }
         levels.push(new Source({ data, width: size, height: size, depth: layerCount }));
     }
@@ -111,23 +153,26 @@ function downsampleLayerPremultiplied(
             const o01 = o00 + srcStride;
             const o11 = o01 + BPP;
 
-            const a0 = srcData[o00 + 3]! / 255;
-            const a1 = srcData[o10 + 3]! / 255;
-            const a2 = srcData[o01 + 3]! / 255;
-            const a3 = srcData[o11 + 3]! / 255;
+            // alpha weights stay as raw bytes: the 255 scale cancels against
+            // sumA in the un-premultiply, and the average is a plain byte mean.
+            const a0 = srcData[o00 + 3]!;
+            const a1 = srcData[o10 + 3]!;
+            const a2 = srcData[o01 + 3]!;
+            const a3 = srcData[o11 + 3]!;
             const sumA = a0 + a1 + a2 + a3;
 
             const dst = dstLayerOffset + (dy * dstSize + dx) * BPP;
 
             if (sumA > 0) {
                 // premultiplied: weight linear RGB by alpha, then un-premultiply.
+                const invSumA = 1 / sumA;
                 for (let ch = 0; ch < 3; ch++) {
                     const lin =
                         SRGB_TO_LINEAR[srcData[o00 + ch]!]! * a0 +
                         SRGB_TO_LINEAR[srcData[o10 + ch]!]! * a1 +
                         SRGB_TO_LINEAR[srcData[o01 + ch]!]! * a2 +
                         SRGB_TO_LINEAR[srcData[o11 + ch]!]! * a3;
-                    dstData[dst + ch] = linearToSrgbByte(lin / sumA);
+                    dstData[dst + ch] = linearToSrgbByte(lin * invSumA);
                 }
             } else {
                 // fully transparent footprint, no coverage to weight by; keep a
@@ -138,11 +183,11 @@ function downsampleLayerPremultiplied(
                         SRGB_TO_LINEAR[srcData[o10 + ch]!]! +
                         SRGB_TO_LINEAR[srcData[o01 + ch]!]! +
                         SRGB_TO_LINEAR[srcData[o11 + ch]!]!;
-                    dstData[dst + ch] = linearToSrgbByte(lin / 4);
+                    dstData[dst + ch] = linearToSrgbByte(lin * 0.25);
                 }
             }
 
-            dstData[dst + 3] = Math.round((sumA / 4) * 255);
+            dstData[dst + 3] = (sumA * 0.25 + 0.5) | 0;
         }
     }
 }
@@ -154,13 +199,9 @@ function downsampleLayerPremultiplied(
 // Without this, the averaged alpha drops below 0.5 at the edges and the
 // cutout erodes; with it, distant foliage keeps its silhouette.
 
-function preserveCoverage(baseData: Uint8Array, dstData: Uint8Array, layer: number, baseSize: number, dstSize: number): void {
-    const target = coverageOf(baseData, layer, baseSize, 1);
+function preserveCoverage(dstData: Uint8Array, layer: number, dstSize: number, target: number): void {
     const dstLayerOffset = layer * dstSize * dstSize * BPP;
     const texels = dstSize * dstSize;
-
-    // nothing passes / everything passes → no meaningful scale to solve for.
-    if (target <= 0 || target >= 1) return;
 
     // binary-search the scale; coverage is monotonic increasing in scale.
     let lo = 0;

@@ -99,39 +99,61 @@ export async function loadBlockTextureAtlasIntoTextureArray(
     textureNames: string[],
     meta: BlockTextureAtlasMetadata,
     textureCutout: Uint8Array,
-    loader: ResourceLoader,
+    pixelBytes: Promise<Uint8Array>,
 ): Promise<void> {
     // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
     if (meta.textures.length === 0) return;
-    // whole-atlas RGBA. Two decode paths (mirrors model-resources): the asset
-    // pipeline injects `loader.decodeImage` (node: sharp) → raw bytes, no DOM; the
-    // browser/editor client has no decoder → createImageBitmap + OffscreenCanvas
-    // (worker-safe, but both absent in node).
-    let fullPixels: Uint8Array | Uint8ClampedArray;
+    let fullPixels: Uint8Array;
     try {
-        // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs).
-        const bytes = await loader.loadBytes('voxels-atlas.png');
-        if (loader.decodeImage) {
-            fullPixels = (await loader.decodeImage(bytes, 'image/png')).rgba;
-        } else {
-            const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
-            const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
-            const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
-            ctx2d.imageSmoothingEnabled = false;
-            ctx2d.drawImage(img, 0, 0);
-            img.close();
-            fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
-        }
+        fullPixels = await decodeAtlasRgbaInBrowser(await pixelBytes, meta);
     } catch {
         return;
     }
-    writeBlockTextureAtlasIntoTextureArray(
-        atlas,
-        textureNames,
-        meta,
-        new Uint8Array(fullPixels.buffer, fullPixels.byteOffset, fullPixels.byteLength),
-        textureCutout,
-    );
+    writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, fullPixels, textureCutout);
+}
+
+/**
+ * Whole-atlas PNG bytes → tightly packed RGBA8, in the browser. (The asset
+ * pipeline has no DOM and takes `loader.decodeImage` — sharp — instead; see
+ * `writeAtlasPixels`.)
+ *
+ * WebCodecs first: it hands back raw RGBA with no canvas in the middle. The
+ * canvas fallback is lossy for every partially transparent texel, because a 2D
+ * backing store is premultiplied — drawImage premultiplies, getImageData
+ * un-premultiplies, and the RGB of a low-alpha texel is quantised by the round
+ * trip. A typical block atlas is ~10% partial alpha (glass, water, leaf edges).
+ */
+async function decodeAtlasRgbaInBrowser(bytes: Uint8Array, meta: BlockTextureAtlasMetadata): Promise<Uint8Array> {
+    const tightBytes = meta.atlasWidth * meta.atlasHeight * BPP;
+    if (typeof ImageDecoder !== 'undefined') {
+        try {
+            const decoder = new ImageDecoder({ data: bytes, type: 'image/png' });
+            const { image } = await decoder.decode();
+            try {
+                if (image.allocationSize({ format: 'RGBA' }) !== tightBytes) throw new Error('unexpected atlas size');
+                const rgba = new Uint8Array(tightBytes);
+                const [plane] = await image.copyTo(rgba, { format: 'RGBA' });
+                // a padded stride would mean the rows don't line up with atlasWidth.
+                if (plane?.stride !== meta.atlasWidth * BPP) throw new Error('unexpected atlas stride');
+                return rgba;
+            } finally {
+                image.close();
+                decoder.close();
+            }
+        } catch {
+            // no PNG track, or no RGBA conversion on this engine: use the canvas.
+        }
+    }
+    // colorSpaceConversion 'none' skips colour management on decode; the atlas is
+    // authored in sRGB and the array texture is already srgb-typed.
+    const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]), { colorSpaceConversion: 'none' });
+    const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
+    const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx2d.imageSmoothingEnabled = false;
+    ctx2d.drawImage(img, 0, 0);
+    img.close();
+    const { data } = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight);
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
 /** Load the atlas manifest. Client fetches it (assetUrl); the asset pipeline
@@ -159,15 +181,15 @@ export async function writeAtlasPixels(
     textureCutout: Uint8Array,
     meta: BlockTextureAtlasMetadata,
     loader: ResourceLoader,
+    pixelBytes: Promise<Uint8Array>,
 ): Promise<void> {
     const decodeImage = loader.decodeImage;
     if (decodeImage) {
-        const bytes = await loader.loadBytes('voxels-atlas.png');
-        const { rgba } = await decodeImage(bytes, 'image/png');
+        const { rgba } = await decodeImage(await pixelBytes, 'image/png');
         writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, rgba, textureCutout);
         return;
     }
-    return loadBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, textureCutout, loader);
+    return loadBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, textureCutout, pixelBytes);
 }
 
 /**
@@ -293,10 +315,17 @@ export async function loadVoxelTextures(
     meta?: BlockTextureAtlasMetadata | null,
     serialize = false,
 ): Promise<void> {
+    // Start the pixel download before resolving the manifest. The PNG doesn't
+    // depend on the manifest, so awaiting the manifest first would stack two
+    // serial round trips on a cold client. A missing atlas rejects here; park
+    // that until whoever consumes the bytes reports it.
+    const pixelBytes = loader.loadBytes('voxels-atlas.png');
+    pixelBytes.catch(() => {});
+
     const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(loader);
     textures.hash = resolvedMeta?.hash ?? null;
     const atlasWrite = resolvedMeta
-        ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader)
+        ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader, pixelBytes)
         : Promise.resolve();
     if (serialize) {
         await atlasWrite.catch((e) => console.warn('[voxel-textures] atlas load failed:', e));

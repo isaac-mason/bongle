@@ -24,4 +24,12 @@ export type ResourceLoader = {
      * when absent (the client), they use the browser DOM path unchanged.
      */
     decodeImage?(bytes: Uint8Array, mime: string): Promise<{ width: number; height: number; rgba: Uint8Array }>;
+    /**
+     * Start loading `url` now so the matching `loadBytes` resolves from the
+     * in-flight request instead of opening a later one. Present only where
+     * loading has real latency to hide, i.e. the browser's fetch loader; the
+     * disk and vfs loaders have nothing to gain and leave it undefined.
+     * Advisory: every caller must work unchanged when it is absent.
+     */
+    prefetch?(url: string): void;
 };
