@@ -68,8 +68,11 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
             console.warn('[client] engine stylesheet missing', styleErr);
         }
 
-        // env flags BEFORE user code / engine eval — compile-time replaceEnv covers
-        // literal reads; runtime/destructured reads fall through to env.js defaults.
+        // env flags BEFORE user code / engine eval. The engine dist is env-NEUTRAL
+        // (every chunk imports the live object from env.js — the prebundle keeps the
+        // 'bongle/env' seam rather than replacing reads), and this host runs no
+        // replaceEnv pass, so these writes ARE the realm identity for engine and user
+        // code alike. They must land before the first module that reads a flag.
         progress('loading engine');
         const { env: rt } = await runner.import('bongle/env');
         rt.client = true;

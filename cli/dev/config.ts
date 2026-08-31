@@ -47,10 +47,13 @@ export function defineBongleDevConfig(opts: BongleDevConfigOptions): UserConfig 
             // editor.css through vite:css-post races per-env cssModulesCache init
             // and crashes startup; the edit UI's css is only reachable client-side).
             ...tailwindcss().map((p: Plugin): Plugin => ({ ...p, applyToEnvironment: (e) => e.name === 'client' })),
-            // edit mode: the in-game scene/voxel editor (editor:true all envs).
+            // edit mode: the in-game scene/voxel editor (editor:true on the two
+            // runtime envs). the pipeline env is NEUTRAL — all three false — since
+            // the bake is its own entry, not a headless client or server; see
+            // realms/pipeline/pipeline.ts.
             envPlugin({ client: true, server: false, editor: true }, 'client'),
             envPlugin({ client: false, server: true, editor: true }, 'server'),
-            envPlugin({ client: false, server: true, editor: true }, 'pipeline'),
+            envPlugin({ client: false, server: false, editor: false }, 'pipeline'),
             virtualEntries({ projectDir }),
             serveResources({ projectDir }),
             serveScenes({ projectDir }),

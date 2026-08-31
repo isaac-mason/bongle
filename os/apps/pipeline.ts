@@ -8,10 +8,11 @@ const pipeline: App = async (env) => {
     const fs = env.fs;
     const runner = env.runner;
 
-    const { env: rt } = await runner.import('bongle/env');
-    rt.client = false;
-    rt.server = true;
-    rt.editor = true;
+    // NEUTRAL env: client/server/editor all stay false. The bake is its own entry
+    // (EditPipeline), not a headless client or server, and nothing it touches reads
+    // a flag — declarations register ungated, and the engine's env.server /
+    // env.editor branches are all runtime gameplay + UI. Leaving them false keeps a
+    // user's `if (!env.server) return` gameplay guard from firing during the bake.
     try {
         await runner.import('src/index.ts'); // user declarations register into this realm
     } catch (err) {

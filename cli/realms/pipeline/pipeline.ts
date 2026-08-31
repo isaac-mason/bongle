@@ -12,7 +12,6 @@
 // start.ts emits the HMR refresh events the edit-client listens for.
 
 import { AssetPipeline } from 'bongle/engine-asset-pipeline';
-import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
 import { createBakeLoader } from '../../../src/asset-pipeline/loader';
 import { createNodeDecodeAudio } from '../../bake/decode-audio-node';
@@ -35,11 +34,11 @@ export type PipelineBootResult = {
 };
 
 export async function start(opts: StartPipelineOptions): Promise<PipelineBootResult> {
-    // the pipeline mirrors the server's compile-time env (render path is
-    // env-agnostic); set before user code so declarations see it.
-    env.client = false;
-    env.server = true;
-    env.editor = true;
+    // NEUTRAL env: client/server/editor all stay false (see os/apps/pipeline.ts —
+    // the browser host does the same). The bake is its own entry, not a headless
+    // client or server: declarations register ungated, and nothing the bake touches
+    // reads a flag. Leaving them false keeps a user's `if (!env.server) return`
+    // gameplay guard from firing during the bake.
     // Resilience: a user module that throws at eval must NOT abort the bake — the
     // atlas / models / audio still generate from whatever registered before the throw.
     try {
