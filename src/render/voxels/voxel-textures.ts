@@ -317,16 +317,18 @@ export async function loadVoxelTextures(
 ): Promise<void> {
     // Start the pixel download before resolving the manifest. The PNG doesn't
     // depend on the manifest, so awaiting the manifest first would stack two
-    // serial round trips on a cold client. A missing atlas rejects here; park
-    // that until whoever consumes the bytes reports it.
-    const pixelBytes = loader.loadBytes('voxels-atlas.png');
-    pixelBytes.catch(() => {});
+    // serial round trips on a cold client. The pipeline emits no PNG when
+    // nothing declares a texture, so skip it there rather than 404. A missing
+    // atlas rejects here; park that until whoever consumes the bytes reports it.
+    const pixelBytes = registry.textures.length > 0 ? loader.loadBytes('voxels-atlas.png') : null;
+    pixelBytes?.catch(() => {});
 
     const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(loader);
     textures.hash = resolvedMeta?.hash ?? null;
-    const atlasWrite = resolvedMeta
-        ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader, pixelBytes)
-        : Promise.resolve();
+    const atlasWrite =
+        resolvedMeta && pixelBytes
+            ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader, pixelBytes)
+            : Promise.resolve();
     if (serialize) {
         await atlasWrite.catch((e) => console.warn('[voxel-textures] atlas load failed:', e));
         textures._resolveReady();

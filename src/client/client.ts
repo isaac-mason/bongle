@@ -200,11 +200,19 @@ function mountDisplayCanvas(state: EngineClient): void {
 }
 
 export async function load(state: EngineClient) {
-    // Kick the atlas downloads off before the backend import + device handshake,
+    // Kick the boot downloads off before the backend import + device handshake,
     // which they'd otherwise queue behind: nothing below needs them until
     // `loadResources`, and `loadBytes` picks up whatever is already in flight.
-    state.resources.loader.prefetch?.('voxels-atlas.json');
-    state.resources.loader.prefetch?.('voxels-atlas.png');
+    // The manifests are fetched on every boot regardless, so prefetching them
+    // adds no request. The payloads are gated on the registry declaring
+    // content (populated at module eval, before this runs), so a game with no
+    // blocks or no sprites doesn't 404 on an atlas the pipeline never emitted.
+    const { loader } = state.resources;
+    loader.prefetch?.('voxels-atlas.json');
+    loader.prefetch?.('sprites-atlas.json');
+    loader.prefetch?.('audio-manifest.json');
+    if (registry.blockTextures.byId.size > 0) loader.prefetch?.('voxels-atlas.png');
+    if (registry.sprites.byId.size > 0) loader.prefetch?.('sprites-atlas.png');
 
     // load-split the backend + run the device handshake (falls back WebGPU->WebGL2)
     // before anything touches the renderer.
