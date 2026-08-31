@@ -44,6 +44,11 @@ export type ResolveFs = {
 export type BuildFs = ResolveFs & {
     read(path: string): Promise<Uint8Array>;
     list(dir?: string, opts?: { recursive?: boolean }): Promise<{ path: string; kind: 'file' | 'dir' }[]>;
+    /** Deref a symlinked id to its real path. OPTIONAL: the editor's vfs is a flat
+     *  seeded tree with no symlinks and omits it. A host over a real node_modules must
+     *  provide it — pnpm reaches a transitive dep only from its dependent's real path,
+     *  and shakeup derefs every resolved id through here. */
+    realpath?(path: string): Promise<string>;
 };
 
 /** Present `BuildFs` as shakeup's `Fs`.
@@ -62,6 +67,7 @@ export function shakeupFs(fs: BuildFs): ShakeupFs {
                 return null;
             }
         },
+        ...(fs.realpath ? { realpath: (id: string) => fs.realpath!(id) } : {}),
         exists: async (id) => {
             const slash = id.lastIndexOf('/');
             const name = slash === -1 ? id : id.slice(slash + 1);

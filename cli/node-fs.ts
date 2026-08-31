@@ -4,13 +4,26 @@
 // remove/… — baked outputs land back on disk). One impl, so `bongle build` runs
 // the exact same graph + bake the browser editor does.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    realpathSync,
+    renameSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BuildFs } from '../build';
 import type { Filesystem, FilesystemSnapshot, FsStat } from '../os/interface';
 
 export function openNodeFs(root: string): Filesystem & BuildFs {
-    const abs = (p: string) => join(root, p);
+    // Ids are project-relative, EXCEPT the ones `realpath` hands back: a pnpm package's
+    // real home is outside the project root, so it can only be named absolutely. Both
+    // live in the same id space, distinguished by the leading slash.
+    const abs = (p: string) => (p.startsWith('/') ? p : join(root, p));
 
     const readDirEntries = (d: string) => {
         try {
@@ -99,6 +112,18 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         },
         async exists(p) {
             return existsSync(abs(p));
+        },
+        // pnpm puts only DIRECT deps in a package's node_modules, each a symlink into
+        // the store; a transitive dep sits beside its dependent inside that store. So a
+        // dep is only reachable from its dependent's REAL path, which is what shakeup
+        // derefs every resolved id to (scan.ts, `resolve.symlinks`, on by default).
+        // Without this the deref is a no-op and transitive deps silently externalize.
+        async realpath(p) {
+            try {
+                return realpathSync(abs(p));
+            } catch {
+                return p;
+            }
         },
         async write(p, data) {
             const f = abs(p);
