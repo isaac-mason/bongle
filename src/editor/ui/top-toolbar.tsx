@@ -435,7 +435,7 @@ function PlaySection() {
                 onClick={() => {
                     if (roomId) stopRoom?.(roomId);
                 }}
-                className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-danger/40 bg-danger/15 text-danger hover:bg-danger/25 cursor-pointer"
+                className="inline-flex h-6 items-center gap-1 px-2 text-[11px] font-mono leading-none rounded border bg-danger-solid text-white border-danger-solid hover:opacity-85 cursor-pointer"
             >
                 <Icons.Square size={12} />
                 Stop session
@@ -448,42 +448,11 @@ function PlaySection() {
             type="button"
             onClick={() => play?.()}
             disabled={playPending}
-            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-success/40 bg-success/15 text-success hover:bg-success/25 cursor-pointer disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-success/15"
+            className="inline-flex h-6 items-center gap-1 px-2 text-[11px] font-mono leading-none rounded border bg-success-solid text-white border-success-solid hover:opacity-85 cursor-pointer disabled:cursor-wait disabled:opacity-70"
         >
             {playPending ? <Icons.Loader2 size={12} className="animate-spin" /> : <Icons.Play size={12} />}
             {playPending ? 'Starting' : 'Play'}
         </button>
-    );
-}
-
-/* ── Mode pill + editor visibility toggle ───────────────────────── */
-
-function ModePill() {
-    const mode = useEditor((s) => s.mode);
-    const editorEnabled = useEditor((s) => {
-        if (!s.room) return false;
-        if (!s.playerEditStores[s.room.playerId]) return false;
-        if (!s.room.editor) return true;
-        return s.playerToView.get(s.room.playerId) === 'edit';
-    });
-
-    // mode is the player's camera/control mode; editorEnabled is the UI flag.
-    // suffix surfaces the off-default combinations (play+editor, edit-hidden)
-    // so the user can tell at a glance when they're in a non-typical mix.
-    const isEdit = mode === 'edit';
-    let suffix: string | null = null;
-    if (mode === 'play' && editorEnabled) suffix = 'editor';
-    else if (mode === 'edit' && !editorEnabled) suffix = 'hidden';
-
-    return (
-        <span
-            className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border ${
-                isEdit ? 'bg-tab-edit/15 text-tab-edit border-tab-edit/40' : 'bg-tab-play/15 text-tab-play border-tab-play/40'
-            }`}
-        >
-            {mode}
-            {suffix && <span className="text-fg-muted">· {suffix}</span>}
-        </span>
     );
 }
 
@@ -497,12 +466,8 @@ export function TopToolbar() {
                 <RoomTabs />
             </div>
 
-            {/* mode + play/stop. editor UI visibility lives on the inspect-client
-                sub-tab now, no global toggle here. */}
-            <div className="flex items-center gap-2">
-                <ModePill />
-                <PlaySection />
-            </div>
+            {/* play/stop. mode + editor UI visibility read off the room tabs. */}
+            <PlaySection />
         </div>
     );
 }

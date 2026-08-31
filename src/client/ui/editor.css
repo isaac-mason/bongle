@@ -19,6 +19,10 @@
     --color-success: #4ade80;
     --color-warn: #fbbf24;
 
+    /* Solid fills for filled buttons (white text on top). */
+    --color-danger-solid: #dc2626;
+    --color-success-solid: #16a34a;
+
     /* Room-tab identity colours (top toolbar): edit / play / inspect-lens. */
     --color-tab-edit: #3b82f6;
     --color-tab-play: #ef4444;
