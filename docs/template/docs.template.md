@@ -974,15 +974,15 @@ camera) as the values to restore when a temporary override ends.
 
 ### Environment - lighting and sky
 
-Each room has one environment: its sky, sun, moon, stars, and clouds. You drive
-it with two calls. `setEnvironment` sets the look, and `setEnvironmentTime` sets
-the time of day. Set them once in an `onInit`, or change them later on game
-events (nightfall, a storm rolling in).
+Each room has one environment: its sky, sun, moon, stars, clouds, and distance
+fog. You drive it with two calls. `setEnvironment` sets the look, and
+`setEnvironmentTime` sets the time of day. Set them once in an `onInit`, or
+change them later on game events (nightfall, a storm rolling in).
 
 The quickest start is a preset. `setEnvironment(ctx, ENVIRONMENT_OVERWORLD)`
 gives you a full daylight scene with sun, moon, stars, and clouds all on, which
 is what the snippet below does. `ENVIRONMENT_DEFAULT` is the barer look a fresh
-room boots with (sky only, everything else off).
+room boots with (sky and fog only, everything else off).
 
 <Snippet source="visuals.snippet.ts" select="lighting" />
 
@@ -1000,9 +1000,37 @@ setEnvironment(ctx, {
 
 The groups are `sky` (a `preset` name or a custom `stops` LUT), `sun`
 (`enabled`, `intensity`), `moon` (`enabled`), `stars` (`enabled`, `density`),
-and `clouds` (`enabled`, `density`, `wind`, `altitude`, `thickness`). The
-top-level `enabled` is a master switch: turn it off and the sky and cloud meshes
-stop rendering entirely.
+`clouds` (`enabled`, `density`, `wind`, `altitude`, `thickness`), and `fog`
+(`enabled`, `color`, `end`, `start`, `opacity`). The top-level `enabled` is a
+master switch: turn it off and the sky and cloud meshes stop rendering entirely.
+
+Fog is the one group that is already on in a fresh room. It fades the world out
+toward the edge of what the client can see, so the streamed chunk boundary does
+not read as a wall.
+
+`end` is where fog reaches full strength: world units, or `'view'` (the default)
+to track that client's own view radius. View radius is a device performance
+setting, so it is per-client and a script cannot know it. That is why `start` is
+a **fraction** of `end` rather than world units, which lets you author the fade
+without knowing the radius. `0.9` (the default) is a narrow lip right at the
+boundary; `0.1` is haze across the whole view.
+
+`color` defaults to `'sky'`, which tracks the sky LUT's horizon at the current
+time of day, so sunsets and night work with nothing authored. Pass a linear rgb
+triple to pin it instead. `opacity` is how opaque fog gets at `end`, where `1`
+fully replaces the colour behind it.
+
+```ts
+// near, thick, atmospheric fog
+setEnvironment(ctx, { fog: { end: 30, start: 0.1 } });
+
+// no fog: the world stops hard at the streamed boundary
+setEnvironment(ctx, { fog: { enabled: false } });
+```
+
+A numeric `end` nearer than the view radius does not re-expose the chunk
+boundary, since fog is already saturated well before it. One further out leaves
+the engine's own boundary fade in place underneath.
 
 `setEnvironmentTime` takes hours on a 24h clock (`0` midnight, `6` sunrise, `12`
 noon, `18` sunset, wrapping past 24). It is the per-frame hot path, one uniform

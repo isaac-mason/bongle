@@ -12,23 +12,88 @@ Create nodes, compose them with traits, and walk the tree.
 
 ```ts
 export type Node = {
+    /** runtime-only numeric ID, assigned by the scene tree's incrementing counter. not persisted. */
     id: number;
+
+    /** optional name, a non-unique label. */
     name: string | undefined;
+
+    /** parent node, or null if this is a root node */
     parent: Node | null;
+
+    /** ordered list of child nodes */
     children: Node[];
+
+    /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
+
+    /**
+     * which Player owns this node. null = server-owned (default).
+     * Ownership is keyed per-Player (not per-Client) so parallel
+     * memberships, same client with multiple Players in a room, don't
+     * collapse onto one body.
+     */
     owner: PlayerId | null;
+
+    /**
+     * whether this node is saved to scene files. default: true.
+     * non-persistent nodes are still included in network replication
+     * and hot-reload round-trips.
+     */
     persist: boolean;
+
+    /**
+     * which side(s) this node lives on / is replicated to:
+     * - `'inherit'`: take effective realm from nearest non-inherit ancestor (default)
+     * - `'shared'`: server-owned, replicated to all clients
+     * - `'client'`: lives only on the client that created it; never replicated
+     * - `'server'`: lives only on the server; never replicated to clients
+     * - `'each'`: server AND every client get their own independent copy on attach
+     *
+     * realm boundaries cascade through the tree implicitly: an `'inherit'`
+     * descendant of a `'server'` node behaves as `'server'`. consumers that walk
+     * the tree (replication, prefab tick) thread the inherited realm through
+     * the recursion so each node sees its effective value in O(1).
+     */
     realm: Realm;
+
+    /** @internal trait data stored directly on the node, keyed by trait slot */
     _traits: Map<number, TraitBase>;
+
+    /** @internal node-level replication version (send-path early-out gate). */
     _sync: NodeSyncState;
+
+    /** @internal bitset for fast trait query matching */
     _bitset: Bitset;
-    _unresolvedTraits: Map<string, {
-        binary?: Uint8Array;
-        json?: Record<string, unknown>;
-    }>;
+
+    /**
+     * @internal traits whose definitions weren't in the registry at load time.
+     * keyed by trait string id. preserves raw data so it round-trips through
+     * pack/unpack and save/load without silent data loss.
+     * hot-reload's serialize→deserialize cycle naturally reconciles these
+     * when the def becomes available again.
+     */
+    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }>;
+
+    /**
+     * @internal validation issues per trait (keyed by trait slot). populated
+     * at scene load and at inspector commit time. derived state, not persisted,
+     * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
+     * empty entries are cleaned up.
+     */
     _traitIssues: Map<number, ValidationIssue[]>;
+
+    /**
+     * if non-null, this node is a prefab instance. its children are
+     * instantiated from the referenced scene. only the prefab config
+     * is persisted, children have persist: false.
+     */
     prefab: PrefabConfig | null;
+
+    /**
+     * @internal runtime-only prefab instantiation state.
+     * not serialized, not replicated, reconstructed on instantiation.
+     */
     _prefabState: PrefabState | null;
 };
 ```
@@ -349,22 +414,31 @@ export const TransformTrait;
 
 ```ts
 export type RemoteInterpolation = {
+    /** eased render pose (`current`) and the ease's start pose (`old`) per channel. */
     positionOld: Vec3;
     positionCurrent: Vec3;
     quaternionOld: Quat;
     quaternionCurrent: Quat;
+    /** ease duration (seconds), an EWMA of the observed send interval, per channel. */
     positionEaseDuration: number;
     quaternionEaseDuration: number;
+    /** seconds elapsed into the current ease segment, per channel. */
     positionElapsed: number;
     quaternionElapsed: number;
+    /** server stamp of the target the current segment is easing toward, per channel;
+     *  0 until the first sync. the gap to `*PendingStamp` is the learned cadence. */
     positionStamp: number;
     quaternionStamp: number;
+    /** server stamp carried by the most recent unpack, per channel (read on retarget). */
     positionPendingStamp: number;
     quaternionPendingStamp: number;
+    /** unpack-bumped sequence vs the last one the render side retargeted on. a
+     *  mismatch means a fresh pose landed and the ease should restart. */
     positionSequence: number;
     positionSeen: number;
     quaternionSequence: number;
     quaternionSeen: number;
+    /** 0 until `current` has been seeded from a real pose (first frame / teleport). */
     initialized: 0 | 1;
 };
 ```
@@ -1003,8 +1077,15 @@ export type SyncHandle<T extends TraitBase = TraitBase> = {
 ```ts
 /** base shape of every trait instance, has `_node` back-ref + def back-ref. */
 export type TraitBase = {
+    /** reference to the node this trait instance belongs to */
     _node: Node;
+    /** the TraitDef this instance was built from */
     _def: TraitDef;
+    /**
+     * per-instance replication working-state, dirty bits + diff snapshots,
+     * array-indexed by sync slice. allocated in buildTraitInstance when the
+     * trait has syncs; undefined otherwise (helpers no-op in that case).
+     */
     _sync?: TraitSyncState;
 };
 ```
@@ -1029,25 +1110,44 @@ export type TraitBody = Record<string, unknown>;
 ```ts
 export type TraitDef = {
     id: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `id` when the author didn't supply one. */
     name: string;
+    /**
+     * runtime slot, see `TraitHandle._slot`. Distinct from any wire index;
+     * `node._traits` is keyed by `slot`, while the wire encoding uses a
+     * sort-by-id position computed fresh per flush at the rpc/replication layer.
+     */
     slot: number;
+    /** raw body of the trait, literals + factories, indexed by field name. */
     body: Record<string, unknown>;
+    /** whether instances of this trait are saved to scene files. default true. */
     persist: boolean;
+
+    /** control registrations in registration order. */
     controls: ControlDef[];
-    controlsById: Map<string, {
-        reg: ControlDef;
-        index: number;
-    }>;
+    /** lookup by control id. */
+    controlsById: Map<string, { reg: ControlDef; index: number }>;
+    /** sync registrations in registration order. position in this array is
+     *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
     sync: SyncDef[];
-    syncById: Map<string, {
-        reg: SyncDef;
-        index: number;
-    }>;
+    /** lookup by sync id. */
+    syncById: Map<string, { reg: SyncDef; index: number }>;
+    /** script registrations in registration order. one ScriptInstance per
+     *  script per attached trait, instantiated when the trait attaches to a
+     *  live node. */
     scripts: ScriptDef[];
-    scriptsById: Map<string, {
-        reg: ScriptDef;
-        index: number;
-    }>;
+    /** lookup by script id (user-supplied, within this trait). */
+    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
+    /**
+     * canonical handle for this def. populated by `trait()` immediately
+     * after the def is constructed, so any registry lookup yields the
+     * same handle the original `trait()` call returned. Used for
+     * by-id attach paths (e.g. optional/conditionally-loaded traits like
+     * the editor trait) where the call site cannot import the handle
+     * directly. Forms a `def.handle._def === def` cycle, fine for GC,
+     * but means TraitDef must never be JSON.stringify'd.
+     */
     handle: TraitHandle;
 };
 ```
@@ -1062,12 +1162,18 @@ export type TraitDef = {
  */
 export type TraitHandle<T extends TraitBase = TraitBase> = {
     readonly _id: string;
+    /**
+     * runtime slot, stable integer identity assigned the first time `trait(id, ...)`
+     * runs, cached in `traitSlots[id]` for the process lifetime. Used as the key
+     * in `node._traits: Map<number, TraitBase>` and anywhere runtime code indexes
+     * a trait. Distinct from the *wire index* (sort-by-id position computed at flush,
+     * lives only on the rpc/replication layer).
+     */
     readonly _slot: number;
     readonly _def: TraitDef;
-    dependency: {
-        registry: 'traits';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'traits'; id: string };
+    /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
 };
 ```
@@ -1089,7 +1195,17 @@ export type TraitInstance<S extends TraitBody> = TraitBase & {
 ```ts
 /** trait-level options, passed as the third arg to `trait()`. */
 export type TraitOptions = {
+    /** human-readable display name for editor UIs (trait pickers,
+     *  inspectors). falls back to the string id when omitted. */
     name?: string;
+    /**
+     * whether instances of this trait round-trip through scene files.
+     * default `true`. set to `false` for traits attached at runtime that
+     * should never appear on disk (e.g. character controllers, gizmos).
+     * for tag traits (no controls), `persist: false` still strips the
+     * trait from saved scenes, its mere presence on the node is the data
+     * being filtered.
+     */
     persist?: boolean;
 };
 ```
@@ -1235,18 +1351,91 @@ export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToCo
 
 ```ts
 export type ClientContext = {
+    /** the gpucat render scenes this client renders into */
     render: RenderScenes;
+
+    /**
+     * the subject: the node local input drives and what the renderer + audio
+     * treat as this client's point of view. a plain field on the single client
+     * state (no box), so a write is observed everywhere that holds this
+     * ClientContext (scripts via `ctx.client`, room-layer via `room.client`).
+     * read it with `getSubject(ctx)`, swap with `setSubject(ctx, node)`.
+     * defaults to `defaultSubject` (the player node).
+     */
     subject: SceneTree.Node | null;
+
+    /** local player body node, alias for `room.playerNode`. the server-side
+     *  streaming anchor; keep it where interest should be. */
     player: SceneTree.Node;
+
+    /**
+     * active render camera node: what the renderer composes the render camera
+     * from each frame (TransformTrait pose + CameraTrait projection). defaults
+     * to `defaultCamera` (`room.cameraNode`) and is repointed by whichever
+     * controller / lens is driving the view. read it with `getCamera(ctx)`
+     * (or `ctx.client.camera`), swap it with `setCamera(ctx, node)`. single
+     * source of truth; room-layer reaches it via `room.client`.
+     */
     camera: SceneTree.Node;
+
+    /**
+     * the subject to return to when a temporary override (editor lens,
+     * spectator, cinematic) ends. plain config field, seeded to the player
+     * node at room setup; games may repoint it to control something other
+     * than the player by default. no set/reset helpers, editor and games read
+     * it and restore `subject` themselves.
+     */
     defaultSubject: SceneTree.Node | null;
+
+    /**
+     * the camera to return to alongside `defaultSubject`. plain config field,
+     * seeded to `room.cameraNode` at room setup. mostly a follower of the
+     * default subject's controller camera; stands alone for controller-less
+     * default views (a fixed / scripted camera).
+     */
     defaultCamera: SceneTree.Node;
+
+    /**
+     * per-room overlay viewport div, stacked above the single shared render canvas
+     * (a backdrop sibling). scripts can append HTML overlays here (debug HUDs, custom
+     * UI). the viewport hides/shows with the active room and is removed when the room
+     * is disposed, so script overlays automatically follow room lifecycle.
+     *
+     * has `pointer-events: none` so empty-area gestures fall through to the canvas
+     * below; overlays that need interactivity must set `pointer-events: auto` on
+     * themselves.
+     */
     viewport: HTMLDivElement;
+
+    /**
+     * per-room touch overlay div under `viewport`, appended AFTER the html UI overlay
+     * so it stacks visually above everything by DOM order alone. touch controls helpers
+     * (joystick / button) mount their roots here; pointer events live on the helper
+     * roots, not on this container (which stays `pointer-events: none`).
+     */
     touchOverlay: HTMLDivElement;
+
+    /** our own client id */
     clientId: ClientId | undefined;
+
+    /**
+     * client debug surface. `dashboard` is the shared dashcat Dashboard —
+     * games dock their own panels on it (or via the scoped `debug.panel(ctx, …)`
+     * helper, which auto-cleans on script dispose). the raw handle is the
+     * escape hatch for full dashcat control. built lazily on first access.
+     *
+     * future home for the client-global metrics/logs handles + open flag
+     * that currently live on the store / ClientRoom.
+     */
     debug: ClientDebugState;
+
+    /** client input state, read keyboard/mouse here in onFrame hooks */
     input: Input;
+
+    /** top-level client engine state, populated by engine-client on room creation */
     state?: EngineClient;
+
+    /** the client room this script is running in */
     room?: ClientRoom;
 };
 ```
@@ -1256,17 +1445,10 @@ export type ClientContext = {
 ```ts
 /** editor viewpoint pose passed under `EDITOR_JOIN_KEY` in join data. */
 export type EditorPlayData = {
-    position: [
-        number,
-        number,
-        number
-    ];
-    quaternion: [
-        number,
-        number,
-        number,
-        number
-    ];
+    /** editor camera world position at play time. */
+    position: [number, number, number];
+    /** editor camera world orientation at play time. */
+    quaternion: [number, number, number, number];
 };
 ```
 
@@ -1288,8 +1470,24 @@ export type EditorPlayData = {
  * `client.camera` point at these.
  */
 export type EditRoomState = {
+    /** stable opaque id for this editor view; surfaces as RoomViewId so the
+     *  UI can address the editor POV separately from the player POV
+     *  even though both belong to the same ClientRoom. */
     id: string;
+
+    /**
+     * the node representing the editor actor. becomes `client.subject` while
+     * the lens is active.
+     */
     subject: SceneTree.Node;
+
+    /**
+     * lens-private camera node, `realm: 'client'` with TransformTrait +
+     * CameraTrait. becomes `client.camera` while the lens is active, so the
+     * lens's pose is preserved across play/edit tab toggles, independently of
+     * `room.cameraNode` (which the player controller drives while in play
+     * view). torn down with the lens.
+     */
     camera: SceneTree.Node;
 };
 ```
@@ -1310,7 +1508,12 @@ export type JoinArgs = {
     playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
+    /** Model id the player renders with, resolved upstream (matchmaker /
+     *  builtin) and already stamped onto `playerNode`'s CharacterTrait
+     *  before this fires. */
     characterModelId: string;
+    /** Rig contract of that model, e.g. `RIG_TYPE_6BONE`, lets onJoin
+     *  branch on rig family without reaching for the trait. */
     rigType: string;
 };
 ```
@@ -1341,17 +1544,41 @@ export type PhysicsContactArgs = {
 
 ```ts
 export type ScriptContext<T extends TraitBase = TraitBase> = {
+    /** the mode of the room this script is running in */
     mode: 'edit' | 'play';
+
+    /** the trait instance this script is bound to. fully typed for the
+     *  TraitHandle passed to `script()`. */
     trait: T;
+
+    /** the node the bound trait is attached to (shortcut for `ctx.trait._node`) */
     node: SceneTree.Node;
+
+    /** the scene tree this script is running in */
     scene: SceneTree.SceneTree;
+
+    /** per-room voxel data */
     voxels: Voxels;
+
+    /** per-room physics world */
     physics: Physics;
+
+    /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
+
+    /** block registry, flat lookup tables for block type/state info */
     blocks: Blocks;
+
+    /** client information, safe to ! bang if env.client is true */
     client?: ClientContext;
+
+    /** server information, safe to ! bang if env.server is true */
     server?: ServerContext;
+
+    /** @internal reference to script instance for hook/RPC functions */
     _instance?: ScriptInstance;
+
+    /** @internal reference to scene tree runtime for hook/RPC functions */
     _runtime?: SceneTreeContext;
 };
 ```
@@ -1369,10 +1596,9 @@ export type ScriptDef = ScriptBody & {
     traitId: string;
     scriptId: string;
     key: string;
-    dependency: {
-        registry: 'scripts';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. lets the AST
+     *  rewrite wrap `script(...)` calls with `__addDeps(h, [...])`. */
+    dependency: { registry: 'scripts'; id: string };
 };
 ```
 
@@ -1856,11 +2082,16 @@ export function ensureModel(ctx: ScriptContext, id: string): void;
 
 ```ts
 export type LoadModelOptions = {
-    url: string | {
-        client: string;
-        server: string;
-    };
+    /** Fetch URL the engine will pull bytes from. Pass a single string
+     *  when both sides hit the same URL (the common case, public R2
+     *  URLs, blob: URLs in standalone client-only contexts). Pass an
+     *  object when client and server URLs differ (signed URLs with
+     *  per-side scopes, dev where the server reads disk and the client
+     *  goes via a dev-server route). */
+    url: string | { client: string; server: string };
+    /** Content hash; surfaces in the handle for cache-busting. */
     hash?: string;
+    /** Payload size in bytes; informational. */
     size?: number;
 };
 ```
@@ -1901,14 +2132,22 @@ export function releaseModel(ctx: ScriptContext, id: string): void;
 ```ts
 export type SoundHandle = {
     readonly soundId: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `soundId` when the author didn't supply one, so
+     *  readers can show `handle.name` unconditionally. */
     readonly name: string;
-    dependency: {
-        registry: 'sounds';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'sounds'; id: string };
     readonly src: string;
     readonly long: boolean;
+    /**
+     * clip duration in seconds, ffprobed at codegen and baked into the
+     * sidecar. zero on the placeholder handle that `sound()` returns when
+     * codegen hasn't run yet for this id; the barrel mutates it in place
+     * on the next pipeline pass.
+     */
     readonly duration: number;
+    /** bumped on HMR via registry.touch(). */
     version: number;
 };
 ```
@@ -1932,6 +2171,7 @@ export type SoundHandle = {
  * ```
  */
 export interface SoundHandleMap {
+
 }
 ```
 
@@ -1939,8 +2179,26 @@ export interface SoundHandleMap {
 
 ```ts
 export type SoundOptions = {
+    /** human-readable display name for editor UIs. falls back to the
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
+     *  key everywhere else. */
     name?: string;
+    /**
+     * source audio (.wav/.mp3/.ogg/.flac): either a string path relative to
+     * project root, or a module-relative `asset('./clip.ogg', import.meta.url)`
+     * ref. The `asset()` form lets engine builtins + 3rd-party deps ship audio
+     * alongside their modules — it resolves relative to the calling module
+     * wherever it's installed, and the pipeline reads the resolved path.
+     */
     src: string;
+    /**
+     * opt out of the audio atlas, ship + decode standalone. default false.
+     *
+     * use for long-form audio (background tracks, voice lines, ambient
+     * loops) where adding to the atlas would bloat the eager-at-boot
+     * fetch. first play of a long clip pays a fetch + decodeAudioData
+     * latency; subsequent plays are instant (decoded buffer is cached).
+     */
     long?: boolean;
 };
 ```
@@ -1972,14 +2230,20 @@ export function sound<const Id extends string>(id: Id, options: SoundOptions): I
 
 ```ts
 export type SpriteHandle = {
+    /** sprite string id (e.g. 'sword'). */
     spriteId: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `spriteId` when the author didn't supply one, so
+     *  readers can show `handle.name` unconditionally. */
     name: string;
-    dependency: {
-        registry: 'sprites';
-        id: string;
-    };
+    /** DepGraph dependency. */
+    dependency: { registry: 'sprites'; id: string };
+    /** source declarations, post-URL-normalization. uv rects + sizes
+     *  live in the atlas JSON sidecar, fetched at runtime. */
     src: NormalizedImageSource | NormalizedImageSource[];
+    /** atlas padding (gutter pixels). */
     padding: number;
+    /** mip generation flag. */
     mipmap: boolean;
 };
 ```
@@ -1988,9 +2252,28 @@ export type SpriteHandle = {
 
 ```ts
 export type SpriteOptions = {
+    /** human-readable display name for editor UIs. falls back to the
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
+     *  key everywhere else. */
     name?: string;
+
+    /**
+     * source image(s). single entry for static sprites, array for
+     * flipbooks (one entry per frame, frames mixed freely between
+     * paths/URLs and draw descriptors).
+     *
+     * URLs are normalized to `.href` at registration, same convention
+     * as `blockTexture()`. The URL form lets 3rd-party packs ship sprite
+     * pixels bundled alongside their modules (vite rewrites
+     * `new URL(...)` in the client bundle; the asset pipeline resolves
+     * `file://` URLs via `fileURLToPath` at bake time).
+     */
     src: ImageSource | ImageSource[];
+
+    /** gutter pixels in the atlas to avoid bleed at mip levels. default 1. */
     padding?: number;
+    /** generate mips for this sprite. default true. set false for crisp
+     *  pixel-art look (typical for particles). */
     mipmap?: boolean;
 };
 ```
@@ -2188,14 +2471,15 @@ export type PrefabType = 'voxels' | 'nodes' | 'composite';
 ```ts
 export type PrefabDef<Args = unknown> = {
     id: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `id` when the author didn't supply one. */
     name: string;
     type: PrefabType;
     deps: ReadonlyArray<DepHandle>;
     argsSchema: Schema;
+    /** default args value, used when callers omit args. `{}` when args isn't set. */
     defaultArgs: Args;
-    node?: {
-        realm?: Realm;
-    };
+    node?: { realm?: Realm };
     apply: (ctx: PrefabApplyContext, args: Args) => void;
 };
 ```
@@ -2205,17 +2489,16 @@ export type PrefabDef<Args = unknown> = {
 ```ts
 export type PrefabHandle<Args = unknown> = {
     readonly id: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `id` when the author didn't supply one. */
     readonly name: string;
-    dependency: {
-        registry: 'prefabs';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'prefabs'; id: string };
     readonly type: PrefabType;
     readonly argsSchema: Schema;
+    /** default args value, read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
     readonly defaultArgs: Args;
-    readonly node: {
-        realm?: Realm;
-    } | undefined;
+    readonly node: { realm?: Realm } | undefined;
     readonly __args: Args;
 };
 ```
@@ -2224,17 +2507,27 @@ export type PrefabHandle<Args = unknown> = {
 
 ```ts
 export type PrefabOptions<T extends PrefabType, S extends Schema> = {
+    /** human-readable display name for editor UIs (prefab picker,
+     *  inventory). falls back to the string id when omitted. */
     name?: string;
+    /** what this prefab produces, voxels, nodes, or both. required. */
     type: T;
+    /**
+     * producer handles whose changes trigger re-instantiation in edit mode.
+     * accepts anything with a DepGraph `dependency` stamp, scene, model,
+     * block, trait, command, prefab handles, etc. usually injected by the
+     * AST rewriter from identifiers the body closes over; list manually
+     * for procedural cases the rewriter can't see.
+     */
     deps?: ReadonlyArray<DepHandle>;
-    args?: {
-        schema: S;
-        default: SchemaType<S>;
-    };
+    /**
+     * args schema + default value. `default` is required when present,
+     * it's used for caller-omitted args, inspector pre-fill, and preview rendering.
+     */
+    args?: { schema: S; default: SchemaType<S> };
     fn?: (ctx: PrefabApplyContext<T>, args: SchemaType<S>) => void;
-    node?: {
-        realm?: Realm;
-    };
+    /** authored anchor defaults, applied to the node createPrefab returns when the caller doesn't override. */
+    node?: { realm?: Realm };
 };
 ```
 
@@ -2279,10 +2572,15 @@ Define block types, read and write the voxel grid, and react to changes.
  * Values stride is 3 for translation/scale, 4 for rotation (xyzw quats).
  */
 export type ClipChannel = {
+    /** Target node by name within the rig (matches a node in `ModelHandle.nodes`). */
     nodeName: string;
+    /** Which transform field this channel drives. */
     property: ClipChannelProperty;
+    /** glTF interpolation mode. CUBICSPLINE keys are 3× wider (in/value/out). */
     interpolation: 'LINEAR' | 'STEP' | 'CUBICSPLINE';
+    /** Keyframe times in seconds. */
     times: Float32Array;
+    /** Keyframe values, packed; stride determined by `property`. */
     values: Float32Array;
 };
 ```
@@ -2303,6 +2601,7 @@ export type ClipChannelProperty = 'translation' | 'rotation' | 'scale';
  * consumed by the animator via `Resources.modelClipChannels(resources, clip)`.
  */
 export type ClipChannels = {
+    /** Total clip length in seconds (max keyframe time across channels). */
     duration: number;
     channels: ClipChannel[];
 };
@@ -2354,32 +2653,69 @@ export type MeshId = {
  *   - MeshNames: union of all mesh names
  *   - ClipNames: union of all animation clip names
  */
-export type ModelHandle<NodeNames extends string = string, MeshNames extends string = string, ClipNames extends string = string> = {
+export type ModelHandle<
+    NodeNames extends string = string,
+    MeshNames extends string = string,
+    ClipNames extends string = string,
+> = {
+    /** User-chosen id from `model('wizard', { src })`. Stable handle. */
     readonly modelId: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
-    dependency: {
-        registry: 'models';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'models'; id: string };
+    /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
+    /**
+     * Per-side public URLs for the packed payload, codegen'd as plain
+     * strings pointing at `/generated/models/<id>.<hash>.<side>.bin` (the cli writes
+     * the bins under `public/generated/models/`). Engine picks the right side and
+     * fetches; user code doesn't touch it. Empty strings on the empty
+     * handle.
+     */
     readonly bin: {
         readonly client: string;
         readonly server: string;
     };
+    /**
+     * Detached Node tree, codegen'd from the gltf hierarchy. Carries
+     * TransformTrait values (baked from gltf node TRS) and MeshTrait with
+     * meshIds wired to the right structs. Clone with cloneNode() before use;
+     * treat as immutable by convention.
+     */
     readonly scene: Node;
+    /**
+     * Bind-pose axis-aligned bounding box in root-local space, union of every
+     * mesh's AABB transformed by its node's accumulated TRS chain to the scene
+     * root. Static (computed at codegen). Use for spawn/framing/coarse colliders;
+     * animation can push verts outside this box at runtime.
+     *
+     * math `Box3`: `[minX, minY, minZ, maxX, maxY, maxZ]`. Empty handle:
+     * zero box at origin.
+     */
     readonly aabb: Box3;
-    readonly nodes: {
-        readonly [K in NodeNames]: Node;
-    };
-    readonly meshes: {
-        readonly [K in MeshNames]: {
-            readonly id: MeshId;
-            readonly aabb: Box3;
-        };
-    };
-    readonly animations: {
-        readonly [K in ClipNames]: ClipDef;
-    };
+    /**
+     * Flat-name index of every named gltf node (mesh-bearing or not).
+     * Each value is a by-reference pointer into `scene`, clone with
+     * cloneNode() to materialize, or reference by name via `model(handle, nodeName)`.
+     */
+    readonly nodes: { readonly [K in NodeNames]: Node };
+    /**
+     * Flat-name index for mesh-surgery: `meshTrait.meshId = wizard.meshes.HatA.id`.
+     * Each entry also carries the mesh's bind-pose local-space AABB
+     * (math `Box3`), handy for mesh-level framing or coarse colliders
+     * without paying for the runtime payload fetch.
+     */
+    readonly meshes: { readonly [K in MeshNames]: { readonly id: MeshId; readonly aabb: Box3 } };
+    /** Clip refs (singletons). Pass directly to Animation.clip(). */
+    readonly animations: { readonly [K in ClipNames]: ClipDef };
+    /**
+     * monotonic counter bumped when this handle's payload reloads. starts
+     * at 0. let prefab() callers list the handle in `deps` to re-trigger
+     * preview at edit time when the model changes. mutated by the engine;
+     * user code treats it as read-only.
+     */
     version: number;
 };
 ```
@@ -2403,6 +2739,7 @@ export type ModelHandle<NodeNames extends string = string, MeshNames extends str
  * ```
  */
 export interface ModelHandleMap {
+
 }
 ```
 
@@ -2410,7 +2747,16 @@ export interface ModelHandleMap {
 
 ```ts
 export type ModelOptions = {
+    /** human-readable display name for editor UIs (inventory, picker).
+     *  falls back to the string id when omitted. */
     name?: string;
+    /**
+     * source .gltf/.glb: either a string path relative to project root, or a
+     * module-relative `asset('./model.glb', import.meta.url)` ref. The `asset()`
+     * form lets 3rd-party packs ship gltf alongside their modules — it resolves
+     * relative to the calling module wherever it's installed, and the pipeline
+     * reads the resolved path.
+     */
     src: string;
 };
 ```
@@ -2452,14 +2798,7 @@ export const baseAvatar;
 
 ```ts
 /** [minX, minY, minZ, maxX, maxY, maxZ] in block-local [0,1]³. */
-export type AABB = readonly [
-    number,
-    number,
-    number,
-    number,
-    number,
-    number
-];
+export type AABB = readonly [number, number, number, number, number, number];
 ```
 
 #### `BlockShape`
@@ -2489,14 +2828,7 @@ export type BlockShapeCube = {
 
 ```ts
 /** [minX, minY, minZ, maxX, maxY, maxZ] in block-local [0,1]³. */
-export type AABB = readonly [
-    number,
-    number,
-    number,
-    number,
-    number,
-    number
-];
+export type AABB = readonly [number, number, number, number, number, number];
 ```
 
 #### `blockShape.BlockShapeCube`
@@ -2910,13 +3242,14 @@ export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'mater
     translucent?: boolean;
     levels?: number;
     fluidGroup?: string;
+    /** screen tint applied when the camera eye sits inside the filled band. */
     tint?: ScreenTintSpec;
+    /** scales the surface for every level. 1 = full cube at max level; lower
+     * (e.g. 15/16) gives a visible meniscus from above. defaults to 1. */
     maxHeight?: number;
-    lightEmission?: [
-        number,
-        number,
-        number
-    ];
+    /** per-channel light output (0..15), set for lava-style glow. */
+    lightEmission?: [number, number, number];
+    /** mark the texture as self-lit so it stays bright in shadow. */
     emissive?: boolean;
 };
 ```
@@ -2925,7 +3258,7 @@ export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'mater
 
 ```ts
 export function cube(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: CubePresetOptions);
 ```
 
@@ -2933,7 +3266,7 @@ export function cube(id: string, {
 
 ```ts
 export function column(id: string, {
-    textures, ...options
+    textures, ...options;
 }: ColumnPresetOptions);
 ```
 
@@ -2941,7 +3274,7 @@ export function column(id: string, {
 
 ```ts
 export function stairs(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: StairsPresetOptions);
 ```
 
@@ -2949,7 +3282,7 @@ export function stairs(id: string, {
 
 ```ts
 export function slab(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: SlabPresetOptions);
 ```
 
@@ -2957,7 +3290,7 @@ export function slab(id: string, {
 
 ```ts
 export function plant(id: string, {
-    textures: texture, ...options
+    textures: texture, ...options;
 }: PlantPresetOptions);
 ```
 
@@ -2965,7 +3298,7 @@ export function plant(id: string, {
 
 ```ts
 export function leaves(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: LeavesPresetOptions);
 ```
 
@@ -2973,7 +3306,7 @@ export function leaves(id: string, {
 
 ```ts
 export function ladder(id: string, {
-    textures: texture, ...options
+    textures: texture, ...options;
 }: LadderPresetOptions);
 ```
 
@@ -2993,7 +3326,9 @@ export const LAVA_DEFAULT_TINT: ScreenTintSpec;
 
 ```ts
 export type LiquidHandle = BlockHandle & {
+    /** state key for a specific level (1..levels). returns the default for stateless liquids. */
     level(n: number): string;
+    /** state key for the highest level (full surface height). */
     max(): string;
 };
 ```
@@ -3002,7 +3337,7 @@ export type LiquidHandle = BlockHandle & {
 
 ```ts
 export function liquid(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: LiquidPresetOptions): LiquidHandle;
 ```
 
@@ -3010,7 +3345,7 @@ export function liquid(id: string, {
 
 ```ts
 export function fence(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: FencePresetOptions);
 ```
 
@@ -3018,7 +3353,7 @@ export function fence(id: string, {
 
 ```ts
 export function pane(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: PanePresetOptions);
 ```
 
@@ -3026,7 +3361,7 @@ export function pane(id: string, {
 
 ```ts
 export function carpet(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: CarpetPresetOptions);
 ```
 
@@ -3034,7 +3369,7 @@ export function carpet(id: string, {
 
 ```ts
 export function trapdoor(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: TrapdoorPresetOptions);
 ```
 
@@ -3042,7 +3377,7 @@ export function trapdoor(id: string, {
 
 ```ts
 export function plate(id: string, {
-    textures: texture, ...options
+    textures: texture, ...options;
 }: PlatePresetOptions);
 ```
 
@@ -3050,7 +3385,7 @@ export function plate(id: string, {
 
 ```ts
 export function wall(id: string, {
-    textures: texturesInput, ...options
+    textures: texturesInput, ...options;
 }: WallPresetOptions);
 ```
 
@@ -3058,7 +3393,7 @@ export function wall(id: string, {
 
 ```ts
 export function torch(id: string, {
-    textures: texture, ...options
+    textures: texture, ...options;
 }: TorchPresetOptions);
 ```
 
@@ -3066,7 +3401,7 @@ export function torch(id: string, {
 
 ```ts
 export function door(id: string, {
-    textures, ...options
+    textures, ...options;
 }: DoorPresetOptions);
 ```
 
@@ -3106,58 +3441,334 @@ export function setDoorOpen(voxels: Voxels, x: number, y: number, z: number, ope
 
 ```ts
 export type BlockRegistryData = {
+    /** total number of global state ids across all blocks (including air + missing). */
     totalStates: number;
+    /** number of registered block types (not counting the implicit missing sentinel). */
     blockCount: number;
+
+    /** block defs in registration order. indexed by dense block type index. */
     defs: BlockDef[];
+    /** block string id → def. */
     idToDef: Map<string, BlockDef>;
+    /** block handles in registration order. */
     handles: BlockHandle[];
+    /** block string id → handle. */
     idToHandle: Map<string, BlockHandle>;
+
+    /** global state id → dense block type index. */
     stateToBlockIndex: Uint16Array;
+    /** global state id → local state index within that block. */
     stateToLocalIndex: Uint16Array;
+
+    /**
+     * global state id → model type (MODEL_NONE=0, MODEL_CUBE=1, MODEL_MESH=2).
+     * used to branch in the mesher/raycast/physics without touching any object.
+     */
     modelType: Uint8Array;
+
+    // ── cube-only data ──────────────────────────────────────────────
+
+    /**
+     * per-state cube texture indices. 6 entries per state, stride=6.
+     * face order: top(0), bottom(1), north(2), south(3), east(4), west(5).
+     * indexed as stateId * 6 + faceIdx. only meaningful for MODEL_CUBE states
+     * but allocated for all states (unused entries are 0).
+     */
     cubeTexIndices: Uint16Array;
+
+    /**
+     * per-state cube face UVs. 48 entries per state (6 faces × 4 corners × 2
+     * components), stride=48. baked from the canonical FACE_UVS pattern with
+     * per-face rotation applied at build time. mesher reads these directly
+     * instead of the global FACE_UVS constant, so per-face rotation costs
+     * nothing in the hot loop. values are 0 or 1.
+     *
+     * face-order indexing matches the mesher's emit order (east, west, up,
+     * down, south, north, driven by FACE_TEX_OFFSET).
+     */
     cubeFaceUVs: Uint8Array;
+
+    // ── mesh-only data (dense, indexed by meshId) ───────────────────
+
+    /**
+     * global state id → dense mesh index (0 = not a mesh, 1+ = valid).
+     * only non-zero for MODEL_MESH states.
+     */
     meshId: Uint16Array;
+    /** dense quad arrays. index 0 is unused (sentinel). */
     meshQuads: BlockQuad[][];
+    /** dense pre-resolved texture indices per quad. parallel to meshQuads. */
     meshTexIndices: Uint16Array[];
+    /**
+     * dense per-quad material (MaterialType enum). parallel to meshQuads.
+     * always allocated, quads without explicit material get the block's default.
+     */
     meshQuadMaterials: Uint8Array[];
+
+    /**
+     * per-quad shape tag (SHAPE_FLAT..SHAPE_IRREGULAR) routing the mesher
+     * into the matching AO/smooth-light emit path. parallel to meshQuads.
+     */
     meshQuadShape: Uint8Array[];
+    /**
+     * per-quad primary face direction (0..5 mesher face order, or
+     * FACE_DIR_NONE=0xff for IRREGULAR). populated for ALIGNED_FULL,
+     * ALIGNED_PARTIAL, PARALLEL, NON_PARALLEL. parallel to meshQuads.
+     */
     meshQuadFaceDir: Uint8Array[];
+    /**
+     * per-quad cull-face direction (0..5 mesher face order, or
+     * FACE_DIR_NONE=0xff for "no cull face"). pre-resolved from the
+     * `cullFace?: 'east'|'west'|'up'|'down'|'south'|'north'` BlockQuad
+     * field so the mesher hot loop reads one Uint8 instead of a
+     * string-keyed Record lookup per quad. parallel to meshQuads.
+     */
     meshQuadCullFaceDir: Uint8Array[];
+    /**
+     * per-quad uniform inset depth ∈ [0,1] along the face direction.
+     * 0 = on the face plane (offset face data), 1 = on the opposite face
+     * plane (non-offset face data). meaningful for ALIGNED_FULL,
+     * ALIGNED_PARTIAL, PARALLEL. unused for NON_PARALLEL/IRREGULAR. parallel
+     * to meshQuads.
+     */
     meshQuadDepth: Float32Array[];
+    /**
+     * per-vertex inset depth, only populated for NON_PARALLEL quads.
+     * length = quads.length * 4. zero-filled for other shapes (cheap; mesh
+     * models are small).
+     */
     meshQuadVertDepth: Float32Array[];
+    /**
+     * per-vertex normal, only populated for IRREGULAR quads. length =
+     * quads.length * 4 * 3. zero-filled for other shapes. when a BlockQuad
+     * doesn't supply per-vertex normals we replicate the face normal.
+     */
     meshQuadVertNormal: Float32Array[];
+
+    /**
+     * per-vertex (u, w) coords on the quad's chosen face plane, in [0,1].
+     * length = quads.length * 8 (4 corners × 2 floats). populated for
+     * ALIGNED_FULL / ALIGNED_PARTIAL / PARALLEL / NON_PARALLEL. zero for
+     * FLAT and IRREGULAR (IRREGULAR uses meshQuadCornerPos).
+     *
+     * relight reads these to bilerp the 4 face-corner light samples without
+     * re-deriving projections from BlockQuad.verts.
+     */
     meshQuadCornerUV: Float32Array[];
+    /**
+     * IRREGULAR only: per-vertex 3D position within the block ([0,1]³).
+     * length = quads.length * 12 (4 corners × 3 floats). zero-filled for
+     * other shapes.
+     *
+     * sodium's irregular blend samples one face cache per axis. each axis
+     * derives its bilerp (u, w) and depth from the same 3D position:
+     * - x-axis: u = vz, w = vy, depth = nx≥0 ? 1-vx : vx
+     * - y-axis: u = vx, w = vz, depth = ny≥0 ? 1-vy : vy
+     * - z-axis: u = vx, w = vy, depth = nz≥0 ? 1-vz : vz
+     * Storing 12 floats instead of 24 (the old per-axis-UV layout was a
+     * redundant copy of the same 3 components).
+     */
     meshQuadCornerPos: Float32Array[];
+    /**
+     * IRREGULAR only: per-vertex (n.x², n.y², n.z²) weights summing to 1.
+     * length = quads.length * 12 (4 corners × 3 floats). zero-filled for
+     * other shapes. pre-squaring saves a multiply per vert per relight.
+     */
     meshQuadCornerNormSq: Float32Array[];
+
+    /**
+     * per-quad face normal (nx, ny, nz). length = quads.length * 3. flattens
+     * `BlockQuad.normal` into a dense per-mesh table so the mesher hot loop
+     * reads typed-array entries instead of indexing into the `BlockQuad`
+     * object array. parallel to meshQuads. populated for all mesh quads.
+     */
     meshQuadNormal: Float32Array[];
+
+    /**
+     * per-vert atlas UV (u, v). length = quads.length * 8 (4 corners × 2).
+     * flattens `BlockQuad.uvs` into a dense per-mesh table; when a quad
+     * leaves `uvs` undefined we bake in the default
+     * `[0,1] [1,1] [1,0] [0,0]` pattern. parallel to meshQuads.
+     */
     meshQuadUVs: Float32Array[];
+
+    /**
+     * per-vert block-local position (x, y, z) ∈ [0,1]³. length =
+     * quads.length * 12 (4 corners × 3). flattens `BlockQuad.verts` so the
+     * hot loop emits world-space quad coords from typed-array reads instead
+     * of dereferencing the BlockQuad object. parallel to meshQuads.
+     */
     meshQuadVerts: Float32Array[];
+
+    // ── collider data ──────────────────────────────────────────────
+
+    /**
+     * global state id → dense collider index (0 = cube fast path, 1+ = valid).
+     * same indirection pattern as meshId. 0 means unit box (COLLIDER_CUBE),
+     * non-zero indexes into colliderShapes[].
+     */
     colliderId: Uint16Array;
+
+    /**
+     * dense pre-built crashcat shapes. index 0 is unused (sentinel).
+     * indexed by colliderId values (1-based). derived from the per-shape
+     * data below at registry freeze; this is the source of truth for the
+     * KCC + rigid-body narrow-phase.
+     */
     colliderShapes: Shape[];
+
+    /**
+     * dense per-shape kind, indexed by colliderId. index 0 holds SHAPE_CUBE
+     * as a sentinel, collider-id 0 is the cube fast path and never reads
+     * shapeAabbs. consumers (e.g. VCC's analytical sweep) read this to
+     * dispatch.
+     */
     shapeKind: Uint8Array;
+
+    /**
+     * dense per-shape AABB list (block-local [0,1]³). populated for
+     * shapeKind=SHAPE_AABBS; empty array for cube entries. indexed by
+     * colliderId.
+     */
     shapeAabbs: AABB[][];
+
+    // ── per-state typed arrays (dense, indexed by stateId) ──────────
+
+    /**
+     * global state id → cull type (CullType enum, uint8).
+     * NONE=0, SOLID=1, SELF=2, PARTIAL=3.
+     */
     cull: Uint8Array;
+    /**
+     * global state id → dense block type index (Uint16).
+     * all states of the same block() share the same blockTypeId.
+     * used by the mesher for self-cull comparisons.
+     */
     blockTypeId: Uint16Array;
+    /**
+     * global state id → material type (MaterialType enum, uint8).
+     * OPAQUE=0, TRANSLUCENT=1. controls which render pass geometry goes to.
+     */
     material: Uint8Array;
+    /**
+     * global state id → vertex animation type (encoded as uint8).
+     * 0 = none, 1 = wave, 2 = sway.
+     */
     vertexAnimation: Uint8Array;
+
+    /**
+     * global state id → packed light emission (0RGB in uint16).
+     * 0 for non-emitting blocks. channels in bits 11..8, 7..4, 3..0.
+     */
     lightEmission: Uint16Array;
+
+    /**
+     * global state id → light opacity (0-15 in uint8).
+     * 0 = transparent to light, 15 = fully opaque.
+     */
     lightOpacity: Uint8Array;
+
+    /**
+     * global state id → emissive flag (0 or 1 in uint8).
+     * 1 = renders at full brightness regardless of surrounding light.
+     */
     emissive: Uint8Array;
+
+    /**
+     * global state id → bitmask of block flags (BLOCK_FLAG_COLLISION, BLOCK_FLAG_SELECTION, etc.).
+     * air/missing/invisible blocks have 0. use bitwise AND to test.
+     */
     flags: Uint32Array;
+
+    /**
+     * global state id → friction coefficient. multiplied with per-body
+     * friction (rigid body / aabb body) to produce contact friction, and
+     * with the vcc character controller's `groundDragRate` for grounded
+     * motion (values < 1 produce slippery surfaces like ice; values > 1
+     * produce grippy surfaces like mud). defaults to 1.0 (no-op multiplier).
+     */
     friction: Float32Array;
+
+    /**
+     * global state id → restitution (bounciness) coefficient. multiplied
+     * with per-body restitution to produce contact restitution. defaults
+     * to 0 (no bounce, multiplies any per-body restitution down to zero,
+     * matching today's behaviour for non-restitutive blocks).
+     */
     restitution: Float32Array;
+
+    /**
+     * global state id → liquid viscosity (0..1). only meaningful when
+     * BLOCK_FLAG_LIQUID is set. drives swim drag in the character controller.
+     */
     liquidViscosity: Float32Array;
+
+    /**
+     * global state id → surface height (0..1). only meaningful for
+     * MODEL_LIQUID states; the mesher reads this to position the top quad
+     * and clip the side quads. 1.0 for everything else (full block).
+     */
     surfaceHeight: Float32Array;
+
+    /**
+     * global state id → fluid group id (uint16). 0 = not a liquid. all states
+     * of a single liquid block share the same group; states from different
+     * liquid blocks with the same group string also share it. used by the
+     * mesher to cull faces between same-fluid neighbours when surface height
+     * allows.
+     */
     fluidGroup: Uint16Array;
+
+    /**
+     * global state id → screen tint (r,g,b,a) packed as 4 floats per state.
+     * indexed as stateId * 4. a (opacity) === 0 means "no tint", the
+     * fast path on the per-frame lookup. read by the client renderer when
+     * the camera sits inside a block; never touched server-side.
+     */
     screenTint: Float32Array;
+
+    /**
+     * global state id → sounds config (footstep / dig / break / place).
+     * `undefined` for air, missing, and blocks without a sounds option.
+     * common case: every state of a block shares the same ref (static
+     * `sounds: preset` declarations); per-state authors get distinct refs.
+     * read on the footstep hot path via `cc.groundBlockState`.
+     */
     sounds: (BlockSoundConfig | undefined)[];
+
+    /**
+     * global state id → particles config (dust / build / break slots).
+     * `undefined` for `particles: false`, air, missing, and blocks
+     * without a cube model + no author-supplied slots. default dust is
+     * derived once per block (from default state's model) and shared
+     * across every state, see `deriveBlockDust` in blocks.ts.
+     */
     particles: (BlockParticleConfig | undefined)[];
+
+    /** global state id → string key (e.g. "oak_log[axis=y]"). air → "air", missing → "". */
     stateToKey: string[];
+    /** string key → global state id. */
     keyToState: Map<string, number>;
+
+    /** all unique texture layer entries (including animation frames). */
     textures: string[];
+    /** texture id → base atlas layer index. built once at freeze time. */
     textureIndex: Map<string, number>;
+
+    /**
+     * per-layer animation metadata. 4 floats per layer, stride=4.
+     * layout: [frameCount, fps, interpolate (0 or 1), _pad].
+     * indexed as layerIdx * 4. for non-animated layers, frameCount=1.
+     * the shader uses this to compute the actual layer to sample.
+     */
     texAnimData: Float32Array;
+
+    /**
+     * per-layer alpha-cutout flag (1 = used by a TRANSPARENT face/quad). built
+     * at freeze time by scanning every cube face and mesh quad. consumed by the
+     * mip-pyramid builder, which gives cutout layers coverage-preserving alpha
+     * so foliage/glass keeps its silhouette at distance instead of eroding.
+     */
     textureCutout: Uint8Array;
 };
 ```
@@ -3346,7 +3957,13 @@ export function int<const Min extends number, const Max extends number>(min: Min
 
 ```ts
 /** infer the ts type for a single property value. */
-export type PropValue<P extends PropDef> = P extends BoolPropDef ? boolean : P extends EnumPropDef<infer V> ? V[number] : P extends IntPropDef ? number : never;
+export type PropValue<P extends PropDef> = P extends BoolPropDef
+    ? boolean
+    : P extends EnumPropDef<infer V>
+      ? V[number]
+      : P extends IntPropDef
+        ? number
+        : never;
 ```
 
 #### `blockState.PropsValues`
@@ -3362,12 +3979,51 @@ export type PropsValues<P extends PropsDef> = {
 
 ```ts
 export type BlockStateDef<P extends PropsDef = PropsDef> = {
+    /** the property definitions. */
     readonly props: P;
+
+    /** total number of states (product of all property cardinalities). */
     readonly totalStates: number;
+
+    /**
+     * pack property values into a local state index (0..totalStates-1).
+     * all properties must be provided. O(n) where n = property count.
+     */
     encode(values: PropsValues<P>): number;
+
+    /**
+     * unpack a local state index into property values.
+     * O(n) where n = property count.
+     */
     decode(index: number): PropsValues<P>;
+
+    /**
+     * extract a single property value from a local state index. O(1).
+     */
     get<K extends string & keyof P>(index: number, prop: K): PropValue<P[K]>;
+
+    /**
+     * return a new local state index with one property changed. O(1).
+     */
     with<K extends string & keyof P>(index: number, prop: K, value: PropValue<P[K]>): number;
+
+    /**
+     * the stride (place-value multiplier) of a single property, the
+     * amount the encoded local index changes when this prop's value
+     * advances by 1. for an all-bool schema the strides are 1, 2, 4, 8…
+     * (a bitmask); for mixed schemas they're a mixed-radix sequence.
+     *
+     * use to inline encode in a hot path without allocating a props
+     * object: capture each stride at module scope and sum the
+     * contributions positionally. O(1).
+     *
+     * ```ts
+     * const N = FenceState.stride('north');
+     * const E = FenceState.stride('east');
+     * // hot path:
+     * const localIdx = (north ? N : 0) + (east ? E : 0) + ...;
+     * ```
+     */
     stride<K extends string & keyof P>(prop: K): number;
 };
 ```
@@ -3399,22 +4055,59 @@ export function create<const P extends PropsDef>(props: P): BlockStateDef<P>;
 
 ```ts
 export type BlockHandle<P extends PropsDef = PropsDef> = {
+    /** block string id (e.g. 'oak_log') */
     readonly id: string;
+
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `id` when the author didn't supply one. */
     readonly name: string;
-    dependency: {
-        registry: 'blocks';
-        id: string;
-    };
+
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'blocks'; id: string };
+
+    /** the block's state schema */
     readonly states: BlockStateDef<P>;
+
+    /** the block def */
     readonly _def: BlockDef<P>;
+
+    /** dense block type index. set by registry builder at freeze time. */
     _index: number;
+
+    /** first global state id. set by registry builder at freeze time. */
     _baseStateId: number;
+
+    /** total number of states for this block. */
     readonly totalStates: number;
+
+    /**
+     * bitmask of hooks this block has (intrinsic + any observer handlers
+     * registered at module scope). populated by the registry builder at
+     * freeze time. drives the fast-path filter in the hook dispatcher.
+     * see BlockHooks enum in block-hooks.ts.
+     */
     _hooks: number;
+
+    /** get the global state id for specific property values. */
     stateId(props: PropsValues<P>): number;
+
+    /**
+     * lift a pre-computed local state index (0..totalStates-1) into a
+     * global state id by adding `_baseStateId`. lets a hot path encode
+     * the local index inline (e.g. with `states.stride()`) and skip the
+     * props-object allocation that `stateId()` requires.
+     */
     stateIdLocal(localIdx: number): number;
+
+    /** get the default global state id. driven by the `defaultState`
+     *  option (falls back to local index 0). */
     defaultId(): number;
+
+    /** get the stable string key for specific property values (e.g. "oak_log[axis=y]"). */
     stateKey(props: PropsValues<P>): string;
+
+    /** get the stable string key for the default state. driven by the
+     *  `defaultState` option (falls back to local index 0). */
     defaultKey(): string;
 };
 ```
@@ -3429,47 +4122,278 @@ export type BlockModel = CubeModel | CustomModel;
 
 ```ts
 export type BlockOptions<P extends PropsDef = PropsDef> = {
+    /** human-readable display name for editor UIs (inventory, hotbar,
+     *  inspectors). falls back to the string id when omitted. */
     name?: string;
+
+    /** block state schema. omit for stateless blocks. */
     states?: BlockStateDef<P>;
+
+    /**
+     * authoritative default state, drives `defaultId()`/`defaultKey()`, the
+     * inventory icon, and any caller that places this block without specifying
+     * props. when omitted, the default is the first encoded state (local index
+     * 0), which can look broken for neighbour-driven shapes (standalone
+     * fence/pane post renders invisible) or for level-encoded blocks (water at
+     * level=1 is a sliver). neighbour-aware blocks correct themselves via
+     * `onNeighbourUpdate` after placement regardless of the default.
+     */
     defaultState?: PropsValues<P>;
+
+    /**
+     * model function. receives decoded props, returns geometry description.
+     * called once per state at freeze time, cached for zero-cost meshing.
+     *
+     * omit for invisible blocks (air).
+     */
     model?: (props: PropsValues<P>) => BlockModel;
+
+    /**
+     * cull type, controls face culling between adjacent blocks.
+     * defaults to CullType.SOLID. can be a static value or a function
+     * of props for per-state cull behavior (called once per state at
+     * freeze time).
+     */
     cull?: CullType | ((props: PropsValues<P>) => CullType);
+
+    /**
+     * material type, controls which render pass geometry goes to.
+     * defaults to MaterialType.OPAQUE. can be a static value or a
+     * function of props for per-state material (called once per state
+     * at freeze time). for per-tri material on custom models, set
+     * material on individual BlockQuad instead.
+     */
     material?: MaterialType | ((props: PropsValues<P>) => MaterialType);
+
+    /**
+     * vertex animation type. the shader applies displacement based on
+     * this. can be a static value or a function of props.
+     * @default VertexAnimation.NONE
+     */
     vertexAnimation?: VertexAnimation | ((props: PropsValues<P>) => VertexAnimation);
-    lightEmission?: [
-        number,
-        number,
-        number
-    ] | ((props: PropsValues<P>) => [
-        number,
-        number,
-        number
-    ]);
+
+    /**
+     * rgb light emission, each channel 0-15. blocks with this set act
+     * as light sources for flood fill lighting. can be state-dependent
+     * (e.g. torch on/off). omit for non-emitters.
+     */
+    lightEmission?: [number, number, number] | ((props: PropsValues<P>) => [number, number, number]);
+
+    /**
+     * light opacity: how much light is absorbed per step through this
+     * block (0-15). 0 = fully transparent to light (air, glass).
+     * 15 = fully opaque (stone). can be state-dependent.
+     * default is based on cull type:
+     *   SOLID=15, SELF=1, PARTIAL=0, NONE=0.
+     */
     lightOpacity?: number | ((props: PropsValues<P>) => number);
+
+    /**
+     * emissive: renders at full brightness regardless of surrounding
+     * light. useful for lamp blocks whose surfaces should glow.
+     * can be state-dependent.
+     * @default false
+     */
     emissive?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
+     * collision: does this block participate in physics collision?
+     * when false, dynamic bodies (players, projectiles) pass through.
+     * can be state-dependent.
+     * @default true
+     */
     collision?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
+     * selection: can this block be targeted by raycasts for interaction?
+     * (mining, placing, editor picking). when false, selection rays
+     * pass through. can be state-dependent.
+     * @default true
+     */
     selection?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
+     * physics/selection shape for this block.
+     *
+     * omit → unit box collider (the default for all blocks, fast path).
+     * BlockShape → use this shape for collision and selection.
+     *
+     * the shape is in block-local [0,1] space. at runtime, translated to
+     * the voxel's world position. use blockShape.rotateY() for rotation
+     * data at define time.
+     *
+     * can be state-dependent: (props) => BlockShape
+     */
     shape?: BlockShape | ((props: PropsValues<P>) => BlockShape);
+
+    /**
+     * climbable: when true, the character controller treats this block as a
+     * ladder, gravity is bypassed inside it, jump ascends, crouch descends.
+     * climbable blocks usually want `collision: false` so the character can
+     * actually enter them. defaults to false.
+     * @default false
+     */
     climbable?: boolean | ((props: PropsValues<P>) => boolean);
-    liquid?: {
-        viscosity: number;
-    } | null | ((props: PropsValues<P>) => {
-        viscosity: number;
-    } | null);
+
+    /**
+     * liquid: when set, the character swims while submerged in this block,
+     * gravity is replaced by a small downward sink, drag scales with
+     * `viscosity` (0..1), and jump/crouch swim up/down. liquids should usually
+     * have `collision: false`.
+     * @default undefined (not a liquid)
+     */
+    liquid?: { viscosity: number } | null | ((props: PropsValues<P>) => { viscosity: number } | null);
+
+    /**
+     * pathfindable: may a navigating agent (see core/nav voxel pathfinding)
+     * occupy/pass through this cell? defaults to the inverse of `collision`, so
+     * normal blocks need no annotation. override to mark colliding-but-passable
+     * cells (open doors) or passable-but-avoided cells (hazards). can be
+     * state-dependent.
+     * @default !collision
+     */
     pathfindable?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
+     * friction coefficient. multiplied with the body's per-rigid-body /
+     * per-aabb-body friction to produce the effective contact friction
+     * (and with the vcc character controller's `groundDragRate` when the
+     * character stands on this block). 0 = perfect ice regardless of
+     * body; ~0.1 = slippery; ~2.0 = sticky.
+     * @default 1.0
+     */
     friction?: number | ((props: PropsValues<P>) => number);
+
+    /**
+     * restitution (bounciness) coefficient. multiplied with the body's
+     * per-rigid-body / per-aabb-body restitution to produce the effective
+     * contact restitution. 0 = no bounce regardless of body; 1 = elastic.
+     * @default 0
+     */
     restitution?: number | ((props: PropsValues<P>) => number);
+
+    /**
+     * sneak-guard: when crouched, the character anchors to this block and
+     * cannot walk off its edges. defaults to true for any collidable block.
+     * set false for blocks the player should be able to slide off even while
+     * crouched (ice, conveyor belts).
+     * defaults to true for collidable blocks, false otherwise
+     */
     sneakGuard?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
+     * extra bits OR'd into the block's flags bitmask. used to mark
+     * connection groups (BLOCK_FLAG_FENCE, BLOCK_FLAG_WALL, BLOCK_FLAG_PANE)
+     * so neighbour-aware blocks can check membership without string compares.
+     */
     flags?: number;
+
+    /**
+     * surface height (0..1), opts this block into MODEL_LIQUID. the mesher
+     * emits a cube with the top quad lowered to this height and the side
+     * quads height-clipped. omit for normal full-cube blocks. can be
+     * state-dependent so a single block can register multiple heights.
+     */
     surfaceHeight?: number | ((props: PropsValues<P>) => number);
+
+    /**
+     * fluid group id (e.g. 'water'). all states sharing a group string cull
+     * faces between each other when surface heights line up. used only by
+     * MODEL_LIQUID blocks; future flow/sim work keys off the same identity.
+     */
     fluidGroup?: string;
+
+    /**
+     * screen tint applied as a fullscreen overlay when the camera sits
+     * inside this block. color is linear RGB (0..1), opacity is 0..1.
+     * for MODEL_LIQUID blocks the tint only applies while the camera Y is
+     * below the cell's surfaceHeight band. omit (or return undefined from
+     * the function form) for no tint.
+     */
     screenTint?: ScreenTintSpec | ((props: PropsValues<P>) => ScreenTintSpec | undefined);
+
+    /**
+     * sounds played for footstep / dig / break / place events on this
+     * block. compose via `blockSoundPresets.*` bundles or build fully
+     * custom. omit to leave the block silent across all four slots.
+     *
+     * static config applies to every state of the block. for blocks
+     * whose sounds vary per state (e.g. waterlogged → water footsteps,
+     * lit/unlit redstone → different break clip), pass a function of
+     * decoded props instead, called once per state at registry freeze
+     * time, baked into a per-state lookup table for hot-path reads.
+     */
     sounds?: BlockSoundConfig | ((props: PropsValues<P>) => BlockSoundConfig);
+
+    /**
+     * pure neighbour-driven state recompute. called after any neighbour of
+     * a block of this type changes (and once when the block itself is placed).
+     * read neighbours via ctx.voxels; return a new global state id, or the
+     * same id for "no change". the engine fast-paths the unchanged case.
+     *
+     * runs in both editor and server runtime, must be pure (no world
+     * mutation beyond returning a new stateId).
+     */
     onNeighbourUpdate?: OnNeighbourUpdateFn;
+
+    /**
+     * imperative side-effect hook fired after any neighbour changes. drop
+     * items, schedule ticks, ignite, etc. server-only, never runs in editor.
+     */
     onNeighbourChanged?: OnNeighbourChangedFn;
+
+    /**
+     * pick the placed stateId from hit context (camera + face + click point).
+     * called once when the build tool places a block of this type. when
+     * undefined, the engine falls back to the prop-name convention
+     * (`axis` / `facing` enum props auto-mutated from hit normal + yaw).
+     */
     place?: PlaceFn;
+
+    /**
+     * rotate a stateId 90° around `axis` (cw = looking down the +axis).
+     * called per-voxel by blueprint rotate and voxel-rotate. when undefined,
+     * the engine falls back to the prop-name convention (`axis` / `facing`
+     * remap tables).
+     */
     rotate?: RotateFn;
+
+    /**
+     * mirror a stateId across the plane perpendicular to `axis`. called
+     * per-voxel by blueprint flip. when undefined, the engine falls back
+     * to the prop-name convention.
+     */
     flip?: FlipFn;
+
+    /**
+     * named particle slots for this block. when omitted (or any slot
+     * within is omitted), missing slots default to 3 auto-derived
+     * `<id>:particle{0,1,2}` dust variants baked from the top-face
+     * texture of the default state (cube models only; cost is 3 sprite
+     * + 3 particle registrations per block at module-scope eval, free
+     * at runtime).
+     *
+     * static config applies to every state. pass a function of decoded
+     * props for per-state slots, called once per state at registry
+     * freeze, baked into a per-state lookup. authors who want per-state
+     * particles should hoist `particle()` declarations to module scope
+     * (free dedup by id) and just reference them per state.
+     *
+     * default dust is derived **once from the default state's model**
+     * and shared across every state, this is the dedup escape hatch
+     * for blocks with many states (the registry never multiplies the
+     * auto-dust set by state count).
+     *
+     * pass `false` to opt out entirely for all states, no dust
+     * derivation, no slot defaults. invisible blocks (no model) never
+     * derive regardless.
+     *
+     * defaulting all three slots to the same dust handles today is a
+     * placeholder; when block-place + block-break systems land, `build`
+     * and `break` will re-default to dedicated presets whose particles
+     * have different physics (e.g. `build` won't collide; `break` will
+     * be larger debris).
+     */
     particles?: BlockParticleConfig | ((props: PropsValues<P>) => BlockParticleConfig) | false;
 };
 ```
@@ -3487,22 +4411,41 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
  * (6 quads), bm.cross() for vegetation cross-quads (4 quads).
  */
 export type BlockQuad = {
-    verts: [
-        Vec3,
-        Vec3,
-        Vec3,
-        Vec3
-    ];
+    /** 4 vertices in CCW order as [x, y, z] in block-local space [0,1]. */
+    verts: [Vec3, Vec3, Vec3, Vec3];
+
+    /** face normal as [nx, ny, nz]. */
     normal: Vec3;
+
+    /** texture ref for this quad (BlockTextureDef handle or string id). */
     texture: TextureRef;
-    uvs?: [
-        Vec2,
-        Vec2,
-        Vec2,
-        Vec2
-    ];
+
+    /** uv coordinates for each vertex. defaults to full-texture [[0,1],[1,1],[1,0],[0,0]]. */
+    uvs?: [Vec2, Vec2, Vec2, Vec2];
+
+    /**
+     * cull face direction. if the neighbor in this direction is a full
+     * opaque cube, this quad is hidden. undefined = never culled.
+     *
+     * only applies to quads flush with the block boundary.
+     * e.g. a slab's bottom face has cullFace: 'down', but its
+     * top face (at y=0.5) has no cullFace because it's never
+     * occluded by a neighbor.
+     */
     cullFace?: 'north' | 'south' | 'east' | 'west' | 'up' | 'down';
+
+    /**
+     * render pass for this quad. defaults to the block's material.
+     * set explicitly for mixed-material custom models (e.g. cauldron
+     * with opaque shell + translucent water quad).
+     */
     material?: MaterialType;
+
+    /**
+     * receives smooth-light + AO sampling. defaults to true. set false
+     * for quads that should stay flat-lit (emissive sub-quads like a
+     * torch flame, or flat per-cell light for cheap fallback).
+     */
     ao?: boolean;
 };
 ```
@@ -3524,9 +4467,17 @@ export type BlockQuad = {
  * not yet wired, for now this is stored on the def for future use.
  */
 export type BlockSoundConfig = {
+    /** played while the character walks on top of this block, and, for
+     *  liquid blocks, on the feet-enter edge (entry splash) and once
+     *  per swim stroke while submerged. one slot covers all three; the
+     *  controller swaps which block is sampled and the character trait
+     *  varies volume between cadence and entry. */
     footstep?: readonly SoundHandle[];
+    /** looped while the block is being mined (before the final break). */
     dig?: readonly SoundHandle[];
+    /** one-shot on the final break (mining completes / block is destroyed). */
     break?: readonly SoundHandle[];
+    /** one-shot when a block of this type is placed by a player. */
     place?: readonly SoundHandle[];
 };
 ```
@@ -3535,13 +4486,22 @@ export type BlockSoundConfig = {
 
 ```ts
 export type BlockTextureDef = {
+    /** texture string id (e.g. 'lava') */
     id: string;
-    dependency: {
-        registry: 'blockTextures';
-        id: string;
-    };
+
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'blockTextures'; id: string };
+
+    /** source declarations, post-URL-normalization. each entry is either
+     *  a path string or a `DrawSource` descriptor; the asset-pipeline
+     *  `draw-textures` pass (step 10) bakes any DrawSource entries to
+     *  in-memory canvases before the block atlas builder runs. */
     frames: NormalizedImageSource[];
+
+    /** animation speed in frames per second. */
     fps: number;
+
+    /** interpolate between frames. */
     interpolate: boolean;
 };
 ```
@@ -3550,8 +4510,22 @@ export type BlockTextureDef = {
 
 ```ts
 export type BlockTextureOptions = {
+    /**
+     * source image(s). single entry for static, array for animated. each
+     * entry may be a string path (project-root-relative), a module-relative
+     * `asset('./texture.png', import.meta.url)` ref, or a `draw()` bake-time
+     * descriptor for procedural / composed textures.
+     *
+     * the `asset()` form lets 3rd-party packs ship textures alongside their
+     * modules — it resolves relative to the calling module wherever it's
+     * installed, and the pipeline reads the resolved path.
+     */
     src: ImageSource | ImageSource[];
+
+    /** animation speed in frames per second. default 1. ignored if single frame. */
     fps?: number;
+
+    /** interpolate between frames (smooth water). default false. */
     interpolate?: boolean;
 };
 ```
@@ -3570,20 +4544,17 @@ export type CubeModel = {
 
 ```ts
 /** per-face texture assignment for a cube model. */
-export type CubeTextures = {
-    all: CubeFaceSpec;
-} | {
-    top: CubeFaceSpec;
-    bottom: CubeFaceSpec;
-    sides: CubeFaceSpec;
-} | {
-    top: CubeFaceSpec;
-    bottom: CubeFaceSpec;
-    north: CubeFaceSpec;
-    south: CubeFaceSpec;
-    east: CubeFaceSpec;
-    west: CubeFaceSpec;
-};
+export type CubeTextures =
+    | { all: CubeFaceSpec }
+    | { top: CubeFaceSpec; bottom: CubeFaceSpec; sides: CubeFaceSpec }
+    | {
+          top: CubeFaceSpec;
+          bottom: CubeFaceSpec;
+          north: CubeFaceSpec;
+          south: CubeFaceSpec;
+          east: CubeFaceSpec;
+          west: CubeFaceSpec;
+      };
 ```
 
 #### `CustomModel`
@@ -3592,6 +4563,9 @@ export type CubeTextures = {
 /** custom model, quad list for arbitrary block shapes. */
 export type CustomModel = {
     type: 'custom';
+    /** list of quads. the mesher emits these directly.
+     *  quad-only authoring (Minecraft + Sodium convention); the
+     *  registry build rejects non-quad input. */
     quads: BlockQuad[];
 };
 ```
@@ -3657,24 +4631,37 @@ export function relightChunks(voxels: Voxels, dirty: Set<Chunk>): void;
 ```ts
 /** result of a voxel sweep. mutated in place. */
 export type VoxelSweepHit = {
+    /** time of impact in [0, 1]. */
     toi: number;
+    /** colliding axis (0=X, 1=Y, 2=Z) or -1 if no hit. dominant-axis hint. */
     axis: number;
+    /** sign of normal on that axis (+1 or -1, in moving box's frame). */
     sign: number;
+    /** contact normal (world space, unit length, axis-aligned). */
     normalX: number;
     normalY: number;
     normalZ: number;
+    /** world voxel coords. */
     vx: number;
     vy: number;
     vz: number;
+    /** global state id at that voxel. */
     stateId: number;
+    /** sub-AABB index within the block's shapeAabbs[cid] list, or -1 for cube. */
     subAabbIndex: number;
+    /** the world-space box that won (in case the caller needs the geometry). */
     boxMinX: number;
     boxMinY: number;
     boxMinZ: number;
     boxMaxX: number;
     boxMaxY: number;
     boxMaxZ: number;
+    /** penetration depth along the contact normal; non-zero only when toi < 0. */
     overlapDepth: number;
+    /** the passable (non-colliding) cells the box swept through this call, when
+     *  the sweep was asked to `collect` them; empty otherwise. pooled: the caller
+     *  resets `crossed.count` before a fresh sweep (or sequence of segment
+     *  sweeps), the sweep only appends. see {@link CrossedVoxels}. */
     crossed: CrossedVoxels;
 };
 ```
@@ -3709,17 +4696,27 @@ export function sweepAabbVsVoxels(out: VoxelSweepHit, voxels: Voxels, mcX: numbe
 ```ts
 export type VoxelRaycastResult = {
     hit: boolean;
+    /** world-space hit point */
     px: number;
     py: number;
     pz: number;
+    /** hit surface normal */
     nx: number;
     ny: number;
     nz: number;
+    /** distance from ray origin */
     distance: number;
+    /** integer world coords of the hit block */
     voxelX: number;
     voxelY: number;
     voxelZ: number;
+    /** global state id of the hit block */
     stateId: number;
+    /**
+     * for cubes: face index (0=east+x, 1=west-x, 2=up+y, 3=down-y, 4=south+z, 5=north-z).
+     * for custom models: triangle index in the model's tris array.
+     * -1 if no hit.
+     */
     hitIndex: number;
 };
 ```
@@ -3756,32 +4753,153 @@ export function raycastVoxels(out: VoxelRaycastResult, voxels: Voxels, registry:
 ```ts
 /** chunk data structure */
 export type Chunk = {
+    /* chunk coordinates */
     cx: number;
     cy: number;
     cz: number;
+
+    /* world coordinates of chunk corner (cx*16, cy*16, cz*16), cached for meshing. */
     wx: number;
     wy: number;
     wz: number;
+
+    /** number of non-air blocks in the chunk */
     nonAirCount: number;
+
+    /** number of fully-occluding (CullType.SOLID) blocks in the chunk.
+     *  always ≤ nonAirCount. solidCount === CHUNK_VOLUME means the chunk is
+     *  entirely opaque; a chunk whose 6 neighbors are also fully opaque
+     *  has no visible surface and can skip remeshing (intended consumer:
+     *  the enqueue path in render/voxels/voxel-visuals.ts). */
     solidCount: number;
+
+    /**
+     * stable string keys per palette slot.
+     * paletteKeys[0] is always "air".
+     *
+     * these are the persistence/network identity. survives registry
+     * rebuilds, block additions/removals.
+     *
+     * INVARIANT: append-only across a session. compaction happens only
+     * when materialising save bytes via `saveVoxels`, which produces a
+     * snapshot without mutating the live chunk. discovery ships this
+     * array by reference in voxel_chunk_ops; clients cache the indices
+     * and assume they stay stable. shrinking/reordering mid-session
+     * silently re-aliases every already-set voxel → wrong-block-type
+     * drift on the next remesh.
+     */
     paletteKeys: string[];
+
+    /**
+     * runtime numeric ids per palette slot (resolved from registry).
+     * palette[0] is always AIR (0).
+     * unresolved keys get MISSING (1).
+     *
+     * rebuilt from paletteKeys on registry change (hot reload).
+     */
     palette: number[];
+
+    /**
+     * reverse lookup: string key → local palette index.
+     * kept in sync with paletteKeys. used by setBlock to find or
+     * allocate a palette slot for a given string key.
+     */
     paletteMap: Map<string, number>;
+
+    /**
+     * packed voxel data. each entry is a local palette index (not a
+     * global state id). length = CHUNK_VOLUME (4096).
+     *
+     * Uint16Array supports up to 65535 palette entries per chunk,
+     * which is more than enough (MC caps at ~4096 distinct states
+     * per section in practice).
+     */
     data: Uint16Array;
+
+    /**
+     * per-voxel light data. length = CHUNK_VOLUME (4096).
+     * each entry packs 4 channels into 16 bits:
+     *   bits 15..12 = sky   (0-15)
+     *   bits 11..8  = red   (0-15)
+     *   bits  7..4  = green (0-15)
+     *   bits  3..0  = blue  (0-15)
+     *
+     * written by the light propagation engine, read by the mesher.
+     * initialized to 0 (full dark).
+     */
     light: Uint16Array;
+
+    /** dirty flag, set when data changes, cleared by mesher. */
     dirty: boolean;
+
+    /** monotonically increasing version of this chunk's mesh-relevant
+     *  state. bumped by every primitive mutation that would change the
+     *  mesh output: block edits (setChunkBlock), light edits (setLight),
+     *  boundary-neighbour edits (via markBoundaryNeighborsDirty),
+     *  registry rebuilds (resolveChunk), and full-light recomputes
+     *  (propagateAllLight). the worker dispatcher echoes the gen on a
+     *  result; voxel-visuals compares against the live `meshGen` to
+     *  decide whether the result is fresh or stale.
+     *
+     *  starts at 1 so that "gen 0" can sentinel "never meshed".
+     *  cloneChunk carries `src.meshGen + 1` so clones force a remesh on
+     *  first observation. */
     meshGen: number;
+
+    /** monotonically increasing version of this chunk's PERSISTED data,
+     *  blocks, light, and palette. bumped by every mutation that changes the
+     *  bytes `saveVoxels` would write (setChunkBlock, setLight, resolveChunk,
+     *  propagateAllLight) but NOT by mesh-only changes (boundary-neighbour
+     *  re-mesh). incremental scene save keys its per-chunk serialized-byte
+     *  cache on this: a chunk re-serializes only when its `version` moves.
+     *  starts at 1; cloneChunk carries `src.version` (clone has identical data). */
     version: number;
+
+    /** light dirty flag, set when light[] changes, cleared after network flush. */
     lightDirty: boolean;
+
+    /**
+     * per-voxel dirty mask for incremental light deltas. byte-per-voxel,
+     * length = CHUNK_VOLUME. set to 1 by setLight when light[i] is written;
+     * cleared (released back to EMPTY_LIGHT_MASK) at end-of-tick after
+     * dispatch. only meaningful on the server (the client never calls
+     * setLight). idle chunks alias the shared EMPTY_LIGHT_MASK singleton,
+     * setLight COWs on first write and end-of-tick releases when count
+     * drops to zero so memory stays proportional to dirty-chunk count.
+     */
     lightDirtyMask: Uint8Array;
+
+    /** number of set bytes in lightDirtyMask, cheap threshold check for
+     *  the dispatchLight delta-vs-whole-chunk branch without scanning the mask. */
     lightDirtyCount: number;
+
+    /** cached compressed snapshot for chunk_full encoding. invalidated on any data/light change. */
     compressedSnapshot: Uint8Array | null;
+
+    /** cached per-slot global state ids at the time of snapshot (the wire
+     *  palette for voxel_chunk_full). invalidated alongside compressedSnapshot. */
     snapshotPalette: number[] | null;
-    compressedLight: {
-        sky: Uint8Array;
-        rgb: Uint8Array;
-    } | null;
+
+    /** cached compressed light streams for chunk_light encoding (sky+rgb split,
+     *  each RLE'd then deflated). invalidated when light changes. */
+    compressedLight: { sky: Uint8Array; rgb: Uint8Array } | null;
+
+    /**
+     * neighbor chunk refs for fast cross-chunk traversal, 26 slots (the full
+     * 3×3×3 apron the mesher reads for AO + smooth light).
+     *   slots 0-5  = the 6 faces, in light.ts's direction convention
+     *                (0=+X, 1=+Y, 2=+Z, 3=-Z, 4=-Y, 5=-X; opposites sum to 5).
+     *                light propagation touches only these.
+     *   slots 6-25 = the 12 edges + 8 corners (see NEIGHBOR_D{X,Y,Z}).
+     * null if that neighbor chunk is not loaded.
+     */
     neighbors: (Chunk | null)[];
+    /**
+     * count of non-null entries in `neighbors` (0-26). Maintained by
+     * link/unlinkChunkNeighbors. The streaming client defers meshing a chunk
+     * until this hits 26 (full apron present) so it meshes once with correct
+     * boundary AO/light instead of re-meshing as each neighbor arrives.
+     */
     knownNeighbourCount: number;
 };
 ```
@@ -3791,15 +4909,48 @@ export type Chunk = {
 ```ts
 export type Voxels = {
     chunks: Map<string, Chunk>;
-    dirty: {
-        blocks: Set<Chunk>;
-        light: Set<Chunk>;
-        removed: Set<string>;
-    };
+    /** dirty index, sidecar to chunk.dirty / chunk.lightDirty flags.
+     *
+     *  `blocks` is the renderer tier, populated by `markChunkDirty` and
+     *  (post Stage 2b) also by `markChunkLightDirty` since meshChunk emits
+     *  geometry+light in one pass. consumed by voxel-visuals.update().
+     *
+     *  `light` is the server network tier, populated by
+     *  `markChunkLightDirty` only. consumed by discovery's per-client
+     *  chunk_light streaming. kept separate from `blocks` so the server
+     *  doesn't have to filter a growing `blocks` set every tick to find
+     *  light-only changes.
+     *
+     *  `removed` is chunk keys the server dropped from `chunks`; the client
+     *  renderer's `voxel-visuals.update` drains it to evict those meshes from
+     *  the arena. Data-driven so the client stays room-agnostic — only the
+     *  active room's arena is maintained; non-active rooms rebuild fresh on
+     *  activation (which clears this set). */
+    dirty: { blocks: Set<Chunk>; light: Set<Chunk>; removed: Set<string> };
+    /** xz-column index, chunks at the same (cx, cz) sorted by cy descending.
+     *  maintained by `ensureChunk` and rebuilt by `loadVoxels`. lets
+     *  sky-light / heightmap / surface code walk only chunks that actually
+     *  exist, instead of scanning a world bbox. */
     columns: Map<string, Chunk[]>;
+    /** region occupancy index: which chunks exist within each AOI region. bare
+     *  membership, not sorted like `columns` — nothing needs region-internal
+     *  order, only "is this region non-empty" (discovery's classification,
+     *  `.size > 0`) and "what's actually in it" (send-time bundling, iterate
+     *  directly — cheaper than probing all REGION_CHUNKS_PER_AXIS³ positions
+     *  through `chunks`, especially for a sparse region). maintained by
+     *  `ensureChunk`/`removeChunk`; an emptied region's entry is deleted so
+     *  churn doesn't leave stale Sets behind. */
     regions: Map<string, Set<Chunk>>;
+    /** block registry, flat lookup tables for block type/state info.
+     *  stored here so setBlock/resolveAllChunks don't need a trailing registry arg.
+     *  on hot reload, registry-dispatch reassigns this field directly and
+     *  calls resolveAllChunks() per room. */
     registry: Blocks;
+    /** authoritative-emission bundle. null on read-only mirrors. see
+     *  `VoxelsAuthority` doc. */
     authority: VoxelsAuthority | null;
+    /** light scheduling + config. non-null on every Voxels, mirrors included.
+     *  see `VoxelsLighting` doc. */
     lighting: VoxelsLighting;
 };
 ```
@@ -3815,8 +4966,17 @@ export type Voxels = {
  * these just like the server does, no type split, no env probe.
  */
 export type VoxelsAuthority = {
+    /** per-tick change log for block ops, light updates, and new chunks. */
     changes: VoxelChanges;
+    /**
+     * per-room observer registry for onBuild / onBreak / onStateChange
+     * handlers registered via script-scope APIs. lazy-init on first
+     * registration. null until any handler is registered. keyed by
+     * block-type index. see block-hooks.ts for the entry shape.
+     */
     observers: Map<number, BlockObserverEntry> | null;
+    /** current block-hook recursion depth. a hook that issues a chained setBlock
+     *  recurses through runBlockHooks; this bounds a runaway cascade. */
     hookDepth: number;
 };
 ```
@@ -4219,11 +5379,15 @@ export type VoxelBlockOp = {
     cy: number;
     cz: number;
     index: number;
+    /** chunk-local palette index, what the network sends to clients. */
     data: number;
+    /** world coords, saves recomputing per delta for hook dispatch. */
     wx: number;
     wy: number;
     wz: number;
+    /** global state id before this op. */
     oldStateId: number;
+    /** global state id after this op. */
     newStateId: number;
 };
 ```
@@ -4258,7 +5422,13 @@ export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
  * every Voxels owns, mirrors included. see `VoxelsLighting`.
  */
 export type VoxelChanges = {
+    /** append-only log of block ops this tick. block-hooks settles each op's
+     *  hooks inline as it's written; discovery ships the log to clients. */
     ops: VoxelOp[];
+    /** chunks created this tick, for streaming. drained by discovery, which
+     *  rewinds each player's cursor so newly-existing chunks get streamed
+     *  without re-walking the whole view sphere. holds the Chunk ref so
+     *  consumers don't have to re-lookup. */
     addedChunks: Set<Chunk>;
 };
 ```
@@ -4318,15 +5488,18 @@ export type FloodFillLightingState = {
  * `invalidateChunk`, so nothing server-fed ever lands in these queues.
  */
 export type VoxelsLighting = {
+    /** flood-fill light-propagation config. see type doc. */
     floodFill: FloodFillLightingState;
-    blocks: Array<{
-        wx: number;
-        wy: number;
-        wz: number;
-        oldStateId: number;
-    }>;
+    /** blocks changed by DEFAULT writes → per-block incremental relight. */
+    blocks: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
+    /** chunks changed by BULK writes / invalidateChunk → scoped whole-chunk
+     *  relight (relightChunks) instead of the per-block path. */
     chunks: Set<Chunk>;
+    /** new chunks needing sky light seeded before incremental updates run. */
     newChunks: Chunk[];
+    /** monotonically increasing; bumped by propagateAllLight (a full
+     *  recompute), so clients discard buffered incremental ops. NOT
+     *  per-tick — it outlives a tick. */
     epoch: number;
 };
 ```
@@ -4574,6 +5747,7 @@ export type SkyPreset = 'overworld';
 
 ```ts
 export type SkyStop = {
+    /** wraps in [0,1]; sun position = `t * 2π` */
     t: number;
     zenith: Vec3;
     horizon: Vec3;
@@ -4587,35 +5761,46 @@ export type SkyStop = {
 /** input shape, every field optional. shallow-merges into current state. */
 export type EnvironmentConfig = {
     enabled?: boolean;
-    sky?: {
-        preset?: SkyPreset;
-        stops?: SkyStop[];
-    };
-    sun?: {
-        enabled?: boolean;
-        intensity?: number;
-    };
-    moon?: {
-        enabled?: boolean;
-    };
-    stars?: {
-        enabled?: boolean;
-        density?: number;
-    };
-    clouds?: {
-        enabled?: boolean;
-        density?: number;
-        wind?: Vec2;
-        altitude?: number;
-        thickness?: number;
-    };
-    fog?: {
-        enabled?: boolean;
-        color?: Vec3 | 'sky';
-        end?: number | 'view';
-        start?: number;
-        opacity?: number;
-    };
+    sky?: { preset?: SkyPreset; stops?: SkyStop[] };
+    sun?: { enabled?: boolean; intensity?: number };
+    moon?: { enabled?: boolean };
+    stars?: { enabled?: boolean; density?: number };
+    /**
+     * planar cloud layer at `altitude` world-units. `thickness` controls the
+     * virtual depth the fragment shader marches through to fake 3D volume,
+     * larger values give chunkier, more parallaxing clouds. `density` is
+     * coverage [0,1]; `wind` is a 2D drift velocity applied to the noise
+     * field over `envTime`.
+     */
+    clouds?: { enabled?: boolean; density?: number; wind?: Vec2; altitude?: number; thickness?: number };
+    /**
+     * distance fog. fog runs from `start` to `end`, and by default `end` is
+     * however far this client can actually see.
+     *
+     *   `end`     world units, or `'view'` (the default) to track the client's
+     *             own view radius. `'view'` is what fades the world out at the
+     *             streamed chunk boundary, and it is per-client, since view
+     *             radius is a device performance setting a script can't know.
+     *   `start`   FRACTION of `end` where the fade begins, not world units, so
+     *             authoring never depends on knowing the view radius. 0.9 is a
+     *             narrow lip at the boundary; 0.1 is fog across the whole view.
+     *   `color`   `'sky'` tracks the sky LUT's horizon at the current time of
+     *             day (so sunsets and night work unauthored), or a linear rgb
+     *             triple pins it.
+     *   `opacity` how opaque fog gets at `end`. 1 fully replaces the colour.
+     *
+     * Shaped after luanti's `set_sky{fog = {fog_distance, fog_start}}`, where
+     * distance is client-controlled by default and start is a fraction of the
+     * visible range (doc/lua_api.md).
+     *
+     * Setting a numeric `end` NEARER than the view radius does not re-expose the
+     * chunk boundary: fog is already saturated well before it. Setting one
+     * further out leaves the engine's own boundary fade in place underneath.
+     *
+     *   { end: 30, start: 0.1 }   near, thick, atmospheric fog
+     *   { enabled: false }        no fog, world stops hard at the boundary
+     */
+    fog?: { enabled?: boolean; color?: Vec3 | 'sky'; end?: number | 'view'; start?: number; opacity?: number };
 };
 ```
 
@@ -4870,23 +6055,26 @@ export const particleUpdate: {
 
 ```ts
 export type ParticleHandle = {
+    /** particle type string id (e.g. 'smoke', '_block-dust/grass'). */
     typeId: string;
+    /** human-readable display name for editor UIs. always set,
+     *  defaults to `typeId` when the author didn't supply one. */
     name: string;
-    dependency: {
-        registry: 'particles';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'particles'; id: string };
+    /** sprite ref (frame timeline source). */
     sprite: SpriteHandle;
+    /** playback mode. */
     playback: ParticlePlayback;
+    /** fps for `'loop'` / `'once'`. defaults to 0 (degenerate frame-0)
+     *  for `'stretch'` and single-frame sprites. */
     fps: number;
+    /** per-particle update fn. */
     update: ParticleUpdateFn;
+    /** resolved spawn-time default for glow [0,1]. */
     glow: number;
-    tint: [
-        r: number,
-        g: number,
-        b: number,
-        a: number
-    ];
+    /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */
+    tint: [r: number, g: number, b: number, a: number];
 };
 ```
 
@@ -4894,18 +6082,33 @@ export type ParticleHandle = {
 
 ```ts
 export type ParticleOptions = {
+    /** human-readable display name for editor UIs. falls back to the
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
+     *  key everywhere else. */
     name?: string;
+    /** the sprite handle whose frames drive the particle's visuals. */
     sprite: SpriteHandle;
+    /** how `age / total` (or `age * fps`) maps to the sprite's frame
+     *  timeline. `'stretch'` requires spawn opts to pass `lifetime`. */
     playback: ParticlePlayback;
+    /** required for `'loop'` / `'once'` on multi-frame sprites; ignored
+     *  for `'stretch'`. single-frame sprites degenerate to "show frame
+     *  0" in all modes. */
     fps?: number;
+    /** per-particle update fn. one indirect call per alive slot per
+     *  tick. compose primitives from `particleUpdate.*` or write your
+     *  own. */
     update: ParticleUpdateFn;
+    /** spawn-time default for the per-particle glow (self-illumination)
+     *  level [0,1]. 0 = fully sample world light (lit like models /
+     *  voxel-meshes), 1 = fully lit / shadow-free, matching mesh/sprite
+     *  `glow`. the update fn can mutate `pool.glow[i]` per-frame for
+     *  fades. default 0. */
     glow?: number;
-    tint?: [
-        r: number,
-        g: number,
-        b: number,
-        a: number
-    ];
+    /** spawn-time default RGBA tint multiplier. RGB multiplies the
+     *  shaded color, A the sprite alpha. the update fn can mutate
+     *  `pool.tintR/G/B/A[i]` per-frame for fades. default [1,1,1,1]. */
+    tint?: [r: number, g: number, b: number, a: number];
 };
 ```
 
@@ -4926,10 +6129,20 @@ export type ParticlePlayback = 'stretch' | 'loop' | 'once';
  *  core→client import; the runtime that allocates / mutates it lives in
  *  client. Both halves agree on the layout via this single declaration. */
 export type ParticlePool = {
+    /** max slots. */
     capacity: number;
+    /** live slots, alive prefix is `[0, count)`. */
     count: number;
+
+    /** particle handle per slot, renderer reads `.sprite` / `.playback`
+     *  / `.fps` to drive frame selection + atlas lookup. null on free slots. */
     handle: Array<ParticleHandle | null>;
+    /** per-particle update fn resolved at spawn time. dispatch target,
+     *  redundant with `handle[i].update` but kept as a direct pointer so
+     *  the tick loop's inner indirect-call doesn't chase through the
+     *  handle struct. null on free slots. */
     updateFn: Array<ParticleUpdateFn | null>;
+
     posX: Float32Array;
     posY: Float32Array;
     posZ: Float32Array;
@@ -4939,14 +6152,30 @@ export type ParticlePool = {
     velX: Float32Array;
     velY: Float32Array;
     velZ: Float32Array;
+
+    /** absolute clock anchor for `age = now - spawnTime[i]`. */
     spawnTime: Float32Array;
+    /** absolute deadline. death = `expiresAt[i] <= now`. default
+     *  `Infinity`. motion fns kill by writing `0`. */
     expiresAt: Float32Array;
+    /** per-particle render size (multiplies sprite world dims). */
     size: Float32Array;
+    /** per-particle glow (self-illumination) in [0,1]. raises the
+     *  lighting floor so the particle lights up in its own colour,
+     *  0 = lit by world voxel light, 1 = fully lit / shadow-free,
+     *  matching mesh/sprite `glow`. mutate from the update fn to
+     *  animate (e.g. fire embers fade 1 → 0 over lifetime). */
     glow: Float32Array;
+    /** per-particle RGBA tint multiplier. RGB multiplies the shaded
+     *  color (so [0,0,0] fades to black), A multiplies the sprite alpha
+     *  (so 0 fades to transparent). default [1,1,1,1] = no tint. mutate
+     *  from the update fn to animate (e.g. fade RGB or A over lifetime).
+     *  decomposed per-channel to match the posX/Y/Z SoA convention. */
     tintR: Float32Array;
     tintG: Float32Array;
     tintB: Float32Array;
     tintA: Float32Array;
+    /** deterministic per-particle jitter seed. */
     seed: Uint32Array;
 };
 ```
@@ -4993,17 +6222,19 @@ export type SpawnOpts = {
     velX?: number;
     velY?: number;
     velZ?: number;
+    /** duration in seconds, engine writes `expiresAt[i] = now + lifetime`. */
     lifetime?: number;
     size?: number;
+    /** start mid-animation by passing `now - offset`. default = now. */
     spawnTime?: number;
+    /** explicit seed. default = random u32. */
     seed?: number;
+    /** override the handle's spawn-default glow (0..1). 1 = fully lit /
+     *  shadow-free, 0 = sample world light. */
     glow?: number;
-    tint?: [
-        r: number,
-        g: number,
-        b: number,
-        a: number
-    ];
+    /** override the handle's spawn-default RGBA tint multiplier. RGB
+     *  multiplies the shaded color, A the sprite alpha. [1,1,1,1] = none. */
+    tint?: [r: number, g: number, b: number, a: number];
 };
 ```
 
@@ -5131,22 +6362,58 @@ export const AnimatorTrait;
 ```ts
 export type AnimationAction = {
     clip: ClipDef;
+    /** current blend weight (0..1) */
     weight: number;
+    /** crossfade destination (set by crossFadeTo) */
     targetWeight: number;
+    /** weight delta per second; 0 = no fade */
     fadeRate: number;
+    /** current playback time in seconds */
     time: number;
+    /** playback rate (default 1) */
     speed: number;
     loopMode: 'once' | 'repeat';
     enabled: boolean;
+    /** ascending = composite later. higher layers fully replace lower
+     *  layers' values for nodes they write. default 0. */
     layer: number;
+    /** filter clip channels by node name. null = no filtering (every
+     *  channel in the clip drives its target). default null. */
     mask: ReadonlySet<string> | null;
+    /** how this action composites within its layer.
+     *  - 'replace' (default): contributes to the layer's weighted sum
+     *  - 'additive': delta from clip's first frame, added on top */
     blendMode: BlendMode;
+    /** scratch, channels resolved at top of tick. preserved across ticks
+     *  so the boneIndices cache below can detect a payload swap by ref
+     *  identity. cleared by `Resources.modelClipChannels` returning a
+     *  fresh ref on resource reload, which forces a rebuild. */
     _channels: ClipChannels | null;
+    /** parallel to `_channels.channels`, boneIndices[c] = the channel's
+     *  target bone index in `state.boneOrder`, or -1 if the rig doesn't
+     *  contain that bone, or if `mask` filters it out. lets the inner
+     *  sample loops index directly instead of doing string-keyed
+     *  `boneIndex.get` + `mask.has` per channel per tick. */
     _boneIndices: Int32Array | null;
+    /** matches `state.boneOrderEpoch` when valid; mismatch ⇒ rebuild. */
     _boneIndicesEpoch: number;
+    /** ref of the channels payload `_boneIndices` was built against. */
     _boneIndicesChannelsRef: ClipChannels | null;
+    /** ref of the mask `_boneIndices` was built against. */
     _boneIndicesMaskRef: ReadonlySet<string> | null;
+    /** parallel to `_channels.channels`, last-found keyframe `lo` index per
+     *  channel. seeded to 0; sample functions read this as their search start
+     *  and write back the new lo. for steady-time playback the typical case
+     *  is 0-1 forward steps before hitting the right interval; only sudden
+     *  rewinds / loop wraps fall through to binary search. (three.js-style
+     *  cached-index hybrid in `findKeyLow`.) */
     _lastKeyIdx: Int32Array | null;
+    /** channel-index buckets partitioned by property type, with masked-out /
+     *  unresolved channels excluded. lets the tick body run three monomorphic
+     *  loops (no `switch (channel.property)` dispatch inside the hot path);
+     *  per animation.bench.ts (H1), this is ~1.2× faster than the
+     *  unified-loop variant. built alongside `_boneIndices` in
+     *  `rebuildActionBoneIndices`. */
     _idxTranslation: Int32Array | null;
     _idxRotation: Int32Array | null;
     _idxScale: Int32Array | null;
@@ -5157,22 +6424,78 @@ export type AnimationAction = {
 
 ```ts
 export type AnimatorState = {
+    /** keyed by ClipDef ref identity (sidecar singleton). lookup-only. */
     actions: Map<ClipDef, AnimationAction>;
+    /** parallel flat list of every action in `actions`, in insertion order.
+     *  the tick body iterates this, `Map.values()` was ~1.8× slower per
+     *  pass in animation.bench.ts and the tick walks it three times. kept
+     *  in sync with `actions` at `Animation.clip()` time. */
     actionsList: AnimationAction[];
+
+    /**
+     * cached parent-first DFS of the rig's TransformTraits, built once on
+     * first tick (when `boneOrder.length === 0`) and reused. scripts that
+     * restructure the rig (e.g. attach a sword to a hand bone and want it
+     * eagerly tracked) call `Animation.invalidateRig(animator)` to force a
+     * rebuild. parent-first ordering means the end-of-tick dirty
+     * reconciliation pass walks bones in a single forward sweep.
+     */
     boneOrder: TransformTrait[];
+    /** parallel to `boneOrder`, direct refs to `t.position` / `t.quaternion`
+     *  / `t.scale` for each bone, captured during `walkBones`. saves a
+     *  hidden-class property lookup per bone per tick in the layer passes.
+     *  these arrays ARE the canonical store, replace + additive write
+     *  directly into them; world matrices are recomputed lazily via
+     *  `getWorldMatrix` on read (Unity/three.js shape). */
     bonePos: Vec3[];
     boneQuat: Quat[];
     boneScale: Vec3[];
+    /** name → index in `boneOrder`. populated alongside `boneOrder`. */
     boneIndex: Map<string, number>;
+    /** bumped each time `rebuildBoneOrder` runs. actions stamp this onto
+     *  their cached `_boneIndices` so a structural change invalidates them. */
     boneOrderEpoch: number;
+
+    /** per-bone weighted sum for the current layer's replace pass (cap × 13). */
     layerAccum: Float32Array;
+    /** for each bone, exclusive end index of its DFS subtree in `boneOrder`
+     *  (descendants of `bi` are the contiguous range `[bi+1, subtreeEnd[bi])`).
+     *  built once during `walkBones`. lets writes mark a bone-and-descendants
+     *  range dirty in one `Uint8Array.fill` call, godot Skeleton3D's
+     *  `nested_set_offset + nested_set_span` trick. */
     subtreeEnd: Int32Array;
+    /** subtree dirty bitmap: 1 = this tick's sampling wrote to bone `bi`'s
+     *  local TRS, OR an ancestor was written. cleared at top of layer
+     *  composition; set by the replace-normalize loop and by `applyAdditiveTA`
+     *  via `subtreeDirty.fill(1, bi, subtreeEnd[bi])`. End-of-tick reconcile
+     *  walks this bitmap once and stamps `_dirty = TRANSFORM_DIRTY_ALL` on
+     *  each marked bone so `getWorldMatrix` lazy-composes correctly. */
     subtreeDirty: Uint8Array;
+    /** capacity of layerAccum / subtreeEnd / subtreeDirty in bones. */
     accumCapacity: number;
+
+    /** the rig's renderable meshes, cached when `boneOrder` is (re)built.
+     *  The per-rig tick gate + LOD fold these meshes' own `cull` entries
+     *  (on `MeshVisualState.cull`, written by the Visibility culler): the
+     *  rig is visible iff any mesh is, and coverage comes from the
+     *  closest/largest one. "Is the model visible" = "is any child mesh
+     *  visible", there's no rig-level cullable. */
     _cullMeshes: MeshTrait[];
+
+    /** current LOD stride: 1 (sample every frame) / 2 / 4 / 8. Defaults 1
+     *  until the first classify pass runs; that way the first visible frame
+     *  always samples and the rig doesn't show a stale pose. */
     _lodStride: number;
+    /** per-rig phase offset, assigned from a room-scoped counter at first
+     *  tick. Spreads sampling across frames so N stride-2 rigs split into
+     *  two phase buckets (half on even frames, half on odd) rather than
+     *  all sampling on the same frame. -1 until assigned. */
     _lodPhase: number;
+    /** `Animations._frameCount` when classification last ran. */
     _lodClassifiedAtFrame: number;
+    /** previous frame's rig visibility (0/1). False→true transition forces
+     *  a sample regardless of stride/phase so a rig coming on-screen doesn't
+     *  show its up-to-8-frame-stale last pose. */
     _lastVisible: number;
 };
 ```
@@ -5188,22 +6511,58 @@ export type BlendMode = 'replace' | 'additive';
 ```ts
 export type AnimationAction = {
     clip: ClipDef;
+    /** current blend weight (0..1) */
     weight: number;
+    /** crossfade destination (set by crossFadeTo) */
     targetWeight: number;
+    /** weight delta per second; 0 = no fade */
     fadeRate: number;
+    /** current playback time in seconds */
     time: number;
+    /** playback rate (default 1) */
     speed: number;
     loopMode: 'once' | 'repeat';
     enabled: boolean;
+    /** ascending = composite later. higher layers fully replace lower
+     *  layers' values for nodes they write. default 0. */
     layer: number;
+    /** filter clip channels by node name. null = no filtering (every
+     *  channel in the clip drives its target). default null. */
     mask: ReadonlySet<string> | null;
+    /** how this action composites within its layer.
+     *  - 'replace' (default): contributes to the layer's weighted sum
+     *  - 'additive': delta from clip's first frame, added on top */
     blendMode: BlendMode;
+    /** scratch, channels resolved at top of tick. preserved across ticks
+     *  so the boneIndices cache below can detect a payload swap by ref
+     *  identity. cleared by `Resources.modelClipChannels` returning a
+     *  fresh ref on resource reload, which forces a rebuild. */
     _channels: ClipChannels | null;
+    /** parallel to `_channels.channels`, boneIndices[c] = the channel's
+     *  target bone index in `state.boneOrder`, or -1 if the rig doesn't
+     *  contain that bone, or if `mask` filters it out. lets the inner
+     *  sample loops index directly instead of doing string-keyed
+     *  `boneIndex.get` + `mask.has` per channel per tick. */
     _boneIndices: Int32Array | null;
+    /** matches `state.boneOrderEpoch` when valid; mismatch ⇒ rebuild. */
     _boneIndicesEpoch: number;
+    /** ref of the channels payload `_boneIndices` was built against. */
     _boneIndicesChannelsRef: ClipChannels | null;
+    /** ref of the mask `_boneIndices` was built against. */
     _boneIndicesMaskRef: ReadonlySet<string> | null;
+    /** parallel to `_channels.channels`, last-found keyframe `lo` index per
+     *  channel. seeded to 0; sample functions read this as their search start
+     *  and write back the new lo. for steady-time playback the typical case
+     *  is 0-1 forward steps before hitting the right interval; only sudden
+     *  rewinds / loop wraps fall through to binary search. (three.js-style
+     *  cached-index hybrid in `findKeyLow`.) */
     _lastKeyIdx: Int32Array | null;
+    /** channel-index buckets partitioned by property type, with masked-out /
+     *  unresolved channels excluded. lets the tick body run three monomorphic
+     *  loops (no `switch (channel.property)` dispatch inside the hot path);
+     *  per animation.bench.ts (H1), this is ~1.2× faster than the
+     *  unified-loop variant. built alongside `_boneIndices` in
+     *  `rebuildActionBoneIndices`. */
     _idxTranslation: Int32Array | null;
     _idxRotation: Int32Array | null;
     _idxScale: Int32Array | null;
@@ -5214,22 +6573,78 @@ export type AnimationAction = {
 
 ```ts
 export type AnimatorState = {
+    /** keyed by ClipDef ref identity (sidecar singleton). lookup-only. */
     actions: Map<ClipDef, AnimationAction>;
+    /** parallel flat list of every action in `actions`, in insertion order.
+     *  the tick body iterates this, `Map.values()` was ~1.8× slower per
+     *  pass in animation.bench.ts and the tick walks it three times. kept
+     *  in sync with `actions` at `Animation.clip()` time. */
     actionsList: AnimationAction[];
+
+    /**
+     * cached parent-first DFS of the rig's TransformTraits, built once on
+     * first tick (when `boneOrder.length === 0`) and reused. scripts that
+     * restructure the rig (e.g. attach a sword to a hand bone and want it
+     * eagerly tracked) call `Animation.invalidateRig(animator)` to force a
+     * rebuild. parent-first ordering means the end-of-tick dirty
+     * reconciliation pass walks bones in a single forward sweep.
+     */
     boneOrder: TransformTrait[];
+    /** parallel to `boneOrder`, direct refs to `t.position` / `t.quaternion`
+     *  / `t.scale` for each bone, captured during `walkBones`. saves a
+     *  hidden-class property lookup per bone per tick in the layer passes.
+     *  these arrays ARE the canonical store, replace + additive write
+     *  directly into them; world matrices are recomputed lazily via
+     *  `getWorldMatrix` on read (Unity/three.js shape). */
     bonePos: Vec3[];
     boneQuat: Quat[];
     boneScale: Vec3[];
+    /** name → index in `boneOrder`. populated alongside `boneOrder`. */
     boneIndex: Map<string, number>;
+    /** bumped each time `rebuildBoneOrder` runs. actions stamp this onto
+     *  their cached `_boneIndices` so a structural change invalidates them. */
     boneOrderEpoch: number;
+
+    /** per-bone weighted sum for the current layer's replace pass (cap × 13). */
     layerAccum: Float32Array;
+    /** for each bone, exclusive end index of its DFS subtree in `boneOrder`
+     *  (descendants of `bi` are the contiguous range `[bi+1, subtreeEnd[bi])`).
+     *  built once during `walkBones`. lets writes mark a bone-and-descendants
+     *  range dirty in one `Uint8Array.fill` call, godot Skeleton3D's
+     *  `nested_set_offset + nested_set_span` trick. */
     subtreeEnd: Int32Array;
+    /** subtree dirty bitmap: 1 = this tick's sampling wrote to bone `bi`'s
+     *  local TRS, OR an ancestor was written. cleared at top of layer
+     *  composition; set by the replace-normalize loop and by `applyAdditiveTA`
+     *  via `subtreeDirty.fill(1, bi, subtreeEnd[bi])`. End-of-tick reconcile
+     *  walks this bitmap once and stamps `_dirty = TRANSFORM_DIRTY_ALL` on
+     *  each marked bone so `getWorldMatrix` lazy-composes correctly. */
     subtreeDirty: Uint8Array;
+    /** capacity of layerAccum / subtreeEnd / subtreeDirty in bones. */
     accumCapacity: number;
+
+    /** the rig's renderable meshes, cached when `boneOrder` is (re)built.
+     *  The per-rig tick gate + LOD fold these meshes' own `cull` entries
+     *  (on `MeshVisualState.cull`, written by the Visibility culler): the
+     *  rig is visible iff any mesh is, and coverage comes from the
+     *  closest/largest one. "Is the model visible" = "is any child mesh
+     *  visible", there's no rig-level cullable. */
     _cullMeshes: MeshTrait[];
+
+    /** current LOD stride: 1 (sample every frame) / 2 / 4 / 8. Defaults 1
+     *  until the first classify pass runs; that way the first visible frame
+     *  always samples and the rig doesn't show a stale pose. */
     _lodStride: number;
+    /** per-rig phase offset, assigned from a room-scoped counter at first
+     *  tick. Spreads sampling across frames so N stride-2 rigs split into
+     *  two phase buckets (half on even frames, half on odd) rather than
+     *  all sampling on the same frame. -1 until assigned. */
     _lodPhase: number;
+    /** `Animations._frameCount` when classification last ran. */
     _lodClassifiedAtFrame: number;
+    /** previous frame's rig visibility (0/1). False→true transition forces
+     *  a sample regardless of stride/phase so a rig coming on-screen doesn't
+     *  show its up-to-8-frame-stale last pose. */
     _lastVisible: number;
 };
 ```
@@ -5312,10 +6727,13 @@ export function descendants(animator: AnimatorTrait, root: string, opts?: {
  * so the per-frame walk doesn't rebuild bitsets / hash each call.
  */
 export type Animations = {
-    animators: ReturnType<typeof query<[
-        typeof AnimatorTrait
-    ]>>;
+    animators: ReturnType<typeof query<[typeof AnimatorTrait]>>;
+    /** monotonic per-room frame counter, drives LOD stride/phase gating in
+     *  the per-animator tick. Wraps would only matter past ~10⁹ frames. */
     frameCount: number;
+    /** room-scoped counter handed out as `_lodPhase` to each animator on its
+     *  first tick. Ensures N rigs at stride 2 split across both phase buckets
+     *  rather than all sampling on the same frame. */
     nextLodPhase: number;
 };
 ```
@@ -5397,7 +6815,12 @@ export function randomDisplayName(): string;
 
 ```ts
 export type Avatar = {
+    /** Resolved model id, registered with `Resources`, written onto the
+     *  player's `CharacterTrait.modelId`. */
     modelId: string;
+
+    /** Rig contract this avatar implements, e.g. `RIG_TYPE_6BONE`. Lets
+     *  game code branch on rig family before reaching for bones. */
     rigType: string;
 };
 ```
@@ -5410,21 +6833,55 @@ Rigid bodies, AABB bodies, contacts, and the physics layers and groups.
 
 ```ts
 export type Physics = {
+    /** crashcat rigid body sub-world, full broadphase + manifolds + sleep. */
     rigid: RigidPhysics.World;
+    /** AABB physics sub-world, items / particles / throwables. analytical sweep. */
     aabb: AabbPhysics.World;
+
+    // ── contact output ───────────────────────────────────────────────
+
+    /** global contact stream, pairs un-normalized (A→B), with added/persisted/removed lifecycle. */
     contacts: PhysicsContacts;
+    /** pool of rigid-body-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     rigidBodyContactPool: RigidBodyContactPool;
+    /** pool of aabb-body-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     aabbBodyContactPool: AabbBodyContactPool;
+    /** pool of voxel-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     voxelContactPool: VoxelContactPool;
+    /** pool of ContactPair instances backing `contacts.*` lists. */
     contactPairPool: ContactPairPool;
-    contactsQuery: ReturnType<typeof query<[
-        typeof ContactsTrait
-    ]>>;
+    /** cached query for fan-out, built once at init so we don't pay hash+lookup each tick. */
+    contactsQuery: ReturnType<typeof query<[typeof ContactsTrait]>>;
+
+    /** sink passed into `AabbPhysics.tick`. drains pairs into `contacts`. */
     aabbPairSink: AabbPhysics.PairSink;
+
+    /** body contacts gathered by character VCCs during `runOnTick` (which runs
+     *  before the rigid solver). a VCC depenetrates its character off the bodies
+     *  it touches and teleport-follows its kinematic inner body, so by the time
+     *  the solver steps there's no overlap and no manifold, a fast projectile
+     *  would pass straight through with no contact event. these are replayed into
+     *  `contacts` each tick (see {@link ingestVccRigidContacts}) so they reach both
+     *  bodies' `ContactsTrait` like any solver contact. staged here (coordinator
+     *  level, not on the rigid world) since the producer is the character
+     *  controller and the replay writes the shared stream. `vccRigidContactCount` is
+     *  the live length; records are reused (no per-frame allocation). */
     vccRigidContacts: VccRigidContact[];
     vccRigidContactCount: number;
+
+    /** same staging as {@link vccRigidContacts}, for the VCC's *voxel* (terrain)
+     *  contacts. the VCC sweeps voxels itself rather than through the solver,
+     *  so its terrain contacts never form a manifold; replayed each tick (see
+     *  {@link ingestVccVoxelContacts}) so they fan out to the character node's
+     *  `ContactsTrait` as VoxelContacts. `vccVoxelContactCount` is the live
+     *  length; records are reused. */
     vccVoxelContacts: VccVoxelContact[];
     vccVoxelContactCount: number;
+
+    /** set of nodes currently enrolled in interpolation because at least one
+     *  subsystem has a body for them. diffed each preStep against the union of
+     *  `rigid.nodeToBody ∪ aabb.nodeToBody`. (Contacts is not membership-driven:
+     *  a node's ContactsTrait is created lazily on its first contact, in fan-out.) */
     _companionNodes: Set<number>;
 };
 ```
@@ -5666,18 +7123,43 @@ export type Perspective = 'first' | 'third-back' | 'third-front';
  * individual sub-flags for settings UIs.
  */
 export type ControlsConfig = {
+    /** master switch. false → trait wires no input and mounts no HUD. */
     enabled: boolean;
+
     desktop: {
+        /** double-tap W activates sprint until W releases. off for games
+         *  where sprint is RMB-held or always-on. */
         doubleTapSprint: boolean;
+        /** double-tap Space toggles noclip (free-fly). off by default; the
+         *  editor flips it on for its character mode, and games that want a
+         *  fly cheat can enable it too. the noclip movement itself lives on
+         *  the CC and is independent of this gesture. */
         doubleTapNoclip: boolean;
     };
+
     touch: {
+        /** auto-mount the default 'move' joystick on mobile. the joystick
+         *  id is read into cc.move regardless, set false to suppress only
+         *  the default mount (e.g. you're mounting your own at a custom
+         *  position). */
         joystick: boolean;
+        /** auto-mount default 'jump' button on mobile. */
         jumpButton: boolean;
+        /** auto-mount 'sprint' button on mobile (off by default, joystick
+         *  magnitude drives sprint instead). always-read regardless. */
         sprintButton: boolean;
+        /** auto-mount 'crouch' button on mobile (off by default). */
         crouchButton: boolean;
+        /** while noclip (free-fly) is active, mount a vertical up/down joystick
+         *  in place of the jump button so the flyer can ascend AND descend with
+         *  analog control. on by default. */
         noclipVerticalJoystick: boolean;
+        /** mount a fly/walk toggle button that flips noclip on tap. off by
+         *  default; opt in where free-fly is allowed (the editor turns it on,
+         *  same as `desktop.doubleTapNoclip`). the touch counterpart to the
+         *  double-tap-Space toggle, which a finger can't do. */
         flyToggleButton: boolean;
+        /** right-half canvas drag → cc.look on touch devices. */
         canvasLook: boolean;
     };
 };
@@ -5854,8 +7336,12 @@ export type SearchType = 'shortest' | 'greedy';
 
 ```ts
 export type FindPathOptions = {
+    /** cap on A* iterations (nodes expanded); returns null once exceeded. the
+     *  guard against an unreachable/disconnected goal blowing up the search. */
     maxIterations?: number;
+    /** frontier scoring. default 'shortest'. */
     searchType?: SearchType;
+    /** distance estimate for A* (default euclidean). */
     heuristic?: Heuristic;
 };
 ```
@@ -5927,27 +7413,35 @@ Reading mouse, keyboard, and touch input.
  */
 export type CanvasTouch = {
     pointerId: number;
+    /** current position, CSS px from canvas top-left. */
     x: number;
     y: number;
+    /** accumulated movement since last reset, CSS px. */
     dx: number;
     dy: number;
+    /** position at pointerdown, CSS px from canvas top-left. */
     startX: number;
     startY: number;
+    /** Date.now() at pointerdown, ms. */
     downAt: number;
+
+    /** first frame this pointerId is observed. */
     justStarted: boolean;
+    /** last frame; only set on entries in _canvasTouchesEnded. */
     justEnded: boolean;
+    /** ended within TAP_MAX_MS and TAP_MAX_DRIFT_PX. */
     tapped: boolean;
+    /** crossed LONG_PRESS_MIN_MS without leaving LONG_PRESS_MAX_DRIFT_PX. */
     longPressed: boolean;
+    /** ended with velocity above SWIPE_MIN_VELOCITY_PX_PER_MS. */
     swiped: boolean;
+    /** direction of the swipe (CSS px from startX/Y to endX/Y), 0 if !swiped. */
     swipeDx: number;
     swipeDy: number;
+
     _maxDriftSq: number;
     _longPressLatched: boolean;
-    _recentSamples: {
-        t: number;
-        x: number;
-        y: number;
-    }[];
+    _recentSamples: { t: number; x: number; y: number }[];
 };
 ```
 
@@ -5957,7 +7451,17 @@ export type CanvasTouch = {
 export type Input = {
     mouseKeyboard: MouseKeyboardInput;
     touch: TouchInput;
+    /** does this room want the pointer locked (desktop mouse-look)? Persistent
+     *  room intent, set via `setPointerLock`. Lives here (not on a controller
+     *  trait) so it survives a controller being removed and re-added — e.g. the
+     *  death→respawn churn — with no relock dance. Default false; the player
+     *  controller sets it true in `onInit`, fly/orbit set it false. */
     _lockWanted: boolean;
+    /** has this room's controller declared its lock intent at least once (any
+     *  `setPointerLock` call)? Distinguishes a freshly-mounted room whose
+     *  `_lockWanted=false` is merely the un-run default (intent still pending)
+     *  from a live room whose `false` is authoritative. `reconcilePointerLock`
+     *  holds a lock through a room swap only while intent is still pending. */
     _lockDeclared: boolean;
 };
 ```
@@ -5966,9 +7470,12 @@ export type Input = {
 
 ```ts
 export type JoystickState = {
+    /** [-1, 1] on each axis with deadzone applied; (0, 0) when idle. */
     x: number;
     y: number;
+    /** true while a finger is pressing the joystick. */
     active: boolean;
+    /** previous-frame `active`, for edge predicates. */
     _prevActive: boolean;
 };
 ```
@@ -5983,31 +7490,44 @@ export type MouseButton = 'left' | 'middle' | 'right';
 
 ```ts
 export type MouseKeyboardInput = {
+    /** currently held keys by KeyboardEvent.code */
     _keyState: Map<string, boolean>;
+    /** key state from the previous frame (for just-up; just-down uses _keyJustPressed) */
     _prevKeyState: Map<string, boolean>;
+    /**
+     * codes that received a non-repeat keydown since last reset. drives
+     * isKeyJustDown directly so macOS doesn't drop subsequent presses when
+     * Cmd is held (Cmd+letter swallows the letter's keyup on macOS, leaving
+     * _keyState stuck true so the prev/current diff fails on the next press).
+     */
     _keyJustPressed: Set<string>;
+    /**
+     * current modifier state. `mod` is cmd-on-mac / ctrl-on-win (e.metaKey
+     * || e.ctrlKey), matching the convention used elsewhere in the editor.
+     */
     _mods: ModifierState;
+    /** modifier state from previous frame */
     _prevMods: ModifierState;
+    /** accumulated mouse movement since last reset() */
     _dx: number;
     _dy: number;
-    _buttons: {
-        left: boolean;
-        right: boolean;
-        middle: boolean;
-    };
-    _prevButtons: {
-        left: boolean;
-        right: boolean;
-        middle: boolean;
-    };
+    /** current mouse button state */
+    _buttons: { left: boolean; right: boolean; middle: boolean };
+    /** button state from previous frame */
+    _prevButtons: { left: boolean; right: boolean; middle: boolean };
+    /** accumulated scroll wheel delta since last reset() */
     _wheelDeltaY: number;
-    _gestures: {
-        left: MouseButtonGesture;
-        middle: MouseButtonGesture;
-        right: MouseButtonGesture;
-    };
+    /** per-button drag-vs-tap discrimination, see MouseButtonGesture */
+    _gestures: { left: MouseButtonGesture; middle: MouseButtonGesture; right: MouseButtonGesture };
+    /** pointer-lock state, snapshotted once per frame so `is/was/just` agree
+     *  within a frame (raw `document.pointerLockElement` can flip mid-frame). */
     _locked: boolean;
     _prevLocked: boolean;
+    /** mirrors InputManager._lockReleases: true while a UI surface (library,
+     *  dialog, ad, host overlay) is holding pointer input via useReleasePointer,
+     *  so the viewport does not own the cursor/wheel. viewport wheel gestures
+     *  (orbit dolly, hotbar cycle) read this to ignore scrolls aimed at a panel
+     *  instead of sniffing the event target for "is this the game". */
     _pointerCapturedByUi: boolean;
 };
 ```
@@ -6017,8 +7537,13 @@ export type MouseKeyboardInput = {
 ```ts
 export type TouchButtonState = {
     down: boolean;
+    /** previous-frame `down`, mirrors the _prevButtons trick above. */
     _prevDown: boolean;
+    /** `look:true` buttons also drive the camera while held (a fire button you
+     *  can aim with). their drag is forwarded into the same look pipeline as a
+     *  right-half canvas drag, see `consumeTouchButtonLookDrag`. */
     look: boolean;
+    /** CSS-px drag accumulated since the last consume; meaningful only when `look`. */
     _dragX: number;
     _dragY: number;
 };
@@ -6028,10 +7553,15 @@ export type TouchButtonState = {
 
 ```ts
 export type TouchInput = {
+    /** live touches keyed by pointerId. */
     _canvasTouches: Map<number, CanvasTouch>;
+    /** touches that ended this frame; cleared by reset. */
     _canvasTouchesEnded: Map<number, CanvasTouch>;
+    /** inter-touch distance last frame (for pinch). 0 when !=2 touches. */
     _pinchPrevDist: number;
+    /** registered virtual joysticks. id chosen by the script. */
     _joysticks: Map<string, JoystickState>;
+    /** registered virtual buttons. */
     _buttons: Map<string, TouchButtonState>;
 };
 ```
@@ -6475,10 +8005,8 @@ RPC, matchmaking, room management, and chat.
 /** a command handle returned by command(). */
 export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
     readonly id: string;
-    dependency: {
-        registry: 'commands';
-        id: string;
-    };
+    /** DepGraph dependency, see SceneHandle.dependency. */
+    dependency: { registry: 'commands'; id: string };
     readonly direction: D;
     readonly schema: S;
     readonly serdes: ReturnType<typeof pack.build<S>>;

@@ -193,7 +193,12 @@ function printSignature(node, sourceFile, fileText, displayName) {
             ts.factory.createFunctionDeclaration(node.modifiers, node.asteriskToken, node.name, node.typeParameters, node.parameters, node.type, undefined),
             sourceFile,
         );
-    } else if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) {
+    } else if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) {
+        // verbatim source, not the printer: member-level comments (e.g. what
+        // `EnvironmentConfig.fog`'s fields mean) are the docs for a type, and
+        // the printer drops them.
+        sigStr = fileText.slice(node.getStart(sourceFile), node.getEnd());
+    } else if (ts.isClassDeclaration(node)) {
         sigStr = printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
     }
     if (!sigStr) return null;
@@ -307,7 +312,10 @@ function formatSignature(code) {
             i = j - 1;
         } else if (c === '}') {
             depth = Math.max(0, depth - 1);
-            out = `${out.replace(/[ \t]+$/, '')}\n${pad()}}`;
+            // one-liner sources drop the last member's `;` (`{ a: X; b: Y }`);
+            // re-add it so every expanded member reads the same.
+            const body = out.replace(/[ \t]+$/, '');
+            out = `${body}${/[^;{\s]$/.test(body) ? ';' : ''}\n${pad()}}`;
         } else if (c === ';') {
             out += ';';
             let j = i + 1;
