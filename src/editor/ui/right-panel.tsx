@@ -63,7 +63,7 @@ export function RightPanel({ width, onResize }: RightPanelProps) {
         >
             <ResizeHandle onResize={onResize} />
 
-            <CollapsiblePane title="hierarchy" defaultOpen={true} defaultHeight={220}>
+            <CollapsiblePane title="hierarchy" defaultOpen={true} defaultHeight={440}>
                 <HierarchyPane />
             </CollapsiblePane>
 
