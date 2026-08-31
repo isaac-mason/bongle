@@ -28,7 +28,7 @@ import { BONGLE_VERSION } from '../../src/build-info';
 import { isStandalone, serverMaxPlayers } from '../../src/core/config';
 import type { EnvValues } from '../env-replace';
 import { type BuildFs, shakeupFs } from '../resolve';
-import { asRolldownPlugin, createBonglePlugin } from './bongle-plugin';
+import { createBonglePlugin } from './bongle-plugin';
 
 type Target = 'client' | 'server';
 
@@ -140,21 +140,28 @@ async function buildTarget(
     fs: BuildFs,
     target: Target,
     progress: (label: string) => void = () => {},
-    bundler?: Bundler,
 ): Promise<Record<string, Uint8Array>> {
     const entry = await entrySource(fs, target);
     progress(`Bundling ${target}`);
-    if (bundler !== undefined) return buildTargetWithRolldown(fs, target, entry, bundler);
     const r = await bundle({
         input: { index: ENTRY_ID },
         fs: shakeupFs(fs),
         plugins: [buildTargetPlugin(fs, target, entry)],
         external: (s) => s.startsWith('node:') || (target === 'server' && s === 'sharp'),
-        // NODE_ENV is already build-defined into the prebundled engine dist (where
-        // React lives); user + play-shell code don't read process.env, so no define.
+        // A prod bundle is production. Without this, npm packages that branch on
+        // process.env.NODE_ENV (react/react-dom/scheduler pick their build that way)
+        // fold nothing and ship BOTH copies -- and on the browser target the read
+        // itself throws, since `process` does not exist there.
+        define: { 'process.env.NODE_ENV': '"production"' },
         // server is host-neutral: it runs in a node process (deploy) AND a browser
         // worker (solo/editor), injecting node/browser capabilities per host.
         platform: target === 'server' ? 'neutral' : 'browser',
+        // `neutral` deliberately empties mainFields (esbuild's rule), which makes a legacy
+        // package carrying only `main` and no `exports` unresolvable — gpucat/packcat/dashcat
+        // are exactly that. Neutral stays right for CONDITIONS (this bundle runs in node AND
+        // in a browser worker, so neither the node nor the browser condition applies); the
+        // entry fields still want the ordinary ESM-then-legacy fallback.
+        ...(target === 'server' ? { resolve: { mainFields: ['module', 'main'] } } : {}),
         output: {
             entryFileNames: 'index.js',
             chunkFileNames: 'assets/[name]-[hash].js',
@@ -168,61 +175,20 @@ async function buildTarget(
         },
     });
     if (r.errors.length > 0) throw new Error(`[bongle] ${target} bundle failed:\n${r.errors.join('\n')}`);
+    // An unresolved import is not cosmetic: shakeup externalizes it (rollup's rule), so the
+    // bundle ships a bare specifier nothing can resolve and the game dies at load with
+    // ERR_MODULE_NOT_FOUND. Only `errors` used to be read, so this shipped silently.
+    const unresolved = r.warnings.filter((w) => w.includes('could not be resolved'));
+    if (unresolved.length > 0) {
+        throw new Error(`[bongle] ${target} bundle has unresolved imports:\n${unresolved.join('\n')}`);
+    }
+    for (const w of r.warnings) progress(`warning: ${w}`);
 
     const enc = new TextEncoder();
     const files: Record<string, Uint8Array> = {};
     for (const c of r.chunks) files[c.fileName] = enc.encode(c.code);
     for (const a of r.assets ?? []) {
         files[a.fileName] = typeof a.source === 'string' ? enc.encode(a.source) : (a.source as Uint8Array);
-    }
-    return files;
-}
-
-// ── TEMPORARY: the CLI's rolldown path ──────────────────────────────────────
-//
-// Identical output shaping to the shakeup path above; only the engine differs.
-// Exists because shakeup has no CommonJS support and a node project's node_modules
-// is full of it. DELETE with `Bundler` + `asRolldownPlugin` once that lands.
-// See llm/plan-shakeup-prod-build.md.
-
-/** the injected rolldown impl (node's), plus an optional host prep hook. */
-export type Bundler = {
-    // biome-ignore lint/suspicious/noExplicitAny: rolldown's types are not a dep of this file.
-    rolldown: (opts: any) => Promise<any>;
-    prepare?: () => void;
-};
-
-async function buildTargetWithRolldown(
-    fs: BuildFs,
-    target: Target,
-    entry: string,
-    bundler: Bundler,
-): Promise<Record<string, Uint8Array>> {
-    bundler.prepare?.();
-    const bundled = await bundler.rolldown({
-        input: { index: ENTRY_ID },
-        plugins: [asRolldownPlugin(buildTargetPlugin(fs, target, entry))],
-        external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
-        platform: target === 'server' ? 'neutral' : 'browser',
-        onLog: (level: string, log: { code?: string }, handler: (l: string, g: unknown) => void) => {
-            if (log.code === 'INEFFECTIVE_DYNAMIC_IMPORT') return;
-            handler(level, log);
-        },
-    });
-    const { output } = await bundled.generate({
-        format: 'es',
-        entryFileNames: 'index.js',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]',
-        inlineDynamicImports: target === 'server',
-        minify: true,
-    });
-    await bundled.close();
-    const enc = new TextEncoder();
-    const files: Record<string, Uint8Array> = {};
-    for (const o of output) {
-        files[o.fileName] =
-            o.type === 'chunk' ? enc.encode(o.code) : typeof o.source === 'string' ? enc.encode(o.source) : o.source;
     }
     return files;
 }
@@ -254,10 +220,6 @@ export type BuildOptions = {
     config: Config;
     /** phase label callback for the progress UI. */
     onProgress?: (label: string) => void;
-    /** TEMPORARY: pass node `rolldown` to build with it instead of shakeup. Only the
-     *  CLI does, and only until shakeup handles CommonJS — see the note above
-     *  `buildTargetWithRolldown`. */
-    bundler?: Bundler;
 };
 
 /** build the whole bundle → zip bytes (client/ + server/ + bongle.json). */
@@ -269,8 +231,8 @@ export async function buildBundle(fs: BuildFs, opts: BuildOptions): Promise<Uint
     // `?worker` entries are bundled inline by the plugin's load hook now (shakeup is
     // reentrant), so there is no pre-pass — and no reason to serialize the targets.
     const [clientFiles, serverFiles] = await Promise.all([
-        buildTarget(fs, 'client', progress, opts.bundler),
-        standalone ? Promise.resolve({} as Record<string, Uint8Array>) : buildTarget(fs, 'server', progress, opts.bundler),
+        buildTarget(fs, 'client', progress),
+        standalone ? Promise.resolve({} as Record<string, Uint8Array>) : buildTarget(fs, 'server', progress),
     ]);
 
     const zip: Record<string, Uint8Array> = {};

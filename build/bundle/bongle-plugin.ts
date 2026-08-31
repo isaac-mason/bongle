@@ -11,15 +11,11 @@
 // The dev path (dev/shakeup-host.ts) drives shakeup's dev server over the same
 // resolve.ts; this is its build-time twin.
 //
-// The hooks are shakeup-shaped (ctx-first). `asRolldownPlugin` below adapts the SAME
-// definition for the rolldown path the CLI still uses — see the note there.
-//
-// `moduleType` is still reported on load: shakeup ignores it (it parses everything as
-// TS and picks JSX off the id's extension), but rolldown needs it to know a `.ts` file
-// carries types. Likewise `.json` is converted here rather than by shakeup's `json()`
-// plugin, so one definition serves both bundlers.
+// Hooks are shakeup-shaped: rollup's calling convention, so the plugin context is `this`
+// rather than a leading parameter. One bundler, one definition — the editor and the CLI run
+// this identical path.
 
-import { bundle, type Plugin } from 'shakeup';
+import { bundle, type Plugin, packageSideEffectsFor } from 'shakeup';
 import { type EnvValues, replaceEnv } from '../env-replace';
 import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule, shakeupFs } from '../resolve';
 
@@ -37,6 +33,30 @@ function moduleTypeOf(id: string): ModuleType {
 /** `?worker` imports resolve to this-prefixed ids; load() bundles + wraps them. */
 const WORKER_PREFIX = '\0worker:';
 
+/** `false` / `true` / one glob / an array of globs. Anything else is not a declaration. */
+function parseSideEffects(raw: unknown): boolean | string[] | undefined {
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'string') return [raw];
+    if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string');
+    return undefined;
+}
+
+/** Read `package.json#sideEffects` for a package. shakeup's own resolver surfaces this, but
+ *  we resolve + load every module ourselves (resolve.ts), so it never runs and the field would go
+ *  unread — which is what kept `bongle/kit` whole: its declarations are pure, but a call to an
+ *  imported `block()` is impure per-statement, so without the manifest saying otherwise every one of
+ *  them is rooted. The owning package is whatever follows the INNERMOST `node_modules/`: that is the
+ *  id's prefix in the editor's flat vfs, and the real nested location under a node host, where a
+ *  realpath'd id points into pnpm's store. */
+function packageDirOf(id: string): string | null {
+    const at = id.lastIndexOf('node_modules/');
+    if (at === -1) return null; // project source — decide per statement
+    const dir = id.slice(0, at + 'node_modules/'.length);
+    const parts = id.slice(at + 'node_modules/'.length).split('/');
+    const name = parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+    return name ? `${dir}${name}` : null;
+}
+
 export type BonglePluginOptions = {
     /** env values baked into every module (replaceEnv). */
     env: EnvValues;
@@ -53,9 +73,27 @@ export type BonglePluginOptions = {
 export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plugin {
     // one nested bundle per worker entry, however many modules import it.
     const workerCache = new Map<string, string>();
+    // package dir → its parsed `sideEffects`, so a verdict costs one manifest read per package.
+    const sideEffectsCache = new Map<string, boolean | string[] | undefined>();
+
+    /** the manifest's `sideEffects` verdict for `id`, or undefined when nothing declares one. */
+    async function sideEffectsOf(id: string): Promise<boolean | undefined> {
+        const dir = packageDirOf(id);
+        if (dir === null) return undefined;
+        if (!sideEffectsCache.has(dir)) {
+            let declared: boolean | string[] | undefined;
+            try {
+                declared = parseSideEffects(JSON.parse(await fs.readText(`${dir}/package.json`)).sideEffects);
+            } catch {
+                declared = undefined;
+            }
+            sideEffectsCache.set(dir, declared);
+        }
+        return packageSideEffectsFor({ dir, sideEffects: sideEffectsCache.get(dir) }, id);
+    }
     return {
         name: 'bongle:source',
-        async resolveId(_ctx, source, importer) {
+        async resolveId(source, importer) {
             if (opts.entry && source === opts.entry.id) return opts.entry.id;
             if (source.startsWith('node:')) return { id: source, external: true };
             if (opts.external?.(source)) return { id: source, external: true };
@@ -79,7 +117,7 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
             }
             return resolveModule(fs, clean, importer ?? undefined); // relative + bare (exports)
         },
-        async load(_ctx, id) {
+        async load(id) {
             if (opts.entry && id === opts.entry.id) return { code: opts.entry.code, moduleType: 'js' };
             if (id.startsWith(WORKER_PREFIX)) {
                 const entryId = id.slice(WORKER_PREFIX.length);
@@ -103,9 +141,9 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
             // definition also serves rolldown (which would otherwise parse raw JSON as
             // a program). Verified against shakeup's bundler too.
             if (id.endsWith('.json')) return { code: `export default ${await fs.readText(id)}`, moduleType: 'js' };
-            return { code: await fs.readText(id), moduleType: moduleTypeOf(id) };
+            return { code: await fs.readText(id), moduleType: moduleTypeOf(id), moduleSideEffects: await sideEffectsOf(id) };
         },
-        transform(_ctx, code, id) {
+        transform(code, id) {
             if (opts.entry && id === opts.entry.id) return null;
             const out = replaceEnv(code, opts.env);
             return out === code ? null : out;
@@ -159,44 +197,4 @@ export default function WorkerWrapper(options) {
     }
 }
 `;
-}
-
-// ── TEMPORARY: rolldown adapter (CLI only) ──────────────────────────────────
-//
-// The editor builds on shakeup. The node CLI does NOT yet, for one reason:
-// shakeup has no CommonJS support, and a real `node_modules` tree is full of it
-// (`react/index.js` is `module.exports = require(...)`, reached via zustand). The
-// editor never meets that — its vfs is seeded with PREBUNDLED ESM deps, which is
-// exactly why scripts/build-deps.mjs exists.
-//
-// So the CLI keeps rolldown until shakeup can eat CJS. This adapter exists so that
-// is the ONLY difference: one plugin definition, two call shapes. shakeup's hooks
-// are ctx-first; rolldown's are not, and the bongle plugin ignores ctx entirely.
-//
-// DELETE THIS, and the `bundler` option it serves, once shakeup handles CJS.
-// See llm/plan-shakeup-prod-build.md.
-
-/** rolldown's plugin shape, structurally — avoids a type dep on rolldown here. */
-type RolldownPlugin = {
-    name: string;
-    resolveId(source: string, importer?: string): unknown;
-    load(id: string): unknown;
-    transform(code: string, id: string): unknown;
-};
-
-export function asRolldownPlugin(p: Plugin): RolldownPlugin {
-    // the bongle plugin never reads ctx (its hooks take `_ctx`), so a stub is honest
-    // here rather than a landmine — a plugin that DID use ctx must not go through this.
-    const ctx = {} as never;
-    const fn = <T>(h: T | { handler: T } | undefined): T | undefined =>
-        h !== undefined && typeof h === 'object' && h !== null && 'handler' in h
-            ? (h as { handler: T }).handler
-            : (h as T | undefined);
-    return {
-        name: p.name,
-        resolveId: (source, importer) =>
-            fn(p.resolveId)?.(ctx, source, importer ?? null, { isEntry: false, kind: 'import-statement' }),
-        load: (id) => fn(p.load)?.(ctx, id),
-        transform: (code, id) => fn(p.transform)?.(ctx, code, id),
-    };
 }
