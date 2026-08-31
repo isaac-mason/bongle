@@ -31,6 +31,7 @@ import { dedup, reorder, weld } from '@gltf-transform/functions';
 import { mat4 } from 'math';
 import type { Box3 } from 'math/shapes';
 import { MeshoptEncoder } from 'meshoptimizer';
+import type { Filesystem } from '../../../os/interface';
 import {
     type ModelBinChannel,
     type ModelBinClip,
@@ -40,7 +41,6 @@ import {
 } from '../../core/models/model-bin';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../../../os/interface';
 import { sha256Hex } from './raster';
 
 // ── paths ──────────────────────────────────────────────────────────
@@ -69,6 +69,8 @@ const binSafeId = (id: string): string => id.replace(/[<>:"/\\|?*]/g, '_');
 /** per-id record of the last successful build for this model. Owned by
  *  the pipeline orchestrator (`PipelineState.modelsCache`) and threaded
  *  in via `BuildModelsOptions.cache`; this module mutates it in place. */
+import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
+
 export type ModelsCacheEntry = {
     srcHash: string;
     hash8: string;
@@ -165,16 +167,20 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     const entries: BuildEntry[] = [];
     let anyFresh = false;
 
-    for (const [id, def] of models) {
-        let e: BuildEntry | null;
+    // Per-model and independent (gltf parse, meshopt, bin write). Order preserved so the emitted
+    // barrel stays deterministic; the per-model catch stays INSIDE the job so one bad model still
+    // only skips itself rather than rejecting the batch.
+    const built = await mapConcurrent([...models], BAKE_CONCURRENCY, async ([id, def]) => {
         try {
-            e = await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
+            return await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
         } catch (err) {
             // a single unparseable/unfetchable model must not fail the whole
             // bake — warn and skip it (its barrel entry is just absent).
             console.warn(`[bongle] model "${id}" (${def.src}) failed to bake: ${(err as Error).message} — skipping`);
-            continue;
+            return null;
         }
+    });
+    for (const e of built) {
         if (!e) continue;
         entries.push(e);
         if (e.fresh) anyFresh = true;

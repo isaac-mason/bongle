@@ -17,6 +17,7 @@ import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
 import type { BlockTextureDef } from '../../core/voxels/blocks';
+import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
 import type { Raster, RasterCanvas, RasterContext2D, RasterImage } from './raster';
 
 export type BakedDraws = Map<DrawSource, RasterCanvas>;
@@ -67,13 +68,24 @@ export async function bakeDrawTextures(
     if (drawFrames.length === 0) return baked;
 
     console.log(`[bongle] baking ${drawFrames.length} DrawSource frame(s)...`);
-    for (const ds of drawFrames) await bakeOne(ds, baked, imageCache, opts.loader, opts.raster, new Set());
+    // Each top-level frame gets its own cycle guard (the guard tracks ANCESTRY within one chain,
+    // not global in-flight-ness), while `inFlight` is shared so a draw referenced by several frames
+    // still bakes once.
+    const inFlight: InFlight = new Map();
+    await mapConcurrent(drawFrames, BAKE_CONCURRENCY, (ds) =>
+        bakeOne(ds, baked, inFlight, imageCache, opts.loader, opts.raster, new Set()),
+    );
     return baked;
 }
 
 // ── internals ───────────────────────────────────────────────────────
 
-type ImageCache = Map<string, RasterImage>;
+// PROMISES, not values. Both caches are consulted by concurrent chains, so memoizing the settled
+// result lets two chains that miss simultaneously do the same work twice — a double decode for an
+// image, and for a draw a second run of the user's fn against a second canvas, after which one of
+// the two canvases is the one in `baked` and the other is silently discarded.
+type ImageCache = Map<string, Promise<RasterImage | RasterCanvas>>;
+type InFlight = Map<DrawSource, Promise<RasterCanvas>>;
 
 function isDrawSource(s: NormalizedImageSource): s is DrawSource {
     return typeof s !== 'string';
@@ -84,61 +96,75 @@ function isDrawSource(s: NormalizedImageSource): s is DrawSource {
  * fresh canvas, store in `baked`. Memoized by descriptor identity, so a draw
  * shared between multiple frames bakes once.
  */
-async function bakeOne(
+function bakeOne(
     ds: DrawSource,
     baked: BakedDraws,
+    inFlight: InFlight,
     imageCache: ImageCache,
     loader: ResourceLoader,
     raster: Raster,
     cycleGuard: Set<DrawSource>,
 ): Promise<RasterCanvas> {
-    const existing = baked.get(ds);
+    // The cycle check comes BEFORE the memo: a self-referencing draw is in flight when its own
+    // input asks for it, so consulting the memo first would hand the chain its own pending promise
+    // and hang instead of reporting the cycle.
+    if (cycleGuard.has(ds)) {
+        return Promise.reject(
+            new Error('[bongle] draw() cycle detected — a draw descriptor references itself through its inputs'),
+        );
+    }
+    const existing = inFlight.get(ds);
     if (existing) return existing;
 
-    if (cycleGuard.has(ds)) {
-        throw new Error('[bongle] draw() cycle detected — a draw descriptor references itself through its inputs');
-    }
-    cycleGuard.add(ds);
+    const run = async (): Promise<RasterCanvas> => {
+        cycleGuard.add(ds);
+        const inputEntries = await Promise.all(
+            Object.entries(ds.inputs).map(async ([key, src]) => {
+                const resolved = await resolveInput(src, baked, inFlight, imageCache, loader, raster, cycleGuard);
+                return [key, resolved] as const;
+            }),
+        );
+        const inputs: Record<string, RasterImage | RasterCanvas> = {};
+        for (const [k, v] of inputEntries) inputs[k] = v;
 
-    const inputEntries = await Promise.all(
-        Object.entries(ds.inputs).map(async ([key, src]) => {
-            const resolved = await resolveInput(src, baked, imageCache, loader, raster, cycleGuard);
-            return [key, resolved] as const;
-        }),
-    );
-    const inputs: Record<string, RasterImage | RasterCanvas> = {};
-    for (const [k, v] of inputEntries) inputs[k] = v;
+        const { canvas, ctx } = raster.makeCanvas(ds.size[0], ds.size[1]);
+        (ds.fn as unknown as DrawFn)(ctx, inputs, ds.params);
 
-    const { canvas, ctx } = raster.makeCanvas(ds.size[0], ds.size[1]);
-    (ds.fn as unknown as DrawFn)(ctx, inputs, ds.params);
+        baked.set(ds, canvas);
+        cycleGuard.delete(ds);
+        return canvas;
+    };
 
-    baked.set(ds, canvas);
-    cycleGuard.delete(ds);
-    return canvas;
+    const p = run();
+    inFlight.set(ds, p);
+    return p;
 }
 
-async function resolveInput(
+function resolveInput(
     src: NormalizedImageSource,
     baked: BakedDraws,
+    inFlight: InFlight,
     imageCache: ImageCache,
     loader: ResourceLoader,
     raster: Raster,
     cycleGuard: Set<DrawSource>,
 ): Promise<RasterImage | RasterCanvas> {
-    if (isDrawSource(src)) return bakeOne(src, baked, imageCache, loader, raster, cycleGuard);
+    if (isDrawSource(src)) return bakeOne(src, baked, inFlight, imageCache, loader, raster, cycleGuard);
 
     const cached = imageCache.get(src);
     if (cached) return cached;
-    let bytes: Uint8Array;
-    try {
-        bytes = await loader.loadBytes(src);
-    } catch {
-        console.warn(`[bongle] draw() input not found: ${src} (magenta placeholder)`);
-        return makePlaceholderImage(raster);
-    }
-    const bitmap = await raster.decodeBitmap(bytes);
-    imageCache.set(src, bitmap);
-    return bitmap;
+    const load = (async (): Promise<RasterImage | RasterCanvas> => {
+        let bytes: Uint8Array;
+        try {
+            bytes = await loader.loadBytes(src);
+        } catch {
+            console.warn(`[bongle] draw() input not found: ${src} (magenta placeholder)`);
+            return makePlaceholderImage(raster);
+        }
+        return raster.decodeBitmap(bytes);
+    })();
+    imageCache.set(src, load);
+    return load;
 }
 
 /** 16×16 magenta canvas, substituted for a missing draw input so the user fn

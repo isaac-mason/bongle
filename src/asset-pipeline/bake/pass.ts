@@ -17,6 +17,7 @@
  * reads it directly off pipeline state after the pass.
  */
 
+import type { Filesystem } from '../../../os/interface';
 import { type Config, DEFAULT_CONFIG, isStandalone } from '../../core/config';
 import type { ModelHandle } from '../../core/models/handle';
 import { type Registry, resolveConfig } from '../../core/registry';
@@ -25,7 +26,6 @@ import type { SceneHandle } from '../../core/scene/scene-handle';
 import type { Blocks } from '../../core/voxels/block-registry';
 import type { BlockDef, BlockHandle, BlockTextureDef } from '../../core/voxels/blocks';
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../../../os/interface';
 import { buildAudio } from './audio';
 import { buildBlockTextureAtlas } from './block-texture-atlas';
 import type { DecodeAudio } from './decode-audio';
@@ -213,38 +213,44 @@ export async function runAssetPipelinePass(
         moduleView = { blocks, blockTextures, models, scenes };
     }
 
-    // Bake DrawSources after block-registry derivation so dust sprites
-    // are present. Atlas builders read the resulting `BakedDraws` map to
-    // replace magenta placeholders with rendered pixels. The bake walks
-    // both registries unconditionally; per-builder gates downstream still
+    // Bake DrawSources after block-registry derivation so dust sprites are present. Atlas
+    // builders read the resulting `BakedDraws` map to replace magenta placeholders with rendered
+    // pixels. The bake walks both registries unconditionally; per-builder gates downstream still
     // apply.
-    const bakedDraws: BakedDraws =
+    //
+    // NOT awaited here: only the two ATLASES consume it. Audio, models and scenes read none of it,
+    // and awaiting up front put all three behind a bake they don't need — audio worst of all,
+    // since it is the longest phase and depends on nothing but `registry.sounds`. Started as a
+    // promise, the atlases chain off it and everything else runs alongside.
+    const bakedDraws: Promise<BakedDraws> =
         atlasDirty || spritesDirty
-            ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { loader, raster }))
-            : new Map();
+            ? timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { loader, raster }))
+            : Promise.resolve(new Map());
 
     const tasks: Promise<void>[] = [];
 
     if (moduleView) {
-        if (atlasDirty)
+        if (atlasDirty) {
+            const view = moduleView;
             tasks.push(
-                timed('block-atlas', buildBlockTextureAtlas(moduleView, { bakedDraws, cache, loader, fs, raster })).then(
-                    () => undefined,
-                ),
+                bakedDraws
+                    .then((draws) =>
+                        timed('block-atlas', buildBlockTextureAtlas(view, { bakedDraws: draws, cache, loader, fs, raster })),
+                    )
+                    .then(() => undefined),
             );
+        }
         // `standalone` is computed once up top (also drives modelsDirty/scenesDirty).
         if (modelsDirty) {
             // standalone → don't emit the server-side model bin (resources/server/models).
             tasks.push(
-                timed(
-                    'models',
-                    buildModels(moduleView, { cache: state.modelsCache, loader, fs, emitServer: !standalone }),
-                ).then(() => undefined),
+                timed('models', buildModels(moduleView, { cache: state.modelsCache, loader, fs, emitServer: !standalone })).then(
+                    () => undefined,
+                ),
             );
         }
         // standalone → bake EVERY authored scene into the client (no server serves them).
-        if (scenesDirty)
-            tasks.push(timed('scenes', buildScenes(moduleView, { mode, standalone, fs })).then(() => undefined));
+        if (scenesDirty) tasks.push(timed('scenes', buildScenes(moduleView, { mode, standalone, fs })).then(() => undefined));
     }
 
     if (soundsDirty) {
@@ -260,9 +266,11 @@ export async function runAssetPipelinePass(
         // of the draw-textures pass above; nullable map entries fall back
         // to magenta inside the builder.
         tasks.push(
-            timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { bakedDraws, cache, loader, fs, raster })).then(
-                () => undefined,
-            ),
+            bakedDraws
+                .then((draws) =>
+                    timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { bakedDraws: draws, cache, loader, fs, raster })),
+                )
+                .then(() => undefined),
         );
     }
 

@@ -48,6 +48,7 @@ import type { Filesystem } from '../../../os/interface';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SoundHandle } from '../../core/sounds/sounds';
+import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
 import type { DecodeAudio } from './decode-audio';
 import { encodeMp3 } from './mp3';
 import { encodeOpusAtlasWebm } from './opus';
@@ -338,14 +339,13 @@ async function buildAtlas(decodeAudio: DecodeAudio, sources: LoadedSource[], fs:
     // the whole stream as WebM-Opus. Opus preserves interior sample positions (48k
     // native, no resample) and the decoder trims the front pre-skip, so every clip's
     // offset + duration (from the PCM sample counts below) lands time-accurate.
-    const pcmChunks: Int16Array[] = [];
-    const sampleCounts: number[] = [];
-    for (const s of sources) {
-        const decoded = await decodeAudio(s.bytes, SAMPLE_RATE);
-        const mono = downmixMono(decoded.channels);
-        pcmChunks.push(mono);
-        sampleCounts.push(mono.length);
-    }
+    // Decodes fan out (WebCodecs in the browser, native in node — both hand off and return a
+    // promise), but the ORDER of the result is load-bearing: the concatenation below is what each
+    // clip's atlas offset is derived from. mapConcurrent keeps input order.
+    const pcmChunks = await mapConcurrent(sources, BAKE_CONCURRENCY, async (s) =>
+        downmixMono((await decodeAudio(s.bytes, SAMPLE_RATE)).channels),
+    );
+    const sampleCounts = pcmChunks.map((mono) => mono.length);
 
     const atlasBytes = await encodeOpusAtlasWebm(concatInt16(pcmChunks), ATLAS_OPUS_BITRATE);
     await fs.write(ATLAS_PATH, atlasBytes);
@@ -369,15 +369,15 @@ async function buildStandalones(
     sources: LoadedSource[],
     fs: Filesystem,
 ): Promise<AudioManifestStandaloneEntry[]> {
-    const entries: AudioManifestStandaloneEntry[] = [];
-    for (const s of sources) {
+    // Per-clip and independent. The mp3 encode itself is lamejs, pure JS and therefore in-thread,
+    // so only the decode and the write actually overlap here — the encode is what a worker pool
+    // would buy later.
+    return mapConcurrent(sources, BAKE_CONCURRENCY, async (s) => {
         const decoded = await decodeAudio(s.bytes, SAMPLE_RATE);
         const mp3 = encodeMp3(decoded.channels, SAMPLE_RATE, STANDALONE_BITRATE_KBPS);
         await fs.write(standalonePath(s.id), mp3);
-        const durationSec = decoded.channels[0]!.length / SAMPLE_RATE;
-        entries.push({ id: s.id, url: `audio/${s.id}.mp3`, durationSec });
-    }
-    return entries;
+        return { id: s.id, url: `audio/${s.id}.mp3`, durationSec: decoded.channels[0]!.length / SAMPLE_RATE };
+    });
 }
 
 async function pruneStandalones(fs: Filesystem, liveIds: Set<string>): Promise<void> {
