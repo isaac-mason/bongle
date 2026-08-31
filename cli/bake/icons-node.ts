@@ -15,6 +15,13 @@ import type { Filesystem } from '../../os/interface';
 import { createClientResourceLoader } from '../../src/asset-pipeline/loader';
 import { decodeImageNode } from './decode-image-node';
 
+// Dawn's AsyncRunner self-schedules a setImmediate that pumps ProcessEvents on the
+// native instance. If V8 collects the instance while one of those is still queued,
+// the callback locks a freed mutex and the process dies with SIGSEGV/SIGABRT. The
+// locals below would go out of scope the moment renderIcons returns, so pin them
+// here for the process lifetime; `bongle`'s one-shot exit(0) does the teardown.
+const pinnedGpu: unknown[] = [];
+
 /** the project's engine-asset-pipeline `Icons` namespace (same bongle instance as
  *  the data bake — shares the baked atlas + registry). */
 type Icons = typeof import('../../src/asset-pipeline')['Icons'];
@@ -39,12 +46,14 @@ export async function renderIcons(fs: Filesystem, Icons: Icons, atlasChanged: bo
     }
     Object.assign(globalThis, webgpu.globals);
     const gpu = webgpu.create([]);
+    pinnedGpu.push(gpu);
     const adapter = await gpu.requestAdapter();
     if (!adapter) {
         console.log('  · icons: no GPU adapter — skipping');
         return false;
     }
     const device = await adapter.requestDevice();
+    pinnedGpu.push(adapter, device);
 
     // reads baked client assets (voxels-atlas.png, model bins) back out of the fs,
     // with the node-canvas decoder attached for raw-bytes texture upload.
