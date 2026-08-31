@@ -40,7 +40,7 @@ function ToggleBtn({
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
+            className={`px-2 py-0.5 text-[10px] font-mono transition-colors ${
                 disabled
                     ? 'text-fg-muted opacity-50 cursor-not-allowed'
                     : active
@@ -665,7 +665,7 @@ function FalloffButton({
         <button
             type="button"
             onClick={onClick}
-            className={`flex flex-col items-center gap-0.5 px-1 py-1 rounded transition-colors ${
+            className={`flex flex-col items-center gap-0.5 px-1 py-1 transition-colors ${
                 active ? 'bg-accent text-on-accent' : 'text-fg hover:bg-surface-muted'
             }`}
         >
@@ -804,7 +804,7 @@ export function ElevationOptions() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
-                    className="px-2 py-0.5 text-[10px] font-mono rounded text-fg hover:text-fg"
+                    className="px-2 py-0.5 text-[10px] font-mono text-fg hover:text-fg"
                 >
                     {loading ? 'loading…' : heightmap ? heightmap.name : 'load…'}
                 </button>
@@ -812,7 +812,7 @@ export function ElevationOptions() {
                     <button
                         type="button"
                         onClick={() => setElevationOptions({ heightmap: null, heightmapError: null })}
-                        className="px-1.5 py-0.5 text-[10px] font-mono rounded text-fg-muted hover:text-fg"
+                        className="px-1.5 py-0.5 text-[10px] font-mono text-fg-muted hover:text-fg"
                         title="clear heightmap"
                     >
                         ×
@@ -869,7 +869,7 @@ function PivotRow() {
                 type="button"
                 title={`pivot ${label} (${hint})`}
                 onClick={() => setPreset(preset)}
-                className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
+                className={`px-2 py-0.5 text-[10px] font-mono transition-colors ${
                     active ? 'bg-accent text-on-accent' : 'text-fg hover:text-fg'
                 }`}
             >
@@ -935,7 +935,7 @@ export function TransformOptions() {
                     type="button"
                     title={enabled ? 'disable snap' : 'enable snap'}
                     onClick={() => onChange(enabled ? null : defaultOn)}
-                    className={`w-5 h-4 rounded text-[9px] font-mono border transition-colors shrink-0 ${
+                    className={`w-5 h-4 text-[9px] font-mono border transition-colors shrink-0 ${
                         enabled ? 'bg-accent border-accent text-on-accent' : 'bg-surface-muted border-border text-fg-muted'
                     }`}
                 >

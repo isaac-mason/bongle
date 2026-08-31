@@ -1,7 +1,7 @@
 import * as Icons from "../../../icons";
 import { type EulerOrder, euler, type Quat, quat } from 'math';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
-import { IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
+import { Button, IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
 import { registry } from '../../core/registry';
 import type { Node, Realm } from '../../core/scene/scene-tree';
 import { createPrefabConfig, getNodeById } from '../../core/scene/scene-tree';
@@ -530,7 +530,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
             const def = prefabDefs.get(id);
             const name = def?.name ?? id;
             const leading = (
-                <PrefabThumb key={id} prefabId={id} size={thumbSize} className="rounded-sm overflow-hidden shrink-0" />
+                <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />
             );
             return { id, label: name, sublabel: name === id ? undefined : id, leading };
         }),
@@ -564,7 +564,7 @@ function BlockRefEditor({ value, onChange }: { value: string; schema: BlockRefSc
                 hasAtlas && coord ? (
                     <div
                         key={def.id}
-                        className="rounded-sm overflow-hidden shrink-0"
+                        className="overflow-hidden shrink-0"
                         style={{
                             width: thumbSize,
                             height: thumbSize,
@@ -721,7 +721,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const isEditorOwned = def.id === 'editor' || def.id.startsWith('editor.');
 
     return (
-        <div className="border border-border rounded">
+        <div className="border border-border">
             <div className="flex items-center justify-between px-2 py-1 bg-surface-muted">
                 <span className="text-[11px] font-mono font-semibold text-fg">{def.id}</span>
                 {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-fg-muted" />}
@@ -771,7 +771,7 @@ function UnresolvedTraitSection({
 }) {
     const removeTrait = useEditRoom((s) => s.removeTrait);
     return (
-        <div className="border border-warn/40 rounded bg-warn/10">
+        <div className="border border-warn/40 bg-warn/10">
             <div className="flex items-center gap-1 px-2 py-1 bg-warn/15">
                 <Icons.TriangleAlert size={12} className="text-warn shrink-0" />
                 <span className="text-[11px] font-mono font-semibold text-warn">{traitId}</span>
@@ -841,20 +841,10 @@ function SectionDivider({ label, action }: { label: string; action?: ReactNode }
  * "+" button used inside SectionDivider to host an add-popover trigger.
  * Bordered + 20px square so it reads as a real affordance against the rule.
  */
-const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ disabled, className, ...props }, ref) => (
-    <button
-        ref={ref}
-        type="button"
-        disabled={disabled}
-        className={`shrink-0 flex items-center justify-center w-5 h-5 rounded border ${
-            disabled
-                ? 'text-fg-muted border-border bg-surface-muted cursor-not-allowed'
-                : 'text-fg border-border bg-surface hover:bg-surface-muted hover:border-fg-muted cursor-pointer'
-        } ${className ?? ''}`}
-        {...props}
-    >
+const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
+    <Button ref={ref} size="icon-sm" className={`shrink-0 ${className ?? ''}`} {...props}>
         <Icons.Plus size={13} />
-    </button>
+    </Button>
 ));
 SectionAddButton.displayName = 'SectionAddButton';
 
@@ -866,15 +856,10 @@ SectionAddButton.displayName = 'SectionAddButton';
  * attaches a default config to the node.
  */
 const AddPrefabTriggerButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
-    <button
-        ref={ref}
-        type="button"
-        className={`flex items-center gap-1 px-1.5 h-5 text-[10px] font-mono text-fg bg-surface border border-border rounded hover:bg-surface-muted hover:border-fg-muted cursor-pointer ${className ?? ''}`}
-        {...props}
-    >
+    <Button ref={ref} size="xs" className={className ?? ''} {...props}>
         <Icons.Layers size={11} />
         <Icons.Plus size={11} />
-    </button>
+    </Button>
 ));
 AddPrefabTriggerButton.displayName = 'AddPrefabTriggerButton';
 
@@ -890,7 +875,7 @@ function AddPrefabAction({ node }: { node: Node }) {
     const thumbSize = 24;
     const items: SearchableSelectItem<string>[] = prefabIds.map((id) => {
         const leading = (
-            <PrefabThumb key={id} prefabId={id} size={thumbSize} className="rounded-sm overflow-hidden shrink-0" />
+            <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />
         );
         return { id, label: id, leading };
     });
@@ -1050,7 +1035,7 @@ export function InspectorPanel() {
                     label="voxel"
                     action={
                         <div className="flex items-center gap-1.5">
-                            {hasIcon && <div className="rounded-sm overflow-hidden" style={iconStyle} />}
+                            {hasIcon && <div className="overflow-hidden" style={iconStyle} />}
                             <span className="text-[10px] font-mono text-fg font-semibold">{def.id}</span>
                         </div>
                     }
@@ -1115,7 +1100,7 @@ export function InspectorPanel() {
                                                     onClick={() => {
                                                         if (targetKey) setBlock(wx, wy, wz, targetKey);
                                                     }}
-                                                    className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors ${
+                                                    className={`px-1.5 py-0.5 text-[10px] font-mono transition-colors ${
                                                         active
                                                             ? 'bg-accent text-on-accent cursor-default'
                                                             : 'bg-surface-muted text-fg hover:bg-border cursor-pointer'
@@ -1242,7 +1227,7 @@ function RealmEditor({ node }: { node: Node }) {
                             active
                                 ? 'bg-accent text-on-accent border-accent'
                                 : 'bg-surface text-fg border-border hover:bg-surface-muted hover:text-fg'
-                        } ${i === 0 ? 'rounded-l' : '-ml-px'} ${i === REALM_OPTIONS.length - 1 ? 'rounded-r' : ''}`}
+                        } ${i === 0 ? '' : '-ml-px'}`}
                     >
                         {opt.value}
                     </button>

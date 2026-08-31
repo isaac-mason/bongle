@@ -122,7 +122,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                className="w-full bg-surface-muted text-fg text-[10px] font-mono px-1 py-0.5 rounded border border-border"
+                className="w-full bg-surface-muted text-fg text-[10px] font-mono px-1 py-0.5 border border-border"
                 onChange={(e) => {
                     onChange(e.target.value);
                     setCursor(e.target.selectionStart ?? e.target.value.length);

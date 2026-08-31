@@ -1,3 +1,5 @@
+export type { ButtonProps, ButtonSize, ButtonTone } from './button';
+export { Button, buttonClass } from './button';
 export { Collapsible, CollapsibleContent, CollapsibleTrigger } from './collapsible';
 export { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './context-menu';
 export { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './dropdown-menu';

@@ -57,5 +57,5 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
 });
 
 function Placeholder({ size }: { size: number }) {
-    return <div style={{ width: size, height: size }} className="bg-surface-muted rounded" />;
+    return <div style={{ width: size, height: size }} className="bg-surface-muted" />;
 }

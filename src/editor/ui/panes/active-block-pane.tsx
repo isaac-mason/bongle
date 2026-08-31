@@ -31,7 +31,7 @@ function BlockIcon({ stateKey, size = 24 }: { stateKey: string; size?: number })
 
     const pos = coords[stateKey];
     if (!atlasUrl || !pos || !cols || !rows)
-        return <div style={{ width: size, height: size }} className="bg-surface-muted rounded" />;
+        return <div style={{ width: size, height: size }} className="bg-surface-muted" />;
 
     const [col, row] = pos;
     return (
@@ -88,7 +88,7 @@ export function ActiveBlockPane() {
                                 type="button"
                                 onClick={() => setBlockState(key)}
                                 title={key}
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono cursor-pointer whitespace-nowrap ${
+                                className={`flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-mono cursor-pointer whitespace-nowrap ${
                                     active
                                         ? 'border-accent bg-accent/25 text-fg'
                                         : 'border-border bg-surface text-fg hover:border-fg-muted hover:text-fg'

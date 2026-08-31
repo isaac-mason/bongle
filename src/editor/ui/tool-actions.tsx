@@ -198,7 +198,7 @@ function ActionBtn({
                 type="button"
                 disabled={disabled}
                 onClick={onClick}
-                className={`flex items-center gap-1 rounded font-mono shadow-sm border transition-colors ${
+                className={`flex items-center gap-1 font-mono shadow-sm border transition-colors ${
                     touch ? 'px-3 py-2 text-xs' : 'px-2 py-1 text-[11px]'
                 } ${
                     disabled
@@ -241,7 +241,7 @@ function GizmoModeBtn({
             title={label}
             disabled={disabled}
             onClick={() => onClick(mode)}
-            className={`flex items-center gap-1 rounded font-mono shadow-sm border transition-colors ${
+            className={`flex items-center gap-1 font-mono shadow-sm border transition-colors ${
                 touch ? 'px-3 py-2 text-xs' : 'px-2 py-1 text-[11px]'
             } ${
                 disabled

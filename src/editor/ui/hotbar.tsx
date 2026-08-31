@@ -25,7 +25,7 @@ export function Hotbar() {
     const room = useEditor((s) => s.room);
     return (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-            <div className="flex gap-1 bg-surface/90 border border-border rounded-sm shadow-md p-1 backdrop-blur-sm">
+            <div className="flex gap-1 bg-surface/90 border border-border shadow-md p-1 backdrop-blur-sm">
                 {hotbar.map((slot, i) => (
                     <Slot
                         // biome-ignore lint/suspicious/noArrayIndexKey: hotbar slots are positional (slot index is the identity)
@@ -70,7 +70,7 @@ function Slot({ index, slot, room, active, carrying, onClick, onClear }: SlotPro
                 e.preventDefault();
                 onClear();
             }}
-            className={`relative flex items-center justify-center rounded-sm cursor-pointer transition-colors ${
+            className={`relative flex items-center justify-center cursor-pointer transition-colors ${
                 active
                     ? 'bg-surface-muted ring-2 ring-accent'
                     : carrying

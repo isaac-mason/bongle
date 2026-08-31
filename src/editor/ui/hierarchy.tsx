@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import * as Icons from "../../../icons";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    Button,
     ContextMenu,
     ContextMenuContent,
     ContextMenuItem,
@@ -409,7 +410,7 @@ export function HierarchyPanel() {
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     placeholder="filter nodes…"
-                    className="flex-1 min-w-0 bg-surface border border-border rounded px-1 py-0.5 text-[10px] font-mono text-fg outline-none focus:border-accent"
+                    className="flex-1 min-w-0 bg-surface border border-border px-1 py-0.5 text-[10px] font-mono text-fg outline-none focus:border-accent"
                 />
                 {filter.length > 0 && (
                     <button
@@ -583,18 +584,17 @@ export function HierarchyPanel() {
             </ContextMenu>
 
             <div className="p-1 border-t border-border">
-                <button
-                    type="button"
+                <Button
                     onClick={() => {
                         const first = selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value : null;
                         const selectedNode = first ? sceneTree._idToNode.get(first) : null;
                         const parent = selectedNode ?? sceneTree.root;
                         createNode(parent.id, parent.children.length, 'New Node');
                     }}
-                    className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-mono bg-surface-muted border border-border rounded text-fg hover:bg-surface-muted cursor-pointer"
+                    className="w-full"
                 >
                     <Icons.Plus size={12} /> Node
-                </button>
+                </Button>
             </div>
         </div>
     );

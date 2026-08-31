@@ -39,7 +39,7 @@ export function ContextMenuContent({ children, className }: ContextMenuContentPr
         <BaseContextMenu.Portal>
             <BaseContextMenu.Positioner>
                 <BaseContextMenu.Popup
-                    className={`z-50 min-w-[120px] py-0.5 bg-surface border border-border rounded shadow-md ${className ?? ''}`}
+                    className={`z-50 min-w-[120px] py-0.5 bg-surface border border-border shadow-md ${className ?? ''}`}
                 >
                     {children}
                 </BaseContextMenu.Popup>

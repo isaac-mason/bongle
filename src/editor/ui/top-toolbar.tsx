@@ -1,4 +1,5 @@
 import * as Icons from "../../../icons";
+import { Button } from '../../client/ui/components';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { setEditorEnabledForRoom, setRoomView } from '../../client/editor';
 import { LOCAL_ROOM_PREFIX, type RoomView, type RoomViewId } from '../../client/rooms';
@@ -289,7 +290,7 @@ function RoomTab({
                     onClick={onActivate}
                     onContextMenu={onContextMenu}
                     title={`${info.sceneId} · ${pillLabel}`}
-                    className={`flex items-center px-1.5 text-[10px] font-mono cursor-pointer border border-r-0 rounded-l ${
+                    className={`flex items-center px-1.5 text-[10px] font-mono cursor-pointer border border-r-0 ${
                         isActive
                             ? activeBg
                             : 'bg-surface text-fg-muted border-border hover:bg-surface-muted hover:text-fg'
@@ -311,7 +312,7 @@ function RoomTab({
                             : view
                               ? 'bg-surface text-fg-muted border-border hover:bg-surface-muted'
                               : 'bg-surface text-fg-muted border-dashed border-border hover:text-fg hover:bg-surface-muted'
-                    } ${canClose ? 'pl-2 pr-1.5 rounded-l border-r-0' : 'px-2 rounded'}`}
+                    } ${canClose ? 'pl-2 pr-1.5 border-r-0' : 'px-2'}`}
                 >
                     {isPlay ? <Icons.Play size={10} /> : <Icons.Wrench size={10} />}
                     {`${isPlay ? 'play' : 'edit'}: ${info.sceneId}`}
@@ -324,7 +325,7 @@ function RoomTab({
                     type="button"
                     onClick={onClose}
                     onContextMenu={onContextMenu}
-                    className={`flex items-center px-1 text-[11px] rounded-r border border-l-0 cursor-pointer ${
+                    className={`flex items-center px-1 text-[11px] border border-l-0 cursor-pointer ${
                         isActive
                             ? `${activeBg} hover:opacity-80`
                             : isPlay
@@ -430,29 +431,29 @@ function PlaySection() {
     // a session that needs stopping, not a place to start a new one.
     if (roomMode === 'play') {
         return (
-            <button
-                type="button"
+            <Button
+                tone="danger"
                 onClick={() => {
                     if (roomId) stopRoom?.(roomId);
                 }}
-                className="inline-flex h-6 items-center gap-1 px-2 text-[11px] font-mono leading-none rounded border bg-danger-solid text-white border-danger-solid hover:opacity-85 cursor-pointer"
             >
                 <Icons.Square size={12} />
                 Stop session
-            </button>
+            </Button>
         );
     }
 
     return (
-        <button
-            type="button"
+        <Button
+            tone="success"
             onClick={() => play?.()}
             disabled={playPending}
-            className="inline-flex h-6 items-center gap-1 px-2 text-[11px] font-mono leading-none rounded border bg-success-solid text-white border-success-solid hover:opacity-85 cursor-pointer disabled:cursor-wait disabled:opacity-70"
+            // starting isn't unavailable, it's busy: keep the fill legible and show a wait cursor.
+            className="disabled:cursor-wait disabled:opacity-70"
         >
             {playPending ? <Icons.Loader2 size={12} className="animate-spin" /> : <Icons.Play size={12} />}
             {playPending ? 'Starting' : 'Play'}
-        </button>
+        </Button>
     );
 }
 

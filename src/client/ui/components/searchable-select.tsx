@@ -124,7 +124,7 @@ export function SearchableSelect<T extends string | number = string>({
                         }
                     }}
                     placeholder={placeholder}
-                    className="shrink-0 w-full mb-1 bg-surface-muted border border-border rounded px-1.5 py-0.5 text-[11px] font-mono text-fg outline-none focus:border-fg-muted"
+                    className="shrink-0 w-full mb-1 bg-surface-muted border border-border px-1.5 py-0.5 text-[11px] font-mono text-fg outline-none focus:border-fg-muted"
                 />
                 <div className="max-h-40 overflow-y-auto">
                     {filtered.length === 0 ? (
@@ -168,7 +168,7 @@ const DefaultSelectTrigger = forwardRef<HTMLButtonElement, ComponentProps<'butto
             ref={ref}
             type="button"
             {...props}
-            className={`flex items-center justify-between gap-1 w-full bg-surface-muted border border-border rounded px-1.5 py-0.5 text-[10px] font-mono text-fg outline-none hover:border-fg-muted cursor-pointer ${className ?? ''}`}
+            className={`flex items-center justify-between gap-1 w-full bg-surface-muted border border-border px-1.5 py-0.5 text-[10px] font-mono text-fg outline-none hover:border-fg-muted cursor-pointer ${className ?? ''}`}
         >
             <span className="truncate">{label}</span>
             <ChevronDown size={10} className="shrink-0 text-fg-muted" />

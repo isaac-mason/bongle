@@ -66,7 +66,7 @@ function ControlModeWidget() {
 
     return (
         <div className="absolute top-2 right-2 z-10 pointer-events-auto">
-            <div className="flex bg-surface border border-border rounded-sm shadow-sm text-xs overflow-hidden">
+            <div className="flex bg-surface border border-border shadow-sm text-xs overflow-hidden">
                 <button
                     type="button"
                     className={`px-2 py-1.5 ${controlMode === 'fly' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
@@ -106,7 +106,7 @@ function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggl
             type="button"
             onClick={onToggle}
             title={collapsed ? 'show panel' : 'hide panel'}
-            className="absolute top-1/2 -translate-y-1/2 right-0 z-10 flex items-center justify-center w-5 py-4 bg-surface border border-r-0 border-border rounded-l-sm text-fg-muted hover:bg-surface-muted hover:text-fg pointer-events-auto"
+            className="absolute top-1/2 -translate-y-1/2 right-0 z-10 flex items-center justify-center w-5 py-4 bg-surface border border-r-0 border-border text-fg-muted hover:bg-surface-muted hover:text-fg pointer-events-auto"
         >
             <Icons.ChevronRight size={14} className={collapsed ? 'rotate-180' : ''} />
         </button>
@@ -358,7 +358,7 @@ function CarriedItemCursor() {
     if (!carried || !pos) return null;
     return (
         <div className="fixed pointer-events-none z-50" style={{ left: pos.x + 12, top: pos.y + 12 }}>
-            <div className="bg-surface/95 rounded shadow-md border border-border p-1">
+            <div className="bg-surface/95 shadow-md border border-border p-1">
                 <InventoryItemIcon item={carried} size={32} />
             </div>
         </div>

@@ -1,5 +1,6 @@
 import { MonitorPlay, ShoppingBag } from "../../../icons";
 import { useRef, useState } from 'react';
+import { Button } from '../../client/ui/components';
 import { useClient } from '../../client/ui/stores/client-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
@@ -34,18 +35,15 @@ function ToolButton({
 
     return (
         <div className="relative">
-            <button
+            <Button
                 ref={btnRef}
-                type="button"
+                size="icon"
+                tone={active ? 'active' : 'default'}
                 onClick={onSelect}
                 onMouseEnter={showPopover}
                 onMouseLeave={() => setPos(null)}
                 title={showSlot ? `${def.label}  (${categoryKeyLabel}·${slotDigit})` : `${def.label}  (${categoryKeyLabel})`}
-                className={`relative w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
-                    active
-                        ? 'bg-accent text-on-accent border-accent'
-                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
-                }`}
+                className="relative"
             >
                 <Icon size={15} />
                 {showSlot && (
@@ -57,7 +55,7 @@ function ToolButton({
                         {slotDigit}
                     </span>
                 )}
-            </button>
+            </Button>
 
             {/* hover popover — fixed so the toolbar's scroll clip can't cut it off */}
             {pos && (
@@ -65,7 +63,7 @@ function ToolButton({
                     className="fixed -translate-y-1/2 z-50 pointer-events-none select-none"
                     style={{ left: pos.left, top: pos.top }}
                 >
-                    <div className="bg-surface-muted text-fg border border-border rounded-md px-2 py-1.5 shadow-lg whitespace-nowrap">
+                    <div className="bg-surface-muted text-fg border border-border px-2 py-1.5 shadow-lg whitespace-nowrap">
                         <div className="flex items-center gap-2">
                             <div className="text-[11px] font-mono font-semibold">{def.label}</div>
                             <div className="flex items-center gap-0.5">
@@ -95,18 +93,14 @@ function InventoryButton() {
         <div className="flex flex-col items-center gap-1 pb-1">
             {/* control indicator: the key that toggles the inventory */}
             <Kbd size="xs">{keyLabel}</Kbd>
-            <button
-                type="button"
+            <Button
+                size="icon"
+                tone={libraryOpen ? 'active' : 'default'}
                 onClick={toggleLibrary}
                 title={`inventory  (${keyLabel})`}
-                className={`w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
-                    libraryOpen
-                        ? 'bg-accent text-on-accent border-accent'
-                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
-                }`}
             >
                 <ShoppingBag size={15} />
-            </button>
+            </Button>
             <div className="w-6 h-px bg-border mt-1" />
         </div>
     );
@@ -122,18 +116,9 @@ function DebugButton() {
         <div className="mt-auto flex flex-col items-center gap-1 pt-1">
             <div className="w-6 h-px bg-border mb-1" />
             <Kbd size="xs">{'`'}</Kbd>
-            <button
-                type="button"
-                onClick={toggleDebug}
-                title="debug panel  (`)"
-                className={`w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
-                    debugOpen
-                        ? 'bg-accent text-on-accent border-accent'
-                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
-                }`}
-            >
+            <Button size="icon" tone={debugOpen ? 'active' : 'default'} onClick={toggleDebug} title="debug panel  (`)">
                 <MonitorPlay size={15} />
-            </button>
+            </Button>
         </div>
     );
 }

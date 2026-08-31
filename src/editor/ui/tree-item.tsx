@@ -110,7 +110,7 @@ export const TreeItem = memo(function TreeItem({
             ref={ref}
             data-node-id={item.nodeId}
             className={`
-                absolute left-0 right-0 flex items-center gap-1 py-0.5 pr-1 rounded select-none font-mono text-[10px] outline-none focus:ring-1 focus:ring-accent
+                absolute left-0 right-0 flex items-center gap-1 py-0.5 pr-1 select-none font-mono text-[10px] outline-none focus:ring-1 focus:ring-accent
                 ${isDragSource ? 'opacity-40' : ''}
                 ${isSelected ? 'bg-accent/25' : 'hover:bg-surface-muted'}
             `}
@@ -160,7 +160,7 @@ export const TreeItem = memo(function TreeItem({
                         e.stopPropagation();
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-surface border border-border rounded px-1 py-0 text-[10px] font-mono text-fg outline-none focus:border-accent"
+                    className="flex-1 min-w-0 bg-surface border border-border px-1 py-0 text-[10px] font-mono text-fg outline-none focus:border-accent"
                 />
             ) : (
                 <span className={`truncate ${item.effectivePersist ? 'text-fg' : 'text-fg-muted italic'}`}>
@@ -170,7 +170,7 @@ export const TreeItem = memo(function TreeItem({
 
             {/* child count badge when collapsed */}
             {item.collapsed && item.childCount > 0 && (
-                <span className="text-[10px] text-fg-muted bg-surface-muted rounded px-1">{item.childCount}</span>
+                <span className="text-[10px] text-fg-muted bg-surface-muted px-1">{item.childCount}</span>
             )}
 
             {/* delete button */}
@@ -187,13 +187,13 @@ export const TreeItem = memo(function TreeItem({
 
 export function TreeItemOverlay({ item, childCount }: { item: FlattenedNode; childCount: number }) {
     return (
-        <div className="relative flex items-center gap-1 py-0.5 px-2 bg-surface border border-border rounded shadow-lg font-mono text-[10px] w-max">
+        <div className="relative flex items-center gap-1 py-0.5 px-2 bg-surface border border-border shadow-lg font-mono text-[10px] w-max">
             <Icons.GripVertical size={12} className="text-fg-muted" />
             <span className={item.effectivePersist ? 'text-fg' : 'text-fg-muted italic'}>
                 {item.node.name || `Node ${item.nodeId}`}
             </span>
             {childCount > 0 && (
-                <span className="absolute -top-2 -right-2 flex items-center justify-center w-5 h-5 rounded-full bg-accent text-on-accent text-[10px] font-semibold">
+                <span className="absolute -top-2 -right-2 flex items-center justify-center w-5 h-5 bg-accent text-on-accent text-[10px] font-semibold">
                     {childCount}
                 </span>
             )}
