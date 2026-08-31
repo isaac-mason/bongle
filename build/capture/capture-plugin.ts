@@ -9,7 +9,7 @@
 //     refs their bodies close over as thunks. Which refs are really producers is settled at runtime
 //     by `__addDeps`, so the wrap is per-module and order-independent (see capture-native.ts).
 
-import type { Plugin, PluginCtx } from 'shakeup';
+import type { Plugin } from 'shakeup';
 import { wrapModuleDeps } from './capture-native';
 
 /** The capture module bracket, shared verbatim with the node CLI plugin (cli/dev/plugin.ts) so the
@@ -40,7 +40,7 @@ export function capturePlugin(options: CapturePluginOptions = {}): Plugin {
     const isUserModule = options.isUserModule ?? (() => true);
     return {
         name: 'bongle:capture',
-        transform: (_ctx: PluginCtx, code: string, id: string) => {
+        transform: (code: string, id: string) => {
             if (!isUserModule(id)) return null;
             // rung 2 (dep-wrap) inside the rung-1 bracket. wrapModuleDeps swallows a parse error
             // (returns code unchanged); the bracket is still applied so `__bongle` resolves and the
