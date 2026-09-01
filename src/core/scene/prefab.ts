@@ -25,11 +25,11 @@ import {
     destroyNode,
     getTrait,
     type Node,
-    type SceneTree,
     type Realm,
     removeTrait,
     reorderChild,
     reparent,
+    type SceneTree,
     setPrefab,
 } from './scene-tree';
 import { logScriptError } from './script-errors';
@@ -184,7 +184,12 @@ export function expandPrefab(
  * (in play mode) stamps voxel content into the world. idempotent, safe to
  * call repeatedly; only does work when the node is stale.
  */
-export function reconcilePrefabNode(sceneTree: SceneTree, node: Node, runtime: SceneTreeContext, worldVoxels: Voxels | null): void {
+export function reconcilePrefabNode(
+    sceneTree: SceneTree,
+    node: Node,
+    runtime: SceneTreeContext,
+    worldVoxels: Voxels | null,
+): void {
     const config = node.prefab!;
     const def = registry.prefabs.byId.get(config.prefabId);
 

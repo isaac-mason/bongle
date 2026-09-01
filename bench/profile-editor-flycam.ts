@@ -7,11 +7,11 @@
 //
 //   ./node_modules/.bin/tsx bench/profile-editor-flycam.ts
 
-import { Session } from 'node:inspector';
 import fs from 'node:fs';
+import { Session } from 'node:inspector';
 import path from 'node:path';
-import { getTrait } from '../src/core/scene/scene-tree';
 import { PlayerTrait } from '../src/builtins/player';
+import { getTrait } from '../src/core/scene/scene-tree';
 import { createWorld, moveBots } from './discovery-world';
 
 const SPREAD = 512; // must comfortably exceed the edit-mode sphere radius (24*16=384 blocks)

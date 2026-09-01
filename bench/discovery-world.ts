@@ -192,7 +192,12 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
             // windows keep draining.
             const acks = new Map<
                 string,
-                { client: Client; playerId: number; full: Array<{ cx: number; cy: number; cz: number }>; regions: Array<{ rx: number; ry: number; rz: number }> }
+                {
+                    client: Client;
+                    playerId: number;
+                    full: Array<{ cx: number; cy: number; cz: number }>;
+                    regions: Array<{ rx: number; ry: number; rz: number }>;
+                }
             >();
             const ackEntry = (client: Client, playerId: number) => {
                 const gk = `${client}:${playerId}`;
@@ -214,7 +219,13 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
             for (const { client, playerId, full, regions } of acks.values()) {
                 // bots report a fixed fast-client rate — these load tests
                 // measure discovery/eviction cost, not adaptive pacing.
-                Discovery.handleVoxelAck(discovery, client, { type: 'voxel_ack', playerId, full, regions, desiredRegionsPerTick: 64 });
+                Discovery.handleVoxelAck(discovery, client, {
+                    type: 'voxel_ack',
+                    playerId,
+                    full,
+                    regions,
+                    desiredRegionsPerTick: 64,
+                });
             }
 
             // frame and discard — nothing consumes the outbox here, and leaving it to

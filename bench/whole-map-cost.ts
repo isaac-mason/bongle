@@ -14,14 +14,14 @@
 //
 //   ./node_modules/.bin/tsx bench/whole-map-cost.ts [--spread N] [--joiners N]
 
+import { encodeChunk } from '../src/core/voxels/chunk-codec';
+import { CHUNK_SIZE } from '../src/core/voxels/voxels';
+import { nodeZstd } from '../src/node/zstd';
 // createWorld's own import chain resolves voxels.ts/light.ts's circular init
 // safely; importing it first means the direct voxels/chunk-codec imports below
 // just reuse those already-initialized modules instead of re-triggering the
 // cycle from a different entry point (which throws a TDZ error on CHUNK_SIZE).
 import { createWorld } from './discovery-world';
-import { encodeChunk } from '../src/core/voxels/chunk-codec';
-import { CHUNK_SIZE } from '../src/core/voxels/voxels';
-import { nodeZstd } from '../src/node/zstd';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: string): string => {

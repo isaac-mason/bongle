@@ -5,10 +5,10 @@
 //   ./node_modules/.bin/tsx bench/profile-voxels-movers.ts [clients] [motion]
 //   node bench/analyze-profile.mjs profiles/voxels-movers-<clients>-<motion>.cpuprofile
 
-import { Session } from 'node:inspector';
 import fs from 'node:fs';
+import { Session } from 'node:inspector';
 import path from 'node:path';
-import { createWorld, moveBots, type Locomotion } from './discovery-world';
+import { createWorld, type Locomotion, moveBots } from './discovery-world';
 
 const CLIENTS = Number(process.argv[2] ?? 64);
 const MOTION = (process.argv[3] ?? 'walk') as Locomotion;

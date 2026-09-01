@@ -66,7 +66,9 @@ for (const [id, profile] of byId) {
     const matches = profile.nodes.filter((n) => n.callFrame?.functionName === fnName);
     if (matches.length === 0) continue;
 
-    console.log(`\n════ profile ${id}  (pid=${profile.pid} tid=${profile.tid})  ${profile.nodes.length} nodes, ${profile.samples.length} samples ════`);
+    console.log(
+        `\n════ profile ${id}  (pid=${profile.pid} tid=${profile.tid})  ${profile.nodes.length} nodes, ${profile.samples.length} samples ════`,
+    );
     console.log(`found ${matches.length} node(s) for "${fnName}":`);
     for (const m of matches) {
         console.log(`  node ${m.id}  ${shortUrl(m.callFrame)}:${m.callFrame.lineNumber + 1}`);
@@ -115,7 +117,9 @@ for (const [id, profile] of byId) {
     }
     if (runStartIdx !== -1) runs.push(runDur);
 
-    console.log(`\nsamples where "${fnName}" is an ancestor: ${underTarget} / ${totalSamples} (${((100 * underTarget) / totalSamples).toFixed(1)}%)`);
+    console.log(
+        `\nsamples where "${fnName}" is an ancestor: ${underTarget} / ${totalSamples} (${((100 * underTarget) / totalSamples).toFixed(1)}%)`,
+    );
 
     console.log(`\nleaf (self) function during those samples:`);
     for (const [k, n] of [...leafUnderTarget.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)) {

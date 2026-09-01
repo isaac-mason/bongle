@@ -12,8 +12,8 @@
 // arrays, indexed by slice, so this is array indexing, not keyed side-map lookups.
 
 import { bytesEqualPrefix } from '../../utils/bytes';
-import type { Node } from '../scene-tree';
 import type { SyncCodec } from '../packcat-bridge';
+import type { Node } from '../scene-tree';
 import type { TraitBase, TraitSyncState } from '../traits';
 
 // reusable scratch for the byte-diff path. `packInto` writes here instead of
