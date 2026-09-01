@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { TraitSyncState } from '../../../../../src/core/scene/traits';
 import { diffSync } from '../../../../../src/core/scene/sync/sync-diff';
+import type { TraitSyncState } from '../../../../../src/core/scene/traits';
 
 // minimal stubs, diffSync only touches codec.{pack,packInto} + the per-instance sync
 // state, so we avoid pulling real packcat codecs (and their runtime env needs) into

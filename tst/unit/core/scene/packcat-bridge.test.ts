@@ -1,9 +1,9 @@
 import * as p from 'packcat';
 import { describe, expect, it } from 'vitest';
 import { registry } from '../../../../src/core/registry';
-import { createNode } from '../../../../src/core/scene/scene-tree';
 import { getControlCodecs, getSyncCodecs } from '../../../../src/core/scene/packcat-bridge';
 import { prop } from '../../../../src/core/scene/prop';
+import { createNode } from '../../../../src/core/scene/scene-tree';
 import { buildTraitInstance, control, sync, type TraitType, trait } from '../../../../src/core/scene/traits';
 
 const TEST_NODE = createNode({ name: 'test' });

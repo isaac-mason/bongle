@@ -1,7 +1,7 @@
 import { vec3 } from 'math';
 import { describe, expect, it } from 'vitest';
-import { createTestServer } from '../../../integration/server-integration-test';
 import { pack } from '../../../../src/api/pack';
+import { prop } from '../../../../src/core/scene/prop';
 import {
     addChild,
     addTrait,
@@ -13,8 +13,8 @@ import {
     type Node,
     query,
 } from '../../../../src/core/scene/scene-tree';
-import { prop } from '../../../../src/core/scene/prop';
 import { control, sync, type TraitType, trait } from '../../../../src/core/scene/traits';
+import { createTestServer } from '../../../integration/server-integration-test';
 
 /* ── test traits ── */
 
