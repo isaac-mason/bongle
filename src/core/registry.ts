@@ -108,6 +108,11 @@ export function structuralHash(value: unknown): string {
     return djb2(stringify(value));
 }
 
+/** objects on the current recursion path, so a back-reference degrades to a
+ *  marker instead of overflowing the stack. Path-scoped, not visit-scoped: the
+ *  same object appearing twice in different branches still hashes normally. */
+const _hashPath = new Set<object>();
+
 function stringify(value: unknown): string {
     if (value === null) return 'null';
     if (value === undefined) return 'undef';
@@ -132,9 +137,15 @@ function stringify(value: unknown): string {
         return `S{${parts.join(',')}}`;
     }
     const obj = value as Record<string, unknown>;
-    const keys = Object.keys(obj).sort();
-    const parts = keys.map((k) => `${k}:${stringify(obj[k])}`);
-    return `{${parts.join(',')}}`;
+    if (_hashPath.has(obj)) return '<cycle>';
+    _hashPath.add(obj);
+    try {
+        const keys = Object.keys(obj).sort();
+        const parts = keys.map((k) => `${k}:${stringify(obj[k])}`);
+        return `{${parts.join(',')}}`;
+    } finally {
+        _hashPath.delete(obj);
+    }
 }
 
 function djb2(s: string): string {

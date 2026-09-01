@@ -1,6 +1,8 @@
+export { my } from '../core/scene/resolutions';
 export { dirty, rate } from '../core/scene/sync/sync-rate';
 export type {
     ControlDef,
+    Directive,
     DirtyConfig,
     RateConfig,
     SyncDef,
@@ -13,4 +15,4 @@ export type {
     TraitOptions,
     TraitType,
 } from '../core/scene/traits';
-export { control, sync, trait } from '../core/scene/traits';
+export { control, Self, sync, trait } from '../core/scene/traits';

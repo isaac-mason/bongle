@@ -1,4 +1,4 @@
-// query conditions: the terms a query (or a declared `link`) is built from.
+// query conditions: the terms a query (or a `my()` resolution) is built from.
 //
 // A term has two orthogonal axes: an operator (what it does to a match) and a
 // source (where it looks). `With(T)` is and/self, `Not(T)` is not/self,
@@ -8,7 +8,7 @@
 // This is a leaf module on purpose. `scene-tree` and the builtin traits both
 // need these constructors, and both import each other, so anything they share
 // has to sit below both or a module-init cycle can leave an enum undefined at
-// the moment a trait declares a link.
+// the moment a trait body declares a resolution.
 
 import type { TraitHandle } from './traits';
 

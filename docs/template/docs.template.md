@@ -283,6 +283,40 @@ them for the wire, with explicit sizes since bytes matter:
 `sync`'s rate and authority (which side may write a field) get a fuller treatment
 under [replication and authority](#replication-and-authority).
 
+#### Resolved fields
+
+A third kind of body value is a *directive*: not a default the engine copies,
+but an instruction it acts on. `my(condition)` is one. It declares that a field
+holds a trait found by walking up from this node, and the scene tree re-resolves
+it as nodes are attached, reparented, and detached, so it can never go stale.
+
+<Snippet source="define-trait.snippet.ts" select="my" />
+
+Writing that by hand means finding the vehicle on every read, or caching it and
+remembering to invalidate the cache on both board and exit. The interesting half
+is that nothing in the rider's own code runs when it boards: the reparent is the
+only event, and the field is already correct by the time anything reads it.
+
+The condition is one of the hierarchy terms from [queries](#queries):
+`Up(T)` accepts a `T` on this node too, which is what you want when a node can
+either sit under a group or be its own (a solo unit carrying `TeamTrait`
+directly, rather than under a squad root). `Ancestor(T)` looks strictly above.
+
+The field is typed `T | null`, is read-only in practice, and is rejected as an
+`addTrait` prop, since anything you assigned would be overwritten the next time
+the tree moved. Don't `control()` or `sync()` it either; it is derived, so
+persisting or replicating it would fight the engine.
+
+Reach for `my` when a trait needs its group available from anywhere, not once
+per tick. `TransformTrait._parent` is the builtin example: world matrices are
+composed on demand from arbitrary call sites, so the pointer has to already be
+there. When you're iterating instead, a query with an `Up` term says the same
+thing without the trait having to know about its group at all.
+
+`my` also takes `{ onResolve }`, called with the node and the new and old values
+whenever the field is re-resolved (whether or not it changed), for traits that
+need to invalidate something downstream.
+
 ### Scripts and lifecycle
 
 `script(Trait, id, factory, opts?)` attaches behaviour. The factory runs once per
@@ -352,6 +386,31 @@ with `trait._node`).
 
 `filter(ctx, conditions)` is the one-shot version that returns a plain array, and
 `first(ctx, Trait)` returns the nearest ancestor carrying a trait.
+
+#### Conditions
+
+A bare trait handle in the list is the common case, "the node has this". For
+anything else, wrap it in a condition:
+
+| Condition | Matches | Tuple slot |
+| --- | --- | --- |
+| `TraitA` / `With(TraitA)` | node has it | `TraitA` |
+| `Not(TraitA)` | node does not have it | none |
+| `Up(TraitA)` | this node or the nearest ancestor bearing it | `TraitA` |
+| `Ancestor(TraitA)` | strictly above: parent, then its parents | `TraitA` |
+| `Optional(x)` | either way | `TraitA \| null` |
+
+`Optional` wraps any of the others except `Not` (which would be meaningless, and
+doesn't typecheck), so `Optional(Up(TraitA))` is "the group above me, if there is
+one". The tuple you iterate follows this table exactly: `Not` terms contribute no
+slot, so the destructuring skips them, and an optional slot is typed nullable.
+
+<Snippet source="queries.snippet.ts" select="conditions" />
+
+`Up` and `Ancestor` resolve against the hierarchy rather than the node's own
+traits, so their cost lands on structural mutations, not on reads. A match holds
+its resolved value, and the tree re-resolves it when a node moves or the target
+trait is added or removed. Reading it back is an array index.
 
 #### Reacting to a query changing
 

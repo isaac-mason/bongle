@@ -519,7 +519,7 @@ describe('parent transform bookkeeping', () => {
         expect(childT._parent).toBe(contT);
     });
 
-    it('detached subtree: adding a transform above relinks descendants', () => {
+    it('detached subtree: adding a transform above re-resolves descendants', () => {
         // no scene tree involved. scene-pack hydrates trees this way (build the
         // nodes, then attach the traits), so pointer maintenance can't be gated
         // on a node being in a scene.

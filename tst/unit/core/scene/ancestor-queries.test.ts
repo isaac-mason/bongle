@@ -270,21 +270,21 @@ describe('Up / Ancestor — query identity', () => {
         expect(withUp).not.toBe(withAncestor);
     });
 
-    it('only traversal terms register a query link', () => {
+    it('only traversal terms register a query resolution', () => {
         const sceneTree = createSceneTree();
-        // links declared on traits (TransformTrait._parent) are global, not
+        // resolutions declared in trait bodies (TransformTrait._parent) are global, not
         // per-tree, so a fresh tree starts with none of its own.
-        expect(sceneTree._queryLinks.length).toBe(0);
+        expect(sceneTree._queryResolutions.length).toBe(0);
 
         query(sceneTree, [Mesh, Group]);
-        expect(sceneTree._queryLinks.length).toBe(0);
+        expect(sceneTree._queryResolutions.length).toBe(0);
 
         query(sceneTree, [Mesh, Optional(Up(Group))]);
-        expect(sceneTree._queryLinks.length).toBe(1);
+        expect(sceneTree._queryResolutions.length).toBe(1);
     });
 });
 
-describe('Up / Ancestor — links sharing one descent', () => {
+describe('Up / Ancestor — resolutions sharing one descent', () => {
     it('two queries on the same target both stay correct through a move', () => {
         const sceneTree = createSceneTree();
         const a = createNode({ name: 'a' });
@@ -340,8 +340,8 @@ describe('Up / Ancestor — links sharing one descent', () => {
         expect(optional.matches[0]![1]).toBe(group);
     });
 
-    it('declared links still settle before query terms resolve', () => {
-        // TransformTrait._parent is a declared link; a query sourcing the same
+    it('declared resolutions still settle before query terms resolve', () => {
+        // TransformTrait._parent is a declared resolution; a query sourcing the same
         // trait must not be grouped with it, or the ordering guarantee breaks.
         const sceneTree = createSceneTree();
         const a = createNode({ name: 'a' });
@@ -402,7 +402,7 @@ describe('membership index — client node ids', () => {
             expect(q.matches.length).toBe(1);
             expect(q.matches[0]![0]._node).toBe(replicated);
 
-            // and the survivor still relinks correctly
+            // and the survivor still re-resolves correctly
             const other = createNode({ name: 'other' });
             addChild(sceneTree.root, other);
             const group2 = addTrait(other, Group);

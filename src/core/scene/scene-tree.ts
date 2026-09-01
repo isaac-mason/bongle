@@ -18,10 +18,10 @@ import {
     SRC_TAG,
     Src,
 } from './conditions';
-import { type AncestorLink, declaredLinks } from './links';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import type { ValidationIssue } from './prop/validate';
+import { declaredResolutions, type Resolution } from './resolutions';
 import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
@@ -314,13 +314,12 @@ export type SceneTree = {
     _visitGeneration: number;
 
     /**
-     * @internal this tree's query-term links, appended when a query with `Up` /
-     * `Ancestor` terms is created and removed when it is reaped. Links declared
-     * on traits (`link()`) are global and walked first, so a declared link's
-     * field is settled before any query term reads ancestry.
+     * @internal this tree's query-term resolutions, appended when a query with
+     * `Up` / `Ancestor` terms is created and removed when it is reaped. The ones
+     * declared in trait bodies (`my()`) are global and walked first, so a
+     * declared field is settled before any query term reads ancestry.
      */
-    _queryLinks: AncestorLink[];
-
+    _queryResolutions: Resolution[];
 
     /**
      * @internal server-side discovery driver. nodes touched this tick (created,
@@ -379,7 +378,7 @@ export function createSceneTree(): SceneTree {
         _queriesAlways: [],
         _queryScratch: [],
         _visitGeneration: 0,
-        _queryLinks: [],
+        _queryResolutions: [],
         _nextNodeId: 1,
         _nextClientNodeId: -1,
         _idToNode: new Map(),
@@ -684,20 +683,20 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
 // every TransformTrait instance has a parent transform pointer to the
 // nearest ancestor node's TransformTrait (or null if none), maintained
 // eagerly on hierarchy and trait mutations so it's always fresh. The
-// maintenance itself is an `AncestorLink` like any other (see `ancestor
-// links` below); only the initial resolve for a node's own pointer lives
-// here.
+// maintenance itself is a `Resolution` like any other (see the
+// `resolutions` section below); only the initial resolve for a node's own
+// pointer lives here.
 
 /**
  * nearest ancestor's TransformTrait, or null. A typed adapter over the shared
- * `findTraitAt` walk: `_parent` is `TransformTrait | null` and consumers
+ * `nearestTrait` walk: `_parent` is `TransformTrait | null` and consumers
  * compare against null (`hasTransformedParent`), so the undefined the generic
  * walk returns is normalised here rather than at four call sites.
  */
 function findTransformAncestor(node: Node): TransformTrait | null {
     const traitSlot = TransformTrait._slot;
     if (traitSlot === undefined) return null;
-    return (findTraitAt(node, traitSlot, false) as TransformTrait | undefined) ?? null;
+    return (nearestTrait(node, traitSlot, false) as TransformTrait | undefined) ?? null;
 }
 
 /** user-facing props for addTrait, only the trait's own declared fields, minus base fields. */
@@ -732,16 +731,15 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
-    // this node's own parent pointer; its descendants are relinked below, by
-    // the same machinery that maintains every other ancestor link.
-    if (traitSlot === TransformTrait._slot) {
-        getTrait(node, TransformTrait)!._parent = findTransformAncestor(node);
-    }
+    // resolve this node's own directive fields. `resolveChildren` below covers
+    // descendants; the node that just gained the trait has to be seeded here,
+    // since nothing above it changed.
+    resolveOwn(node, handle._def);
 
     const scene = node.scene;
     // descendants resolving this trait from the hierarchy now resolve to it.
     // runs detached too: a subtree is often fully built before it is attached.
-    relinkChildren(scene, node, traitSlot);
+    resolveChildren(scene, node, traitSlot);
 
     if (scene) {
         bumpNodeVersion(scene, node);
@@ -852,7 +850,7 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         node._traits.delete(traitSlot);
         // descendants that resolved to this trait now fall through to the next
         // one above. runs after the delete so the walk sees the new answer.
-        relinkChildren(scene, node, traitSlot);
+        resolveChildren(scene, node, traitSlot);
         flushQueryEvents();
     }
 }
@@ -916,18 +914,16 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     node._traits.set(traitSlot, instance);
     bitset.add(node._bitset, traitSlot);
 
-    // this node's own parent pointer. prev pose seeding is owned by
+    // resolve this node's own directive fields. prev pose seeding is owned by
     // `setInterpolation(node, true)`, callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
     // "addTrait happens before node.scene is wired" hydration race.
-    if (traitSlot === TransformTrait._slot) {
-        getTrait(node, TransformTrait)!._parent = findTransformAncestor(node);
-    }
+    resolveOwn(node, def);
 
     // descendants resolving this trait from the hierarchy now resolve to it.
     // outside the `scene` guard: this path hydrates detached trees (scene-pack).
-    relinkChildren(scene, node, traitSlot);
+    resolveChildren(scene, node, traitSlot);
 
     if (scene) {
         bumpNodeVersion(scene, node);
@@ -1082,9 +1078,9 @@ export function addChild(parent: Node, child: Node): void {
         registerSubtree(parent.scene, child);
     }
 
-    // re-resolve ancestor links over the attached subtree. runs even when
+    // re-resolve every resolution over the attached subtree. runs even when
     // `parent` is itself detached — pointers within the subtree still matter.
-    relinkSubtree(parent.scene, child, undefined, wasDetached && parent.scene !== null);
+    resolveSubtree(parent.scene, child, undefined, wasDetached && parent.scene !== null);
 
     // last, so an enter handler reading a world matrix sees fresh pointers
     flushQueryEvents();
@@ -1164,12 +1160,12 @@ export function reparent(node: Node, newParent: Node): void {
         for (const n of moved) bumpNodeVersion(scene, n);
     }
 
-    // re-resolve every ancestor link over the moved subtree. a node that was
-    // already live carries its old parent, so links that resolve identically
+    // re-resolve every resolution over the moved subtree. a node that was
+    // already live carries its old parent, so ones that resolve identically
     // either side of the move skip their walk entirely.
     // when the node was detached, `registerSubtree` above already filled its
-    // query slots; only declared links still need the walk.
-    relinkSubtree(scene, node, wasInTree ? oldParent : null, !wasInTree);
+    // query slots; only the declared resolutions still need the walk.
+    resolveSubtree(scene, node, wasInTree ? oldParent : null, !wasInTree);
 
     flushQueryEvents();
 }
@@ -1284,7 +1280,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         for (let qi = 0; qi < candidateCount; qi++) {
             const q = candidates[qi]!;
             if (nodeMatchesQuery(n, q) && queryIndexOf(q, n) === -1) {
-                // hierarchy slots are filled by the relink walk the caller runs
+                // hierarchy slots are filled by the resolve walk the caller runs
                 // once the whole subtree is registered, which is cheaper per
                 // node than resolving each one here.
                 addNodeToQuery(q, n, true);
@@ -1305,7 +1301,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
     // fill the hierarchy slots pass 1 deferred, before any user code runs.
     // pass 2 fires `onInit`, and a script reading a query tuple there must not
     // see a half-built match.
-    fillQueryLinks(sceneTree, node);
+    fillQueryResolutions(sceneTree, node);
 
     // pass 2: fire onInit on all new script instances
     for (const instance of newScriptInstances) {
@@ -1898,6 +1894,17 @@ function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number):
     return n;
 }
 
+/**
+ * Seed the directive-declared fields a trait brings with it, for the node that
+ * just gained it. Ancestry above the node is unchanged, so only this node needs
+ * resolving — descendants are handled by `resolveChildren`.
+ */
+function resolveOwn(node: Node, def: TraitDef): void {
+    for (const l of def.resolutions) {
+        l.apply(node, nearestTrait(node, l.traitSlot, l.inclusive));
+    }
+}
+
 /** position of `node` in `q.matches`, or -1. */
 function queryIndexOf(q: Query<any>, node: Node): number {
     const i = q._sparse[sparseKey(node.id)];
@@ -1921,7 +1928,7 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
      * @internal sparse membership index: node id (zigzagged, since client ids
      * are negative) → position in `matches`. A plain array, not a Map: node
      * ids are integers so V8 keeps this as a fast elements-kind array, and
-     * membership is looked up once per link per visited node during relinking,
+     * membership is looked up once per resolution per visited node in the walk,
      * which measured as the dominant cost of the walk.
      *
      * Entries are never cleared on removal — a stale index is caught by
@@ -1930,7 +1937,7 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
     _sparse: number[];
     /** terms whose value comes from the hierarchy (`Up` / `Ancestor`), with the
      *  tuple slot each writes. empty for the ordinary self-only query, which is
-     *  what lets structural mutations skip relinking entirely. */
+     *  what lets structural mutations skip the resolve walk entirely. */
     traversals: TraversalTerm[];
     /** node started matching. subscribe with {@link onQueryEnter}, never directly:
      *  the topic alone has no backfill, no error isolation, and no lifetime. */
@@ -1971,9 +1978,9 @@ export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number
 /**
  * one `Up` / `Ancestor` term of a query, resolved against the hierarchy rather
  * than the node's own bitset. `tupleIndex` is the slot it writes in a match;
- * `required` terms also gate membership, so a relink can add or drop a node.
+ * `required` terms also gate membership, so a re-resolve can add or drop a node.
  */
-export type TraversalTerm = AncestorLink & {
+export type TraversalTerm = Resolution & {
     required: boolean;
     tupleIndex: number;
 };
@@ -1982,7 +1989,7 @@ export type TraversalTerm = AncestorLink & {
  * nearest trait instance at or above `node`, per `inclusive`. the walk is
  * O(depth) map lookups and runs only on structural change, never per frame.
  */
-function findTraitAt(node: Node | null, traitSlot: number, inclusive: boolean): TraitBase | undefined {
+function nearestTrait(node: Node | null, traitSlot: number, inclusive: boolean): TraitBase | undefined {
     let cur: Node | null = inclusive ? node : (node?.parent ?? null);
     while (cur) {
         const t = cur._traits.get(traitSlot);
@@ -1997,7 +2004,7 @@ function resolveTerm(node: Node, condition: Condition<any, any, any>): TraitBase
     const traitSlot = condition.trait._slot;
     if (traitSlot === undefined) return undefined;
     if (condition.src === Src.Self) return node._traits.get(traitSlot);
-    return findTraitAt(node, traitSlot, condition.src === Src.Up);
+    return nearestTrait(node, traitSlot, condition.src === Src.Up);
 }
 
 function buildConditionBitsets(conditions: ConditionArgs[]): {
@@ -2095,7 +2102,7 @@ export function query<const Args extends ConditionArgs[]>(
     };
 
     // bind each traversal term's apply to this query. one closure per term for
-    // the life of the query, so relinking allocates nothing.
+    // the life of the query, so the resolve walk allocates nothing.
     for (const term of traversals) {
         term.apply = (node, resolved) => applyTraversal(q, term, node, resolved);
     }
@@ -2114,7 +2121,7 @@ export function query<const Args extends ConditionArgs[]>(
             else list.push(q);
         }
     }
-    for (const term of traversals) sceneTree._queryLinks.push(term);
+    for (const term of traversals) sceneTree._queryResolutions.push(term);
 
     // populate with existing matching nodes
     for (const node of sceneTree.nodes) {
@@ -2154,10 +2161,10 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
             if (list !== undefined) swapRemove(list, q);
         }
         for (const term of q.traversals) {
-            const i = sceneTree._queryLinks.indexOf(term);
+            const i = sceneTree._queryResolutions.indexOf(term);
             if (i !== -1) {
-                sceneTree._queryLinks[i] = sceneTree._queryLinks[sceneTree._queryLinks.length - 1]!;
-                sceneTree._queryLinks.pop();
+                sceneTree._queryResolutions[i] = sceneTree._queryResolutions[sceneTree._queryResolutions.length - 1]!;
+                sceneTree._queryResolutions.pop();
             }
         }
     }
@@ -2335,7 +2342,7 @@ function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
     for (let i = 0; i < q.traversals.length; i++) {
         const term = q.traversals[i]!;
         if (!term.required) continue;
-        if (findTraitAt(node, term.traitSlot, term.inclusive) === undefined) return false;
+        if (nearestTrait(node, term.traitSlot, term.inclusive) === undefined) return false;
     }
     return true;
 }
@@ -2344,9 +2351,9 @@ function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
  * Build a match tuple. Not terms contribute no slot; everything else does,
  * `null` when unresolved, so a tuple's arity never depends on what resolved.
  *
- * `deferTraversals` leaves `Optional` hierarchy slots null for the relink walk
+ * `deferTraversals` leaves `Optional` hierarchy slots null for the resolve walk
  * to fill. Resolving them here costs an O(depth) ancestor walk *per node*,
- * while the relink walk carries the resolved value down and is O(1) per node —
+ * while the resolve walk carries the resolved value down and is O(1) per node —
  * so when a whole subtree is being registered and a walk is about to run
  * anyway, deferring turns O(nodes x depth) into O(nodes). Required terms are
  * never deferred: `nodeMatchesQuery` has to resolve them to decide membership.
@@ -2405,9 +2412,9 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     }
 }
 
-/* ── ancestor links ───────────────────────────────────────────────────
+/* ── resolutions ──────────────────────────────────────────────────────
  *
- * An `AncestorLink` keeps "the nearest trait at or above me" resolved for
+ * A `Resolution` keeps "the nearest trait at or above me" resolved for
  * every node, and is re-resolved when the tree changes shape or the target
  * trait is added/removed. Two kinds of consumer, one mechanism:
  *
@@ -2416,8 +2423,8 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
  *     subtree's world matrices stale
  *
  * Invalidation is pushed from the mutation rather than discovered by
- * rescanning: `relinkSubtree` after the tree around a node changed shape,
- * `relinkChildren` when the target trait on the node itself changed.
+ * rescanning: `resolveSubtree` after the tree around a node changed shape,
+ * `resolveChildren` when the target trait on the node itself changed.
  *
  * The walk prunes: at a node bearing the target trait, everything below
  * already resolves to that node and cannot have been affected by whatever
@@ -2453,28 +2460,28 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
     }
 }
 
-/** re-resolve one link over `node` and, unless pruned, its descendants. */
-function relinkLink(link: AncestorLink, node: Node, inherited: TraitBase | undefined): void {
-    const own = node._traits.get(link.traitSlot);
-    link.apply(node, link.inclusive ? (own ?? inherited) : inherited);
+/** re-resolve one resolution over `node` and, unless pruned, its descendants. */
+function resolveFrom(resolution: Resolution, node: Node, inherited: TraitBase | undefined): void {
+    const own = node._traits.get(resolution.traitSlot);
+    resolution.apply(node, resolution.inclusive ? (own ?? inherited) : inherited);
     if (own !== undefined) return;
     for (const child of node.children) {
-        relinkLink(link, child, inherited);
+        resolveFrom(resolution, child, inherited);
     }
 }
 
 /**
- * re-resolve every live link over `node`'s subtree, seeding each from what
+ * re-resolve every live resolution over `node`'s subtree, seeding each from what
  * `node` inherits from strictly above. Call after the tree around `node` has
  * changed shape (attach, detach, reparent).
  */
-export function relinkSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null, queryLinksFilled = false): void {
-    relinkSubtreeFor(declaredLinks(), node, movedFrom);
-    // `queryLinksFilled`: the subtree was freshly registered, so `registerSubtree`
+export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null, querySlotsFilled = false): void {
+    resolveSubtreeFor(declaredResolutions(), node, movedFrom);
+    // `querySlotsFilled`: the subtree was freshly registered, so `registerSubtree`
     // already filled its deferred slots. Walking them again would re-derive the
     // same values.
-    if (sceneTree !== null && !queryLinksFilled) {
-        relinkSubtreeFor(sceneTree._queryLinks, node, movedFrom);
+    if (sceneTree !== null && !querySlotsFilled) {
+        resolveSubtreeFor(sceneTree._queryResolutions, node, movedFrom);
     }
 }
 
@@ -2486,53 +2493,53 @@ export function relinkSubtree(sceneTree: SceneTree | null, node: Node, movedFrom
  * These nodes just entered, so a slot going null → resolved is its initial
  * value, not a rebind; `_fillingTuples` suppresses the events for this pass.
  */
-function fillQueryLinks(sceneTree: SceneTree, node: Node): void {
-    if (sceneTree._queryLinks.length === 0) return;
+function fillQueryResolutions(sceneTree: SceneTree, node: Node): void {
+    if (sceneTree._queryResolutions.length === 0) return;
     _fillingTuples = true;
-    relinkSubtreeFor(sceneTree._queryLinks, node, undefined);
+    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined);
     _fillingTuples = false;
 }
 
 /** set only for the duration of a fill pass; the walk is synchronous and never
  *  re-enters itself, so a module-scope flag is enough to keep `apply`'s
- *  signature shared with declared links. */
+ *  signature shared with the declared resolutions. */
 let _fillingTuples = false;
 
-function relinkSubtreeFor(links: AncestorLink[], node: Node, movedFrom?: Node | null): void {
-    for (let i = 0; i < links.length; i++) {
-        const link = links[i]!;
-        const inherited = findTraitAt(node.parent, link.traitSlot, true);
-        // A move whose old and new parents resolve this link to the same value
+function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null): void {
+    for (let i = 0; i < resolutions.length; i++) {
+        const resolution = resolutions[i]!;
+        const inherited = nearestTrait(node.parent, resolution.traitSlot, true);
+        // A move whose old and new parents resolve this to the same value
         // changes nothing anywhere in the subtree: every resolution inside it
         // derives from what the subtree inherits, and the subtree's own shape
         // and traits didn't change. Two O(depth) walks replace one O(subtree)
         // one. Only offered for a move of an already-live node, where "the
         // subtree is otherwise unchanged" is guaranteed.
         if (movedFrom !== undefined && movedFrom !== null) {
-            if (findTraitAt(movedFrom, link.traitSlot, true) === inherited) continue;
+            if (nearestTrait(movedFrom, resolution.traitSlot, true) === inherited) continue;
         }
-        relinkLink(link, node, inherited);
+        resolveFrom(resolution, node, inherited);
     }
 }
 
 /**
- * re-resolve links over `node`'s descendants only, for the case where the
+ * re-resolve over `node`'s descendants only, for the case where the
  * target trait *on `node` itself* changed: the node's own value is the
  * caller's business, but its descendants inherit differently now and must not
  * prune at the node that changed.
  */
-function relinkChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    relinkChildrenFor(declaredLinks(), node, traitSlot);
-    if (sceneTree !== null) relinkChildrenFor(sceneTree._queryLinks, node, traitSlot);
+function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
+    resolveChildrenFor(declaredResolutions(), node, traitSlot);
+    if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutions, node, traitSlot);
 }
 
-function relinkChildrenFor(links: AncestorLink[], node: Node, traitSlot: number): void {
-    for (let i = 0; i < links.length; i++) {
-        const link = links[i]!;
-        if (link.traitSlot !== traitSlot) continue;
-        const inherited = findTraitAt(node, traitSlot, true);
+function resolveChildrenFor(resolutions: Resolution[], node: Node, traitSlot: number): void {
+    for (let i = 0; i < resolutions.length; i++) {
+        const resolution = resolutions[i]!;
+        if (resolution.traitSlot !== traitSlot) continue;
+        const inherited = nearestTrait(node, traitSlot, true);
         for (const child of node.children) {
-            relinkLink(link, child, inherited);
+            resolveFrom(resolution, child, inherited);
         }
     }
 }

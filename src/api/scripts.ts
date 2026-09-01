@@ -37,6 +37,8 @@ export function system(id: string, factory: ScriptFactory<WorldScriptBase>, opts
 }
 
 export type { ClientId } from '../core/client';
+export type { Condition, ConditionArgs } from '../core/scene/conditions';
+export { Ancestor, Not, Oper, Optional, Src, Up, With } from '../core/scene/conditions';
 export type { QueryMatch, QueryMatches } from '../core/scene/scene-tree';
 export type {
     ClientContext,

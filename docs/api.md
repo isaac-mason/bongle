@@ -260,11 +260,12 @@ export function cloneNode(node: Node): Node;
 
 ```ts
 /**
- * Clone a node intended for the **visual scene**, same as `cloneNode`, plus
- * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
- * installed on the clone root. Use this for every cloneNode site that goes
- * into the visible scene; reserve `cloneNode` for non-visual subtree
- * duplication (e.g. detached prefab data).
+ * Clone a node intended for the **visual scene**, same as `cloneNode`, plus a
+ * `ModelTrait` (a lighting group, one shared voxel-light value for every mesh
+ * under the clone) installed on the clone root. Reserve `cloneNode` for
+ * non-visual subtree duplication (e.g. detached prefab data), or for meshes you
+ * want lit individually — a mesh outside any group renders fine and samples at
+ * its own AABB centre.
  *
  * Typical usage:
  * ```ts
@@ -278,9 +279,14 @@ export function cloneNode(node: Node): Node;
  * supply or maintain. If the source already has a `ModelTrait`, the existing
  * one is left in place.
  *
+ * The new `ModelTrait`'s `lightOffset` is seeded to the centre of the clone's
+ * own mesh AABBs, so voxel light samples from inside the model's body rather
+ * than at its origin (which for a model authored standing on y=0 is the floor
+ * block it sits on). Assign `lightOffset` afterwards to override it.
+ *
  * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
  * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
- * TransformTrait]` pair each frame, so without one the model would silently
+ * TransformTrait]` pair each frame, so without one the group would silently
  * never be lit (stuck full-bright, `lightOffset` dead). An added identity
  * transform is faithful, that's exactly the TRS the bake elided.
  */
@@ -986,6 +992,37 @@ export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Q
 
 Define traits and the schemas behind editor controls (`prop`) and network packing (`pack`).
 
+#### `my`
+
+```ts
+/**
+ * Declare that this field holds the trait resolved by `source`, and have the
+ * scene tree keep it correct. Used as a trait-body value — a *directive*, not
+ * a default:
+ *
+ * ```ts
+ * export const TransformTrait = trait('transform', {
+ *     position: () => vec3.create(),
+ *     parent: my(Ancestor(Self), { onResolve: (node) => markAncestryChanged(node) }),
+ * });
+ * ```
+ *
+ * The field is always `T | null` — a resolution has no membership to gate, so there
+ * is no required/optional distinction and `Optional(...)` is not accepted. It
+ * is derived, so it is excluded from `addTrait` props and must never also be
+ * `control()`ed or `sync()`ed; persisting or replicating it would fight the
+ * maintainer.
+ *
+ * `onResolve` fires whenever the resolution ran for that node, changed or
+ * not — which is what `TransformTrait` needs, since a re-point invalidates the
+ * subtree's world matrices either way. The old and new values are passed so a
+ * consumer that only cares about actual changes can compare them itself.
+ */
+export function my<T extends TraitHandle>(source: Condition<T, Oper.And, Src.Up | Src.Ancestor>, opts?: {
+    onResolve?(node: Node, next: TraitBase | null, prev: TraitBase | null): void;
+}): Directive<TraitType<T> | null>;
+```
+
 #### `dirty`
 
 ```ts
@@ -1019,6 +1056,19 @@ export const rate: {
 ```ts
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
+```
+
+#### `Directive`
+
+```ts
+export type Directive<T> = {
+    readonly [$directive]: 'resolution';
+    /** phantom, carries the resolved field type. not present at runtime. */
+    readonly __type: T;
+    /** the hierarchy condition this field resolves. */
+    readonly source: unknown;
+    readonly opts?: unknown;
+};
 ```
 
 #### `DirtyConfig`
@@ -1128,6 +1178,11 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
+    /** nearest-trait resolutions declared in this trait's body (`my()`), in order.
+     *  Owned by the def so an HMR re-eval that drops a declaration drops the
+     *  resolution with it, the same way controls and syncs are handled. */
+    resolutions: ResolutionDef[];
+
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
     sync: SyncDef[];
@@ -1186,7 +1241,7 @@ export type TraitHandle<T extends TraitBase = TraitBase> = {
  * to their return type, literals pass through.
  */
 export type TraitInstance<S extends TraitBody> = TraitBase & {
-    [K in keyof S as K extends ReservedTraitKey ? never : K]: S[K] extends Factory<infer R> ? R : S[K];
+    [K in keyof S as K extends ReservedTraitKey ? never : K]: ResolveField<S[K], TraitInstance<S>>;
 };
 ```
 
@@ -1227,6 +1282,28 @@ export type TraitType<H extends TraitHandle> = H['__type'];
  * the inspector lookup key.
  */
 export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void;
+```
+
+#### `Self`
+
+```ts
+/**
+ * Placeholder for "this trait's own instance type", for a field that points at
+ * another instance of the trait it is declared on. A trait body cannot name the
+ * type being inferred from it, so `Self` stands in and `TraitInstance`
+ * substitutes the real type:
+ *
+ * ```ts
+ * export const TransformTrait = trait('transform', { _parent: my(Ancestor(Self)) });
+ * // instance type: { _parent: TransformTrait | null }
+ * ```
+ *
+ * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
+ * what `TraitInstance` matches on to make the substitution.
+ */
+export type Self = TraitBase & {
+    readonly [SELF_MARKER]: true;
+};
 ```
 
 #### `sync`
@@ -1321,6 +1398,61 @@ export function system(id: string, factory: ScriptFactory<WorldScriptBase>, opts
 ```ts
 /** numeric id assigned to a connected client. 0 = unassigned. */
 export type ClientId = number;
+```
+
+#### `Condition`
+
+```ts
+export type Condition<T extends TraitHandle = TraitHandle, O extends Oper = Oper, S extends Src = Src> = {
+    trait: T;
+    oper: O;
+    src: S;
+};
+```
+
+#### `ConditionArgs`
+
+```ts
+export type ConditionArgs = TraitHandle | Condition<any, any, any>;
+```
+
+#### `Ancestor`
+
+```ts
+/** `t` strictly above this node: parent, then parents of parents. */
+export function Ancestor<T extends TraitHandle>(t: T): Condition<T, Oper.And, Src.Ancestor>;
+```
+
+#### `Not`
+
+```ts
+/** node does not have `t`. contributes no tuple slot. */
+export function Not<T extends TraitHandle>(t: T): Condition<T, Oper.Not, Src.Self>;
+```
+
+#### `Optional`
+
+```ts
+/**
+ * make a term non-filtering: the node matches whether or not the trait
+ * resolves, and its tuple slot is `null` when it doesn't. wraps `With`, `Up`
+ * or `Ancestor`. `Optional(Not(...))` is meaningless and doesn't typecheck.
+ */
+export function Optional<T extends TraitHandle>(t: T): Condition<T, Oper.Optional, Src.Self>;
+```
+
+#### `Up`
+
+```ts
+/** `t` on this node, else on its nearest ancestor bearing it. */
+export function Up<T extends TraitHandle>(t: T): Condition<T, Oper.And, Src.Up>;
+```
+
+#### `With`
+
+```ts
+/** node has `t`. a bare trait handle in a query arg list means this. */
+export function With<T extends TraitHandle>(t: T): Condition<T, Oper.And, Src.Self>;
 ```
 
 #### `QueryMatch`
@@ -1639,7 +1771,7 @@ export function broadcast<S extends Scripts.Schema>(ctx: ScriptContext, handle: 
 #### `filter`
 
 ```ts
-export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[];
+export function filter<const Args extends ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[];
 ```
 
 #### `first`
@@ -1861,7 +1993,7 @@ export function onPrePhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => voi
  * });
  * ```
  */
-export function onQueryEnter<Conditions extends SceneTree.Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
+export function onQueryEnter<Conditions extends Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
 ```
 
 #### `onQueryExit`
@@ -1875,7 +2007,7 @@ export function onQueryEnter<Conditions extends SceneTree.Condition[]>(ctx: Scri
  * node still matching. that is what makes teardown and hot reload safe, the
  * instance going away closes everything it opened.
  */
-export function onQueryExit<Conditions extends SceneTree.Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
+export function onQueryExit<Conditions extends Condition[]>(ctx: ScriptContext, q: SceneTree.Query<Conditions>, fn: QueryListener<Conditions>): Unsubscribe;
 ```
 
 #### `onSwap`
@@ -1912,7 +2044,7 @@ export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Un
  * the query is released when the script instance disposes, do not hold
  * references across `onSwap` boundaries.
  */
-export function query<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Query<SceneTree.ConditionArgsToConditions<Args>>;
+export function query<const Args extends ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Query<ConditionArgsToConditions<Args>>;
 ```
 
 #### `script`
@@ -1944,6 +2076,8 @@ export function script<T extends TraitBase>(handle: TraitHandle<T>, scriptId: st
 ```ts
 export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirection>(ctx: ScriptContext, handle: CommandHandle<S, Direction>, data: Scripts.SchemaType<S>, client?: Direction extends typeof Rpc.SERVER_TO_CLIENT ? Client : never): void;
 ```
+
+Also exported: `Oper`, `Src`.
 
 ## Logging & environment
 
@@ -2005,7 +2139,12 @@ export function panel(ctx: ScriptContext, opts: PanelOptions = {
  *   stripped in production builds.
  *
  * The asset pipeline does NOT use a flag, it's a separate engine entry
- * (`EngineAssetPipeline`), not a headless variant of the client.
+ * (`EngineAssetPipeline`), not a headless variant of the client. Its realm runs
+ * NEUTRAL: all three flags stay false. Declarations register ungated, so the bake
+ * sees the whole registry either way, and a neutral realm keeps gameplay guarded
+ * with `if (!env.server) return` from running against the bake's headless rooms.
+ * A script that must run there (assembling visuals for a prefab capture) simply
+ * doesn't guard.
  *
  * Note: there is no `env.edit` or `env.play`. Mode is per-room and
  * available on the script context as `ctx.mode`.
@@ -5100,7 +5239,8 @@ export function regionKey(rx: number, ry: number, rz: number): string;
 #### `toChunkCoord`
 
 ```ts
-/** world position → chunk coordinate (floored division). */
+/** block coordinate → chunk coordinate. caller floors first: this truncates
+ *  toward zero, so a raw negative float lands one chunk too high. */
 export function toChunkCoord(worldCoord: number): number;
 ```
 
@@ -5556,6 +5696,21 @@ export function markChunkLightDirty(voxels: Voxels, chunk: Chunk): void;
  *  deserialize and as a defensive reconcile when callers bypass `ensureChunk`
  *  (tests/benches, savefile load, a full relight). */
 export function rebuildSpatialIndexes(voxels: Voxels): void;
+```
+
+#### `getChunk`
+
+```ts
+/** get the loaded chunk at the given chunk coordinates, or undefined. */
+export function getChunk(voxels: Voxels, cx: number, cy: number, cz: number): Chunk | undefined;
+```
+
+#### `getChunkAt`
+
+```ts
+/** get the loaded chunk containing a block coordinate, or undefined. block
+ *  coordinates, not chunk ones: see `getChunk` for the coarser form. */
+export function getChunkAt(voxels: Voxels, wx: number, wy: number, wz: number): Chunk | undefined;
 ```
 
 #### `ensureChunk`

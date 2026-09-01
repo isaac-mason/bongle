@@ -14,11 +14,11 @@ describe('Self marker', () => {
 
         // the compile-time half: reading TransformTrait-only members straight
         // off `_parent` only typechecks if `Self` resolved to the real type.
-        const link = ct._parent;
-        expect(link).toBe(pt);
-        if (link === null) throw new Error('expected a parent transform');
-        expect(link.worldMatrix.length).toBe(16);
-        expect(link.position.length).toBe(3);
-        expect(link._parent).toBe(null);
+        const resolved = ct._parent;
+        expect(resolved).toBe(pt);
+        if (resolved === null) throw new Error('expected a parent transform');
+        expect(resolved.worldMatrix.length).toBe(16);
+        expect(resolved.position.length).toBe(3);
+        expect(resolved._parent).toBe(null);
     });
 });

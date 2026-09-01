@@ -1,8 +1,8 @@
-// ── relink cost on realistic scene shapes ───────────────────────────
+// ── resolve cost on realistic scene shapes ──────────────────────────
 //
 // run: pnpm bench scene-shapes
 //
-// `ancestor-links.bench.ts` measures a 64-node *chain*, which is a stress
+// `resolutions.bench.ts` measures a 64-node *chain*, which is a stress
 // shape, not a real one. Real scenes are wide and shallow: a container with
 // hundreds of props, each prop a model root with a handful of mesh children —
 // depth 2-3, not 64. And the subtree a mutation actually moves is one prop
@@ -13,9 +13,9 @@
 //   reparent         a prop between containers
 //   scene load       one attach of a whole populated container
 //
-// Link count is 2 throughout, matching what the engine registers today: both
-// `model-visuals` and `voxel-mesh-visuals` query `Optional(Up(ModelTrait))`,
-// so every room has two links resolving the same trait.
+// Resolution count is 2 throughout, matching what the engine registers today:
+// both `model-visuals` and `voxel-mesh-visuals` query `Optional(Up(ModelTrait))`,
+// so every room has two resolving the same trait.
 
 import { bench, group } from '@pmndrs/labs';
 import { Optional, Up } from '../src/core/scene/conditions';
@@ -61,17 +61,17 @@ function buildContainer(sceneTree: SceneTree, props: number, meshes: number): No
     return container;
 }
 
-function withLinks(sceneTree: SceneTree, links: number): void {
-    if (links > 0) query(sceneTree, [Mesh, Optional(Up(Model))]);
-    if (links > 1) query(sceneTree, [VoxelMesh, Optional(Up(Model))]);
+function withResolutions(sceneTree: SceneTree, count: number): void {
+    if (count > 0) query(sceneTree, [Mesh, Optional(Up(Model))]);
+    if (count > 1) query(sceneTree, [VoxelMesh, Optional(Up(Model))]);
 }
 
 group('scene shapes: spawn a prop into a populated container @shape @spawn', () => {
-    for (const links of [0, 2]) {
-        bench(`spawn+despawn 1 prop (6 nodes), 200 props present, ${links} links`, function* () {
+    for (const count of [0, 2]) {
+        bench(`spawn+despawn 1 prop (6 nodes), 200 props present, ${count} resolutions`, function* () {
             const sceneTree = createSceneTree();
             const container = buildContainer(sceneTree, 200, 5);
-            withLinks(sceneTree, links);
+            withResolutions(sceneTree, count);
             const prop = buildProp(5);
             yield () => {
                 addChild(container, prop);
@@ -82,12 +82,12 @@ group('scene shapes: spawn a prop into a populated container @shape @spawn', () 
 });
 
 group('scene shapes: reparent a prop between containers @shape @reparent', () => {
-    for (const links of [0, 2]) {
-        bench(`reparent 1 prop (6 nodes) between containers, ${links} links`, function* () {
+    for (const count of [0, 2]) {
+        bench(`reparent 1 prop (6 nodes) between containers, ${count} resolutions`, function* () {
             const sceneTree = createSceneTree();
             const a = buildContainer(sceneTree, 100, 5);
             const b = buildContainer(sceneTree, 100, 5);
-            withLinks(sceneTree, links);
+            withResolutions(sceneTree, count);
             const prop = buildProp(5);
             addChild(a, prop);
             yield () => {
@@ -99,10 +99,10 @@ group('scene shapes: reparent a prop between containers @shape @reparent', () =>
 });
 
 group('scene shapes: scene load, one attach of a whole container @shape @load', () => {
-    for (const links of [0, 2]) {
-        bench(`attach container of 200 props (1200 nodes), ${links} links`, function* () {
+    for (const count of [0, 2]) {
+        bench(`attach container of 200 props (1200 nodes), ${count} resolutions`, function* () {
             const sceneTree = createSceneTree();
-            withLinks(sceneTree, links);
+            withResolutions(sceneTree, count);
             // built detached, attached in one go — the scene-load shape.
             const container = createNode({ name: 'container' });
             for (let i = 0; i < 200; i++) addChild(container, buildProp(5));
@@ -118,7 +118,7 @@ group('scene shapes: deep vs wide, same node count @shape @topology', () => {
     // 240 nodes either way: the stress shape the other bench file uses vs the
     // shape a real scene has. If these differ sharply, chain numbers don't
     // transfer.
-    bench('reparent 240 nodes as a chain, 2 links', function* () {
+    bench('reparent 240 nodes as a chain, 2 resolutions', function* () {
         const sceneTree = createSceneTree();
         const a = createNode({ name: 'a' });
         const b = createNode({ name: 'b' });
@@ -126,7 +126,7 @@ group('scene shapes: deep vs wide, same node count @shape @topology', () => {
         addChild(sceneTree.root, b);
         addTrait(a, Model);
         addTrait(b, Model);
-        withLinks(sceneTree, 2);
+        withResolutions(sceneTree, 2);
         const root = createNode({ name: 'chain' });
         addTrait(root, Mesh);
         let cur = root;
@@ -143,7 +143,7 @@ group('scene shapes: deep vs wide, same node count @shape @topology', () => {
         };
     }).gc(true);
 
-    bench('reparent 240 nodes as 40 props x 6, 2 links', function* () {
+    bench('reparent 240 nodes as 40 props x 6, 2 resolutions', function* () {
         const sceneTree = createSceneTree();
         const a = createNode({ name: 'a' });
         const b = createNode({ name: 'b' });
@@ -151,7 +151,7 @@ group('scene shapes: deep vs wide, same node count @shape @topology', () => {
         addChild(sceneTree.root, b);
         addTrait(a, Model);
         addTrait(b, Model);
-        withLinks(sceneTree, 2);
+        withResolutions(sceneTree, 2);
         const group_ = createNode({ name: 'wide' });
         for (let i = 0; i < 40; i++) addChild(group_, buildProp(5));
         addChild(a, group_);
@@ -200,7 +200,7 @@ function detachedContainer(props: number): Node {
 
 function loadFixture(props: number, unrelatedQueries: number) {
     const sceneTree = createSceneTree();
-    withLinks(sceneTree, 2);
+    withResolutions(sceneTree, 2);
     for (let i = 0; i < unrelatedQueries; i++) query(sceneTree, [Unrelated[i]!]);
     return { sceneTree, container: detachedContainer(props) };
 }

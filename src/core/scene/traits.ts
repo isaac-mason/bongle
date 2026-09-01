@@ -1,8 +1,8 @@
 import { recordTrait } from '../capture/module-scope';
 import { registry, structuralHash, upsert } from '../registry';
-import type { AncestorLinkDef } from './links';
 import type { pack } from './pack';
 import type { prop } from './prop';
+import { buildResolution, type ResolutionDef } from './resolutions';
 import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
 
@@ -39,18 +39,58 @@ export type TraitOptions = {
 type Factory<T> = () => T;
 
 /**
+ * The third kind of trait-body value, beside a literal and a factory: a
+ * *directive*, an instruction to `trait()` rather than a default. `my()`
+ * returns one. The engine initialises the field (to `null`) and registers
+ * whatever the directive declares; the author never assigns it.
+ *
+ * Branded with a registry symbol rather than `Symbol()` so the check survives
+ * an HMR re-evaluation that mints a fresh module scope — a plain unique symbol
+ * would silently stop matching markers built by a module copy that didn't
+ * re-run, and the field would quietly go unmaintained.
+ */
+export const $directive: unique symbol = Symbol.for('bongle.directive');
+
+export type Directive<T> = {
+    readonly [$directive]: 'resolution';
+    /** phantom, carries the resolved field type. not present at runtime. */
+    readonly __type: T;
+    /** the hierarchy condition this field resolves. */
+    readonly source: unknown;
+    readonly opts?: unknown;
+};
+
+export function isDirective(v: unknown): v is Directive<unknown> {
+    return typeof v === 'object' && v !== null && $directive in v;
+}
+
+/** sentinel slot marking `Self`; swapped for the owning trait's slot at registration. */
+export const SELF_SLOT = -1;
+
+declare const SELF_MARKER: unique symbol;
+/**
  * Placeholder for "this trait's own instance type", for a field that points at
- * another instance of the trait it's declared on. A trait body can't name the
- * type being inferred from it, so `_parent: null as Self | null` stands in and
- * `TraitInstance` substitutes the real type.
+ * another instance of the trait it is declared on. A trait body cannot name the
+ * type being inferred from it, so `Self` stands in and `TraitInstance`
+ * substitutes the real type:
  *
  * ```ts
- * export const TransformTrait = trait('transform', { _parent: null as Self | null });
+ * export const TransformTrait = trait('transform', { _parent: my(Ancestor(Self)) });
  * // instance type: { _parent: TransformTrait | null }
  * ```
+ *
+ * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
+ * what `TraitInstance` matches on to make the substitution.
  */
-declare const SELF_MARKER: unique symbol;
-export type Self = { readonly [SELF_MARKER]: true };
+export type Self = TraitBase & { readonly [SELF_MARKER]: true };
+
+/**
+ * Stand-in handle for "the trait being defined", so a body can reference itself
+ * in a directive: `parent: my(Ancestor(Self))`. Resolved to the enclosing
+ * trait's slot when `trait()` registers the directive; it is never a real trait
+ * and must not reach `addTrait` or a query.
+ */
+export const Self = { _id: 'bongle.self', _slot: SELF_SLOT } as unknown as TraitHandle<Self>;
 
 /** field names that cannot be used in trait definitions. */
 type ReservedTraitKey = '_node' | '_def' | '_sync';
@@ -65,7 +105,14 @@ export type TraitInstance<S extends TraitBody> = TraitBase & {
 
 /** unwrap a body field to its instance type: factories to their return type,
  *  `Self` to the instance type being built, literals to themselves. */
-type ResolveField<V, TSelf> = V extends Factory<infer R> ? SubstituteSelf<R, TSelf> : SubstituteSelf<V, TSelf>;
+// a directive is a declaration, not a default: its field takes the type the
+// directive resolves to. Checked first, and in containment form so it doesn't
+// distribute over a union.
+type ResolveField<V, TSelf> = [V] extends [Directive<infer D>]
+    ? SubstituteSelf<D, TSelf>
+    : V extends Factory<infer R>
+      ? SubstituteSelf<R, TSelf>
+      : SubstituteSelf<V, TSelf>;
 
 // `[Self] extends [V]` asks whether V *contains* the marker, rather than
 // whether V is assignable to it — the latter also matches `null`, which would
@@ -251,10 +298,10 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** ancestor links declared on this trait (`link()`), in registration order.
+    /** nearest-trait resolutions declared in this trait's body (`my()`), in order.
      *  Owned by the def so an HMR re-eval that drops a declaration drops the
-     *  link with it, the same way controls and syncs are handled. */
-    links: AncestorLinkDef[];
+     *  resolution with it, the same way controls and syncs are handled. */
+    resolutions: ResolutionDef[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -338,7 +385,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         persist: options?.persist ?? true,
         controls: [],
         controlsById: new Map(),
-        links: [],
+        resolutions: [],
         sync: [],
         syncById: new Map(),
         scripts: [],
@@ -354,6 +401,14 @@ export function trait<S extends TraitBody = Record<string, never>>(
     };
     def.handle = handle;
 
+    // directives in the body are declarations, not defaults: register what they
+    // declare now that the def (and its slot, which `Self` resolves to) exists.
+    for (const [key, value] of Object.entries(def.body)) {
+        if (!isDirective(value)) continue;
+        const built = buildResolution(slot, key, value);
+        if (built !== null) def.resolutions.push(built);
+    }
+
     upsert(registry.traits, id, def);
     // bodyHash = structural hash of the trait body (literals by value,
     // factories by toString). any body delta, added/removed key, default
@@ -361,9 +416,30 @@ export function trait<S extends TraitBody = Record<string, never>>(
     // a default change can silently be a type change (e.g. number → string,
     // vec3 factory → quat factory), so we treat any body delta as needing
     // fresh script closures rather than try to classify "safe" tweaks.
-    recordTrait(id, structuralHash(def.body));
+    recordTrait(id, structuralHash(hashableBody(def.body)));
 
     return handle;
+}
+
+/**
+ * Body with directives reduced to what they declare. A directive holds the
+ * condition's trait *handle*, and a handle points back at its def which points
+ * back at the handle — hashing that walks a cycle, and hashes unrelated def
+ * internals besides. What actually matters for change detection is the target
+ * trait, the source kind, and the hook's text.
+ */
+function hashableBody(body: TraitBody): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+        out[key] = isDirective(value) ? describeDirective(value) : value;
+    }
+    return out;
+}
+
+function describeDirective(d: Directive<unknown>): string {
+    const source = (d as { source?: { trait?: { _id?: string }; src?: number } }).source;
+    const opts = (d as { opts?: { onResolve?: (...args: unknown[]) => unknown } }).opts;
+    return `resolution:${source?.trait?._id ?? '?'}:${source?.src ?? '?'}:${opts?.onResolve?.toString() ?? ''}`;
 }
 
 /* ── trait-level registrars ── */
@@ -436,7 +512,10 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
     const instance: TraitBase & Record<string, unknown> = { _node: null!, _def: def };
 
     for (const [key, value] of Object.entries(def.body)) {
-        if (typeof value === 'function') {
+        if (isDirective(value)) {
+            // maintained by the engine (see `resolutions`), never a stored default.
+            instance[key] = null;
+        } else if (typeof value === 'function') {
             instance[key] = (value as Factory<unknown>)();
         } else if (value !== null && typeof value === 'object') {
             // structuredClone to avoid sharing object/array literals across instances
@@ -448,6 +527,9 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
+            // a directive-declared field is maintained by the engine; an
+            // override would be silently overwritten by the next resolve.
+            if (isDirective(def.body[key])) continue;
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.

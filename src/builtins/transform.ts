@@ -18,13 +18,13 @@ import type { Mat4, Quat, Vec3 } from 'math';
 import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { Ancestor } from '../core/scene/conditions';
-import { link } from '../core/scene/links';
+import { my } from '../core/scene/resolutions';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
-import { control, type Self, sync, type TraitType, trait } from '../core/scene/traits';
+import { control, Self, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 import { toChunkCoord } from '../core/voxels/voxels';
 
@@ -121,13 +121,23 @@ export const TransformTrait = trait('transform', {
     /** last seen teleport counter for snap detection */
     lastTeleport: 0,
 
-    // the nearest TransformTrait strictly above this node, or null. Maintained
-    // by the `link` declared below, never assigned by hand.
-    //
-    // `Self` is the marker for "another instance of this same trait": a body
-    // can't name the type being inferred from it, so `TraitInstance`
-    // substitutes it. Readers get `TransformTrait | null` with no cast.
-    _parent: null as Self | null,
+    // the nearest TransformTrait strictly above this node, or null. A directive
+    // rather than a default: the scene tree resolves it and keeps it correct
+    // through every reparent and trait add/remove, and nothing assigns it by
+    // hand. `Self` names the trait being defined, which a body otherwise can't
+    // do, and `TraitInstance` substitutes it so readers get
+    // `TransformTrait | null` with no cast.
+    _parent: my(Ancestor(Self), {
+        onResolve: (node) => {
+            // the parent pointer moved, so every cached world value below is stale.
+            markAncestryChanged(node);
+            // a branch-topmost transform's nearest transform ancestor changing
+            // can flip its AOI transform-root status (`isTransformRoot`).
+            // markAncestryChanged deliberately stays out of `dirtyNodes` (no
+            // replication retransmit), so signal a revisit explicitly.
+            if (node.scene) markNodeDirty(node.scene, node);
+        },
+    }),
 
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.
     // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
@@ -172,26 +182,6 @@ export const TransformTrait = trait('transform', {
 
 /** instance type for TransformTrait */
 export type TransformTrait = TraitType<typeof TransformTrait>;
-
-// `_parent` is not stored state, it is the nearest TransformTrait strictly
-// above this node, kept correct by the scene tree through every reparent and
-// trait add/remove. Declared here rather than maintained inside the scene
-// graph so the dirtying that has to accompany a re-point lives with the trait
-// that understands it.
-link(TransformTrait, '_parent', Ancestor(TransformTrait), {
-    onRelink: (node) => {
-        // the parent pointer moved, so every cached world value below is stale.
-        markAncestryChanged(node);
-        // a branch-topmost transform's nearest transform ancestor changing can
-        // flip its AOI transform-root status (`isTransformRoot`).
-        // markAncestryChanged deliberately stays out of `dirtyNodes` (no
-        // replication retransmit), so signal a revisit explicitly. markNodeDirty
-        // (not bumpNodeVersion): nothing client-visible changed, the scene diff
-        // finds no field or structure delta and emits nothing; this only re-runs
-        // the entity-index reconcile against the node's new root status.
-        if (node.scene) markNodeDirty(node.scene, node);
-    },
-});
 
 /* ── remote chase-latest translator ───────────────────────────────────────
  *
