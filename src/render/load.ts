@@ -13,7 +13,12 @@ import { type RenderDeviceCaps, type Renderer, type RendererBackendKind, readRen
 
 /** create + run the device handshake for one backend. */
 async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Renderer; caps: RenderDeviceCaps }> {
-    const mod = kind === 'webgl' ? await import('./webgl') : await import('./webgpu');
+    const mod =
+        kind === 'none'
+            ? await import('./none')
+            : kind === 'webgl'
+              ? await import('./webgl')
+              : await import('./webgpu');
     const renderer = mod.create();
     const caps = await renderer.load();
     return { renderer, caps };
@@ -40,6 +45,9 @@ async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Ren
  */
 export async function loadRenderBackend(): Promise<{ renderer: Renderer; caps: RenderDeviceCaps }> {
     const requested = readRendererOverride() ?? ((await webgpuAvailable()) ? 'webgpu' : 'webgl');
+    // Only ever reached via an explicit override — the probe above can't produce
+    // it — so a real player never lands on a backend that draws nothing.
+    if (requested === 'none') return createAndLoad('none');
     if (requested === 'webgl') return createAndLoad('webgl');
     try {
         return await createAndLoad('webgpu');

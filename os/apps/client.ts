@@ -59,8 +59,8 @@ export type ClientBootCaps = {
      *  site with nowhere to record the answer omits it. */
     graphics?: {
         handshakeStarted(): void;
-        handshakeSucceeded(backend: 'webgpu' | 'webgl'): void;
-        deviceLost(backend: 'webgpu' | 'webgl'): void;
+        handshakeSucceeded(backend: 'webgpu' | 'webgl' | 'none'): void;
+        deviceLost(backend: 'webgpu' | 'webgl' | 'none'): void;
     };
 };
 

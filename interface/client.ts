@@ -30,10 +30,14 @@ export type ClientDriver = {
      *  if the device dies later in the session.
      *
      *  Optional: a host with nowhere to record the answer (the editor's own realms,
-     *  a client booted straight off disk) omits it, and the engine still renders. */
+     *  a client booted straight off disk) omits it, and the engine still renders.
+     *
+     *  `none` (the load-generation backend) reports like any other. It's reachable
+     *  only by asking for it, and a host that keeps backend history already ignores
+     *  a session whose backend was forced, so it needs no special case. */
     graphics?: {
-        started(backend: 'webgpu' | 'webgl'): void;
-        deviceLost(backend: 'webgpu' | 'webgl'): void;
+        started(backend: 'webgpu' | 'webgl' | 'none'): void;
+        deviceLost(backend: 'webgpu' | 'webgl' | 'none'): void;
     };
 };
 

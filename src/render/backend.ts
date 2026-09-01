@@ -21,7 +21,10 @@ import type { Blocks } from '../core/voxels/block-registry';
 import type { TimeResources } from './time';
 import type { VoxelArenaBudget } from './voxels/voxel-arena';
 
-export type RendererBackendKind = 'webgpu' | 'webgl';
+/** `none` draws nothing and is never auto-selected — see `render/none`. It
+ *  exists for headless load generation, where a faithful client on the network
+ *  with no pixels is the point. */
+export type RendererBackendKind = 'webgpu' | 'webgl' | 'none';
 
 // ── contract parameter types (owned by the contract, not a backend) ──────────
 
@@ -131,14 +134,19 @@ export type Renderer = {
     refreshSpriteResources(opts: RefreshSpriteResourcesOpts): Promise<boolean>;
 };
 
-/** `?renderer=webgl` / `?renderer=webgpu` names the backend to use. Normally set by
- *  the host, which probes the device once and stamps its answer onto every realm it
- *  spawns; also typed by hand for QA. Returns null when unset or in a non-DOM
- *  context, which is the hostless case `webgpuAvailable` then covers. */
+/** `?renderer=webgl` / `?renderer=webgpu` / `?renderer=none` names the backend to
+ *  use. Normally set by the host, which probes the device once and stamps its answer
+ *  onto every realm it spawns; also typed by hand for QA, and set to `none` by the
+ *  load-generation rig. Returns null when unset or in a non-DOM context, which is the
+ *  hostless case `webgpuAvailable` then covers.
+ *
+ *  An older bundle simply doesn't recognise `none` here and falls through to the
+ *  probe, so pointing the rig at one degrades to a drawing backend rather than
+ *  breaking. */
 export function readRendererOverride(): RendererBackendKind | null {
     if (typeof location === 'undefined' || !location.search) return null;
     const v = new URLSearchParams(location.search).get('renderer');
-    return v === 'webgl' || v === 'webgpu' ? v : null;
+    return v === 'webgl' || v === 'webgpu' || v === 'none' ? v : null;
 }
 
 /**
