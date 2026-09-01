@@ -1,7 +1,7 @@
 // Typechecked snippets for The programming model — defining a trait.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { my, onTick, script, trait, Up } from 'bongle';
+import { my, onTick, script, trait, type TraitType, Up } from 'bongle';
 
 /* SNIPPET_START: define */
 // a trait is named state. fields are literals or factories (use a factory for
@@ -22,20 +22,16 @@ script(HealthTrait, 'regen', (ctx) => {
 /* SNIPPET_START: my */
 const VehicleTrait = trait('vehicle', { fuel: 100, speed: 0 });
 
-// riders are reparented into a seat node under the vehicle when they board, and
-// back out into the world when they leave.
+// riders are reparented into a seat under the vehicle when they board.
 const RiderTrait = trait('rider', {
-    // the vehicle this node is riding, or null when on foot. the engine
-    // re-resolves it on every board and exit, and every rider aboard resolves to
-    // the same instance, so the vehicle is the group they share.
+    // the vehicle this node is riding, or null when on foot. re-resolved on
+    // every board and exit, so any call site can just read it.
     vehicle: my(Up(VehicleTrait)),
 });
+type RiderTrait = TraitType<typeof RiderTrait>;
 
-script(RiderTrait, 'fuel-warning', (ctx) => {
-    onTick(ctx, () => {
-        const vehicle = ctx.trait.vehicle;
-        if (vehicle === null) return; // on foot
-        if (vehicle.fuel < 10) console.log('low fuel');
-    });
-});
+// called from input handling, UI, a physics callback: nowhere to iterate.
+export function canRefuel(rider: RiderTrait): boolean {
+    return rider.vehicle !== null && rider.vehicle.fuel < 100;
+}
 /* SNIPPET_END: my */
