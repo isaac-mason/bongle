@@ -12,7 +12,7 @@
 
 import { type SweepResult, sweepAabbVsAabb } from '../physics/aabb/aabb-sweep';
 import { AIR, type Blocks, BLOCK_FLAG_COLLISION, MISSING, SHAPE_AABBS } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, getChunk, type Voxels, voxelIndex } from './voxels';
 
 /** result of a voxel sweep. mutated in place. */
 export type VoxelSweepHit = {
@@ -140,7 +140,7 @@ export function sweepAabbVsVoxels(
     for (let cz = cz0; cz <= cz1; cz++) {
         for (let cy = cy0; cy <= cy1; cy++) {
             for (let cx = cx0; cx <= cx1; cx++) {
-                const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+                const chunk = getChunk(voxels, cx, cy, cz);
                 const cwx = cx << CHUNK_BITS;
                 const cwy = cy << CHUNK_BITS;
                 const cwz = cz << CHUNK_BITS;

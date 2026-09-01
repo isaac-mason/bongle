@@ -39,7 +39,7 @@ import { type Box3, box3 } from 'math/shapes';
 import type { Blocks } from './block-registry';
 import { AIR, BLOCK_FLAG_COLLISION, MISSING, MODEL_NONE } from './block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, getChunk, type Voxels, voxelIndex } from './voxels';
 
 // ── shape type ──────────────────────────────────────────────────────
 
@@ -638,7 +638,7 @@ function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number 
     const cx = wx >> CHUNK_BITS;
     const cy = wy >> CHUNK_BITS;
     const cz = wz >> CHUNK_BITS;
-    const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+    const chunk = getChunk(voxels, cx, cy, cz);
     if (!chunk || chunk.nonAirCount === 0) return AIR;
     const lx = wx & (CHUNK_SIZE - 1);
     const ly = wy & (CHUNK_SIZE - 1);
@@ -983,7 +983,7 @@ function collideVoxelsVsConvex(
                 const cx = vx >> CHUNK_BITS;
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
-                const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+                const chunk = getChunk(voxels, cx, cy, cz);
                 if (!chunk || chunk.nonAirCount === 0) continue;
 
                 const lx = vx - (cx << CHUNK_BITS);
@@ -1274,7 +1274,7 @@ function castConvexVsVoxels(
                 const cx = vx >> CHUNK_BITS;
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
-                const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+                const chunk = getChunk(voxels, cx, cy, cz);
                 if (!chunk || chunk.nonAirCount === 0) continue;
 
                 const lx = vx - (cx << CHUNK_BITS);

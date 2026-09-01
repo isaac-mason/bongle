@@ -58,7 +58,7 @@ import {
     SHAPE_IRREGULAR,
     SHAPE_NON_PARALLEL,
 } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, neighbourSlot, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, getChunk, neighbourSlot, type Voxels, voxelIndex } from './voxels';
 
 const SLAB_SIZE = CHUNK_SIZE + 2; // 18
 const SLAB_SIZE_SQ = SLAB_SIZE * SLAB_SIZE; // 324
@@ -948,7 +948,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     slab.fill(AIR);
     lightSlab.fill(PACKED_LIGHT_SKY_FULL);
 
-    const center = voxels.chunks.get(chunkKey(cx, cy, cz));
+    const center = getChunk(voxels, cx, cy, cz);
     if (center === undefined) return;
 
     // fill the center 16x16x16 from the chunk's own data + light

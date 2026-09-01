@@ -1,7 +1,7 @@
 import { castRayVsShape, createClosestCastRayCollector, createDefaultCastRaySettings } from 'crashcat';
 import type { Blocks } from './block-registry';
 import { AIR, MISSING } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, getChunk, type Voxels, voxelIndex } from './voxels';
 
 export type VoxelRaycastResult = {
     hit: boolean;
@@ -155,7 +155,7 @@ export function raycastVoxels(
         const cx = x >> CHUNK_BITS;
         const cy = y >> CHUNK_BITS;
         const cz = z >> CHUNK_BITS;
-        const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+        const chunk = getChunk(voxels, cx, cy, cz);
 
         // skip empty/missing chunks, advance to chunk exit boundary
         if (!chunk || chunk.nonAirCount === 0) {

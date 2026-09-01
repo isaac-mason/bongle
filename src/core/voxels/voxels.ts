@@ -66,7 +66,8 @@ export function regionKey(rx: number, ry: number, rz: number): string {
     return `${rx},${ry},${rz}`;
 }
 
-/** world position → chunk coordinate (floored division). */
+/** block coordinate → chunk coordinate. caller floors first: this truncates
+ *  toward zero, so a raw negative float lands one chunk too high. */
 export function toChunkCoord(worldCoord: number): number {
     return worldCoord >> CHUNK_BITS;
 }
@@ -1064,6 +1065,11 @@ export function rebuildSpatialIndexes(voxels: Voxels): void {
     }
 }
 
+/** get the loaded chunk at the given chunk coordinates, or undefined. */
+export function getChunk(voxels: Voxels, cx: number, cy: number, cz: number): Chunk | undefined {
+    return voxels.chunks.get(chunkKey(cx, cy, cz));
+}
+
 /** get or create a chunk at the given chunk coordinates. */
 export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number): Chunk {
     const key = chunkKey(cx, cy, cz);
@@ -1108,7 +1114,7 @@ export function getBlock(voxels: Voxels, wx: number, wy: number, wz: number): st
     const cx = toChunkCoord(wx);
     const cy = toChunkCoord(wy);
     const cz = toChunkCoord(wz);
-    const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+    const chunk = getChunk(voxels, cx, cy, cz);
     if (!chunk) return BLOCK_AIR;
     return getChunkBlockKey(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }
@@ -1118,7 +1124,7 @@ export function getBlockState(voxels: Voxels, wx: number, wy: number, wz: number
     const cx = toChunkCoord(wx);
     const cy = toChunkCoord(wy);
     const cz = toChunkCoord(wz);
-    const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+    const chunk = getChunk(voxels, cx, cy, cz);
     if (!chunk) return AIR;
     return getChunkBlock(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }
@@ -1180,7 +1186,7 @@ function markBoundaryNeighborsDirty(
         for (const oy of ys) {
             for (const oz of zs) {
                 if (ox === 0 && oy === 0 && oz === 0) continue;
-                const n = voxels.chunks.get(chunkKey(cx + ox, cy + oy, cz + oz));
+                const n = getChunk(voxels, cx + ox, cy + oy, cz + oz);
                 if (n) {
                     n.meshGen++;
                     markChunkDirty(voxels, n);

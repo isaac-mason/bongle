@@ -905,6 +905,21 @@ To find which block a ray hits, for a build cursor or a hitscan weapon, use
 `raycastVoxels` (covered under [Scene queries](#scene-queries)). The kit blocks
 also include presets such as doors; toggle one with `getDoorOpen` and `setDoorOpen`.
 
+#### Chunks
+
+The grid is stored in 16x16x16 **chunks**, and the block calls above find the right
+one for you, so most scripts never think about them. Reach for a chunk directly when
+you care whether part of the world is *loaded*: `getChunk` returns the chunk at a set
+of chunk coordinates, or `undefined` if it is not resident. That is a real distinction
+`getBlock` cannot express, since it reports air both for an empty cell and for a
+chunk that has not streamed in yet.
+
+Chunk coordinates are not block coordinates. Convert with `toChunkCoord`, one axis at
+a time, and floor any fractional position first: it truncates toward zero, so a raw
+negative float lands one chunk too high.
+
+<Snippet source="blocks.snippet.ts" select="chunks" />
+
 ### Reacting to changes
 
 To run logic when the world changes, register a block event for a block type.

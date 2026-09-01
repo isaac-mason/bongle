@@ -16,11 +16,13 @@ import {
     forEachBlock,
     getBlock,
     getBlockState,
+    getChunk,
     onBlockBreak,
     onBlockBuild,
     onInit,
     setBlock,
     system,
+    toChunkCoord,
     use,
 } from 'bongle';
 import { blockTextures } from 'bongle/kit';
@@ -99,6 +101,23 @@ system('place-grass', (ctx) => {
     });
 });
 /* SNIPPET_END: edit-world */
+
+/* SNIPPET_START: chunks */
+// chunks are 16x16x16. getChunk takes CHUNK coordinates, not block ones, so
+// convert first with toChunkCoord (one axis at a time).
+system('chunk-lookup', (ctx) => {
+    onInit(ctx, () => {
+        const chunk = getChunk(ctx.voxels, toChunkCoord(0), toChunkCoord(64), toChunkCoord(0));
+
+        // undefined means the chunk is not loaded here, which is NOT the same as
+        // "all air": getBlock reports air for both, so test with getChunk when the
+        // difference matters (streaming, worldgen, or a scan you want to skip).
+        if (chunk === undefined) {
+            debug.log(ctx, 'not loaded yet');
+        }
+    });
+});
+/* SNIPPET_END: chunks */
 
 /* SNIPPET_START: block-events */
 // react when a block of this type is placed or broken (server-only)
