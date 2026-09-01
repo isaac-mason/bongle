@@ -22,12 +22,12 @@ export async function start(opts: StartClientOptions): Promise<void> {
     env.editor = false;
     await opts.userEntry();
 
-    // dev has no host portal: matchmake is a no-op, platform verbs inert.
+    // dev has no host platform: matchmake is a no-op, platform verbs inert.
     const driver: ClientDriver = {
         matchmake() {},
         // local dev has no website to navigate to; say so rather than fail silently.
-        async portal({ slug }) {
-            console.warn(`[bongle] client.portal('${slug}'): no platform in local dev, staying here`);
+        async transfer({ slug }) {
+            console.warn(`[bongle] client.transfer to '${slug}': no platform in local dev, staying here`);
             return false;
         },
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },

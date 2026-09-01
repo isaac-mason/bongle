@@ -25,7 +25,7 @@ export const client = {
      * **With `project`**: send them to a DIFFERENT project, by slug. The host
      * asks them first (a game cannot move someone silently) and on accept takes
      * them there, ending this session. A refused target then rests for a while,
-     * so the natural spelling — "while the player is standing in the portal,
+     * so the natural spelling — "while the player is standing on the trigger,
      * ask" — does not re-ask every tick; calls for that target simply resolve
      * false until it lapses. Only one ask may be outstanding at a time.
      *
@@ -77,7 +77,7 @@ export const client = {
         const pointer = releasePointer(ctx);
         try {
             return await Transfer.whileAsking(state.transfer, slug, () =>
-                state.driver.portal({ slug, options, joinData: o?.joinData }),
+                state.driver.transfer({ slug, options, joinData: o?.joinData }),
             );
         } finally {
             // Unconditional. Where the host really navigates this is inert, since

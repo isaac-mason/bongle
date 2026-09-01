@@ -30,10 +30,10 @@ export async function start(opts: StartClientOptions): Promise<void> {
 
     const driver: ClientDriver = {
         matchmake() {},
-        // the editor is not a play page: a portal opens the target in a new tab
+        // the editor is not a play page: a transfer opens the target in a new tab
         // instead of navigating, so the editing session survives.
-        async portal({ slug }) {
-            console.warn(`[bongle] client.portal('${slug}'): not wired in the editor yet, staying here`);
+        async transfer({ slug }) {
+            console.warn(`[bongle] client.transfer to '${slug}': not wired in the editor yet, staying here`);
             return false;
         },
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },

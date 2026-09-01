@@ -15,7 +15,7 @@ export type ClientDriver = {
      *  unavailable, or a host with nowhere to send them); true means the host is
      *  navigating away and this session is over. Hosts with no platform around
      *  them resolve false. */
-    portal(req: {
+    transfer(req: {
         slug: string;
         options: Record<string, string | number | boolean>;
         joinData?: Record<string, JsonValue>;

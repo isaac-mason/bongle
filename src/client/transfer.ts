@@ -2,8 +2,9 @@
  * `client.transfer` bookkeeping for the cross-project case: whose turn it is to
  * ask, and which targets are resting.
  *
- * Both exist because of how a portal is naturally written — "while the player is
- * standing in it, ask" — which calls from a tick. Without the single-flight that
+ * Both exist because of how a transfer trigger is naturally written — "while the
+ * player is standing on it, ask" — which calls from a tick. Without the
+ * single-flight that
  * stacks asks faster than a person can answer, orphaning every promise but the
  * last (and with it the paired pointer-lock restore). Without the cooldown a
  * refusal is re-asked on the very next frame, and since the host resolves the
@@ -14,8 +15,8 @@
  * do at whatever pace the game wants.
  */
 
-/** How long a refused target rests. Long enough that a player standing in a
- *  portal they declined is not asked again immediately, short enough that
+/** How long a refused target rests. Long enough that a player standing on a
+ *  trigger they declined is not asked again immediately, short enough that
  *  walking away and coming back works. */
 const COOLDOWN_MS = 3_000;
 

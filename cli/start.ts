@@ -79,9 +79,11 @@ function shellHtml(hasStyles: boolean): string {
         <script type="module">
             import app from '/index.js';
 
-            // no host portal locally: matchmake is a no-op, platform verbs inert.
+            // no host platform locally: matchmake is a no-op, transfers refuse,
+            // platform verbs inert.
             const driver = {
                 matchmake() {},
+                transfer: async () => false,
                 platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             };
             const state = app.init(driver);

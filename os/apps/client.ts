@@ -34,13 +34,13 @@ export type ClientBootCaps = {
     err: (...parts: unknown[]) => void;
     /** structured boot status for the task manager (host + guest debugging). */
     progress: (status: unknown) => void;
-    /** the game asked to send this player to another project (`client.portal`).
-     *  Whether to ask, and how to get them there — a route, a new tab, a
-     *  redirect — is entirely the host's business, so this just forwards the
-     *  slug and resolves whether the player went. Required, not optional: a
-     *  boot site that silently answered `false` would look like a player who
-     *  declined, so each one states its answer. */
-    portal: (req: {
+    /** the game asked to send this player to another project (`client.transfer`
+     *  with a `project`). Whether to ask, and how to get them there — a route, a
+     *  new tab, a redirect — is entirely the host's business, so this just
+     *  forwards the slug and resolves whether the player went. Required, not
+     *  optional: a boot site that silently answered `false` would look like a
+     *  player who declined, so each one states its answer. */
+    transfer: (req: {
         slug: string;
         options: Record<string, string | number | boolean>;
         joinData: Record<string, string | number | boolean>;
@@ -100,8 +100,8 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
 
         const driver: ClientDriver = {
             matchmake() {},
-            portal({ slug, options, joinData }) {
-                return caps.portal({ slug, options, joinData: (joinData ?? {}) as Record<string, string | number | boolean> });
+            transfer({ slug, options, joinData }) {
+                return caps.transfer({ slug, options, joinData: (joinData ?? {}) as Record<string, string | number | boolean> });
             },
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             user,
@@ -250,16 +250,16 @@ const client: App = async (env) => {
         // editor. One dial per request: send the ask, take the single answer,
         // hang up. Nothing serving it (a bare OS) means nowhere to send the
         // player, which the timeout resolves to `false`.
-        portal: async (req) => {
+        transfer: async (req) => {
             try {
                 let answer!: (ok: boolean) => void;
                 const answered = new Promise<boolean>((resolve) => {
                     answer = resolve;
                 });
                 const chan = await env.connect('platform', (m) => answer(!!(m as { ok?: boolean } | null)?.ok), {
-                    signal: AbortSignal.timeout(PORTAL_ASK_TIMEOUT_MS),
+                    signal: AbortSignal.timeout(TRANSFER_ASK_TIMEOUT_MS),
                 });
-                chan.send({ type: 'portal', ...req });
+                chan.send({ type: 'transfer', ...req });
                 const ok = await answered;
                 chan.close();
                 return ok;
@@ -267,7 +267,7 @@ const client: App = async (env) => {
                 return false;
             }
         },
-        // Same 'platform' service as `portal`, but nothing to wait for: these are
+        // Same 'platform' service as `transfer`, but nothing to wait for: these are
         // told, not asked. Dial, say it, hang up — and if nothing is serving
         // (a bare OS), there is no host keeping score and the report is moot.
         graphics: graphicsReporter(env),
@@ -283,7 +283,7 @@ function graphicsReporter(env: Parameters<App>[0]): ClientBootCaps['graphics'] {
     const send = (report: Record<string, unknown>) => {
         void (async () => {
             try {
-                const chan = await env.connect('platform', () => {}, { signal: AbortSignal.timeout(PORTAL_ASK_TIMEOUT_MS) });
+                const chan = await env.connect('platform', () => {}, { signal: AbortSignal.timeout(TRANSFER_ASK_TIMEOUT_MS) });
                 chan.send({ type: 'graphics', ...report });
                 chan.close();
             } catch {
@@ -298,10 +298,10 @@ function graphicsReporter(env: Parameters<App>[0]): ClientBootCaps['graphics'] {
     };
 }
 
-/** How long to wait for the shell to answer a portal ask. Generous: the answer
+/** How long to wait for the shell to answer a transfer ask. Generous: the answer
  *  is a human deciding in a dialog, and a dial parks until the name is served
  *  at all, so this doubles as the "nothing is embedding us" timeout. */
-const PORTAL_ASK_TIMEOUT_MS = 120_000;
+const TRANSFER_ASK_TIMEOUT_MS = 120_000;
 
 /** the account user the local play-preview joins as (avatar resolution — engine
  *  knowledge, so it lives with the client). */
