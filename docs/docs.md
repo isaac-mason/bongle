@@ -1606,34 +1606,29 @@ system('chunk-lookup', (ctx) => {
 
 ### Procedural generation
 
-Generating a world is the one voxel workload where the cost of a write matters.
-A gameplay edit happens once when a player clicks; a generator lays millions of
-blocks in a burst, and the per-block bookkeeping that makes `setBlock` convenient
-is exactly what you want to shed.
+Laying a world is the one voxel workload where the cost of a single write
+matters: a player's edit happens once, a generator runs millions in a burst.
 
-There are three tiers. They produce identical blocks and differ only in how much
-work the engine does per call, and in what you give up:
+Three tiers produce identical blocks, differing only in the per-block work the
+engine does:
 
-| | Per block | Gives up |
+| | Per block | You handle |
 | --- | --- | --- |
-| `setBlock` | world to chunk lookup, palette, counts, mesh-dirty, light, op | nothing |
-| `setChunkBlock` | palette, counts, mesh-dirty, light, op | you resolve the chunk |
-| raw `chunkData` writes | an array store | ops and hooks; you call `invalidateChunk` |
+| `setBlock` | chunk lookup, palette, counts, mesh-dirty, light, op | nothing |
+| `setChunkBlock` | palette, counts, mesh-dirty, light, op | resolving the chunk |
+| raw `chunkData` writes | one array store | `invalidateChunk`, and no replication |
 
-Generation belongs on the server, before anyone is near the region. That
-precondition is what makes the cheaper tiers safe: they skip the replication ops
-that would otherwise tell a streaming client what changed.
+Generate on the server, before anyone is near the region.
 
 #### Simple: `setBlock`
 
-The gameplay call, and the right one until you measure otherwise. World
+The gameplay call, and the right one until you measure otherwise: world
 coordinates, chunks created as needed.
 
-Pass `SetBlockFlags.BULK` when generating. Block-def hooks still settle inline,
-so fences join and stairs shape themselves, but script events don't fire: you do
-not want your own `onBlockBuild` handler running a million times while terrain
-appears. Lighting also defers to a whole-chunk relight instead of propagating
-per block.
+Pass `SetBlockFlags.BULK` when generating. Block-def hooks still settle inline
+so fences join and stairs shape, but script events don't fire (you do not want
+your own `onBlockBuild` running a million times), and lighting defers to a
+whole-chunk relight instead of propagating per block.
 
 ```ts
 // a 64x64 stone platform, one call per block. BULK still settles block-def
@@ -1649,16 +1644,13 @@ function generateFlat(voxels: Voxels): void {
 
 #### Faster: `setChunkBlock`
 
-`setBlock` is a thin wrapper that resolves world coordinates to a chunk and then
-calls `setChunkBlock`. Once you're filling whole chunks you already know which
-chunk you're in, so hoist that lookup out of the inner loop and call the inner
-function yourself.
-
-Coordinates become chunk-local, so the loops change shape: iterate chunks on the
-outside, cells 0 to 15 on the inside. `ensureChunk` takes chunk coordinates and
-creates the chunk if it isn't there; `toLocalCoord` converts a world axis if you
-are coming the other way. Everything else about the write is unchanged, so this
-tier is a pure saving with nothing traded away.
+`setBlock` is a wrapper that resolves world coordinates to a chunk and calls
+`setChunkBlock`. Once you are filling whole chunks you already know which chunk
+you are in, so hoist that lookup out of the inner loop yourself. Coordinates
+become chunk-local, so the loops step in chunks on the outside and 0 to 15 on
+the inside (`toLocalCoord` converts a world axis to its in-chunk one, the pair
+of `toChunkCoord` above). Nothing else about the write changes, so this tier
+trades nothing away.
 
 ```ts
 // the same platform, resolving the chunk once per chunk instead of once per
@@ -1677,16 +1669,14 @@ function generateFlatByChunk(voxels: Voxels): void {
 }
 ```
 
-#### Advanced: writing chunk data directly
+#### Fastest: raw chunk data
 
-The last tier drops the write function entirely and stores into the chunk's
-array. `chunkData(chunk)` hands you a writable `Uint16Array`, one entry per cell.
-
-Entries are **chunk-local palette slots**, not global block ids, so resolve a
-slot once per key with `ensureChunkPaletteSlot` and reuse it for every cell that
-takes that block. `voxelIndex(lx, ly, lz)` gives the array index. Then call
-`invalidateChunk` once per chunk when the writes are done: it rescans the
-non-air and solid counts, marks the chunk mesh-dirty, and schedules its light.
+`chunkData(chunk)` hands you the chunk's writable `Uint16Array`, one entry per
+cell. Entries are **chunk-local palette slots**, not global block ids, so
+resolve a slot once per key with `ensureChunkPaletteSlot` and reuse it, and
+`voxelIndex(lx, ly, lz)` gives the index. Call `invalidateChunk` once per chunk
+when the writes are done: it rescans the counts, marks the chunk mesh-dirty, and
+schedules its light.
 
 ```ts
 // the same platform again, writing palette slots straight into the chunk array.
@@ -1712,22 +1702,20 @@ function generateFlatRaw(voxels: Voxels, blocks: BlockRegistryData): void {
 }
 ```
 
-What you give up is real, and it is why this tier is for generation only:
+This tier is generation-only, because it skips:
 
-- **No ops.** Nothing replicates. A client already streaming this region will
-  never hear about the writes, so generate before anyone can be there.
-- **No block-def hooks.** Fences won't join and stairs won't shape themselves.
-  Write the already-settled block state instead.
-- **No script events.** `onBlockBuild` and friends never fire.
+- **Ops.** Nothing replicates, so a client already streaming the region never
+  hears about the writes.
+- **Block-def hooks.** Fences will not join and stairs will not shape. Write the
+  settled state instead.
+- **Script events.** `onBlockBuild` and friends never fire.
 
-For a generator large enough to want this tier, work **one chunk column at a
-time**: resolve the vertical band of chunks the column needs, hold them in a map,
-and route every write through a small function that picks the right chunk of the
-band and drops anything landing outside the column. Structures that straddle a
-boundary are then handled by iterating a margin ring around each column, so a
-tree rooted in the neighbouring column still gets placed and simply has its
-outside cells clipped. That keeps every write local to a chunk you already hold,
-with no cross-chunk lookups and no seams.
+At this scale, work one chunk column at a time: resolve the vertical band of
+chunks the column needs into a map, and route every write through a function
+that picks the band entry and drops anything outside the column. Iterate a
+margin ring around each column so a tree rooted next door still places, clipped
+to the part you own. Every write then lands in a chunk you already hold, with no
+cross-chunk lookups and no seams.
 
 ### Reacting to changes
 
