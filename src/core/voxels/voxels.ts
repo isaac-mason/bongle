@@ -1070,6 +1070,12 @@ export function getChunk(voxels: Voxels, cx: number, cy: number, cz: number): Ch
     return voxels.chunks.get(chunkKey(cx, cy, cz));
 }
 
+/** get the loaded chunk containing a block coordinate, or undefined. block
+ *  coordinates, not chunk ones: see `getChunk` for the coarser form. */
+export function getChunkAt(voxels: Voxels, wx: number, wy: number, wz: number): Chunk | undefined {
+    return getChunk(voxels, toChunkCoord(wx), toChunkCoord(wy), toChunkCoord(wz));
+}
+
 /** get or create a chunk at the given chunk coordinates. */
 export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number): Chunk {
     const key = chunkKey(cx, cy, cz);
@@ -1111,20 +1117,14 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
 
 /** get the string key at a world position. returns "air" if chunk doesn't exist. */
 export function getBlock(voxels: Voxels, wx: number, wy: number, wz: number): string {
-    const cx = toChunkCoord(wx);
-    const cy = toChunkCoord(wy);
-    const cz = toChunkCoord(wz);
-    const chunk = getChunk(voxels, cx, cy, cz);
+    const chunk = getChunkAt(voxels, wx, wy, wz);
     if (!chunk) return BLOCK_AIR;
     return getChunkBlockKey(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }
 
 /** get the global state id at a world position. returns AIR if chunk doesn't exist. */
 export function getBlockState(voxels: Voxels, wx: number, wy: number, wz: number): number {
-    const cx = toChunkCoord(wx);
-    const cy = toChunkCoord(wy);
-    const cz = toChunkCoord(wz);
-    const chunk = getChunk(voxels, cx, cy, cz);
+    const chunk = getChunkAt(voxels, wx, wy, wz);
     if (!chunk) return AIR;
     return getChunkBlock(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }

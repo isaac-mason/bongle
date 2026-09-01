@@ -32,10 +32,9 @@ import {
     CHUNK_SIZE,
     type Chunk,
     EMPTY_LIGHT_MASK,
-    getChunk,
+    getChunkAt,
     rebuildSpatialIndexes,
     setLight,
-    toChunkCoord,
     toLocalCoord,
     type Voxels,
     voxelIndex,
@@ -134,10 +133,7 @@ export function getEmissionB(packed: number): number {
 const INV_15 = 1 / 15;
 
 function _readPackedLight(voxels: Voxels, vx: number, vy: number, vz: number): number {
-    const cx = toChunkCoord(vx);
-    const cy = toChunkCoord(vy);
-    const cz = toChunkCoord(vz);
-    const chunk = getChunk(voxels, cx, cy, cz);
+    const chunk = getChunkAt(voxels, vx, vy, vz);
     if (!chunk) return 0xf000; // open sky, no block light
     const lx = toLocalCoord(vx);
     const ly = toLocalCoord(vy);
@@ -331,7 +327,7 @@ function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
 // this is the ONE place we do a map lookup, at seed time, not in BFS.
 
 function resolveWorldPos(voxels: Voxels, wx: number, wy: number, wz: number): Chunk | null {
-    return getChunk(voxels, toChunkCoord(wx), toChunkCoord(wy), toChunkCoord(wz)) ?? null;
+    return getChunkAt(voxels, wx, wy, wz) ?? null;
 }
 
 // ── bucket priority queue ───────────────────────────────────────────

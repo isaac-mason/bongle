@@ -909,14 +909,16 @@ also include presets such as doors; toggle one with `getDoorOpen` and `setDoorOp
 
 The grid is stored in 16x16x16 **chunks**, and the block calls above find the right
 one for you, so most scripts never think about them. Reach for a chunk directly when
-you care whether part of the world is *loaded*: `getChunk` returns the chunk at a set
-of chunk coordinates, or `undefined` if it is not resident. That is a real distinction
-`getBlock` cannot express, since it reports air both for an empty cell and for a
-chunk that has not streamed in yet.
+you care whether part of the world is *loaded*: `getChunkAt` takes the same block
+coordinates as `getBlock` and returns the chunk holding that block, or `undefined` if
+it is not resident. That is a real distinction `getBlock` cannot express, since it
+reports air both for an empty cell and for a chunk that has not streamed in yet.
 
-Chunk coordinates are not block coordinates. Convert with `toChunkCoord`, one axis at
-a time, and floor any fractional position first: it truncates toward zero, so a raw
-negative float lands one chunk too high.
+`getChunk` is the same lookup in **chunk** coordinates, for when you already have
+them, from a neighbour walk or a bounds scan. The two differ only in coordinate
+space, and one chunk step is 16 blocks, so pick deliberately. To go between them,
+`toChunkCoord` converts one axis at a time; floor any fractional position first,
+since it truncates toward zero and a raw negative float lands one chunk too high.
 
 <Snippet source="blocks.snippet.ts" select="chunks" />
 
