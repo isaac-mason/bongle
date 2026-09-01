@@ -4,6 +4,10 @@
 // `Renderer` handle — it never names the concrete `render/webgpu` / `render/webgl`
 // modules or the selection logic. The dynamic `import()` is the code-split point:
 // only the chosen backend is fetched/parsed for a session.
+//
+// Selection is mostly not decided here. The host that embeds this client probes the
+// device and hands the answer down; see `loadRenderBackend` below for the full
+// precedence and for why the fallback is loud rather than fatal.
 
 import { type RenderDeviceCaps, type Renderer, type RendererBackendKind, readRendererOverride, webgpuAvailable } from './backend';
 
@@ -20,22 +24,27 @@ async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Ren
  * run the device handshake — returning a renderer that's ready to use plus the
  * adapter caps the client's tier detect needs.
  *
- * Prefer WebGPU when its adapter actually comes up (`webgpuAvailable` in render/backend
- * probes it), else WebGL2 — the universal floor. A `?renderer=` override forces the backend and
- * skips the probe (QA wants the exact backend, and a forced WebGPU that can't init
- * should fail loudly, not silently downgrade). The `try/catch` is a backstop for the
- * pathological "adapter probed OK but the device request then loses the race" case;
- * the probe means it essentially never fires.
+ * The backend normally comes from the host: it probes the device once (by actually
+ * rendering on it) and stamps the answer in as `?renderer=`, so every realm it
+ * spawns — this client, the editor's windows, the icon-bake worker — agrees. Only a
+ * realm with no host to tell it (the node bake, a client booted straight off disk,
+ * tests) falls through to `webgpuAvailable`, a bare adapter check that is a much
+ * weaker signal and is why the host does the real work.
+ *
+ * WebGPU that can't be stood up always steps down to WebGL2 rather than throwing,
+ * whether it was chosen here or handed in. A player is never better off with a dead
+ * canvas than a working WebGL2 one, and the loud `console.error` plus the demotion
+ * the client reports back to the host (`ClientDriver.graphics`) is what makes the
+ * fallback visible — to whoever forced the backend, and to the host, which starts
+ * on WebGL2 next time instead of rediscovering this every load.
  */
 export async function loadRenderBackend(): Promise<{ renderer: Renderer; caps: RenderDeviceCaps }> {
-    const override = readRendererOverride();
-    if (override) return createAndLoad(override);
-
-    if (!(await webgpuAvailable())) return createAndLoad('webgl');
+    const requested = readRendererOverride() ?? ((await webgpuAvailable()) ? 'webgpu' : 'webgl');
+    if (requested === 'webgl') return createAndLoad('webgl');
     try {
         return await createAndLoad('webgpu');
     } catch (err) {
-        console.warn('[render] WebGPU device init failed after adapter probe; falling back to WebGL2.', err);
+        console.error('[render] WebGPU could not be initialised; falling back to WebGL2.', err);
         return createAndLoad('webgl');
     }
 }

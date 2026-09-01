@@ -2,9 +2,9 @@
 // live `Renderer` (backend.ts) + `loadRenderBackend` (load.ts). The pipeline
 // worker's icon bakers program against `OfflineRenderer` and never name the
 // concrete `render/webgpu` / `render/webgl` modules, the voxel producer, or the
-// readback fn (`readPixels` vs `readRenderTargetPixels`). `loadOfflineBackend` picks
-// the backend the same way the live client does — `?renderer=` override, else a real
-// adapter probe — so icon baking always lands on the backend the client is running.
+// readback fn (`readPixels` vs `readRenderTargetPixels`). `loadOfflineBackend` takes
+// the backend the same way the live client does — from the host that probed the
+// device — so icon baking always lands on the backend the client is running.
 
 import type { Camera, RenderPipeline, RenderTarget, Scene } from 'gpucat';
 import type * as Performance from '../client/performance';
@@ -123,15 +123,17 @@ async function createOfflineFor(
 
 /**
  * Select + dynamically import the offline backend and mint its handle. Twin of
- * `loadRenderBackend()` — same override / `webgpuAvailable()` probe / fallback, same
- * code-split `import()`. `gpu` is the injected Node Dawn device (WebGPU only); the
- * browser-worker path leaves it undefined and each backend acquires its own (WebGPU:
- * `navigator.gpu`; WebGL: OffscreenCanvas WebGL2).
+ * `loadRenderBackend()` — same precedence, same fallback, same code-split `import()`.
+ * `gpu` is the injected Node Dawn device (WebGPU only); the browser-worker path
+ * leaves it undefined and each backend acquires its own (WebGPU: `navigator.gpu`;
+ * WebGL: OffscreenCanvas WebGL2).
  *
- * The probe is what keeps the icon bake on the SAME backend as the live client. A
- * presence-only `navigator.gpu` check sends a no-adapter device (blocklisted GPU,
- * hardware accel off, VM) into a WebGPU bake that throws at `createOffline`, while the
- * client happily runs WebGL2 — which reads as "everything renders except block icons".
+ * `backend` is the host's chosen backend, threaded in because this runs in a worker
+ * whose `self.location` can't carry the page query the live client reads. Sharing
+ * one host decision is what keeps the icon bake on the SAME backend as the client
+ * that will display those icons. Left to guess for itself, a bake could take a
+ * WebGPU path the client didn't, which reads as "everything renders except block
+ * icons".
  */
 export async function loadOfflineBackend(
     gpu?: { device: GPUDevice; adapter: GPUAdapter },
@@ -140,18 +142,15 @@ export async function loadOfflineBackend(
     // An injected device is always WebGPU (Node Dawn bake — no navigator.gpu, so the
     // probe below would wrongly pick WebGL).
     if (gpu) return createOfflineFor('webgpu', gpu);
-    // The explicit backend (`?renderer=` threaded into the pipeline worker, whose
-    // `self.location` can't carry the page query), else this realm's own `?renderer=`
-    // (the editor's game-client iframe does carry it). A forced backend skips the probe
-    // and fails loudly rather than silently downgrading.
-    const override = backend ?? readRendererOverride();
-    if (override) return createOfflineFor(override);
-
-    if (!(await webgpuAvailable())) return createOfflineFor('webgl');
+    // The host's backend, else this realm's own `?renderer=` (the editor's
+    // game-client iframe does carry it), else the bare adapter check for a realm with
+    // no host at all.
+    const requested = backend ?? readRendererOverride() ?? ((await webgpuAvailable()) ? 'webgpu' : 'webgl');
+    if (requested === 'webgl') return createOfflineFor('webgl');
     try {
         return await createOfflineFor('webgpu');
     } catch (err) {
-        console.warn('[render] WebGPU offline init failed after adapter probe; falling back to WebGL2.', err);
+        console.error('[render] WebGPU offline init failed; falling back to WebGL2.', err);
         return createOfflineFor('webgl');
     }
 }

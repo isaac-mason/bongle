@@ -38,8 +38,10 @@ const pipeline: App = async (env) => {
             // failure only reached this worker's console, which nobody opens.
             err: (m: string) => env.err(m),
         },
-        // `renderer` is the shell's `?renderer=` override: this app is a worker, so
-        // the icon bake can't read it off `self.location` the way a windowed app does.
+        // `renderer` is the host's chosen backend, carried on the session: this app is
+        // a worker, so the icon bake can't read it off `self.location` the way a
+        // windowed app does, and guessing could bake icons on a backend the client
+        // isn't running.
         { mode: 'edit', cache: true, renderer: (env.init as EditorSession | undefined)?.renderer },
     );
 

@@ -219,10 +219,18 @@ export async function load(state: EngineClient) {
     const { renderer, caps } = await loadRenderBackend();
     state.renderer = renderer;
 
+    // Tell the host which backend we actually landed on. It chose one (by probing
+    // the device) and handed it in; this is the only way it learns that we had to
+    // fall back, so the next boot can start where this one ended up.
+    state.driver.graphics?.started(renderer.kind);
+
     // a lost GPU device invalidates every resource; recreation isn't wired, so
     // halt the frame loop and tell the user to reload.
     renderer.onDeviceLost = (info) => {
         state.deviceLost = true;
+        // Report before the user reloads, so the reload doesn't land on the backend
+        // that just died.
+        state.driver.graphics?.deviceLost(renderer.kind);
         console.error(
             `[engine] render device lost (${info.api})${info.reason ? `: ${info.reason}` : ''}. ` +
                 `The GPU context was invalidated; reload to restore rendering.`,

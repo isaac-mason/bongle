@@ -131,8 +131,10 @@ export type Renderer = {
     refreshSpriteResources(opts: RefreshSpriteResourcesOpts): Promise<boolean>;
 };
 
-/** `?renderer=webgl` / `?renderer=webgpu` forces a backend (QA / debugging).
- *  Returns null when unset or in a non-DOM context. */
+/** `?renderer=webgl` / `?renderer=webgpu` names the backend to use. Normally set by
+ *  the host, which probes the device once and stamps its answer onto every realm it
+ *  spawns; also typed by hand for QA. Returns null when unset or in a non-DOM
+ *  context, which is the hostless case `webgpuAvailable` then covers. */
 export function readRendererOverride(): RendererBackendKind | null {
     if (typeof location === 'undefined' || !location.search) return null;
     const v = new URLSearchParams(location.search).get('renderer');
@@ -140,18 +142,16 @@ export function readRendererOverride(): RendererBackendKind | null {
 }
 
 /**
- * Can WebGPU actually stand up here? `navigator.gpu` only means the API is exposed;
- * the adapter still fails to materialize on a blocklisted GPU, with hardware accel
- * off, or in a headless/VM context. We make the SAME bare `requestAdapter()` both
- * backends make at init (gpucat passes no adapter options, and requests a device with
- * only adapter-advertised features + default limits — which can't fail once the
- * adapter exists), so a null here reliably predicts their init failure.
+ * The fallback backend check, for a realm with no host to tell it which to use: the
+ * node bake, a client booted straight off disk, tests. Everything embedded by the
+ * platform is handed a backend instead (see `readRendererOverride`).
  *
- * Presence alone is NOT a safe substitute: a device that reports `navigator.gpu`
- * but yields no adapter is a WebGL2 device, and picking WebGPU for it fails outright.
- * Both selection seams — `loadRenderBackend` (render/load) and `loadOfflineBackend`
- * (render/offline) — probe through here so the live client and the icon bake can
- * never land on different backends.
+ * It answers a narrow question — did an adapter materialize? — and that is as far as
+ * it goes. `navigator.gpu` alone is worse still (a device that exposes the API and
+ * yields no adapter is a WebGL2 device), so this is the floor rather than the goal.
+ * An adapter can still be a software rasterizer, produce a device that fails, or
+ * compile nothing; proving those needs a real render, which is why the platform
+ * probes properly and shares one answer rather than every realm asking here.
  */
 export async function webgpuAvailable(): Promise<boolean> {
     if (typeof navigator === 'undefined' || !navigator.gpu) return false;

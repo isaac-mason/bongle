@@ -22,6 +22,19 @@ export type ClientDriver = {
     }): Promise<boolean>;
     platform: Platform;
     user: ClientUser;
+    /** Report what the renderer actually did, for a host that chose the backend.
+     *  The host picks a backend (by probing the device) and hands it in as
+     *  `?renderer=`; these tell it whether the choice held. `started` fires once the
+     *  device handshake succeeds, carrying the backend the engine landed on, which
+     *  differs from the requested one when it had to fall back. `deviceLost` fires
+     *  if the device dies later in the session.
+     *
+     *  Optional: a host with nowhere to record the answer (the editor's own realms,
+     *  a client booted straight off disk) omits it, and the engine still renders. */
+    graphics?: {
+        started(backend: 'webgpu' | 'webgl'): void;
+        deviceLost(backend: 'webgpu' | 'webgl'): void;
+    };
 };
 
 export type Platform = {
