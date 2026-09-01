@@ -48,6 +48,20 @@ export type ClientBootCaps = {
     /** register graceful teardown (release WebGPU). Absent where teardown is a
      *  frame reload (the guest). */
     onDispose?: (fn: () => void) => void;
+    /** report the render backend's fate to the host that chose it. The host probes
+     *  the device, picks a backend, and hands it in as `?renderer=`; these tell it
+     *  whether the choice held, so a bad call or a dead driver doesn't repeat on
+     *  every session.
+     *
+     *  `handshakeStarted` brackets the one stretch that can take the whole frame
+     *  down before anything can report it — the host writes a marker it can find
+     *  next load — and `handshakeSucceeded` closes that bracket. Optional: a boot
+     *  site with nowhere to record the answer omits it. */
+    graphics?: {
+        handshakeStarted(): void;
+        handshakeSucceeded(backend: 'webgpu' | 'webgl'): void;
+        deviceLost(backend: 'webgpu' | 'webgl'): void;
+    };
 };
 
 /** Boot EngineClient in edit mode against the given capabilities, wire the game
@@ -91,6 +105,12 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
             },
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             user,
+            // The engine reports the backend it landed on and any later device loss;
+            // the caps carry both out to whoever chose the backend.
+            graphics: caps.graphics && {
+                started: (backend) => caps.graphics?.handshakeSucceeded(backend),
+                deviceLost: (backend) => caps.graphics?.deviceLost(backend),
+            },
         };
 
         const state = EngineClient.init({
@@ -102,6 +122,9 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
 
         progress('booting');
         await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs) });
+        // `load` runs the device handshake, so the crash bracket opens here and is
+        // closed by the driver's `started` from inside it.
+        caps.graphics?.handshakeStarted();
         await EngineClient.load(state);
         EngineClientEditor.watchRegistry(state);
         caps.onDispose?.(() => EngineClient.dispose(state));
@@ -244,12 +267,36 @@ const client: App = async (env) => {
                 return false;
             }
         },
+        // Same 'platform' service as `portal`, but nothing to wait for: these are
+        // told, not asked. Dial, say it, hang up — and if nothing is serving
+        // (a bare OS), there is no host keeping score and the report is moot.
+        graphics: graphicsReporter(env),
         log: (...p) => env.log(...p),
         err: (...p) => env.err(...p),
         progress: (status) => env.progress(status),
         onDispose: (fn) => env.onDispose(fn),
     });
 };
+
+/** Fire-and-forget reports to the embedding platform over the 'platform' service. */
+function graphicsReporter(env: Parameters<App>[0]): ClientBootCaps['graphics'] {
+    const send = (report: Record<string, unknown>) => {
+        void (async () => {
+            try {
+                const chan = await env.connect('platform', () => {}, { signal: AbortSignal.timeout(PORTAL_ASK_TIMEOUT_MS) });
+                chan.send({ type: 'graphics', ...report });
+                chan.close();
+            } catch {
+                // nothing embedding us, or it hung up — the report has nowhere to go.
+            }
+        })();
+    };
+    return {
+        handshakeStarted: () => send({ phase: 'booting' }),
+        handshakeSucceeded: (backend) => send({ phase: 'started', backend }),
+        deviceLost: (backend) => send({ phase: 'device-lost', backend }),
+    };
+}
 
 /** How long to wait for the shell to answer a portal ask. Generous: the answer
  *  is a human deciding in a dialog, and a dial parks until the name is served
