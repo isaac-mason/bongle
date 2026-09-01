@@ -755,7 +755,7 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     Debug.end(room.clientMetrics, 'voxel-mesh');
 
     Debug.begin(room.clientMetrics, 'model');
-    ModelVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility);
+    ModelVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility, room.voxels);
     Debug.end(room.clientMetrics, 'model');
 
     Debug.begin(room.clientMetrics, 'dom-ui');

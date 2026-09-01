@@ -905,7 +905,7 @@ function tickAnimator(
         // earlier in boneOrder and was composed by this loop's prior
         // iteration. exception: rig-root bones whose `parent transform`
         // lives outside the rig, refresh it via the lazy walk-up.
-        const parent = t._parent as TransformTrait | null;
+        const parent = t._parent;
         if (parent !== null && parent._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
             getWorldMatrix(parent);
         }

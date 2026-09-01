@@ -1,17 +1,21 @@
-// ModelTrait, the shared voxel-light home for everything rendered under
-// this node. `ModelLighting` samples voxel light once per frame at this
-// node's origin plus `lightOffset` and writes it here; every MeshTrait
-// in the subtree reads it via `findModelAncestor`.
+// ModelTrait, a lighting group: one shared voxel-light value for every mesh
+// at or below this node. `ModelLighting` samples once per frame at this node's
+// origin plus `lightOffset` and writes it here; meshes resolve their group via
+// the renderers' `Up(ModelTrait)` query term, which the scene tree keeps live
+// across reparenting and trait add/remove.
 //
-// Sampling per-model (rather than per-mesh) keeps lighting consistent
-// across a rig's limbs, bones whose own world position clips into a
-// solid voxel mid-animation don't pop dark, because the sample point is
-// by construction inside the model body.
+// Grouping is optional and is the granularity knob for model lighting. With a
+// ModelTrait, a rig's limbs share one sample, so a bone whose world position
+// clips into a solid voxel mid-animation can't pop dark, and the whole model
+// costs one sample. Without one, each mesh is its own lighting unit and samples
+// at its own AABB centre — inside its geometry by construction, no anchor to
+// configure — which gives a multi-part model a real gradient at the cost of one
+// sample per mesh.
 //
-// Sits on the model-instance root (rig root for animated models, model
-// root for static multi-mesh, or the mesh node itself for single-mesh
-// things). Meshes walk parents from their own node to find the nearest
-// ancestor ModelTrait; the mesh batched renderer requires one.
+// Sits wherever the group boundary belongs: the rig root for animated models,
+// the model root for static multi-mesh, or the mesh node itself for single-mesh
+// things (`Up` counts the node itself, so a node carrying both MeshTrait and
+// ModelTrait resolves to its own).
 //
 // Lifecycle: `cloneModel` installs ModelTrait on the clone root, and the
 // Animator (when present) installs one on its node, so meshes under a rig
@@ -19,7 +23,7 @@
 //
 // Standalone visuals (sprite, extruded-sprite, shadow) do NOT install a
 // ModelTrait. They sample light themselves (sprite/extruded) or don't
-// need it (shadow). Only the mesh batched renderer reads from ModelTrait.
+// need it (shadow). Only the mesh renderers read from ModelTrait.
 
 import type { Vec3, Vec4 } from 'math';
 import { type TraitType, trait } from '../core/scene/traits';

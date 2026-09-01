@@ -293,7 +293,8 @@ function applyPredictionInterpolation(transform: TransformTrait): void {
         applyPredictionBlend(transform, transform.position, transform.quaternion);
         vec3.copy(transform.interpolatedWorldScale, transform.scale);
     } else {
-        const parent = transform._parent as TransformTrait;
+        // guarded by `hasTransformedParent` above, which the compiler can't see through
+        const parent = transform._parent!;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
@@ -388,7 +389,8 @@ function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat:
         );
         transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
     } else {
-        const parent = transform._parent as TransformTrait;
+        // guarded by `hasTransformedParent` above, which the compiler can't see through
+        const parent = transform._parent!;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);

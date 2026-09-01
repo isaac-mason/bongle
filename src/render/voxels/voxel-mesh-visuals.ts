@@ -38,7 +38,8 @@ import { getVisualWorldMatrix } from '../../api/transforms';
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
-import type { Node, SceneTree } from '../../core/scene/scene-tree';
+import { Optional, type Src, Up } from '../../core/scene/conditions';
+import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../core/voxels/chunk-mesher';
 import { sampleVoxelLight } from '../../core/voxels/light';
@@ -63,7 +64,9 @@ import {
     type VoxelMeshBatch,
 } from './voxel-mesh-resources';
 
-type VoxelMeshQuery = ReturnType<typeof query<[typeof VoxelMeshTrait, typeof TransformTrait]>>;
+type VoxelMeshQuery = ReturnType<
+    typeof query<[typeof VoxelMeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
+>;
 
 // ── per-trait state ─────────────────────────────────────────────────
 
@@ -119,7 +122,7 @@ export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree):
     scene.add(batch.mesh);
     return {
         aliveStates: [],
-        _query: query(sceneTree, [VoxelMeshTrait, TransformTrait]),
+        _query: query(sceneTree, [VoxelMeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
         frameId: 0,
         scene,
     };
@@ -140,13 +143,16 @@ export function update(
     let instanceDataDirty = false;
 
     // ── phase 1: allocate / refresh states ──────────────────────────
-    for (const [vmTrait, transformTrait] of q) {
+    for (const [vmTrait, transformTrait, modelAncestor] of q) {
         let state = vmTrait._state;
         const model = vmTrait.model;
 
         // fast path: same model ref, state already exists.
         if (state !== null && state.modelRef === model && model !== null) {
             state.lastSeenFrame = frameId;
+            // the query keeps the resolved lighting group live; phase 3 walks
+            // aliveStates rather than matches, so copy it across.
+            state.model = modelAncestor;
             continue;
         }
 
@@ -172,9 +178,6 @@ export function update(
             growVoxelMeshBatch(batch, batch.instanceAllocator.capacity);
             instArr = batch.instanceDataBuf.array as Float32Array;
         }
-
-        const node = vmTrait._node;
-        const modelAncestor = findModelAncestor(node);
 
         // register with a cull box from the VoxelModel's local AABB
         // (boundsMin/Max − origin, the space the mesh is baked in).
@@ -526,14 +529,4 @@ function voxelLocalAabb(out: Box3, model: VoxelModel): Box3 {
         model.boundsMax[1] - oy,
         model.boundsMax[2] - oz,
     );
-}
-
-function findModelAncestor(node: Node): ModelTrait | null {
-    let cur: Node | null = node;
-    while (cur) {
-        const m = getTrait(cur, ModelTrait);
-        if (m) return m;
-        cur = cur.parent;
-    }
-    return null;
 }

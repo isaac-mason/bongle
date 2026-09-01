@@ -182,7 +182,6 @@
         "blockbench:plugin": "blockbench/build-plugin.sh"
     },
     "dependencies": {
-        "shakeup": "github:isaac-mason/shakeup#main",
         "@base-ui/react": "^1.5.0",
         "@breezystack/lamejs": "^1.2.7",
         "@dnd-kit/abstract": "^0.3.2",
@@ -210,6 +209,7 @@
         "react": "^19.2.4",
         "react-colorful": "^5.7.0",
         "react-dom": "^19.2.4",
+        "shakeup": "github:isaac-mason/shakeup#main",
         "sharp": "^0.34.5",
         "skia-canvas": "^3.0.0",
         "tsx": "^4.23.0",
@@ -219,6 +219,7 @@
     },
     "devDependencies": {
         "@biomejs/biome": "^2.3.13",
+        "@pmndrs/labs": "^0.8.0",
         "@tailwindcss/vite": "^4.2.2",
         "@types/archiver": "^6.0.3",
         "@types/estree": "^1.0.8",

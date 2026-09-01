@@ -31,11 +31,12 @@ export function cloneNode(node: Node): Node {
 }
 
 /**
- * Clone a node intended for the **visual scene**, same as `cloneNode`, plus
- * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
- * installed on the clone root. Use this for every cloneNode site that goes
- * into the visible scene; reserve `cloneNode` for non-visual subtree
- * duplication (e.g. detached prefab data).
+ * Clone a node intended for the **visual scene**, same as `cloneNode`, plus a
+ * `ModelTrait` (a lighting group, one shared voxel-light value for every mesh
+ * under the clone) installed on the clone root. Reserve `cloneNode` for
+ * non-visual subtree duplication (e.g. detached prefab data), or for meshes you
+ * want lit individually — a mesh outside any group renders fine and samples at
+ * its own AABB centre.
  *
  * Typical usage:
  * ```ts
@@ -56,7 +57,7 @@ export function cloneNode(node: Node): Node {
  *
  * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
  * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
- * TransformTrait]` pair each frame, so without one the model would silently
+ * TransformTrait]` pair each frame, so without one the group would silently
  * never be lit (stuck full-bright, `lightOffset` dead). An added identity
  * transform is faithful, that's exactly the TRS the bake elided.
  */

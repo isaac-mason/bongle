@@ -17,12 +17,14 @@
 import type { Mat4, Quat, Vec3 } from 'math';
 import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
+import { Ancestor } from '../core/scene/conditions';
+import { link } from '../core/scene/links';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
-import { getTrait } from '../core/scene/scene-tree';
+import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
-import { control, sync, type TraitType, trait } from '../core/scene/traits';
+import { control, type Self, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 import { toChunkCoord } from '../core/voxels/voxels';
 
@@ -119,10 +121,13 @@ export const TransformTrait = trait('transform', {
     /** last seen teleport counter for snap detection */
     lastTeleport: 0,
 
-    // points to the nearest ancestor's TransformTrait instance, or null.
-    // typed as `any` to break the self-referential type cycle in the trait body;
-    // call sites that read this field cast to `TransformTrait | null`.
-    _parent: null as any,
+    // the nearest TransformTrait strictly above this node, or null. Maintained
+    // by the `link` declared below, never assigned by hand.
+    //
+    // `Self` is the marker for "another instance of this same trait": a body
+    // can't name the type being inferred from it, so `TraitInstance`
+    // substitutes it. Readers get `TransformTrait | null` with no cast.
+    _parent: null as Self | null,
 
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.
     // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
@@ -167,6 +172,26 @@ export const TransformTrait = trait('transform', {
 
 /** instance type for TransformTrait */
 export type TransformTrait = TraitType<typeof TransformTrait>;
+
+// `_parent` is not stored state, it is the nearest TransformTrait strictly
+// above this node, kept correct by the scene tree through every reparent and
+// trait add/remove. Declared here rather than maintained inside the scene
+// graph so the dirtying that has to accompany a re-point lives with the trait
+// that understands it.
+link(TransformTrait, '_parent', Ancestor(TransformTrait), {
+    onRelink: (node) => {
+        // the parent pointer moved, so every cached world value below is stale.
+        markAncestryChanged(node);
+        // a branch-topmost transform's nearest transform ancestor changing can
+        // flip its AOI transform-root status (`isTransformRoot`).
+        // markAncestryChanged deliberately stays out of `dirtyNodes` (no
+        // replication retransmit), so signal a revisit explicitly. markNodeDirty
+        // (not bumpNodeVersion): nothing client-visible changed, the scene diff
+        // finds no field or structure delta and emits nothing; this only re-runs
+        // the entity-index reconcile against the node's new root status.
+        if (node.scene) markNodeDirty(node.scene, node);
+    },
+});
 
 /* ── remote chase-latest translator ───────────────────────────────────────
  *
@@ -487,7 +512,7 @@ const _interpolatedWalkStack: TransformTrait[] = [];
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
 export function composeWorldMatrix(transform: TransformTrait): void {
-    const parent = transform._parent as TransformTrait | null;
+    const parent = transform._parent;
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -620,7 +645,7 @@ function updateWorldTransform(transform: TransformTrait): void {
     let cursor: TransformTrait | null = transform;
     while (cursor !== null && cursor._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
         stack.push(cursor);
-        cursor = cursor._parent as TransformTrait | null;
+        cursor = cursor._parent;
     }
 
     for (let i = stack.length - 1; i >= 0; i--) {
@@ -646,7 +671,7 @@ function updateWorldTransform(transform: TransformTrait): void {
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
 export function composeInterpolatedWorldMatrix(transform: TransformTrait): void {
-    const parent = transform._parent as TransformTrait | null;
+    const parent = transform._parent;
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -778,7 +803,7 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
     let cursor: TransformTrait | null = transform;
     while (cursor?._interpolated && cursor._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) {
         stack.push(cursor);
-        cursor = cursor._parent as TransformTrait | null;
+        cursor = cursor._parent;
     }
 
     // boundary parent (cursor) is null, a clean interp ancestor, or a
@@ -1089,7 +1114,7 @@ export function computeWorldTransforms(nodes: SceneTree): void {
  * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3 {
-    const parentTransform = t._parent as TransformTrait | null;
+    const parentTransform = t._parent;
     if (parentTransform === null) {
         if (out !== worldPosition) vec3.copy(out, worldPosition);
         return out;
@@ -1114,7 +1139,7 @@ const _worldToLocalQuaternion_invParentQuat: Quat = quat.create();
  * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat {
-    const parentTransform = transform._parent as TransformTrait | null;
+    const parentTransform = transform._parent;
     if (parentTransform === null) {
         if (out !== worldQuaternion) quat.copy(out, worldQuaternion);
         return out;

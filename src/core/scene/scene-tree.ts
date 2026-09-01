@@ -1,4 +1,4 @@
-import { getWorldChunk, markAncestryChanged, TransformTrait } from '../../builtins/transform';
+import { getWorldChunk, TransformTrait } from '../../builtins/transform';
 import { env } from '../../env';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';
@@ -8,6 +8,17 @@ import * as bitset from '../utils/bitset';
 import { type Listener, type Topic, topic, type Unsubscribe } from '../utils/topic';
 import type { Voxels } from '../voxels/voxels';
 import { chunkToRegionCoord, regionKey } from '../voxels/voxels';
+import {
+    type Condition,
+    type ConditionArgs,
+    type ConditionArgsToConditions,
+    type ExtractTraitsFromConditions,
+    OPER_TAG,
+    Oper,
+    SRC_TAG,
+    Src,
+} from './conditions';
+import { type AncestorLink, declaredLinks } from './links';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import type { ValidationIssue } from './prop/validate';
@@ -276,6 +287,42 @@ export type SceneTree = {
     queries: Map<string, Query<any>>;
 
     /**
+     * @internal the same queries as a dense array. Membership sites iterate
+     * this per node, and `Map.values()` allocates a fresh iterator on every
+     * call — once per node per site during a subtree attach.
+     */
+    _queryList: Array<Query<any>>;
+
+    /**
+     * @internal trait slot → queries that mention that slot in ANY term. A node
+     * can only match, or stop matching, a query that references one of its
+     * traits, so membership work consults these rather than every query in the
+     * tree. Indexed by every mentioned slot, not just positive ones: removing
+     * `T` can make a node newly satisfy a `Not(T)`, and adding the target of an
+     * `Up` term changes that node's own resolution.
+     */
+    _queriesByTrait: Array<Array<Query<any>> | undefined>;
+    /**
+     * @internal queries with no positive self-trait requirement (`[Not(Tag)]`,
+     * or a lone `Up` term). These can match a node bearing nothing the index
+     * would find, so they are always consulted.
+     */
+    _queriesAlways: Array<Query<any>>;
+    /** @internal reused candidate buffer; `_visitGeneration` dedupes a query
+     *  reachable through two of a node's traits without allocating a Set. */
+    _queryScratch: Array<Query<any>>;
+    _visitGeneration: number;
+
+    /**
+     * @internal this tree's query-term links, appended when a query with `Up` /
+     * `Ancestor` terms is created and removed when it is reaped. Links declared
+     * on traits (`link()`) are global and walked first, so a declared link's
+     * field is settled before any query term reads ancestry.
+     */
+    _queryLinks: AncestorLink[];
+
+
+    /**
      * @internal server-side discovery driver. nodes touched this tick (created,
      * structural change, trait add/remove, field change, or destroyed), the set
      * the per-client scene-sync fan-out iterates instead of walking the whole tree.
@@ -327,6 +374,12 @@ export function createSceneTree(): SceneTree {
         root: null!,
         nodes: new Set(),
         queries: new Map(),
+        _queryList: [],
+        _queriesByTrait: [],
+        _queriesAlways: [],
+        _queryScratch: [],
+        _visitGeneration: 0,
+        _queryLinks: [],
         _nextNodeId: 1,
         _nextClientNodeId: -1,
         _idToNode: new Map(),
@@ -591,10 +644,14 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     node._unresolvedTraits.clear();
 
     // remove from all queries
-    for (const q of sceneTree.queries.values()) {
-        if (q.nodeToIndex.has(node)) {
-            removeNodeFromQuery(q, node);
-        }
+    // a node can only be a member of a query that references one of its traits
+    // (or of one with no positive self-trait at all), so the candidate set is
+    // sufficient here — no need to sweep every query in the tree.
+    const candidates = sceneTree._queryScratch;
+    const count = collectQueries(sceneTree, node);
+    for (let i = 0; i < count; i++) {
+        const q = candidates[i]!;
+        if (queryIndexOf(q, node) !== -1) removeNodeFromQuery(q, node);
     }
 
     // detach from parent
@@ -625,65 +682,22 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
 // ── parent transform bookkeeping ──────────────────────────────────────
 //
 // every TransformTrait instance has a parent transform pointer to the
-// nearest ancestor node's TransformTrait (or null if none). maintained
-// eagerly on hierarchy and trait mutations so it's always fresh.
+// nearest ancestor node's TransformTrait (or null if none), maintained
+// eagerly on hierarchy and trait mutations so it's always fresh. The
+// maintenance itself is an `AncestorLink` like any other (see `ancestor
+// links` below); only the initial resolve for a node's own pointer lives
+// here.
 
-/** walk up the parent chain to find the nearest ancestor with a TransformTrait. */
+/**
+ * nearest ancestor's TransformTrait, or null. A typed adapter over the shared
+ * `findTraitAt` walk: `_parent` is `TransformTrait | null` and consumers
+ * compare against null (`hasTransformedParent`), so the undefined the generic
+ * walk returns is normalised here rather than at four call sites.
+ */
 function findTransformAncestor(node: Node): TransformTrait | null {
-    let cur = node.parent;
-    while (cur) {
-        const t = getTrait(cur, TransformTrait);
-        if (t) return t;
-        cur = cur.parent;
-    }
-    return null;
-}
-
-/**
- * update parent transform for all TransformTrait instances in the
- * immediate children of `node`. for each child: if it has a TransformTrait,
- * set its parent transform to `ancestor`, mark it dirty (parent changed so
- * cached world values are stale), and stop (its own children already
- * point to it). if it doesn't, recurse into its children.
- */
-function updateChildTransformPointers(node: Node, ancestor: TransformTrait | null): void {
-    for (const child of node.children) {
-        const t = getTrait(child, TransformTrait);
-        if (t) {
-            t._parent = ancestor;
-            markAncestryChanged(child);
-            // this branch-topmost transform's nearest transform ancestor just changed,
-            // which can flip its AOI transform-root status (`isTransformRoot`).
-            // markAncestryChanged deliberately stays out of `dirtyNodes` (no replication
-            // retransmit), so signal a revisit explicitly. markNodeDirty (not
-            // bumpNodeVersion): nothing client-visible changed, the scene diff will find
-            // no field/structure delta and emit nothing; this only re-runs the
-            // entity-index reconcile against the node's new root status.
-            if (child.scene) markNodeDirty(child.scene, child);
-        } else {
-            updateChildTransformPointers(child, ancestor);
-        }
-    }
-}
-
-/**
- * update parent transform for the root of a moved/attached subtree and
- * propagate down. the root gets `ancestor`; its children get the root's
- * transform (if it has one) or pass `ancestor` through.
- * also marks all affected transforms dirty since parent pointers changed.
- */
-function updateSubtreeTransformPointers(subtreeRoot: Node, ancestor: TransformTrait | null): void {
-    const t = getTrait(subtreeRoot, TransformTrait);
-    if (t) {
-        t._parent = ancestor;
-        // mark this node + descendants dirty (ancestry changed)
-        markAncestryChanged(subtreeRoot);
-        // children of this node point to it
-        updateChildTransformPointers(subtreeRoot, t);
-    } else {
-        // no transform here, children inherit the same ancestor
-        updateChildTransformPointers(subtreeRoot, ancestor);
-    }
+    const traitSlot = TransformTrait._slot;
+    if (traitSlot === undefined) return null;
+    return (findTraitAt(node, traitSlot, false) as TransformTrait | undefined) ?? null;
 }
 
 /** user-facing props for addTrait, only the trait's own declared fields, minus base fields. */
@@ -718,18 +732,20 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
-    // maintain parent transform pointers (works purely within local subtree)
+    // this node's own parent pointer; its descendants are relinked below, by
+    // the same machinery that maintains every other ancestor link.
     if (traitSlot === TransformTrait._slot) {
-        const t = getTrait(node, TransformTrait)!;
-        t._parent = findTransformAncestor(node);
-        updateChildTransformPointers(node, t);
+        getTrait(node, TransformTrait)!._parent = findTransformAncestor(node);
     }
 
     const scene = node.scene;
+    // descendants resolving this trait from the hierarchy now resolve to it.
+    // runs detached too: a subtree is often fully built before it is attached.
+    relinkChildren(scene, node, traitSlot);
 
     if (scene) {
         bumpNodeVersion(scene, node);
-        reindex(scene, node);
+        reindex(scene, node, traitSlot);
         if (scene.context) {
             const created = instantiateTraitScripts(scene.context, node, instance, handle._def);
             for (const i of created) initScriptInstance(i);
@@ -825,23 +841,18 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         // the trait value is still resolvable.
         if (scene?.context) disposeTraitScripts(scene.context, node, handle._def);
 
-        // maintain parent transform pointers, children that pointed to this
-        // transform now inherit this transform's own parent
-        if (traitSlot === TransformTrait._slot) {
-            const t = getTrait(node, TransformTrait)!;
-            const ancestor = t._parent ?? null;
-            updateChildTransformPointers(node, ancestor);
-        }
-
         // update bitset so queries see the node as no longer matching
         bitset.remove(node._bitset, traitSlot);
         if (scene) {
             bumpNodeVersion(scene, node);
             // reindex this node, callbacks fire while trait value still in _traits
-            reindex(scene, node);
+            reindex(scene, node, traitSlot);
         }
         // now safe to delete the value
         node._traits.delete(traitSlot);
+        // descendants that resolved to this trait now fall through to the next
+        // one above. runs after the delete so the walk sees the new answer.
+        relinkChildren(scene, node, traitSlot);
         flushQueryEvents();
     }
 }
@@ -871,11 +882,8 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
             if (def) disposeTraitScripts(scene.context, node, def);
         }
 
-        // maintain parent transform pointers
         if (traitSlot === TransformTrait._slot) {
             const t = getTrait(node, TransformTrait)!;
-            const ancestor = t._parent ?? null;
-            updateChildTransformPointers(node, ancestor);
             if (scene) {
                 scene._transformDirty.delete(t);
                 scene._interpolating.delete(t);
@@ -885,7 +893,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
         bitset.remove(node._bitset, traitSlot);
         if (scene) {
             bumpNodeVersion(scene, node);
-            reindex(scene, node);
+            reindex(scene, node, traitSlot);
         }
         node._traits.delete(traitSlot);
         flushQueryEvents();
@@ -908,20 +916,22 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     node._traits.set(traitSlot, instance);
     bitset.add(node._bitset, traitSlot);
 
-    // maintain parent transform pointers. prev pose seeding is owned by
+    // this node's own parent pointer. prev pose seeding is owned by
     // `setInterpolation(node, true)`, callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
     // "addTrait happens before node.scene is wired" hydration race.
     if (traitSlot === TransformTrait._slot) {
-        const t = getTrait(node, TransformTrait)!;
-        t._parent = findTransformAncestor(node);
-        updateChildTransformPointers(node, t);
+        getTrait(node, TransformTrait)!._parent = findTransformAncestor(node);
     }
+
+    // descendants resolving this trait from the hierarchy now resolve to it.
+    // outside the `scene` guard: this path hydrates detached trees (scene-pack).
+    relinkChildren(scene, node, traitSlot);
 
     if (scene) {
         bumpNodeVersion(scene, node);
-        reindex(scene, node);
+        reindex(scene, node, traitSlot);
     }
 
     if (scene?.context) {
@@ -1059,6 +1069,11 @@ export function addChild(parent: Node, child: Node): void {
         removeChildInternal(child.parent, child);
     }
 
+    // a child that wasn't in a scene tree gets registered below, which builds
+    // its query tuples from scratch; one that was already registered is only
+    // moving, and `registerSubtree` won't rebuild tuples it already has.
+    const wasDetached = child.scene === null;
+
     child.parent = parent;
     parent.children.push(child);
 
@@ -1067,9 +1082,9 @@ export function addChild(parent: Node, child: Node): void {
         registerSubtree(parent.scene, child);
     }
 
-    // update parent transform pointers for the attached subtree
-    const ancestor = findTransformAncestor(child);
-    updateSubtreeTransformPointers(child, ancestor);
+    // re-resolve ancestor links over the attached subtree. runs even when
+    // `parent` is itself detached — pointers within the subtree still matter.
+    relinkSubtree(parent.scene, child, undefined, wasDetached && parent.scene !== null);
 
     // last, so an enter handler reading a world matrix sees fresh pointers
     flushQueryEvents();
@@ -1122,6 +1137,7 @@ export function reparent(node: Node, newParent: Node): void {
 
     const scene = newParent.scene;
     const oldParent = node.parent;
+    const wasInTree = node.scene !== null;
 
     // fire onExit before detaching, old parent is still set
     if (oldParent && node.scene !== null && scene.context) {
@@ -1148,9 +1164,12 @@ export function reparent(node: Node, newParent: Node): void {
         for (const n of moved) bumpNodeVersion(scene, n);
     }
 
-    // update parent transform pointers for the moved subtree
-    const ancestor = findTransformAncestor(node);
-    updateSubtreeTransformPointers(node, ancestor);
+    // re-resolve every ancestor link over the moved subtree. a node that was
+    // already live carries its old parent, so links that resolve identically
+    // either side of the move skip their walk entirely.
+    // when the node was detached, `registerSubtree` above already filled its
+    // query slots; only declared links still need the walk.
+    relinkSubtree(scene, node, wasInTree ? oldParent : null, !wasInTree);
 
     flushQueryEvents();
 }
@@ -1260,9 +1279,15 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         }
         sceneTree._idToNode.set(n.id, n);
 
-        for (const q of sceneTree.queries.values()) {
-            if (nodeMatchesQuery(n, q) && !q.nodeToIndex.has(n)) {
-                addNodeToQuery(q, n);
+        const candidates = sceneTree._queryScratch;
+        const candidateCount = collectQueries(sceneTree, n);
+        for (let qi = 0; qi < candidateCount; qi++) {
+            const q = candidates[qi]!;
+            if (nodeMatchesQuery(n, q) && queryIndexOf(q, n) === -1) {
+                // hierarchy slots are filled by the relink walk the caller runs
+                // once the whole subtree is registered, which is cheaper per
+                // node than resolving each one here.
+                addNodeToQuery(q, n, true);
             }
         }
 
@@ -1276,6 +1301,11 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
             }
         }
     }
+
+    // fill the hierarchy slots pass 1 deferred, before any user code runs.
+    // pass 2 fires `onInit`, and a script reading a query tuple there must not
+    // see a half-built match.
+    fillQueryLinks(sceneTree, node);
 
     // pass 2: fire onInit on all new script instances
     for (const instance of newScriptInstances) {
@@ -1320,10 +1350,10 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
     }
 
     // remove from all queries
-    for (const q of sceneTree.queries.values()) {
-        if (q.nodeToIndex.has(node)) {
-            removeNodeFromQuery(q, node);
-        }
+    const queries = sceneTree._queryList;
+    for (let i = 0; i < queries.length; i++) {
+        const q = queries[i]!;
+        if (queryIndexOf(q, node) !== -1) removeNodeFromQuery(q, node);
     }
 
     setOwner(sceneTree, node, null);
@@ -1804,66 +1834,112 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
 
 /* query system */
 
-export enum ConditionType {
-    WITH,
-    NOT,
+/**
+ * Sparse-index key for a node id. Server ids count up from 1 and client ids
+ * down from -1, and a client tree holds both (replicated nodes arrive with
+ * server ids), so the two runs are interleaved into one dense-ish key space.
+ */
+function sparseKey(id: number): number {
+    return id >= 0 ? id * 2 : -id * 2 - 1;
 }
 
-export type WithCondition<T extends TraitHandle> = {
-    type: ConditionType.WITH;
-    trait: T;
-};
-
-export type NotCondition<T extends TraitHandle> = {
-    type: ConditionType.NOT;
-    trait: T;
-};
-
-export function With<T extends TraitHandle>(t: T): WithCondition<T> {
-    return { type: ConditionType.WITH, trait: t };
+/** remove `value` from `arr` by swap-pop, if present. */
+function swapRemove<T>(arr: T[], value: T): void {
+    const i = arr.indexOf(value);
+    if (i === -1) return;
+    arr[i] = arr[arr.length - 1]!;
+    arr.pop();
 }
 
-export function Not<T extends TraitHandle>(t: T): NotCondition<T> {
-    return { type: ConditionType.NOT, trait: t };
+function pushCandidates(sceneTree: SceneTree, slot: number, gen: number, out: Array<Query<any>>, n: number): number {
+    const list = sceneTree._queriesByTrait[slot];
+    if (list === undefined) return n;
+    for (let i = 0; i < list.length; i++) {
+        const q = list[i]!;
+        if (q._visitGeneration === gen) continue;
+        q._visitGeneration = gen;
+        out[n++] = q;
+    }
+    return n;
 }
 
-export type Condition = WithCondition<any> | NotCondition<any>;
+/**
+ * Gather the queries whose verdict for `node` could have changed, into the
+ * scene tree's scratch buffer; returns how many. Pass `changedSlot` when a
+ * single trait was added or removed, otherwise every trait the node bears is
+ * considered.
+ *
+ * Walks the node's bitset words rather than its trait map: iterating a Map
+ * allocates an iterator, and this runs once per node per membership site.
+ */
+function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number): number {
+    const gen = ++sceneTree._visitGeneration;
+    const out = sceneTree._queryScratch;
+    let n = 0;
 
-export type ConditionArgs = TraitHandle | WithCondition<any> | NotCondition<any>;
+    const always = sceneTree._queriesAlways;
+    for (let i = 0; i < always.length; i++) {
+        const q = always[i]!;
+        q._visitGeneration = gen;
+        out[n++] = q;
+    }
 
-export type ConditionArgsToConditions<Args extends ConditionArgs[]> = {
-    [K in keyof Args]: Args[K] extends TraitHandle
-        ? WithCondition<Args[K]>
-        : Args[K] extends WithCondition<any>
-          ? Args[K]
-          : Args[K] extends NotCondition<any>
-            ? Args[K]
-            : never;
-};
+    if (changedSlot !== undefined) return pushCandidates(sceneTree, changedSlot, gen, out, n);
 
-/** extract trait instance types from WITH conditions (NOT conditions don't provide values) */
-type ExtractTraitsFromConditions<Conditions extends Condition[]> = Conditions extends [
-    infer First,
-    ...infer Rest extends Condition[],
-]
-    ? First extends WithCondition<TraitHandle<infer T>>
-        ? [T, ...ExtractTraitsFromConditions<Rest>]
-        : ExtractTraitsFromConditions<Rest>
-    : [];
+    const bits = node._bitset;
+    for (let w = 0; w < bits.length; w++) {
+        let word = bits[w]!;
+        while (word !== 0) {
+            const bit = word & -word;
+            n = pushCandidates(sceneTree, w * 32 + (31 - Math.clz32(bit)), gen, out, n);
+            word ^= bit;
+        }
+    }
+    return n;
+}
 
-export type Query<Conditions extends Array<Condition>> = {
+/** position of `node` in `q.matches`, or -1. */
+function queryIndexOf(q: Query<any>, node: Node): number {
+    const i = q._sparse[sparseKey(node.id)];
+    return i !== undefined && q.matchNodes[i] === node ? i : -1;
+}
+
+/** placeholder until `query()` binds a term's apply to its query. */
+function noopApply(): void {}
+
+export type Query<Conditions extends Array<Condition<any, any, any>>> = {
     hash: string;
     conditions: [...Conditions];
     withTraits: number[];
     withBitset: Bitset;
     withoutBitset: Bitset;
     matches: Array<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    nodeToIndex: Map<Node, number>;
+    /** the node behind each entry of `matches`, same index. Also the validity
+     *  check for `_sparse`, whose entries are allowed to go stale. */
+    matchNodes: Node[];
+    /**
+     * @internal sparse membership index: node id (zigzagged, since client ids
+     * are negative) → position in `matches`. A plain array, not a Map: node
+     * ids are integers so V8 keeps this as a fast elements-kind array, and
+     * membership is looked up once per link per visited node during relinking,
+     * which measured as the dominant cost of the walk.
+     *
+     * Entries are never cleared on removal — a stale index is caught by
+     * `matchNodes[i] === node`, the same trick koota's SparseSet uses.
+     */
+    _sparse: number[];
+    /** terms whose value comes from the hierarchy (`Up` / `Ancestor`), with the
+     *  tuple slot each writes. empty for the ordinary self-only query, which is
+     *  what lets structural mutations skip relinking entirely. */
+    traversals: TraversalTerm[];
     /** node started matching. subscribe with {@link onQueryEnter}, never directly:
      *  the topic alone has no backfill, no error isolation, and no lifetime. */
     onEnter: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     /** node stopped matching. subscribe with {@link onQueryExit}. */
     onExit: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
+    /** a still-matching node's hierarchy-sourced value changed (reparent, or the
+     *  target trait added/removed above it). subscribe with {@link onQueryRebind}. */
+    onRebind: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     /**
      * live ref-count from script instances that called `query(ctx, ...)`.
      * 0 + `acquired` false → engine-persistent (never reaped).
@@ -1872,6 +1948,8 @@ export type Query<Conditions extends Array<Condition>> = {
     refcount: number;
     /** true once any script instance has acquired this query; gates reaping. */
     acquired: boolean;
+    /** @internal dedupe stamp for candidate collection. */
+    _visitGeneration: number;
     [Symbol.iterator](): Iterator<[...traits: ExtractTraitsFromConditions<Conditions>]>;
 };
 
@@ -1890,59 +1968,101 @@ export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToCo
 /** one element of {@link QueryMatches}, the trait tuple a single query result yields. */
 export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
 
+/**
+ * one `Up` / `Ancestor` term of a query, resolved against the hierarchy rather
+ * than the node's own bitset. `tupleIndex` is the slot it writes in a match;
+ * `required` terms also gate membership, so a relink can add or drop a node.
+ */
+export type TraversalTerm = AncestorLink & {
+    required: boolean;
+    tupleIndex: number;
+};
+
+/**
+ * nearest trait instance at or above `node`, per `inclusive`. the walk is
+ * O(depth) map lookups and runs only on structural change, never per frame.
+ */
+function findTraitAt(node: Node | null, traitSlot: number, inclusive: boolean): TraitBase | undefined {
+    let cur: Node | null = inclusive ? node : (node?.parent ?? null);
+    while (cur) {
+        const t = cur._traits.get(traitSlot);
+        if (t !== undefined) return t;
+        cur = cur.parent;
+    }
+    return undefined;
+}
+
+/** resolve one term's value for `node`, honouring its source. */
+function resolveTerm(node: Node, condition: Condition<any, any, any>): TraitBase | undefined {
+    const traitSlot = condition.trait._slot;
+    if (traitSlot === undefined) return undefined;
+    if (condition.src === Src.Self) return node._traits.get(traitSlot);
+    return findTraitAt(node, traitSlot, condition.src === Src.Up);
+}
+
 function buildConditionBitsets(conditions: ConditionArgs[]): {
-    parsedConditions: Condition[];
+    parsedConditions: Array<Condition<any, any, any>>;
     withBitset: Bitset;
     withoutBitset: Bitset;
     withTraits: number[];
+    traversals: TraversalTerm[];
 } {
-    const parsedConditions: Condition[] = conditions.map((cond): Condition => {
+    const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
         if (typeof cond === 'object' && cond !== null && '_slot' in cond) {
-            // bare trait handle → implicit WITH
-            return { type: ConditionType.WITH, trait: cond } as WithCondition<any>;
+            // bare trait handle → implicit With
+            return { trait: cond, oper: Oper.And, src: Src.Self };
         }
-        return cond as Condition;
+        return cond as Condition<any, any, any>;
     });
 
     let withBitset = bitset.init();
     let withoutBitset = bitset.init();
     const withTraits: number[] = [];
+    const traversals: TraversalTerm[] = [];
 
+    // tuple index advances for every value-carrying term, i.e. everything but Not.
+    let tupleIndex = 0;
     for (const condition of parsedConditions) {
         const traitSlot = condition.trait._slot;
-        if (traitSlot === undefined) continue;
-        switch (condition.type) {
-            case ConditionType.WITH:
-                withBitset = bitset.add(withBitset, traitSlot);
-                withTraits.push(traitSlot);
-                break;
-            case ConditionType.NOT:
-                withoutBitset = bitset.add(withoutBitset, traitSlot);
-                break;
+        if (condition.oper === Oper.Not) {
+            if (traitSlot !== undefined) withoutBitset = bitset.add(withoutBitset, traitSlot);
+            continue;
         }
+        if (traitSlot !== undefined) {
+            if (condition.src === Src.Self) {
+                // only a self-sourced requirement is a bitmask test on the node.
+                if (condition.oper === Oper.And) {
+                    withBitset = bitset.add(withBitset, traitSlot);
+                    withTraits.push(traitSlot);
+                }
+            } else {
+                traversals.push({
+                    traitSlot,
+                    inclusive: condition.src === Src.Up,
+                    required: condition.oper === Oper.And,
+                    tupleIndex,
+                    // bound to the query below, once it exists.
+                    apply: noopApply,
+                });
+            }
+        }
+        tupleIndex++;
     }
 
-    return { parsedConditions, withBitset, withoutBitset, withTraits };
+    return { parsedConditions, withBitset, withoutBitset, withTraits, traversals };
 }
 
 export function query<const Args extends ConditionArgs[]>(
     sceneTree: SceneTree,
     conditions: Args,
 ): Query<ConditionArgsToConditions<Args>> {
-    const { parsedConditions, withBitset, withoutBitset, withTraits } = buildConditionBitsets(conditions);
+    const { parsedConditions, withBitset, withoutBitset, withTraits, traversals } = buildConditionBitsets(conditions);
 
-    // hash conditions (order matters, do not sort)
+    // hash conditions (order matters, do not sort). oper and src both belong in
+    // the key: `[Mesh, Up(Model)]` and `[Mesh, Model]` are different queries.
     const hashParts: string[] = [];
     for (const c of parsedConditions) {
-        const index = c.trait._slot;
-        switch (c.type) {
-            case ConditionType.WITH:
-                hashParts.push(`W${index}`);
-                break;
-            case ConditionType.NOT:
-                hashParts.push(`N${index}`);
-                break;
-        }
+        hashParts.push(`${OPER_TAG[c.oper]}${SRC_TAG[c.src]}${c.trait._slot}`);
     }
     const hash = hashParts.join(',');
 
@@ -1960,18 +2080,41 @@ export function query<const Args extends ConditionArgs[]>(
         withBitset,
         withoutBitset,
         matches: [],
-        nodeToIndex: new Map(),
+        matchNodes: [],
+        _sparse: [],
+        traversals,
         onEnter: topic(),
         onExit: topic(),
+        onRebind: topic(),
         refcount: 0,
         acquired: false,
+        _visitGeneration: 0,
         [Symbol.iterator]() {
             return this.matches[Symbol.iterator]();
         },
     };
 
+    // bind each traversal term's apply to this query. one closure per term for
+    // the life of the query, so relinking allocates nothing.
+    for (const term of traversals) {
+        term.apply = (node, resolved) => applyTraversal(q, term, node, resolved);
+    }
+
     // register query
     sceneTree.queries.set(hash, q);
+    sceneTree._queryList.push(q);
+    if (withTraits.length === 0) {
+        sceneTree._queriesAlways.push(q);
+    } else {
+        for (const c of parsedConditions) {
+            const slot = c.trait._slot;
+            if (slot === undefined) continue;
+            const list = sceneTree._queriesByTrait[slot];
+            if (list === undefined) sceneTree._queriesByTrait[slot] = [q];
+            else list.push(q);
+        }
+    }
+    for (const term of traversals) sceneTree._queryLinks.push(term);
 
     // populate with existing matching nodes
     for (const node of sceneTree.nodes) {
@@ -2002,6 +2145,21 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     q.refcount--;
     if (q.refcount <= 0 && q.acquired) {
         sceneTree.queries.delete(q.hash);
+        swapRemove(sceneTree._queryList, q);
+        swapRemove(sceneTree._queriesAlways, q);
+        for (const c of q.conditions) {
+            const slot = (c as Condition<any, any, any>).trait._slot;
+            if (slot === undefined) continue;
+            const list = sceneTree._queriesByTrait[slot];
+            if (list !== undefined) swapRemove(list, q);
+        }
+        for (const term of q.traversals) {
+            const i = sceneTree._queryLinks.indexOf(term);
+            if (i !== -1) {
+                sceneTree._queryLinks[i] = sceneTree._queryLinks[sceneTree._queryLinks.length - 1]!;
+                sceneTree._queryLinks.pop();
+            }
+        }
     }
 }
 
@@ -2100,6 +2258,33 @@ export function onQueryEnter<Conditions extends Condition[]>(
     return () => offQueryEnter(q, fn);
 }
 
+/**
+ * subscribe to a still-matching node's hierarchy-sourced value changing: the
+ * node was reparented, or the trait an `Up` / `Ancestor` term resolves to was
+ * added or removed above it. Enter/exit can't express this — the match never
+ * stopped, only what it resolved to.
+ *
+ * Unlike {@link onQueryEnter} there is **no backfill**: nothing has rebound
+ * yet at subscribe time. Consumers that iterate `matches` need this only when
+ * they cache something derived from the resolved value; the tuple itself is
+ * updated in place.
+ */
+export function onQueryRebind<Conditions extends Array<Condition<any, any, any>>>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): Unsubscribe {
+    q.onRebind.add(fn as Listener<any>);
+    return () => offQueryRebind(q, fn);
+}
+
+/** drop an {@link onQueryRebind} subscription. idempotent. */
+export function offQueryRebind<Conditions extends Array<Condition<any, any, any>>>(
+    q: Query<Conditions>,
+    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
+): void {
+    q.onRebind.remove(fn as Listener<any>);
+}
+
 /** drop an {@link onQueryEnter} subscription. no exit drain, enter has no
  *  teardown half. idempotent. */
 export function offQueryEnter<Conditions extends Condition[]>(
@@ -2146,26 +2331,43 @@ export function offQueryExit<Conditions extends Condition[]>(
 function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
     if (!bitset.containsAll(node._bitset, q.withBitset)) return false;
     if (!bitset.containsNone(node._bitset, q.withoutBitset)) return false;
+    // a required hierarchy term can't be answered from the node's own bitset.
+    for (let i = 0; i < q.traversals.length; i++) {
+        const term = q.traversals[i]!;
+        if (!term.required) continue;
+        if (findTraitAt(node, term.traitSlot, term.inclusive) === undefined) return false;
+    }
     return true;
 }
 
-function buildQueryTuple(q: Query<any>, node: Node): any[] {
+/**
+ * Build a match tuple. Not terms contribute no slot; everything else does,
+ * `null` when unresolved, so a tuple's arity never depends on what resolved.
+ *
+ * `deferTraversals` leaves `Optional` hierarchy slots null for the relink walk
+ * to fill. Resolving them here costs an O(depth) ancestor walk *per node*,
+ * while the relink walk carries the resolved value down and is O(1) per node —
+ * so when a whole subtree is being registered and a walk is about to run
+ * anyway, deferring turns O(nodes x depth) into O(nodes). Required terms are
+ * never deferred: `nodeMatchesQuery` has to resolve them to decide membership.
+ */
+function buildQueryTuple(q: Query<any>, node: Node, deferTraversals = false): any[] {
     const tuple: any[] = [];
     for (const condition of q.conditions) {
-        if (condition.type === ConditionType.WITH) {
-            const index = condition.trait._slot;
-            if (index !== undefined) {
-                tuple.push(node._traits.get(index));
-            }
+        if (condition.oper === Oper.Not) continue;
+        if (deferTraversals && condition.oper === Oper.Optional && condition.src !== Src.Self) {
+            tuple.push(null);
+            continue;
         }
-        // NOT conditions don't contribute to tuple
+        tuple.push(resolveTerm(node, condition) ?? null);
     }
     return tuple;
 }
 
-function addNodeToQuery(q: Query<any>, node: Node): void {
-    const tuple = buildQueryTuple(q, node);
-    q.nodeToIndex.set(node, q.matches.length);
+function addNodeToQuery(q: Query<any>, node: Node, deferTraversals = false): void {
+    const tuple = buildQueryTuple(q, node, deferTraversals);
+    q._sparse[sparseKey(node.id)] = q.matches.length;
+    q.matchNodes.push(node);
     q.matches.push(tuple as any);
 
     // the tuple pushed above is the event payload: it stays valid even if a
@@ -2176,36 +2378,177 @@ function addNodeToQuery(q: Query<any>, node: Node): void {
 }
 
 function removeNodeFromQuery(q: Query<any>, node: Node): void {
-    const index = q.nodeToIndex.get(node);
-    if (index === undefined) return;
+    const index = queryIndexOf(q, node);
+    if (index === -1) return;
 
     // capture the payload BEFORE the swap-remove: removeTrait deletes the
     // trait value from `_traits` right after reindexing, so it has to be read
     // here, and a handler must never see the departing node still in `matches`.
     const tuple = q.onExit.listeners.size > 0 ? buildQueryTuple(q, node) : null;
 
-    // swap-remove from matches
+    // swap-remove from matches, keeping matchNodes in lockstep. The moved
+    // entry's sparse slot is repointed; the departing node's is left stale,
+    // since `matchNodes[i] === node` will reject it.
     const lastIndex = q.matches.length - 1;
     if (index !== lastIndex) {
-        const lastTuple = q.matches[lastIndex] as any[];
-        q.matches[index] = lastTuple as any;
-        // get node from first trait's back-reference for nodeToIndex update
-        const lastNode = (lastTuple[0] as TraitBase)?._node;
-        if (lastNode) q.nodeToIndex.set(lastNode, index);
+        q.matches[index] = q.matches[lastIndex] as any;
+        const movedNode = q.matchNodes[lastIndex]!;
+        q.matchNodes[index] = movedNode;
+        q._sparse[sparseKey(movedNode.id)] = index;
     }
 
     q.matches.pop();
-    q.nodeToIndex.delete(node);
+    q.matchNodes.pop();
 
     if (tuple !== null) {
         _pendingQueryEvents.push({ topic: q.onExit, tuple });
     }
 }
 
-function reindex(sceneTree: SceneTree, node: Node): void {
-    for (const q of sceneTree.queries.values()) {
+/* ── ancestor links ───────────────────────────────────────────────────
+ *
+ * An `AncestorLink` keeps "the nearest trait at or above me" resolved for
+ * every node, and is re-resolved when the tree changes shape or the target
+ * trait is added/removed. Two kinds of consumer, one mechanism:
+ *
+ *   - a query's `Up` / `Ancestor` terms, whose apply writes the match tuple
+ *   - `TransformTrait._parent`, whose apply writes the field and marks the
+ *     subtree's world matrices stale
+ *
+ * Invalidation is pushed from the mutation rather than discovered by
+ * rescanning: `relinkSubtree` after the tree around a node changed shape,
+ * `relinkChildren` when the target trait on the node itself changed.
+ *
+ * The walk prunes: at a node bearing the target trait, everything below
+ * already resolves to that node and cannot have been affected by whatever
+ * changed above it, so the descent stops there.
+ */
+
+/** apply a freshly resolved value for one query term to one node. */
+function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved: TraitBase | undefined): void {
+    if (term.required) {
+        // a required term gates membership, so its resolution flipping can add
+        // or drop the node. re-test the whole query: cheap, and correct against
+        // the node's other conditions.
+        const wasIn = queryIndexOf(q, node) !== -1;
         const matches = nodeMatchesQuery(node, q);
-        const wasInQuery = q.nodeToIndex.has(node);
+        if (matches && !wasIn) {
+            addNodeToQuery(q, node);
+            return;
+        }
+        if (!matches) {
+            if (wasIn) removeNodeFromQuery(q, node);
+            return;
+        }
+    }
+
+    const index = queryIndexOf(q, node);
+    if (index === -1) return;
+    const tuple = q.matches[index] as any[];
+    const next = resolved ?? null;
+    if (tuple[term.tupleIndex] === next) return;
+    tuple[term.tupleIndex] = next;
+    if (!_fillingTuples && q.onRebind.listeners.size > 0) {
+        _pendingQueryEvents.push({ topic: q.onRebind, tuple });
+    }
+}
+
+/** re-resolve one link over `node` and, unless pruned, its descendants. */
+function relinkLink(link: AncestorLink, node: Node, inherited: TraitBase | undefined): void {
+    const own = node._traits.get(link.traitSlot);
+    link.apply(node, link.inclusive ? (own ?? inherited) : inherited);
+    if (own !== undefined) return;
+    for (const child of node.children) {
+        relinkLink(link, child, inherited);
+    }
+}
+
+/**
+ * re-resolve every live link over `node`'s subtree, seeding each from what
+ * `node` inherits from strictly above. Call after the tree around `node` has
+ * changed shape (attach, detach, reparent).
+ */
+export function relinkSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null, queryLinksFilled = false): void {
+    relinkSubtreeFor(declaredLinks(), node, movedFrom);
+    // `queryLinksFilled`: the subtree was freshly registered, so `registerSubtree`
+    // already filled its deferred slots. Walking them again would re-derive the
+    // same values.
+    if (sceneTree !== null && !queryLinksFilled) {
+        relinkSubtreeFor(sceneTree._queryLinks, node, movedFrom);
+    }
+}
+
+/**
+ * Complete the hierarchy slots that `registerSubtree` left deferred. Resolving
+ * them here rather than per node during registration is the difference between
+ * O(nodes x depth) and O(nodes): the walk carries each resolved value down.
+ *
+ * These nodes just entered, so a slot going null → resolved is its initial
+ * value, not a rebind; `_fillingTuples` suppresses the events for this pass.
+ */
+function fillQueryLinks(sceneTree: SceneTree, node: Node): void {
+    if (sceneTree._queryLinks.length === 0) return;
+    _fillingTuples = true;
+    relinkSubtreeFor(sceneTree._queryLinks, node, undefined);
+    _fillingTuples = false;
+}
+
+/** set only for the duration of a fill pass; the walk is synchronous and never
+ *  re-enters itself, so a module-scope flag is enough to keep `apply`'s
+ *  signature shared with declared links. */
+let _fillingTuples = false;
+
+function relinkSubtreeFor(links: AncestorLink[], node: Node, movedFrom?: Node | null): void {
+    for (let i = 0; i < links.length; i++) {
+        const link = links[i]!;
+        const inherited = findTraitAt(node.parent, link.traitSlot, true);
+        // A move whose old and new parents resolve this link to the same value
+        // changes nothing anywhere in the subtree: every resolution inside it
+        // derives from what the subtree inherits, and the subtree's own shape
+        // and traits didn't change. Two O(depth) walks replace one O(subtree)
+        // one. Only offered for a move of an already-live node, where "the
+        // subtree is otherwise unchanged" is guaranteed.
+        if (movedFrom !== undefined && movedFrom !== null) {
+            if (findTraitAt(movedFrom, link.traitSlot, true) === inherited) continue;
+        }
+        relinkLink(link, node, inherited);
+    }
+}
+
+/**
+ * re-resolve links over `node`'s descendants only, for the case where the
+ * target trait *on `node` itself* changed: the node's own value is the
+ * caller's business, but its descendants inherit differently now and must not
+ * prune at the node that changed.
+ */
+function relinkChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
+    relinkChildrenFor(declaredLinks(), node, traitSlot);
+    if (sceneTree !== null) relinkChildrenFor(sceneTree._queryLinks, node, traitSlot);
+}
+
+function relinkChildrenFor(links: AncestorLink[], node: Node, traitSlot: number): void {
+    for (let i = 0; i < links.length; i++) {
+        const link = links[i]!;
+        if (link.traitSlot !== traitSlot) continue;
+        const inherited = findTraitAt(node, traitSlot, true);
+        for (const child of node.children) {
+            relinkLink(link, child, inherited);
+        }
+    }
+}
+
+/**
+ * Re-test `node`'s membership. `changedSlot` narrows the work to queries that
+ * reference the trait that just came or went; omit it when several traits
+ * changed at once and every trait the node bears should be considered.
+ */
+function reindex(sceneTree: SceneTree, node: Node, changedSlot?: number): void {
+    const candidates = sceneTree._queryScratch;
+    const count = collectQueries(sceneTree, node, changedSlot);
+    for (let i = 0; i < count; i++) {
+        const q = candidates[i]!;
+        const matches = nodeMatchesQuery(node, q);
+        const wasInQuery = queryIndexOf(q, node) !== -1;
 
         if (matches && !wasInQuery) {
             addNodeToQuery(q, node);

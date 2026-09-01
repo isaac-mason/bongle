@@ -32,9 +32,11 @@ import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import type { MeshId } from '../../core/models/handle';
 import * as Resources from '../../core/resources';
-import type { Node, SceneTree } from '../../core/scene/scene-tree';
+import { Optional, type Src, Up } from '../../core/scene/conditions';
+import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
-import { env } from '../../env';
+import { sampleVoxelLight } from '../../core/voxels/light';
+import type { Voxels } from '../../core/voxels/voxels';
 import * as Visibility from '../visibility/visibility';
 import {
     allocateSlot,
@@ -49,7 +51,9 @@ import {
     resetModelBatch,
 } from './model-resources';
 
-type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrait]>>;
+type MeshQuery = ReturnType<
+    typeof query<[typeof MeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
+>;
 
 // InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
 // model-resources.ts, must stay in sync, no compiler will catch drift):
@@ -105,17 +109,24 @@ export type MeshVisualState = {
      *  loop reads to gate inclusion in the per-mesh buckets. Registered at
      *  alloc, unregistered on destroy. */
     cull: Visibility.CullState;
-    /** nearest `ModelTrait` ancestor (shared light slot for the rig).
-     *  Required at alloc time, without it there's no light source for
-     *  the params upload (the engine no longer falls back to per-mesh
-     *  voxel sampling). Rejected + warned at alloc, same as bounds. */
-    model: ModelTrait;
+    /** the mesh's lighting group: the nearest `ModelTrait` at or above this
+     *  node, resolved by the query's `Up` term and kept live by the scene
+     *  tree. `null` means this mesh is its own lighting unit and samples
+     *  voxel light at its own AABB centre. Refreshed every frame from the
+     *  query tuple, so a regrouped mesh can never hold a stale pointer. */
+    model: ModelTrait | null;
     /** sibling `TransformTrait` on this mesh's node, resolved at alloc and
      *  cached so the per-frame loop skips the `_traits.get` Map hit. The
      *  ECS query gates on `[MeshTrait, TransformTrait]` already, so this
      *  is always present at alloc time; if a script removes the transform
      *  later the query stops matching and the state goes stale → destroyed. */
     transform: TransformTrait;
+    /** frame of the most recent voxel-light resample, and the inputs that
+     *  justified it. Only meaningful for an ungrouped mesh (one in a lighting
+     *  group reads the group's value and never samples). */
+    lightSampledFrame: number;
+    lightTransformVersion: number;
+    lightEpoch: number;
     /** RGBA of the last light written into the slot's params block. Compared
      *  against the freshly resolved light each frame; only a delta marks
      *  params dirty. Initialised to NaN so the first compare always
@@ -152,7 +163,7 @@ export function init(batch: ModelBatch, scene: Scene, sceneTree: SceneTree): Mod
     scene.add(batch.mesh);
     return {
         aliveStates: [],
-        _query: query(sceneTree, [MeshTrait, TransformTrait]),
+        _query: query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
         frameId: 0,
         scene,
     };
@@ -177,6 +188,7 @@ export function update(
     modelResources: ModelResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
+    voxels: Voxels,
 ): void {
     const q = visuals._query;
 
@@ -186,13 +198,16 @@ export function update(
     let instanceDataDirty = false;
 
     // ── phase 1: allocate / refresh states ──────────────────────────
-    for (const [meshTrait] of q.matches) {
+    for (const [meshTrait, , model] of q.matches) {
         let state = meshTrait._state as MeshVisualState | null;
         const meshId = meshTrait.meshId;
 
         // fast path: same MeshId ref, state already exists.
         if (state !== null && state.meshIdRef === meshId && meshId !== null) {
             state.lastSeenFrame = frameId;
+            // the query keeps the resolved group live; copy it across so phase 3
+            // (which walks aliveStates, not matches) reads the current one.
+            state.model = model;
             continue;
         }
 
@@ -225,18 +240,6 @@ export function update(
             instArr = batch.instanceDataBuf.array as Float32Array;
         }
 
-        const model = findModelAncestor(meshTrait._node);
-        if (model === null) {
-            // Engine policy: meshes render only under a ModelTrait ancestor
-            // (the shared light slot, installed by cloneModel). Frustum
-            // culling is per-mesh and needs no ancestor. Roll back the slot
-            // we just took. Warn only in editor mode, at runtime, silent
-            // drop. env.editor is build-time-replaced so the warn branch
-            // DCEs out of prod bundles.
-            freeSlot(batch.instanceAllocator, slot);
-            if (env.editor) warnMissingModelTrait(meshTrait._node);
-            continue;
-        }
         const transform = getTrait(meshTrait._node, TransformTrait)!;
 
         // register this mesh with the shared culler, seeded from the handle's
@@ -259,6 +262,9 @@ export function update(
             cull,
             model,
             transform,
+            lightSampledFrame: -1,
+            lightTransformVersion: -1,
+            lightEpoch: -1,
             lastLightR: NaN,
             lastLightG: NaN,
             lastLightB: NaN,
@@ -304,21 +310,44 @@ export function update(
         // `unlit` via `setMeshUnlit` bumps `meshTrait._version` so the
         // params upload below still picks up the flag flip.
         //
-        // The lit branch copies the rig-wide light from the ancestor
-        // ModelTrait into `meshTrait.light` (script-visible), then compares
-        // against the state's last-uploaded light. A pure copy of
-        // unchanged values doesn't flip `lightDirty`, so the params upload
-        // is skipped, without this gate every visible mesh would re-upload
-        // every frame.
+        // The lit branch writes `meshTrait.light` (script-visible), then compares
+        // against the state's last-uploaded light. Writing unchanged values
+        // doesn't flip `lightDirty`, so the params upload is skipped; without
+        // this gate every visible mesh would re-upload every frame.
+        //
+        // A mesh in a lighting group (a `ModelTrait` at or above it) shares that
+        // group's one sample, so a rig's limbs stay consistent and a bone whose
+        // world position clips into a solid voxel can't pop dark. A mesh with no
+        // group is its own lighting unit and samples at its own AABB centre,
+        // which is inside its geometry by construction — no anchor to configure.
         const visualWorldMatrix = getVisualWorldMatrix(transformTrait);
         let lightDirty = false;
         if (!meshTrait.unlit) {
             const light = meshTrait.light;
-            const src = model.light;
-            light[0] = src[0]!;
-            light[1] = src[1]!;
-            light[2] = src[2]!;
-            light[3] = src[3]!;
+            const cull = state.cull;
+            if (model !== null) {
+                const src = model.light;
+                light[0] = src[0]!;
+                light[1] = src[1]!;
+                light[2] = src[2]!;
+                light[3] = src[3]!;
+            } else if (cull.leaf !== -1 && shouldResampleLight(state, transformTrait, voxels, frameId)) {
+                // the centre of a box's world AABB is the world transform of its
+                // local centre (the box is symmetric about it), so this is a
+                // point transform, not a box transform.
+                const b = cull.aabb;
+                const lx = (b[0]! + b[3]!) * 0.5;
+                const ly = (b[1]! + b[4]!) * 0.5;
+                const lz = (b[2]! + b[5]!) * 0.5;
+                const m = visualWorldMatrix;
+                sampleVoxelLight(
+                    voxels,
+                    m[0]! * lx + m[4]! * ly + m[8]! * lz + m[12]!,
+                    m[1]! * lx + m[5]! * ly + m[9]! * lz + m[13]!,
+                    m[2]! * lx + m[6]! * ly + m[10]! * lz + m[14]!,
+                    light,
+                );
+            }
             const lr = light[0]!;
             const lg = light[1]!;
             const lb = light[2]!;
@@ -453,25 +482,33 @@ export function update(
     if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
 }
 
-function findModelAncestor(node: Node): ModelTrait | null {
-    let cur: Node | null = node;
-    while (cur) {
-        const m = getTrait(cur, ModelTrait);
-        if (m) return m;
-        cur = cur.parent;
-    }
-    return null;
-}
+/** how often an unmoved, ungrouped mesh re-samples voxel light, in frames.
+ *  phased by instance slot so the cost spreads instead of spiking. */
+const LIGHT_RESAMPLE_FRAMES = 8;
 
-const _warnedNodes = new WeakSet<Node>();
-function warnMissingModelTrait(node: Node): void {
-    if (_warnedNodes.has(node)) return;
-    _warnedNodes.add(node);
-    console.warn(
-        '[model-visuals] MeshTrait has no ModelTrait ancestor — instance will not render. ' +
-            'Use cloneModel() or add a ModelTrait to the model-root ancestor. Node:',
-        node,
-    );
+/**
+ * Should this ungrouped mesh sample voxel light this frame? A mesh that hasn't
+ * moved is almost always looking at unchanged light, so a static prop pays one
+ * sample rather than one per frame.
+ *
+ * Movement and a full relight (`lighting.epoch`) resample immediately. Ordinary
+ * local light changes — a torch placed nearby — bump neither, so the phased
+ * periodic refresh is what catches those, within `LIGHT_RESAMPLE_FRAMES`.
+ */
+function shouldResampleLight(state: MeshVisualState, transform: TransformTrait, voxels: Voxels, frameId: number): boolean {
+    const version = transform._version;
+    const epoch = voxels.lighting.epoch;
+    if (state.lightTransformVersion !== version || state.lightEpoch !== epoch) {
+        state.lightTransformVersion = version;
+        state.lightEpoch = epoch;
+        state.lightSampledFrame = frameId;
+        return true;
+    }
+    if ((frameId + state.slot) % LIGHT_RESAMPLE_FRAMES === 0) {
+        state.lightSampledFrame = frameId;
+        return true;
+    }
+    return false;
 }
 
 // ── dispose ─────────────────────────────────────────────────────────

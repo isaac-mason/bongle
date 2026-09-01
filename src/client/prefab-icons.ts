@@ -142,7 +142,14 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // model + voxel-mesh visuals (register cull entries; offline pass draws all).
-        ModelVisuals.update(room.modelVisuals, deps.modelResources.batch, deps.modelResources, deps.resources, room.visibility);
+        ModelVisuals.update(
+            room.modelVisuals,
+            deps.modelResources.batch,
+            deps.modelResources,
+            deps.resources,
+            room.visibility,
+            room.voxels,
+        );
         VoxelMeshVisuals.update(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.voxels, room.visibility);
 
         // ── frame + render ──

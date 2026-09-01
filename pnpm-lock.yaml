@@ -114,6 +114,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.3.13
         version: 2.4.10
+      '@pmndrs/labs':
+        specifier: ^0.8.0
+        version: 0.8.0
       '@types/archiver':
         specifier: ^6.0.3
         version: 6.0.4

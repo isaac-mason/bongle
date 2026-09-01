@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { __popModule, __pushModule } from '../../../../src/core/capture/module-scope';
 import { registry } from '../../../../src/core/registry';
+import { Not } from '../../../../src/core/scene/conditions';
 import { prop } from '../../../../src/core/scene/prop';
 import { packSceneTree, unpackSceneTree } from '../../../../src/core/scene/scene-pack';
 import {
@@ -17,7 +18,6 @@ import {
     isReplicable,
     loadSceneTree,
     type Node,
-    Not,
     onQueryEnter,
     onQueryExit,
     query,

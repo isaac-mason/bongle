@@ -24,6 +24,7 @@ import * as Rpc from '../rpc';
 import * as blockHooks from '../voxels/block-hooks';
 import type { Blocks } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
+import type { Condition, ConditionArgs, ConditionArgsToConditions } from './conditions';
 import * as SceneTree from './scene-tree';
 import { logScriptError } from './script-errors';
 import type { TraitBase, TraitHandle } from './traits';
@@ -506,10 +507,10 @@ const noop: Unsubscribe = () => {};
  * the query is released when the script instance disposes, do not hold
  * references across `onSwap` boundaries.
  */
-export function query<const Args extends SceneTree.ConditionArgs[]>(
+export function query<const Args extends ConditionArgs[]>(
     ctx: ScriptContext,
     conditions: Args,
-): SceneTree.Query<SceneTree.ConditionArgsToConditions<Args>> {
+): SceneTree.Query<ConditionArgsToConditions<Args>> {
     const q = SceneTree.query(ctx.scene, conditions);
     const instance = ctx._instance;
     if (instance && !instance.queries.has(q)) {
@@ -547,7 +548,7 @@ export function query<const Args extends SceneTree.ConditionArgs[]>(
  * });
  * ```
  */
-export function onQueryEnter<Conditions extends SceneTree.Condition[]>(
+export function onQueryEnter<Conditions extends Condition[]>(
     ctx: ScriptContext,
     q: SceneTree.Query<Conditions>,
     fn: QueryListener<Conditions>,
@@ -563,7 +564,7 @@ export function onQueryEnter<Conditions extends SceneTree.Condition[]>(
  * node still matching. that is what makes teardown and hot reload safe, the
  * instance going away closes everything it opened.
  */
-export function onQueryExit<Conditions extends SceneTree.Condition[]>(
+export function onQueryExit<Conditions extends Condition[]>(
     ctx: ScriptContext,
     q: SceneTree.Query<Conditions>,
     fn: QueryListener<Conditions>,
@@ -571,9 +572,9 @@ export function onQueryExit<Conditions extends SceneTree.Condition[]>(
     return addQueryHook(ctx, q, 'exit', fn);
 }
 
-type QueryListener<Conditions extends SceneTree.Condition[]> = Parameters<typeof SceneTree.onQueryEnter<Conditions>>[1];
+type QueryListener<Conditions extends Condition[]> = Parameters<typeof SceneTree.onQueryEnter<Conditions>>[1];
 
-function addQueryHook<Conditions extends SceneTree.Condition[]>(
+function addQueryHook<Conditions extends Condition[]>(
     ctx: ScriptContext,
     q: SceneTree.Query<Conditions>,
     kind: 'enter' | 'exit',
@@ -614,7 +615,7 @@ function releaseQueryHook(record: ScriptInstance['queryHooks'][number]): void {
     else SceneTree.offQueryExit(record.q, record.fn);
 }
 
-export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[] {
+export function filter<const Args extends ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[] {
     return SceneTree.filter(ctx.scene, conditions);
 }
 

@@ -1,6 +1,5 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { registry, reindexRegistry } from '../../../../src/core/registry';
 import {
     computeWorldTransforms,
     getVisualWorldPosition,
@@ -26,10 +25,11 @@ import {
     worldToLocalPosition,
     worldToLocalQuaternion,
 } from '../../../../src/builtins/transform';
-import { interpolate, snapshot } from '../../../../src/render/transform/interpolation';
+import { registry, reindexRegistry } from '../../../../src/core/registry';
 import {
     addChild,
     addTrait,
+    addTraitBySlot,
     createNode,
     createSceneTree,
     deserializeNode,
@@ -38,6 +38,7 @@ import {
     reparent,
     serializeNode,
 } from '../../../../src/core/scene/scene-tree';
+import { interpolate, snapshot } from '../../../../src/render/transform/interpolation';
 
 /* ── helpers ── */
 
@@ -516,6 +517,20 @@ describe('parent transform bookkeeping', () => {
         // container now points to parentB, child still points to container
         expect(contT._parent).toBe(bt);
         expect(childT._parent).toBe(contT);
+    });
+
+    it('detached subtree: adding a transform above relinks descendants', () => {
+        // no scene tree involved. scene-pack hydrates trees this way (build the
+        // nodes, then attach the traits), so pointer maintenance can't be gated
+        // on a node being in a scene.
+        const parent = createNode({ name: 'Parent' });
+        const child = createNode({ name: 'Child' });
+        addChild(parent, child);
+        const ct = addTrait(child, TransformTrait);
+        expect(ct._parent).toBeNull();
+
+        addTraitBySlot(parent, TransformTrait._slot!);
+        expect(ct._parent).toBe(getTrait(parent, TransformTrait));
     });
 
     it('intermediate node without transform: grandchild points to grandparent', () => {

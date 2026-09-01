@@ -1,8 +1,9 @@
 import { recordTrait } from '../capture/module-scope';
 import { registry, structuralHash, upsert } from '../registry';
-import type { Node } from './scene-tree';
+import type { AncestorLinkDef } from './links';
 import type { pack } from './pack';
 import type { prop } from './prop';
+import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
 
 /* ── trait body types ── */
@@ -37,6 +38,20 @@ export type TraitOptions = {
 /** factory marker: a value-producing function called once per instance. */
 type Factory<T> = () => T;
 
+/**
+ * Placeholder for "this trait's own instance type", for a field that points at
+ * another instance of the trait it's declared on. A trait body can't name the
+ * type being inferred from it, so `_parent: null as Self | null` stands in and
+ * `TraitInstance` substitutes the real type.
+ *
+ * ```ts
+ * export const TransformTrait = trait('transform', { _parent: null as Self | null });
+ * // instance type: { _parent: TransformTrait | null }
+ * ```
+ */
+declare const SELF_MARKER: unique symbol;
+export type Self = { readonly [SELF_MARKER]: true };
+
 /** field names that cannot be used in trait definitions. */
 type ReservedTraitKey = '_node' | '_def' | '_sync';
 
@@ -45,8 +60,18 @@ type ReservedTraitKey = '_node' | '_def' | '_sync';
  * to their return type, literals pass through.
  */
 export type TraitInstance<S extends TraitBody> = TraitBase & {
-    [K in keyof S as K extends ReservedTraitKey ? never : K]: S[K] extends Factory<infer R> ? R : S[K];
+    [K in keyof S as K extends ReservedTraitKey ? never : K]: ResolveField<S[K], TraitInstance<S>>;
 };
+
+/** unwrap a body field to its instance type: factories to their return type,
+ *  `Self` to the instance type being built, literals to themselves. */
+type ResolveField<V, TSelf> = V extends Factory<infer R> ? SubstituteSelf<R, TSelf> : SubstituteSelf<V, TSelf>;
+
+// `[Self] extends [V]` asks whether V *contains* the marker, rather than
+// whether V is assignable to it — the latter also matches `null`, which would
+// rewrite every nullable field in the codebase. `0 extends 1 & V` is the
+// standard `any` guard: without it an `any`-typed field would match too.
+type SubstituteSelf<V, TSelf> = 0 extends 1 & V ? V : [Self] extends [V] ? ([null] extends [V] ? TSelf | null : TSelf) : V;
 
 /* ── trait-level registrations: control & sync ───────────────────────
  *
@@ -226,6 +251,11 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
+    /** ancestor links declared on this trait (`link()`), in registration order.
+     *  Owned by the def so an HMR re-eval that drops a declaration drops the
+     *  link with it, the same way controls and syncs are handled. */
+    links: AncestorLinkDef[];
+
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
     sync: SyncDef[];
@@ -308,6 +338,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         persist: options?.persist ?? true,
         controls: [],
         controlsById: new Map(),
+        links: [],
         sync: [],
         syncById: new Map(),
         scripts: [],
