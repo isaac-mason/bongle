@@ -2127,6 +2127,8 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
             } else {
                 traversals.push({
                     traitSlot,
+                    // a query term writes into its members, not into one trait's instances.
+                    ownerSlot: -1,
                     inclusive: condition.src === Src.Up,
                     required: condition.oper === Oper.And,
                     tupleIndex,

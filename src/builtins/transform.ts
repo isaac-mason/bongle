@@ -20,7 +20,7 @@ import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { Ancestor } from '../core/scene/conditions';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
-import { my } from '../core/scene/resolutions';
+import { context } from '../core/scene/resolutions';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
@@ -154,22 +154,11 @@ export const TransformTrait = trait('transform', {
      *  Maintained alongside `_parent`, off the same resolve. */
     _children: [] as TransformSubtree[],
 
-    _parent: my(Ancestor(Self), {
-        onResolve: (node, next, prev) => {
-            const own = getTrait(node, TransformTrait);
-            if (own !== undefined && next !== prev) {
-                if (prev !== null) removeTransformChild(prev as TransformTrait, own);
-                if (next !== null) (next as TransformTrait)._children.push(own);
-            }
-            // the parent pointer moved, so every cached world value below is stale.
-            markAncestryChanged(node);
-            // a branch-topmost transform's nearest transform ancestor changing
-            // can flip its AOI transform-root status (`isTransformRoot`).
-            // markAncestryChanged deliberately stays out of `dirtyNodes` (no
-            // replication retransmit), so signal a revisit explicitly.
-            if (node.scene) markNodeDirty(node.scene, node);
-        },
-    }),
+    /** nearest transform-bearing ancestor, maintained by the `context()` below. Typed as
+     *  `any` here and narrowed on the exported `TransformTrait` type: naming the trait from
+     *  inside its own body is circular, which is the one thing the old in-body directive's
+     *  phantom type did for free. */
+    _parent: null as any,
 
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.
     // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
@@ -213,7 +202,10 @@ export const TransformTrait = trait('transform', {
 });
 
 /** instance type for TransformTrait */
-export type TransformTrait = TraitType<typeof TransformTrait>;
+export type TransformTrait = Omit<TraitType<typeof TransformTrait>, '_parent'> & {
+    /** nearest transform-bearing ancestor, or null at a transform root. */
+    _parent: TransformTrait | null;
+};
 
 /* ── remote chase-latest translator ───────────────────────────────────────
  *
@@ -305,6 +297,29 @@ export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
 }
 
 /* ── controls (editor + persistence) ── */
+
+/**
+ * `_parent` is the nearest transform-bearing ancestor, which is what contracts the node
+ * hierarchy into the transform hierarchy: nodes without a transform are passthrough, and a
+ * transform's parent is the first bearer above it, however many plain nodes intervene.
+ *
+ * `change` fires only when that pointer actually moves. A transform whose ANCESTOR moved
+ * keeps the same `_parent` and is not notified — `markTransformDirty` invalidates it by
+ * walking `_children` instead (pinned by the transform tests).
+ */
+context(TransformTrait, '_parent', {
+    of: Ancestor(Self),
+    change: (own, next, prev) => {
+        if (prev !== null) removeTransformChild(prev as TransformTrait, own);
+        if (next !== null) (next as TransformTrait)._children.push(own);
+        // the parent pointer moved, so every cached world value below is stale.
+        markAncestryChanged(own._node);
+        // a branch-topmost transform's nearest transform ancestor changing can flip its AOI
+        // transform-root status (`isTransformRoot`). markAncestryChanged deliberately stays
+        // out of `dirtyNodes` (no replication retransmit), so signal a revisit explicitly.
+        if (own._node.scene) markNodeDirty(own._node.scene, own._node);
+    },
+});
 
 control(TransformTrait, 'position', {
     label: 'Position',
