@@ -1,9 +1,9 @@
 import { recordTrait } from '../capture/module-scope';
-import { fileResolution, registry, structuralHash, upsert } from '../registry';
+import { registry, structuralHash, upsert } from '../registry';
 import type { pack } from './pack';
 import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
-import { buildResolution, type ResolutionDef } from './resolutions';
+import type { ResolutionDef } from './resolutions';
 import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
 
@@ -52,19 +52,6 @@ type Factory<T> = () => T;
  */
 export const $directive: unique symbol = Symbol.for('bongle.directive');
 
-export type Directive<T> = {
-    readonly [$directive]: 'resolution';
-    /** phantom, carries the resolved field type. not present at runtime. */
-    readonly __type: T;
-    /** the hierarchy condition this field resolves. */
-    readonly source: unknown;
-    readonly opts?: unknown;
-};
-
-export function isDirective(v: unknown): v is Directive<unknown> {
-    return typeof v === 'object' && v !== null && $directive in v;
-}
-
 /** sentinel slot marking `Self`; swapped for the owning trait's slot at registration. */
 export const SELF_SLOT = -1;
 
@@ -106,14 +93,7 @@ export type TraitInstance<S extends TraitBody> = TraitBase & {
 
 /** unwrap a body field to its instance type: factories to their return type,
  *  `Self` to the instance type being built, literals to themselves. */
-// a directive is a declaration, not a default: its field takes the type the
-// directive resolves to. Checked first, and in containment form so it doesn't
-// distribute over a union.
-type ResolveField<V, TSelf> = [V] extends [Directive<infer D>]
-    ? SubstituteSelf<D, TSelf>
-    : V extends Factory<infer R>
-      ? SubstituteSelf<R, TSelf>
-      : SubstituteSelf<V, TSelf>;
+type ResolveField<V, TSelf> = V extends Factory<infer R> ? SubstituteSelf<R, TSelf> : SubstituteSelf<V, TSelf>;
 
 // `[Self] extends [V]` asks whether V *contains* the marker, rather than
 // whether V is assignable to it — the latter also matches `null`, which would
@@ -416,17 +396,6 @@ export function trait<S extends TraitBody = Record<string, never>>(
     };
     def.handle = handle;
 
-    // directives in the body are declarations, not defaults: register what they
-    // declare now that the def (and its slot, which `Self` resolves to) exists.
-    for (const [key, value] of Object.entries(def.body)) {
-        if (!isDirective(value)) continue;
-        const built = buildResolution(slot, key, value);
-        if (built !== null) {
-            def.resolutions.push(built);
-            fileResolution(registry, built);
-        }
-    }
-
     // compiled here rather than on first instantiation: ~27us for the widest trait, which belongs at
     // import time and not in whichever frame first spawns one.
     def.construct = compileConstructor(def);
@@ -451,17 +420,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
  * trait, the source kind, and the hook's text.
  */
 function hashableBody(body: TraitBody): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(body)) {
-        out[key] = isDirective(value) ? describeDirective(value) : value;
-    }
-    return out;
-}
-
-function describeDirective(d: Directive<unknown>): string {
-    const source = (d as { source?: { trait?: { _id?: string }; src?: number } }).source;
-    const opts = (d as { opts?: { onResolve?: (...args: unknown[]) => unknown } }).opts;
-    return `resolution:${source?.trait?._id ?? '?'}:${source?.src ?? '?'}:${opts?.onResolve?.toString() ?? ''}`;
+    return body as Record<string, unknown>;
 }
 
 /* ── trait-level registrars ── */
@@ -608,9 +567,7 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
         const value = def.body[key];
         const name = JSON.stringify(key);
 
-        if (isDirective(value)) {
-            fields.push(`${name}: null`);
-        } else if (typeof value === 'function') {
+        if (typeof value === 'function') {
             fields.push(`${name}: v[${captured.length}]()`);
             captured.push(value);
         } else if (value !== null && typeof value === 'object') {
@@ -645,9 +602,9 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
-            // a directive-declared field is maintained by the engine; an
-            // override would be silently overwritten by the next resolve.
-            if (isDirective(def.body[key])) continue;
+            // a `context()` field is maintained by the engine; an override would be
+            // silently overwritten by the next resolve, so it is ignored outright.
+            if (def.resolutions.some((r) => (r as ResolutionDef).field === key)) continue;
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.

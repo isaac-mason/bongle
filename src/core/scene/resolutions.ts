@@ -23,7 +23,7 @@
 import { fileResolution, registry } from '../registry';
 import { type Condition, type Oper, Src } from './conditions';
 import type { Node } from './scene-tree';
-import { $directive, type Directive, SELF_SLOT, type TraitBase, type TraitHandle, type TraitType } from './traits';
+import { SELF_SLOT, type TraitBase, type TraitHandle } from './traits';
 
 /**
  * one maintained "nearest trait at or above me" relationship.
@@ -109,67 +109,4 @@ export function context<T extends TraitBase, R extends TraitHandle>(
     if (existing !== -1) def.resolutions[existing] = resolution;
     else def.resolutions.push(resolution);
     fileResolution(registry, resolution);
-}
-
-/**
- * Declare that this field holds the trait resolved by `source`, and have the
- * scene tree keep it correct. Used as a trait-body value — a *directive*, not
- * a default:
- *
- * ```ts
- * export const TransformTrait = trait('transform', {
- *     position: () => vec3.create(),
- *     parent: my(Ancestor(Self), { onResolve: (node) => markAncestryChanged(node) }),
- * });
- * ```
- *
- * The field is always `T | null` — a resolution has no membership to gate, so there
- * is no required/optional distinction and `Optional(...)` is not accepted. It
- * is derived, so it is excluded from `addTrait` props and must never also be
- * `control()`ed or `sync()`ed; persisting or replicating it would fight the
- * maintainer.
- *
- * `onResolve` fires whenever the resolution ran for that node, changed or
- * not — which is what `TransformTrait` needs, since a re-point invalidates the
- * subtree's world matrices either way. The old and new values are passed so a
- * consumer that only cares about actual changes can compare them itself.
- */
-export function my<T extends TraitHandle>(
-    source: Condition<T, Oper.And, Src.Up | Src.Ancestor>,
-    opts?: { onResolve?(node: Node, next: TraitBase | null, prev: TraitBase | null): void },
-): Directive<TraitType<T> | null> {
-    return { [$directive]: 'resolution', source, opts } as unknown as Directive<TraitType<T> | null>;
-}
-
-/**
- * Build the `Resolution` a `my()` directive describes. Called by `trait()`
- * for each directive in a body; `ownerSlot` is the trait being defined, which
- * is also what `Self` resolves to.
- */
-export function buildResolution(ownerSlot: number, field: string, directive: Directive<unknown>): ResolutionDef | null {
-    const source = directive.source as Condition<TraitHandle, Oper.And, Src>;
-    const declared = source.trait._slot;
-    if (declared === undefined) return null;
-    // `Self` carries a sentinel slot; a self-referential resolution targets the
-    // trait currently being defined.
-    const traitSlot = declared === SELF_SLOT ? ownerSlot : declared;
-    const onResolve = (directive.opts as { onResolve?: (n: Node, a: TraitBase | null, b: TraitBase | null) => void } | undefined)
-        ?.onResolve;
-
-    return {
-        field,
-        traitSlot,
-        ownerSlot,
-        inclusive: source.src === Src.Up,
-        apply(node, resolved) {
-            const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
-            // the walk visits every node on its way down; only nodes bearing the
-            // owning trait have a field to write.
-            if (instance === undefined) return;
-            const next = (resolved ?? null) as TraitBase | null;
-            const prev = (instance[field] ?? null) as TraitBase | null;
-            instance[field] = next;
-            onResolve?.(node, next, prev);
-        },
-    };
 }

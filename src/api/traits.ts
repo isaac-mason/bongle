@@ -1,8 +1,7 @@
-export { my } from '../core/scene/resolutions';
+export { context } from '../core/scene/resolutions';
 export { dirty, rate } from '../core/scene/sync/sync-rate';
 export type {
     ControlDef,
-    Directive,
     DirtyConfig,
     RateConfig,
     SyncDef,

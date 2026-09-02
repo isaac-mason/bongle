@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Ancestor, Up } from '../../../../src/core/scene/conditions';
-import { my } from '../../../../src/core/scene/resolutions';
+import { context } from '../../../../src/core/scene/resolutions';
 import { addChild, addTrait, cloneNode, createNode, createSceneTree, getTrait } from '../../../../src/core/scene/scene-tree';
 import { Self, trait } from '../../../../src/core/scene/traits';
 
@@ -9,7 +9,8 @@ describe('directives on detached subtrees', () => {
     // detached, and `cloneNode` assembles one bottom-up. Nothing here is in a
     // scene tree, so none of it is in a query.
     it('addTrait resolves the field on a detached node', () => {
-        const Chain = trait('detached/chain', { parent: my(Ancestor(Self)) });
+        const Chain = trait('detached/chain', { parent: null as any });
+        context(Chain, 'parent', { of: Ancestor(Self) });
         const top = createNode({ name: 'top' });
         const mid = createNode({ name: 'mid' });
         addChild(top, mid);
@@ -20,7 +21,8 @@ describe('directives on detached subtrees', () => {
     });
 
     it('addChild re-resolves a detached subtree under a detached parent', () => {
-        const Chain = trait('detached/chain2', { parent: my(Ancestor(Self)) });
+        const Chain = trait('detached/chain2', { parent: null as any });
+        context(Chain, 'parent', { of: Ancestor(Self) });
         const top = createNode({ name: 'top' });
         const t = addTrait(top, Chain);
 
@@ -41,7 +43,8 @@ describe('directives on detached subtrees', () => {
     });
 
     it('a clone carries fresh resolutions, not pointers into the source tree', () => {
-        const Chain = trait('detached/chain3', { parent: my(Ancestor(Self)) });
+        const Chain = trait('detached/chain3', { parent: null as any });
+        context(Chain, 'parent', { of: Ancestor(Self) });
         const sceneTree = createSceneTree();
         const host = createNode({ name: 'host' });
         addChild(sceneTree.root, host);
@@ -80,12 +83,16 @@ describe('directives in a trait body', () => {
         // that cycle and overflowed the stack; only `Self` (which has no def)
         // happened to avoid it.
         const Group = trait('hash/group', { n: 0 });
-        expect(() => trait('hash/mesh', { group: my(Up(Group)) })).not.toThrow();
+        expect(() => {
+            const T = trait('hash/mesh', { group: null as any });
+            context(T, 'group', { of: Up(Group) });
+        }).not.toThrow();
     });
 
     it('a directive field cannot be set through addTrait props', () => {
         const Group = trait('hash/group2', { n: 0 });
-        const Mesh = trait('hash/mesh2', { group: my(Up(Group)) });
+        const Mesh = trait('hash/mesh2', { group: null as any });
+        context(Mesh, 'group', { of: Up(Group) });
 
         const sceneTree = createSceneTree();
         const host = createNode({ name: 'host' });
@@ -96,13 +103,14 @@ describe('directives in a trait body', () => {
         addChild(host, child);
         // an override would be silently overwritten by the next resolve, so it is
         // ignored outright rather than briefly appearing to work.
-        const decoy = { n: 99 } as unknown as typeof real;
+        const decoy = { n: 99 } as any;
         const mesh = addTrait(child, Mesh, { group: decoy });
         expect(mesh.group).toBe(real);
     });
 
     it('a self-referential directive resolves to the enclosing trait', () => {
-        const Chain = trait('hash/chain', { parent: my(Ancestor(Self)) });
+        const Chain = trait('hash/chain', { parent: null as any });
+        context(Chain, 'parent', { of: Ancestor(Self) });
         const sceneTree = createSceneTree();
         const top = createNode({ name: 'top' });
         const mid = createNode({ name: 'mid' });
