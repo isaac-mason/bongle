@@ -14,12 +14,27 @@
 // Swept over passthrough density, since that is the variable the whole question turns on
 // and the one we have never measured on a real scene.
 //
-// Result, 2000 transforms: the walk costs 1.17-1.32x the field, and barely grows with gap
-// depth (5x the hops buys 1.7x the penalty) because `mat4.multiply` dominates, not the
-// parent lookup. The maintenance half was measured separately by toggling the declared-
-// resolution descent off on this same fixture: ~5-10% of an attach. So materialising
-// `_parent` is right — it pays on a per-frame path and costs on a per-spawn one — but the
-// margin is 1.2-1.3x, nothing like the 45x `_children` bought for invalidation.
+// Result, 2000 transforms, against the materialised `_parent`:
+//
+//   gap   pull+walk   pull+memo   push sweep
+//   0        1.16x       1.15x        1.07x
+//   1        1.31x       1.23x        1.67x
+//   2        1.26x       1.23x        1.63x
+//   4        1.32x       1.36x        1.87x
+//
+// The pull variants only visit bearers but pay a lookup each; the push sweep pays no lookup
+// at all but visits every passthrough node. They therefore fail in OPPOSITE directions, and
+// the best non-`_parent` design depends entirely on passthrough density. With no gaps the
+// sweep is within 7% of `_parent` while needing no maintenance, no field and nothing to
+// invalidate.
+//
+// The maintenance half was measured separately, by toggling the declared-resolution descent
+// off on this same fixture: ~5-10% of an attach. So materialising `_parent` is right — it
+// pays per frame and costs per spawn — but the margin is 1.07-1.33x, nothing like the 45x
+// `_children` bought for invalidation.
+//
+// Memoising the walk (path compression on the gap nodes) does NOT help: the compression pass
+// costs about what it saves.
 //
 // Do NOT compare against a second trait without `my()`: it lands on a different slot, so
 // `_traits.length` differs and the fixture measures slot density instead. That comparison
@@ -39,7 +54,7 @@ const Xf = trait('contraction/xf', {
     _parent: my(Ancestor(Self)),
 });
 
-const XfSlot = () => Xf._slot;
+const XF_SLOT = Xf._slot;
 
 /** the field path: parent comes straight off the trait. */
 function worldViaField(t: any): Mat4 {
@@ -54,20 +69,67 @@ function worldViaField(t: any): Mat4 {
 /** the walk path: identical algorithm, parent found by climbing the node tree. */
 function worldViaWalk(t: any): Mat4 {
     if (t.valid) return t.world;
-    let cursor: Node | null = t._node.parent;
     let p: any = null;
-    while (cursor !== null) {
-        const found = cursor._traits[XfSlot()];
+    for (let cursor: Node | null = t._node.parent; cursor !== null; cursor = cursor.parent) {
+        const found = cursor._traits[XF_SLOT];
         if (found !== undefined) {
             p = found;
             break;
         }
-        cursor = cursor.parent;
     }
     if (p === null) mat4.copy(t.world, t.local);
     else mat4.multiply(t.world, worldViaWalk(p), t.local);
     t.valid = true;
     return t.world;
+}
+
+/**
+ * the memoised walk: same climb, but each passthrough node caches the bearer it landed on,
+ * so a second transform under the same run of gaps short-circuits. Union-find style path
+ * compression; the cache is per-run, cleared with the fixture.
+ */
+function worldViaMemoWalk(t: any): Mat4 {
+    if (t.valid) return t.world;
+    let p: any = null;
+    const start: Node | null = t._node.parent;
+    for (let cursor: Node | null = start; cursor !== null; cursor = cursor.parent) {
+        const memo = (cursor as any)._xfMemo;
+        if (memo !== undefined) {
+            p = memo;
+            break;
+        }
+        const found = cursor._traits[XF_SLOT];
+        if (found !== undefined) {
+            p = found;
+            break;
+        }
+    }
+    // compress: point every gap we crossed straight at the answer.
+    for (let cursor: Node | null = start; cursor !== null && cursor._traits[XF_SLOT] === undefined; cursor = cursor.parent) {
+        (cursor as any)._xfMemo = p;
+    }
+    if (p === null) mat4.copy(t.world, t.local);
+    else mat4.multiply(t.world, worldViaMemoWalk(p), t.local);
+    t.valid = true;
+    return t.world;
+}
+
+/**
+ * push, not pull: one top-down sweep of the NODE tree carrying the running world matrix.
+ * A node without the trait passes its parent's value straight through — the identity case,
+ * made literal — so there is no parent lookup anywhere, and no per-transform recursion.
+ */
+function sweep(node: Node, parentWorld: Mat4 | null): void {
+    const t: any = node._traits[XF_SLOT];
+    let childWorld = parentWorld;
+    if (t !== undefined) {
+        if (parentWorld === null) mat4.copy(t.world, t.local);
+        else mat4.multiply(t.world, parentWorld, t.local);
+        t.valid = true;
+        childWorld = t.world;
+    }
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) sweep(children[i]!, childWorld);
 }
 
 const TRANSFORMS = 2000;
@@ -114,7 +176,9 @@ function best(fn: () => void, reps: number): number {
 }
 
 console.log(`${TRANSFORMS} transforms, branching 4\n`);
-console.log(`${'passthrough gap'.padEnd(18)} ${'read via _parent'.padStart(17)} ${'read via walk'.padStart(14)}  penalty`);
+console.log(
+    `${'gap'.padEnd(5)} ${'_parent'.padStart(9)} ${'walk'.padStart(9)} ${'memo'.padStart(9)} ${'sweep'.padStart(9)}   walk  memo  sweep`,
+);
 for (const passthrough of [0, 1, 2, 4]) {
     const sceneTree = createSceneTree();
     const { root, bearers } = build(passthrough, 4);
@@ -131,9 +195,17 @@ for (const passthrough of [0, 1, 2, 4]) {
         invalidate();
         for (let i = 0; i < bearers.length; i++) worldViaWalk(bearers[i]);
     }, 200);
+    const memo = best(() => {
+        invalidate();
+        for (let i = 0; i < bearers.length; i++) worldViaMemoWalk(bearers[i]);
+    }, 200);
+    const push = best(() => {
+        invalidate();
+        sweep(root, null);
+    }, 200);
 
     console.log(
-        `${String(passthrough).padEnd(18)} ${`${field.toFixed(3)} ms`.padStart(17)} ${`${walk.toFixed(3)} ms`.padStart(14)}  ${(walk / field).toFixed(2)}x`,
+        `${String(passthrough).padEnd(5)} ${field.toFixed(3).padStart(9)} ${walk.toFixed(3).padStart(9)} ${memo.toFixed(3).padStart(9)} ${push.toFixed(3).padStart(9)}   ${`${(walk / field).toFixed(2)}x`} ${`${(memo / field).toFixed(2)}x`} ${`${(push / field).toFixed(2)}x`}`,
     );
     removeChild(sceneTree.root, root);
 }
