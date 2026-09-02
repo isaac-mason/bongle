@@ -72,7 +72,7 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait.get(traitSlot);
+        const def = registry.slotToTrait[traitSlot];
         if (!def) continue;
 
         const codecs = getSyncCodecs(def);
@@ -119,7 +119,9 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
 /* ── per-client knowledge tracking ── */
 
 type TraitKnowledge = {
-    version: number;
+    /** a field of this trait is version-ahead of what this client has, because rate gating
+     *  held it back. Set by `readChangedFields`, which is the only thing that can know. */
+    behind: boolean;
     // Per-field knowledge as dense arrays indexed by sync field index (0..def.sync.length).
     // The trait is already selected by the enclosing `traits` map (keyed by def.id), so
     // the field only needs its index, no per-tick key to build. Sized + zero-filled once
@@ -681,7 +683,7 @@ export function acceptOwnerFields(
             let traitKnowledge = known.traits.get(def.id);
             if (!traitKnowledge) {
                 traitKnowledge = {
-                    version: 0,
+                    behind: false,
                     versions: zeros(def.sync.length),
                     lastSentTicks: zeros(def.sync.length),
                 };
@@ -1093,7 +1095,7 @@ function walkReplicable(
  * packs fresh, controls aren't snapshotted on the instance.
  */
 function readAllFields(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.slotToTrait.get(traitSlot);
+    const def = registry.slotToTrait[traitSlot];
     if (!def) return [];
 
     const codecs = getControlCodecs(def);
@@ -1112,7 +1114,7 @@ function readAllFields(node: Node, traitSlot: number, instance: TraitBase): Bina
  * receiver, pairs with readAllFields (controls).
  */
 function readAllSyncs(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.slotToTrait.get(traitSlot);
+    const def = registry.slotToTrait[traitSlot];
     if (!def) return [];
 
     const codecs = getSyncCodecs(def);
@@ -1127,9 +1129,8 @@ function readAllSyncs(node: Node, traitSlot: number, instance: TraitBase): Binar
 
 /**
  * read only fields that changed (version > known version) as BinaryField entries,
- * applying per-field rate gating. fields that are throttled are skipped.
- * sentFieldKeys is populated with the snapshot keys of fields that were included,
- * so callers can update per-field knowledge.
+ * applying per-field rate gating. Commits per-field knowledge for the fields it sends, and
+ * records on `known.behind` whether rate gating held anything back.
  */
 function readChangedFields(
     node: Node,
@@ -1139,7 +1140,11 @@ function readChangedFields(
     currentTick: number,
     playerId: PlayerId,
 ): BinaryField[] | null {
-    const def = registry.slotToTrait.get(traitSlot);
+    // cleared before the early returns: a trait that can't ship anything owes nothing, and a
+    // stale `true` would pin its node in `nodeSyncKnowledge` forever.
+    known.behind = false;
+
+    const def = registry.slotToTrait[traitSlot];
     if (!def) return null;
 
     const codecs = getSyncCodecs(def);
@@ -1180,6 +1185,8 @@ function readChangedFields(
         const lastSent = known.lastSentTicks[i] ?? 0;
         if (hz !== null && !ownerHandoff && lastSent !== 0) {
             if (!SyncRate.shouldSendThisTick(hz, lastSent, currentTick, 60)) {
+                // held back this tick: the node stays pending so the field retries.
+                known.behind = true;
                 continue;
             }
         }
@@ -1207,16 +1214,15 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const parentId = node.parent?.id ?? 0;
     const index = childIndexOf(node);
 
-    const wireIndex = registry.protocol.traits;
     const traits: BinaryTrait[] = [];
     const nodeTraits = node._traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait.get(traitSlot);
+        const def = registry.slotToTrait[traitSlot];
         if (!def) continue;
         traits.push({
-            netIndex: wireIndex.idToIndex.get(def.id),
+            netIndex: def.netIndex,
             id: undefined,
             fields: readAllFields(node, traitSlot, instance),
             syncs: readAllSyncs(node, traitSlot, instance),
@@ -1292,7 +1298,7 @@ function diffNodeKnowledge(
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait.get(traitSlot);
+        const def = registry.slotToTrait[traitSlot];
         if (!def) continue;
 
         const traitKnowledge = known.traits.get(def.id);
@@ -1302,7 +1308,7 @@ function diffNodeKnowledge(
             updates.push({
                 type: 'node_trait_added',
                 id: node.id,
-                traitNetIndex: wireIndex.idToIndex.get(def.id),
+                traitNetIndex: def.netIndex,
                 traitId: undefined,
                 fields: readAllFields(node, traitSlot, instance),
                 syncs: readAllSyncs(node, traitSlot, instance),
@@ -1316,11 +1322,7 @@ function diffNodeKnowledge(
                 versions.push(instance._sync?.versions[i] ?? 0);
                 lastSentTicks.push(currentTick);
             }
-            known.traits.set(def.id, {
-                version: instance._sync?.traitVersion ?? 0,
-                versions,
-                lastSentTicks,
-            });
+            known.traits.set(def.id, { behind: false, versions, lastSentTicks });
         } else {
             // existing trait, send only changed fields, with per-field rate gating
             // readChangedFields commits per-field knowledge for the fields it sends.
@@ -1329,11 +1331,10 @@ function diffNodeKnowledge(
                 updates.push({
                     type: 'node_trait_fields',
                     id: node.id,
-                    traitNetIndex: wireIndex.idToIndex.get(def.id)!,
+                    traitNetIndex: def.netIndex!,
                     fields: changedFields,
                 });
             }
-            traitKnowledge.version = instance._sync?.traitVersion ?? 0;
         }
     }
 
@@ -1349,7 +1350,7 @@ function diffNodeKnowledge(
                 fields: [],
                 syncs: [],
             });
-            known.traits.set(id, { version: 0, versions: [], lastSentTicks: [] });
+            known.traits.set(id, { behind: false, versions: [], lastSentTicks: [] });
         }
         // note: unresolved traits can't change in-place (no live instance),
         // so we don't need to check version diffs for them
@@ -1387,25 +1388,15 @@ function diffNodeKnowledge(
         }
     }
 
-    // update node version, if any fields were throttled (not yet sent), keep nodeVersion
-    // stale so the node is re-checked next tick. we detect this by comparing each trait's
-    // field knowledge against the current field versions.
+    // if any field was rate-throttled, keep nodeVersion stale so the node is re-checked
+    // next tick. `readChangedFields` already knows which those are; it used to be
+    // re-derived by walking every trait and field a second time.
     let allFieldsCurrent = true;
-    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
-        const instance = nodeTraits[traitSlot];
-        if (instance === undefined) continue;
-        const def = registry.slotToTrait.get(traitSlot);
-        if (!def) continue;
-        const tk = known.traits.get(def.id);
-        if (!tk) continue;
-        for (let i = 0; i < def.sync.length; i++) {
-            const currentFv = instance._sync?.versions[i] ?? 0;
-            if (currentFv > (tk.versions[i] ?? 0)) {
-                allFieldsCurrent = false;
-                break;
-            }
+    for (const traitKnowledge of known.traits.values()) {
+        if (traitKnowledge.behind) {
+            allFieldsCurrent = false;
+            break;
         }
-        if (!allFieldsCurrent) break;
     }
     // `nodeVersion` reaching `node._sync.version` IS this client's "fully caught up"
     // marker, so it doubles as the pending-index truth: park the node while a field
@@ -1433,7 +1424,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait.get(traitSlot);
+        const def = registry.slotToTrait[traitSlot];
         if (!def) continue;
 
         // snapshot per-sync versions for this trait, dense PACKED arrays by field
@@ -1448,7 +1439,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         }
 
         traits.set(def.id, {
-            version: instance._sync?.traitVersion ?? 0,
+            behind: false,
             versions,
             lastSentTicks,
         });
@@ -1456,7 +1447,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     // include unresolved traits so the diff system knows we already sent them
     for (const id of node._unresolvedTraits?.keys() ?? []) {
         if (!traits.has(id)) {
-            traits.set(id, { version: 0, versions: [], lastSentTicks: [] });
+            traits.set(id, { behind: false, versions: [], lastSentTicks: [] });
         }
     }
 
