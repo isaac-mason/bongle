@@ -2546,23 +2546,23 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
 
 /** apply a freshly resolved value for one query term to one node. */
 function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved: TraitBase | undefined): void {
+    const index = queryIndexOf(q, node);
     if (term.required) {
         // a required term gates membership, so its resolution flipping can add
         // or drop the node. re-test the whole query: cheap, and correct against
         // the node's other conditions.
-        const wasIn = queryIndexOf(q, node) !== -1;
         const matches = nodeMatchesQuery(node, q);
-        if (matches && !wasIn) {
+        if (matches && index === -1) {
             addNodeToQuery(q, node);
             return;
         }
         if (!matches) {
-            if (wasIn) removeNodeFromQuery(q, node);
+            if (index !== -1) removeNodeFromQuery(q, node);
             return;
         }
+        // still a member and nothing was added or removed, so the index above still stands.
     }
 
-    const index = queryIndexOf(q, node);
     if (index === -1) return;
     const tuple = q.matches[index] as any[];
     const next = resolved ?? null;
