@@ -315,9 +315,9 @@ export type TraitDef = {
     /** lookup by script id (user-supplied, within this trait). */
     scriptsById: Map<string, { reg: ScriptDef; index: number }>;
 
-    /** compiled instance constructor, built on first instantiation. Lives here rather than in a
-     *  side map so an HMR re-eval, which mints a fresh def, gets a fresh one for free. */
-    construct: (() => TraitBase) | null;
+    /** compiled instance constructor, built with the def. Lives here rather than in a side map so an
+     *  HMR re-eval, which mints a fresh def, gets a fresh one for free. */
+    construct: () => TraitBase;
     /**
      * canonical handle for this def. populated by `trait()` immediately
      * after the def is constructed, so any registry lookup yields the
@@ -394,7 +394,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         syncById: new Map(),
         scripts: [],
         scriptsById: new Map(),
-        construct: null,
+        construct: null!,
         handle: null!,
     };
     const handle: TraitHandle<TraitInstance<S>> = {
@@ -413,6 +413,10 @@ export function trait<S extends TraitBody = Record<string, never>>(
         const built = buildResolution(slot, key, value);
         if (built !== null) def.resolutions.push(built);
     }
+
+    // compiled here rather than on first instantiation: ~27us for the widest trait, which belongs at
+    // import time and not in whichever frame first spawns one.
+    def.construct = compileConstructor(def);
 
     upsert(registry.traits, id, def);
     // bodyHash = structural hash of the trait body (literals by value,
@@ -624,8 +628,7 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
 }
 
 export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
-    const construct = (def.construct ??= compileConstructor(def));
-    const instance = construct() as TraitBase & Record<string, unknown>;
+    const instance = def.construct() as TraitBase & Record<string, unknown>;
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
