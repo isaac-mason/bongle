@@ -1,3 +1,4 @@
+import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import { exposeDevtools } from '../devtools';
 import type { App, EditorSession } from '../interface';
 import { type EditorServer, startEditorServer } from './server/editor-server';
@@ -54,7 +55,7 @@ const server: App = async (env) => {
         } catch (err) {
             env.err('tick error:', String((err as Error).message));
         }
-    }, 1000 / 60);
+    }, 1000 / SERVER_TICK_HZ);
 
     // graceful shutdown: stop the loop, drain the transport, flush dirty rooms to
     // disk — AWAITED, so the OS holds teardown until saves land.

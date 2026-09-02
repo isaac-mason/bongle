@@ -123,6 +123,11 @@ export const SERVER_CLOCK_INTERP_DELAY = 0.05;
  *  send rate and the chase timing derive from one constant. */
 export const TRANSFORM_SEND_HZ = 30;
 
+/** the sim loop's fixed step. hosts drive `EngineServer.update` at this rate, and the
+ *  send-path rate gate converts a sync's `rate.hz(...)` into a tick interval against it,
+ *  so a host running some other cadence would silently scale every capped field. */
+export const SERVER_TICK_HZ = 60;
+
 /** scratch for the per-observe percentile sort (≤ SYNC_SAMPLES_MAX live samples). */
 const _sortedOffsets = new Float64Array(SYNC_SAMPLES_MAX);
 

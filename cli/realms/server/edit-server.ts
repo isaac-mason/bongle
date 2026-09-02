@@ -6,13 +6,13 @@
 // with the user code (userEntry).
 
 import type { Server as HttpServer } from 'node:http';
-import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
+import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import * as EngineServerEditor from 'bongle/engine-server-editor';
-import { createFallbackAvatarsDriver } from '../../../src/node/sample-avatars-driver';
 import { env } from 'bongle/env';
-import { openNodeFs } from '../../node-fs';
-import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
+import { createFallbackAvatarsDriver } from '../../../src/node/sample-avatars-driver';
+import { initZstd, zstdCompress } from '../../../zstd-wasm';
+import { openNodeFs } from '../../node-fs';
 import { attachGameTransport, type GameTransport } from './transport';
 
 export type StartServerOptions = {
@@ -95,7 +95,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         last = now;
         EngineServer.update(state, dt);
         transport.flush();
-    }, 1000 / 60);
+    }, 1000 / SERVER_TICK_HZ);
 
     return {
         app,

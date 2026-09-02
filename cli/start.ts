@@ -14,6 +14,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import { unzipSync } from 'fflate';
 import { contentType } from '../build';
 import type { ResolvedAvatar, ServerApp } from '../interface/index';
@@ -23,7 +24,7 @@ import { createInMemoryStorageDriver } from '../src/server/storage-in-memory';
 import { openNodeFs } from './node-fs';
 import { attachGameTransport } from './realms/server/transport';
 
-const STEP_MS = 1000 / 60;
+const STEP_MS = 1000 / SERVER_TICK_HZ;
 const STEP_S = STEP_MS / 1000;
 
 /** Resolve the bundle arg to an unpacked directory containing bongle.json. A
