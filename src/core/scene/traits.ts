@@ -508,20 +508,87 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
  * shared source data are responsible for cloning so runtime mutations
  * don't bleed back.
  */
+/** deep-copy a trait value; plain arrays/objects directly, anything else via structuredClone. */
+export function cloneTraitValue(value: object): unknown {
+    if (Array.isArray(value)) {
+        const length = value.length;
+        const out = new Array(length);
+        for (let i = 0; i < length; i++) {
+            const item = value[i];
+            out[i] = item !== null && typeof item === 'object' ? cloneTraitValue(item) : item;
+        }
+        return out;
+    }
+    if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+        return (value as Uint8Array).slice();
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+        const source = value as Record<string, unknown>;
+        const out: Record<string, unknown> = {};
+        for (const key of Object.keys(source)) {
+            const item = source[key];
+            out[key] = item !== null && typeof item === 'object' ? cloneTraitValue(item) : item;
+        }
+        return out;
+    }
+    return structuredClone(value);
+}
+
+/** how one body field turns into an instance field. */
+enum FieldKind {
+    /** a directive: engine-maintained, seeded to null. */
+    Directive = 0,
+    /** a factory `() => T`, called once per instance. */
+    Factory = 1,
+    /** an object/array literal, deep-copied per instance. */
+    Clone = 2,
+    /** a primitive, shared as-is. */
+    Literal = 3,
+}
+
+type FieldPlan = { key: string; kind: FieldKind; value: unknown };
+
+/** per-def field plan, so `buildTraitInstance` doesn't re-walk `Object.entries` per instance. */
+const fieldPlans = new WeakMap<TraitDef, FieldPlan[]>();
+
+function fieldPlanFor(def: TraitDef): FieldPlan[] {
+    let plan = fieldPlans.get(def);
+    if (plan !== undefined) return plan;
+
+    plan = [];
+    for (const key of Object.keys(def.body)) {
+        const value = def.body[key];
+        let kind: FieldKind;
+        if (isDirective(value)) kind = FieldKind.Directive;
+        else if (typeof value === 'function') kind = FieldKind.Factory;
+        else if (value !== null && typeof value === 'object') kind = FieldKind.Clone;
+        else kind = FieldKind.Literal;
+        plan.push({ key, kind, value });
+    }
+    fieldPlans.set(def, plan);
+    return plan;
+}
+
 export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
     const instance: TraitBase & Record<string, unknown> = { _node: null!, _def: def };
 
-    for (const [key, value] of Object.entries(def.body)) {
-        if (isDirective(value)) {
-            // maintained by the engine (see `resolutions`), never a stored default.
-            instance[key] = null;
-        } else if (typeof value === 'function') {
-            instance[key] = (value as Factory<unknown>)();
-        } else if (value !== null && typeof value === 'object') {
-            // structuredClone to avoid sharing object/array literals across instances
-            instance[key] = structuredClone(value);
-        } else {
-            instance[key] = value;
+    const plan = fieldPlanFor(def);
+    for (let i = 0; i < plan.length; i++) {
+        const field = plan[i]!;
+        switch (field.kind) {
+            case FieldKind.Directive:
+                instance[field.key] = null;
+                break;
+            case FieldKind.Factory:
+                instance[field.key] = (field.value as Factory<unknown>)();
+                break;
+            case FieldKind.Clone:
+                instance[field.key] = cloneTraitValue(field.value as object);
+                break;
+            default:
+                instance[field.key] = field.value;
+                break;
         }
     }
 
