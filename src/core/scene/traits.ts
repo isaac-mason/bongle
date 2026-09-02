@@ -266,10 +266,14 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** nearest-trait resolutions declared for this trait with `context()`, in order.
-     *  Owned by the def so an HMR re-eval that drops a declaration drops the
-     *  resolution with it, the same way controls and syncs are handled. */
-    resolutions: ResolutionDef[];
+    /** `context()` declarations for this trait, in order. Owned by the def so an HMR
+     *  re-eval that drops a declaration drops it here too, the same way controls and syncs
+     *  are handled. */
+    contexts: ContextDef[];
+    /** derived from `contexts`, in the same order: what the scene tree's walk consumes.
+     *  Cached on the def like `_syncCodecs` and `construct`, so the registry can rebuild its
+     *  index without reaching back into the trait module. */
+    _resolutions: Resolution[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -365,7 +369,8 @@ export function trait<S extends TraitBody = Record<string, never>>(
         persist: options?.persist ?? true,
         controls: [],
         controlsById: new Map(),
-        resolutions: [],
+        contexts: [],
+        _resolutions: [],
         sync: [],
         syncById: new Map(),
         scripts: [],
@@ -585,7 +590,7 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
         for (const [key, value] of Object.entries(overrides)) {
             // a `context()` field is maintained by the engine; an override would be
             // silently overwritten by the next resolve, so it is ignored outright.
-            if (def.resolutions.some((r) => (r as ResolutionDef).field === key)) continue;
+            if (def.contexts.some((c) => c.contextId === key)) continue;
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.
@@ -616,7 +621,10 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 /* ── context: nearest-trait resolutions ── */
 
 /**
- * one maintained "nearest trait at or above me" relationship.
+ * What the SCENE TREE walks, derived from a declaration rather than authored: `traitSlot`
+ * has had `Self` substituted, `inclusive` has been read off the condition, and `apply` is
+ * system behaviour. A query's `Up`/`Ancestor` term is one of these too, which is why it is
+ * not named for `context()`.
  *
  * `traitSlot` is both what gets resolved and where the walk prunes: below a
  * node bearing it, the answer is that node and cannot have been changed by
@@ -638,8 +646,18 @@ export type Resolution = {
     apply(node: Node, resolved: TraitBase | undefined): void;
 };
 
-/** a declared resolution, as stored on its owning `TraitDef`. */
-export type ResolutionDef = Resolution & { field: string };
+/** body passed by the user to `context()`, fields only, no stamps. */
+export type ContextBody<T extends TraitBase = TraitBase, R extends TraitHandle = TraitHandle> = {
+    /** where to look: an `Up` or `Ancestor` term, the same vocabulary a query uses. */
+    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
+    /** runs when the resolved value actually differs, after the field is written. */
+    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
+};
+
+/** a `context()` declaration as stored on its owning `TraitDef`: what the author wrote,
+ *  plus its identity. Everything derived from it lives on the `Resolution` the walk sees. */
+export type ContextDef<T extends TraitBase = TraitBase, R extends TraitHandle = TraitHandle> = ContextBody<T, R> &
+    TraitChildStamp<'contextId'>;
 
 /**
  * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
@@ -670,33 +688,47 @@ export function context<T extends TraitBase, R extends TraitHandle>(
     },
 ): void {
     const def = handle._def;
-    const ownerSlot = handle._slot;
-    const declared = body.condition.trait._slot;
-    if (declared === undefined) return;
-    const traitSlot = declared === SELF_SLOT ? ownerSlot : declared;
-    const change = body.change;
+    const reg = { ...body, traitId: def.id, contextId: id } as unknown as ContextDef;
 
-    const resolution: ResolutionDef = {
-        field: id,
-        traitSlot,
+    // replace rather than append, so a re-evaluated module does not stack duplicates.
+    const resolution = buildContextResolution(def, reg);
+    if (resolution === null) return;
+    const existing = def.contexts.findIndex((c) => c.contextId === id);
+    if (existing !== -1) {
+        def.contexts[existing] = reg;
+        def._resolutions[existing] = resolution;
+    } else {
+        def.contexts.push(reg);
+        def._resolutions.push(resolution);
+    }
+    fileResolution(registry, resolution);
+}
+
+/**
+ * Turn a `context()` declaration into the walk's `Resolution`. Separate from the def so the
+ * def stays what the author wrote and the registry can rebuild its index from defs alone.
+ */
+export function buildContextResolution(def: TraitDef, reg: ContextDef): Resolution | null {
+    const ownerSlot = def.slot;
+    const declared = reg.condition.trait._slot;
+    if (declared === undefined) return null;
+    const field = reg.contextId;
+    const change = reg.change;
+
+    return {
+        traitSlot: declared === SELF_SLOT ? ownerSlot : declared,
         ownerSlot,
-        inclusive: body.condition.src === Src.Up,
+        inclusive: reg.condition.src === Src.Up,
         apply(node, resolved) {
             const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
             // the walk visits every node on its way down; only nodes bearing the owning
             // trait have a field to write.
             if (instance === undefined) return;
             const next = (resolved ?? null) as TraitBase | null;
-            const prev = (instance[id] ?? null) as TraitBase | null;
+            const prev = (instance[field] ?? null) as TraitBase | null;
             if (next === prev) return;
-            instance[id] = next;
-            change?.(instance as unknown as T, next, prev);
+            instance[field] = next;
+            change?.(instance as unknown as TraitBase, next, prev);
         },
     };
-
-    // replace rather than append, so a re-evaluated module does not stack duplicates.
-    const existing = def.resolutions.findIndex((r) => (r as ResolutionDef).field === id);
-    if (existing !== -1) def.resolutions[existing] = resolution;
-    else def.resolutions.push(resolution);
-    fileResolution(registry, resolution);
 }

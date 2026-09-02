@@ -1145,10 +1145,14 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** nearest-trait resolutions declared for this trait with `context()`, in order.
-     *  Owned by the def so an HMR re-eval that drops a declaration drops the
-     *  resolution with it, the same way controls and syncs are handled. */
-    resolutions: ResolutionDef[];
+    /** `context()` declarations for this trait, in order. Owned by the def so an HMR
+     *  re-eval that drops a declaration drops it here too, the same way controls and syncs
+     *  are handled. */
+    contexts: ContextDef[];
+    /** derived from `contexts`, in the same order: what the scene tree's walk consumes.
+     *  Cached on the def like `_syncCodecs` and `construct`, so the registry can rebuild its
+     *  index without reaching back into the trait module. */
+    _resolutions: Resolution[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */

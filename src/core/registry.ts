@@ -666,7 +666,7 @@ export function fileResolution(reg: Registry, resolution: Resolution): void {
 function rebuildResolutionGroups(reg: Registry): void {
     reg.resolutionGroups = [];
     for (const [, def] of reg.traits.byId) {
-        for (const r of def.resolutions) fileResolution(reg, r);
+        for (const r of def._resolutions) fileResolution(reg, r);
     }
 }
 

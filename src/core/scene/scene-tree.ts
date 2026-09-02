@@ -1965,7 +1965,7 @@ function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number):
  * resolving — descendants are handled by `resolveChildren`.
  */
 function resolveOwn(node: Node, def: TraitDef): void {
-    for (const l of def.resolutions) {
+    for (const l of def._resolutions) {
         l.apply(node, nearestTrait(node, l.traitSlot, l.inclusive));
     }
 }
