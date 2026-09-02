@@ -1,18 +1,18 @@
-import * as Icons from "../../../icons";
 import { type EulerOrder, euler, type Quat, quat } from 'math';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
+import * as Icons from '../../../icons';
 import { Button, IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
 import { registry } from '../../core/registry';
-import type { Node, Realm } from '../../core/scene/scene-tree';
-import { createPrefabConfig, getNodeById } from '../../core/scene/scene-tree';
 import type { BlockRefSchema, PrefabRefSchema, Schema } from '../../core/scene/prop/prop';
 import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/prop';
+import type { Node, Realm } from '../../core/scene/scene-tree';
+import { createPrefabConfig, getNodeById } from '../../core/scene/scene-tree';
 import * as Selection from '../../core/scene/selection';
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
-import { PrefabThumb } from './prefab-thumb';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { PrefabThumb } from './prefab-thumb';
 
 function useTraits(): TraitDef[] {
     return [...registry.traits.byId.values()];
@@ -529,9 +529,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
         ...ids.map((id) => {
             const def = prefabDefs.get(id);
             const name = def?.name ?? id;
-            const leading = (
-                <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />
-            );
+            const leading = <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />;
             return { id, label: name, sublabel: name === id ? undefined : id, leading };
         }),
     ];
@@ -705,7 +703,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const def = traitsBySlot.get(traitSlot);
     if (!def) return null;
 
-    const instance = node._traits.get(traitSlot);
+    const instance = node._traits[traitSlot];
 
     // collect controls for display
     const propertyEntries: Array<{ key: string; reg: ControlDef; value: unknown }> = [];
@@ -805,7 +803,7 @@ function AddTraitAction({ node }: { node: Node }) {
     if (!room) return null;
 
     const items: SearchableSelectItem<string>[] = traits
-        .filter((def) => !node._traits.has(def.slot))
+        .filter((def) => !node._traits[def.slot] !== undefined)
         .map((def) => ({ id: def.id, label: def.name, sublabel: def.name === def.id ? undefined : def.id }));
 
     if (items.length === 0) return <SectionAddButton disabled />;
@@ -874,9 +872,7 @@ function AddPrefabAction({ node }: { node: Node }) {
 
     const thumbSize = 24;
     const items: SearchableSelectItem<string>[] = prefabIds.map((id) => {
-        const leading = (
-            <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />
-        );
+        const leading = <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />;
         return { id, label: id, leading };
     });
 
@@ -1138,7 +1134,10 @@ export function InspectorPanel() {
         return <div className="p-2 text-[10px] text-fg-muted font-mono italic">node not found</div>;
     }
 
-    const traitSlots = Array.from(node._traits.keys());
+    const traitSlots: number[] = [];
+    for (let slot = 0; slot < node._traits.length; slot++) {
+        if (node._traits[slot] !== undefined) traitSlots.push(slot);
+    }
 
     return (
         <div className="flex flex-col max-h-full">

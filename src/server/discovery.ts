@@ -66,7 +66,10 @@ export function runDiffDetection(sceneTree: SceneTree): void {
 }
 
 function diffNode(sceneTree: SceneTree, node: Node): void {
-    for (const [traitSlot, instance] of node._traits) {
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
 
@@ -1197,7 +1200,10 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
 
     const wireIndex = registry.protocol.traits;
     const traits: BinaryTrait[] = [];
-    for (const [traitSlot, instance] of node._traits) {
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         traits.push({
@@ -1274,7 +1280,10 @@ function diffNodeKnowledge(
     const currentTraitIds = new Set<string>();
     const wireIndex = registry.protocol.traits;
 
-    for (const [traitSlot, instance] of node._traits) {
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         currentTraitIds.add(def.id);
@@ -1379,7 +1388,9 @@ function diffNodeKnowledge(
     // stale so the node is re-checked next tick. we detect this by comparing each trait's
     // field knowledge against the current field versions.
     let allFieldsCurrent = true;
-    for (const [traitSlot, instance] of node._traits) {
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         const tk = known.traits.get(def.id);
@@ -1415,7 +1426,10 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     const childIndex = node.parent ? node.parent.children.indexOf(node) : 0;
 
     const traits = new Map<string, TraitKnowledge>();
-    for (const [traitSlot, instance] of node._traits) {
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
 
@@ -2003,7 +2017,14 @@ function dispatchFull(
             ]);
             const coord = { cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz };
             knowledge.knownChunks.set(c.key, coord);
-            fileKnownChunk(knowledge, chunkToRegionCoord(c.chunk.cx), chunkToRegionCoord(c.chunk.cy), chunkToRegionCoord(c.chunk.cz), c.key, coord);
+            fileKnownChunk(
+                knowledge,
+                chunkToRegionCoord(c.chunk.cx),
+                chunkToRegionCoord(c.chunk.cy),
+                chunkToRegionCoord(c.chunk.cz),
+                c.key,
+                coord,
+            );
             knowledge.inFlightFull.add(c.key);
         },
         { max: MAX_IN_FLIGHT_FULL, select: (k) => k.inFlightFull },
@@ -2033,7 +2054,13 @@ function dispatchFull(
  * chunk lookup, it's an assembly of up to REGION_VOLUME of them plus a
  * bitmask, which doesn't fit dispatchChannel's one-key-one-ship shape.
  */
-function dispatchRegionFull(state: Discovery, room: Room, voxels: Voxels, players: Player[], out: Array<[Client, ServerMessage]>): Set<Chunk> {
+function dispatchRegionFull(
+    state: Discovery,
+    room: Room,
+    voxels: Voxels,
+    players: Player[],
+    out: Array<[Client, ServerMessage]>,
+): Set<Chunk> {
     type RegionCandidate = { d2: number; key: string; pid: PlayerId; rx: number; ry: number; rz: number };
 
     const shipped = new Set<Chunk>();
@@ -2184,7 +2211,14 @@ function dispatchLight(
  *  alongside every `knownChunks`/`knownEmptyChunks` add/remove so the secondary
  *  region index (used by eviction, see below) never drifts — mirrors how
  *  `voxels.ts` keeps `chunks` and `regions` in sync via `ensureChunk`/`removeChunk`. */
-function fileKnownChunk(knowledge: ClientVoxelKnowledge, rx: number, ry: number, rz: number, key: string, coord: ChunkCoord): void {
+function fileKnownChunk(
+    knowledge: ClientVoxelKnowledge,
+    rx: number,
+    ry: number,
+    rz: number,
+    key: string,
+    coord: ChunkCoord,
+): void {
     const k = regionKey(rx, ry, rz);
     let region = knowledge.knownRegions.get(k);
     if (!region) {
@@ -2355,7 +2389,13 @@ function flushVoxelsForPlayer(
         for (const chunk of changes.addedChunks) {
             const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
             if (knowledge.knownEmptyChunks.delete(key)) {
-                unfileKnownChunk(knowledge, chunkToRegionCoord(chunk.cx), chunkToRegionCoord(chunk.cy), chunkToRegionCoord(chunk.cz), key);
+                unfileKnownChunk(
+                    knowledge,
+                    chunkToRegionCoord(chunk.cx),
+                    chunkToRegionCoord(chunk.cy),
+                    chunkToRegionCoord(chunk.cz),
+                    key,
+                );
                 knowledge.pendingFull.add(key);
             }
         }
@@ -2374,7 +2414,13 @@ function flushVoxelsForPlayer(
         for (const [key, entry] of blockChanges) {
             if (entry.changes.size > PROMOTION_THRESHOLD) {
                 knowledge.knownChunks.delete(key);
-                unfileKnownChunk(knowledge, chunkToRegionCoord(entry.cx), chunkToRegionCoord(entry.cy), chunkToRegionCoord(entry.cz), key);
+                unfileKnownChunk(
+                    knowledge,
+                    chunkToRegionCoord(entry.cx),
+                    chunkToRegionCoord(entry.cy),
+                    chunkToRegionCoord(entry.cz),
+                    key,
+                );
                 knowledge.pendingLight.delete(key);
                 // if it was shipped-but-not-acked, drop the in-flight slot; the
                 // stale ack for the old send is ignored (unknown key).

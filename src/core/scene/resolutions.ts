@@ -120,7 +120,7 @@ export function buildResolution(ownerSlot: number, field: string, directive: Dir
         traitSlot,
         inclusive: source.src === Src.Up,
         apply(node, resolved) {
-            const instance = node._traits.get(ownerSlot) as Record<string, unknown> | undefined;
+            const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
             // the walk visits every node on its way down; only nodes bearing the
             // owning trait have a field to write.
             if (instance === undefined) return;

@@ -10,8 +10,8 @@
 import type { PlayerId } from '../core/client';
 import type { BinaryField } from '../core/protocol';
 import { registry } from '../core/registry';
-import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getSyncCodecs } from '../core/scene/packcat-bridge';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { diffSync } from '../core/scene/sync/sync-diff';
 import type { ClientNet } from './net';
 import { send } from './net';
@@ -31,7 +31,13 @@ export function createSyncSnapshots(): Set<Node> {
  * per-slice byte snapshot lives on `instance._sync`, same store the server
  * diff uses.
  */
-export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: string, playerId: PlayerId, tracked: Set<Node>): void {
+export function sendOwnerSyncUpdates(
+    net: ClientNet,
+    sg: SceneTree,
+    roomId: string,
+    playerId: PlayerId,
+    tracked: Set<Node>,
+): void {
     const owned = sg.playerIdToOwnedNodes.get(playerId);
 
     // reset + untrack nodes we no longer own (destroyed, or owner handed off) so
@@ -52,7 +58,10 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: stri
     for (const node of owned) {
         let ownsAnySync = false;
 
-        for (const [traitSlot, instance] of node._traits) {
+        const nodeTraits = node._traits;
+        for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+            const instance = nodeTraits[traitSlot];
+            if (instance === undefined) continue;
             const def = registry.slotToTrait.get(traitSlot);
             if (!def) continue;
 
@@ -103,7 +112,10 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: stri
 /** clear the per-instance owner-upload snapshots for every trait on a node, so a
  *  future re-own re-uploads from first-seen. */
 function resetOwnerSnapshot(node: Node): void {
-    for (const [, instance] of node._traits) {
+    const nodeTraits = node._traits;
+    for (let slot = 0; slot < nodeTraits.length; slot++) {
+        const instance = nodeTraits[slot];
+        if (instance === undefined) continue;
         const sync = instance._sync;
         if (!sync) continue;
         sync.bytes.fill(undefined);

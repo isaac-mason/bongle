@@ -64,7 +64,10 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
             const index = node.parent ? node.parent.children.indexOf(node) : 0;
 
             const traits: BinaryTrait[] = [];
-            for (const [traitSlot, instance] of node._traits) {
+            const nodeTraits = node._traits;
+            for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+                const instance = nodeTraits[traitSlot];
+                if (instance === undefined) continue;
                 const def = registry.slotToTrait.get(traitSlot);
                 if (!def) continue;
                 traits.push({
@@ -136,7 +139,7 @@ export function unpackSceneTree(
             runtime.instances.delete(root.id);
         }
     }
-    root._traits.clear();
+    root._traits.length = 0;
     root._unresolvedTraits.clear();
 
     // first node is root
@@ -174,7 +177,7 @@ export function unpackSceneTree(
         const instance = buildTraitInstance(def, props ?? undefined);
         applySyncFields(def, bt.syncs, instance, inbound?.syncRemap.get(traitId));
         instance._node = root;
-        root._traits.set(def.slot, instance);
+        root._traits[def.slot] = instance;
     }
 
     // root script instances re-instantiate from the trait list at initSceneTree time
@@ -247,7 +250,7 @@ export function applySceneSyncUpdate(
             const def = registry.traits.byId.get(traitId);
             if (!def) break;
 
-            const instance = node._traits.get(def.slot);
+            const instance = node._traits[def.slot];
             if (!instance) break;
 
             applySyncFields(def, update.fields, instance, inbound?.syncRemap.get(traitId));
@@ -271,7 +274,7 @@ export function applySceneSyncUpdate(
             // if already present, treat as update
             const syncRemap = inbound?.syncRemap.get(traitId);
             const controlRemap = inbound?.controlRemap.get(traitId);
-            const existing = node._traits.get(def.slot);
+            const existing = node._traits[def.slot];
             if (existing) {
                 applyControlFields(def, update.fields, existing, controlRemap);
                 applySyncFields(def, update.syncs, existing, syncRemap);

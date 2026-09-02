@@ -74,7 +74,7 @@ export function populateScene(
     handle.node.children.length = 0;
 
     // clear current root traits before re-applying.
-    handle.node._traits.clear();
+    handle.node._traits.length = 0;
     handle.node._bitset = bitset.init();
     handle.node._unresolvedTraits.clear();
     handle.node._traitIssues.clear();
@@ -95,7 +95,7 @@ export function populateScene(
             const controls = structuredClone(st.controls);
             const instance = buildTraitInstance(def, controls);
             instance._node = handle.node;
-            handle.node._traits.set(def.slot, instance);
+            handle.node._traits[def.slot] = instance;
             bitset.add(handle.node._bitset, def.slot);
             refreshTraitIssues(handle.node, def, instance, `root of scene "${id}"`);
         }

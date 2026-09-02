@@ -21,9 +21,9 @@
 import { describe, expect, it } from 'vitest';
 import { registry, reindexRegistry } from '../../src/core/registry';
 import { CLIENT_TO_SERVER, command } from '../../src/core/rpc';
-import { addChild, addTrait, createNode } from '../../src/core/scene/scene-tree';
 import { pack } from '../../src/core/scene/pack';
 import { packSceneTree, unpackSceneTree } from '../../src/core/scene/scene-pack';
+import { addChild, addTrait, createNode } from '../../src/core/scene/scene-tree';
 import { trait } from '../../src/core/scene/traits';
 import { createTestServer } from './server-integration-test';
 
@@ -84,7 +84,7 @@ describe('project-module — deterministic wire indices', () => {
         addChild(server.room.scene.root, node);
         addTrait(node, TraitBC);
         const slotBefore = TraitBC._slot;
-        expect(node._traits.has(slotBefore)).toBe(true);
+        expect(node._traits[slotBefore]).toBeDefined();
 
         // simulate HMR re-eval: a new trait whose id sorts FIRST among our
         // b-prefix entries. `trait()` upserts into the registry, bumping the
@@ -96,14 +96,13 @@ describe('project-module — deterministic wire indices', () => {
         expect(traitsAfter).toEqual(['wire-test-b/a-earliest', 'wire-test-b/c-mid', 'wire-test-b/m-middle']);
         expect(registry.protocol.traits.idToIndex.get('wire-test-b/c-mid')!).toBe(indexBefore + 1);
 
-        // but the runtime slot didn't move — the live node's trait is still
-        // accessible at the same Map key.
+        // but the runtime slot didn't move — the live node's trait is still there.
         expect(TraitBC._slot).toBe(slotBefore);
         expect(TraitBA._slot).not.toBe(slotBefore);
-        expect(node._traits.has(slotBefore)).toBe(true);
+        expect(node._traits[slotBefore]).toBeDefined();
         expect(registry.slotToTrait.get(slotBefore)?.id).toBe('wire-test-b/c-mid');
 
-        expect(node._traits.has(TraitBM._slot) === false).toBe(true);
+        expect(node._traits[TraitBM._slot]).toBeUndefined();
         expect(registry.slotToTrait.get(TraitBM._slot)?.id).toBe('wire-test-b/m-middle');
 
         server.dispose();
@@ -140,8 +139,8 @@ describe('project-module — deterministic wire indices', () => {
         // mis-routing; when they don't, decode no-ops via missing def.
         const misroutedDef = registry.traits.byId.get(misroutedId);
         if (misroutedId !== 'wire-test-c/m-middle' && misroutedDef !== undefined) {
-            expect(decodedNode!._traits.has(misroutedDef.slot)).toBe(true);
-            expect(decodedNode!._traits.has(TraitCM._slot)).toBe(false);
+            expect(decodedNode!._traits[misroutedDef.slot]).toBeDefined();
+            expect(decodedNode!._traits[TraitCM._slot]).toBeUndefined();
         }
 
         sender.dispose();

@@ -26,12 +26,12 @@ import {
     getTrait,
     isAncestorOf,
     type Node,
-    type SceneTree,
     type PrefabConfig,
     type Realm,
     removeTraitBySlot,
     reorderChild,
     reparent,
+    type SceneTree,
     type SerializedTrait,
     serializeNode,
     setPrefab,
@@ -835,7 +835,7 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
         const json = node._unresolvedTraits.get(traitId)?.json;
         return json ? structuredClone(json) : null;
     }
-    const instance = node._traits.get(def.slot);
+    const instance = node._traits[def.slot];
     if (!instance) return null;
     // clone, captured props are retained on the action's closure for undo;
     // sharing references with the live trait would let runtime mutations
@@ -856,7 +856,7 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
         bumpNodeVersion(sceneTree, node);
         return;
     }
-    const instance = node._traits.get(def.slot);
+    const instance = node._traits[def.slot];
     if (!instance) return;
     for (const key of Object.keys(props)) {
         const ci = def.controlsById.get(key);

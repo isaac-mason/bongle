@@ -34,7 +34,9 @@ import {
     createSceneTree,
     deserializeNode,
     getTrait,
+    removeChild,
     removeTrait,
+    removeTraitBySlot,
     reparent,
     serializeNode,
 } from '../../../../src/core/scene/scene-tree';
@@ -533,6 +535,77 @@ describe('parent transform bookkeeping', () => {
         expect(ct._parent).toBe(getTrait(parent, TransformTrait));
     });
 
+    it('a detached subtree reads as its own root, and stops tracking its old parent', () => {
+        // detaching leaves the subtree alive and readable, so its resolutions
+        // have to stay true. Without a re-resolve on detach its topmost
+        // transform keeps pointing at the parent it left: world matrices inside
+        // it stay offset by that parent, and MOVING the old parent drags the
+        // detached subtree along with it.
+        const sceneTree = setup();
+
+        const container = createNode({ name: 'Container' });
+        addChild(sceneTree.root, container);
+        const containerTransform = addTrait(container, TransformTrait, { position: vec3.fromValues(100, 0, 0) });
+
+        const prop = createNode({ name: 'Prop' });
+        addChild(container, prop);
+        const propTransform = addTrait(prop, TransformTrait, { position: vec3.fromValues(10, 0, 0) });
+
+        const part = createNode({ name: 'Part' });
+        addChild(prop, part);
+        const partTransform = addTrait(part, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
+
+        expectVec3Near(getWorldPosition(partTransform), vec3.fromValues(111, 0, 0));
+
+        removeChild(container, prop);
+
+        // the subtree is now its own root: the container's offset is gone, but
+        // the transforms *within* the subtree still compose.
+        expect(propTransform._parent).toBeNull();
+        expect(partTransform._parent).toBe(propTransform);
+        expectVec3Near(getWorldPosition(propTransform), vec3.fromValues(10, 0, 0));
+        expectVec3Near(getWorldPosition(partTransform), vec3.fromValues(11, 0, 0));
+
+        // and it is genuinely detached: moving the old parent must not move it.
+        setPosition(containerTransform, vec3.fromValues(500, 0, 0));
+        expectVec3Near(getWorldPosition(partTransform), vec3.fromValues(11, 0, 0));
+
+        // re-attaching somewhere else picks up the new ancestry.
+        const other = createNode({ name: 'Other' });
+        addChild(sceneTree.root, other);
+        addTrait(other, TransformTrait, { position: vec3.fromValues(7, 0, 0) });
+        addChild(other, prop);
+        expectVec3Near(getWorldPosition(partTransform), vec3.fromValues(18, 0, 0));
+    });
+
+    it('removeTraitBySlot re-resolves descendants, like removeTrait does', () => {
+        // the slot-indexed removal is what the client's scene-pack unpack calls
+        // when the server drops a trait, and what the inspector calls. It used to
+        // skip the descendant re-resolve that `removeTrait` runs, leaving every
+        // descendant pointing at a trait instance no longer on any node — their
+        // world transforms then composed against a detached parent forever.
+        const sceneTree = setup();
+
+        const grandparent = createNode({ name: 'GP' });
+        addChild(sceneTree.root, grandparent);
+        const gpt = addTrait(grandparent, TransformTrait, { position: vec3.fromValues(100, 0, 0) });
+
+        const parent = createNode({ name: 'Parent' });
+        addChild(grandparent, parent);
+        addTrait(parent, TransformTrait, { position: vec3.fromValues(10, 0, 0) });
+
+        const child = createNode({ name: 'Child' });
+        addChild(parent, child);
+        const ct = addTrait(child, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
+
+        expectVec3Near(getWorldPosition(ct), vec3.fromValues(111, 0, 0));
+
+        removeTraitBySlot(parent, TransformTrait._slot!);
+
+        expect(ct._parent).toBe(gpt);
+        expectVec3Near(getWorldPosition(ct), vec3.fromValues(101, 0, 0));
+    });
+
     it('intermediate node without transform: grandchild points to grandparent', () => {
         const sceneTree = setup();
 
@@ -987,6 +1060,29 @@ describe('dirty-flag lazy recompute', () => {
         expect(t._dirty & (TRANSFORM_DIRTY_WORLD_MATRIX | TRANSFORM_DIRTY_WORLD_TRS)).toBe(0);
     });
 
+    it('getWorldPosition reads the matrix translation, leaving the TRS decompose deferred', () => {
+        const sceneTree = setup();
+        const parent = createNode({ name: 'Parent' });
+        addChild(sceneTree.root, parent);
+        addTrait(parent, TransformTrait, { position: vec3.fromValues(10, 0, 0) });
+        const child = createNode({ name: 'Child' });
+        addChild(parent, child);
+        addTrait(child, TransformTrait, { position: vec3.fromValues(0, 5, 0) });
+
+        const ct = getTrait(child, TransformTrait)!;
+        expectVec3Near(getWorldPosition(ct), vec3.fromValues(10, 5, 0));
+        // the matrix is now fresh, but the quaternion and scale are still
+        // waiting on a decompose nobody has asked for.
+        expect(ct._dirty & TRANSFORM_DIRTY_WORLD_MATRIX).toBe(0);
+        expect(ct._dirty & TRANSFORM_DIRTY_WORLD_TRS).toBe(TRANSFORM_DIRTY_WORLD_TRS);
+
+        // asking for the quaternion decomposes, and the position it writes
+        // agrees with what the fast path already returned.
+        getWorldQuaternion(ct);
+        expect(ct._dirty & TRANSFORM_DIRTY_WORLD_TRS).toBe(0);
+        expectVec3Near(ct.worldPosition, vec3.fromValues(10, 5, 0));
+    });
+
     it('markDirty early-outs if already dirty', () => {
         const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
@@ -1000,9 +1096,11 @@ describe('dirty-flag lazy recompute', () => {
         const pt = getTrait(parent, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
 
-        // clean the world chain on both
-        getWorldPosition(pt);
-        getWorldPosition(ct);
+        // clean the world chain on both. via the quaternion getter, since that
+        // is the one that decomposes — getWorldPosition reads the matrix's
+        // translation column and leaves the TRS bit for whoever wants the rest.
+        getWorldQuaternion(pt);
+        getWorldQuaternion(ct);
         const WORLD_MASK = TRANSFORM_DIRTY_WORLD_MATRIX | TRANSFORM_DIRTY_WORLD_TRS;
         expect(pt._dirty & WORLD_MASK).toBe(0);
         expect(ct._dirty & WORLD_MASK).toBe(0);

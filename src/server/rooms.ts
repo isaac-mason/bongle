@@ -1150,7 +1150,7 @@ export function applyOwnerSync(
     const def = registry.traits.byId.get(traitId);
     if (!def) return;
 
-    const instance = node._traits.get(def.slot);
+    const instance = node._traits[def.slot];
     if (!instance) return;
 
     Discovery.acceptOwnerFields(
