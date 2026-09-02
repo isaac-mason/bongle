@@ -119,6 +119,9 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
 /* ── per-client knowledge tracking ── */
 
 type TraitKnowledge = {
+    /** the trait's registry id, so a removal can still name it if the def has since left the
+     *  registry and its slot no longer resolves. */
+    id: string;
     /** a field of this trait is version-ahead of what this client has, because rate gating
      *  held it back. Set by `readChangedFields`, which is the only thing that can know. */
     behind: boolean;
@@ -149,7 +152,12 @@ type ClientNodeKnowledge = {
     name: string | undefined;
     owner: PlayerId | null;
     realm: Realm;
-    traits: Map<string, TraitKnowledge>;
+    /** per-slot knowledge for traits whose def is in the registry. Indexed the same way
+     *  `Node._traits` is, so the fan-out reaches it without hashing a trait id. */
+    traits: Array<TraitKnowledge | undefined>;
+    /** knowledge for traits whose def was missing at snapshot time (HMR drift). Mirrors
+     *  `Node._unresolvedTraits`; null until one appears, which is the normal case. */
+    unresolvedTraits: Map<string, TraitKnowledge> | null;
     /** json-encoded PrefabConfig, or null if no prefab */
     prefab: string | null;
 };
@@ -680,14 +688,15 @@ export function acceptOwnerFields(
             const nodeKnowledge = cs.nodeKnowledge.get(player.id);
             const known = nodeKnowledge?.get(node.id);
             if (!known) continue;
-            let traitKnowledge = known.traits.get(def.id);
+            let traitKnowledge = known.traits[def.slot];
             if (!traitKnowledge) {
                 traitKnowledge = {
+                    id: def.id,
                     behind: false,
                     versions: zeros(def.sync.length),
                     lastSentTicks: zeros(def.sync.length),
                 };
-                known.traits.set(def.id, traitKnowledge);
+                known.traits[def.slot] = traitKnowledge;
             }
             // stamp the field version; lastSentTick stays as-is (0 if first seen).
             traitKnowledge.versions[i] = fieldVersion;
@@ -1292,7 +1301,6 @@ function diffNodeKnowledge(
     }
 
     // trait changes, per-field granularity with per-field rate gating
-    const wireIndex = registry.protocol.traits;
 
     const nodeTraits = node._traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
@@ -1301,7 +1309,7 @@ function diffNodeKnowledge(
         const def = registry.slotToTrait[traitSlot];
         if (!def) continue;
 
-        const traitKnowledge = known.traits.get(def.id);
+        const traitKnowledge = known.traits[traitSlot];
 
         if (!traitKnowledge) {
             // new trait, send add with full state (controls + syncs, no rate gating)
@@ -1322,7 +1330,7 @@ function diffNodeKnowledge(
                 versions.push(instance._sync?.versions[i] ?? 0);
                 lastSentTicks.push(currentTick);
             }
-            known.traits.set(def.id, { behind: false, versions, lastSentTicks });
+            known.traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
         } else {
             // existing trait, send only changed fields, with per-field rate gating
             // readChangedFields commits per-field knowledge for the fields it sends.
@@ -1340,7 +1348,7 @@ function diffNodeKnowledge(
 
     // include unresolved traits in current set
     for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        const traitKnowledge = known.traits.get(id);
+        const traitKnowledge = known.unresolvedTraits?.get(id);
         if (!traitKnowledge) {
             updates.push({
                 type: 'node_trait_added',
@@ -1350,28 +1358,38 @@ function diffNodeKnowledge(
                 fields: [],
                 syncs: [],
             });
-            known.traits.set(id, { behind: false, versions: [], lastSentTicks: [] });
+            (known.unresolvedTraits ??= new Map()).set(id, { id, behind: false, versions: [], lastSentTicks: [] });
         }
         // note: unresolved traits can't change in-place (no live instance),
         // so we don't need to check version diffs for them
     }
 
-    // removed traits, wire-compress when the id still has a current
-    // entry; fall back to the string id for traits that disappeared from
-    // the registry between snapshot and now (rare HMR edge).
-    for (const traitId of known.traits.keys()) {
-        const stillPresent =
-            node._traits[registry.traits.byId.get(traitId)?.slot ?? -1] !== undefined ||
-            node._unresolvedTraits?.has(traitId) === true;
-        if (!stillPresent) {
-            const netIndex = wireIndex.idToIndex.get(traitId);
+    // removed traits, wire-compressed to the net index; the id is only put on the wire for
+    // a trait that left the registry between snapshot and now (rare HMR edge), which is why
+    // the knowledge carries it.
+    for (let traitSlot = 0; traitSlot < known.traits.length; traitSlot++) {
+        const traitKnowledge = known.traits[traitSlot];
+        if (traitKnowledge === undefined || nodeTraits[traitSlot] !== undefined) continue;
+        const netIndex = registry.slotToTrait[traitSlot]?.netIndex;
+        updates.push({
+            type: 'node_trait_removed',
+            id: node.id,
+            traitNetIndex: netIndex,
+            traitId: netIndex === undefined ? traitKnowledge.id : undefined,
+        });
+        known.traits[traitSlot] = undefined;
+    }
+    if (known.unresolvedTraits !== null) {
+        for (const [traitId, traitKnowledge] of known.unresolvedTraits) {
+            if (node._unresolvedTraits?.has(traitId) === true) continue;
+            const netIndex = registry.protocol.traits.idToIndex.get(traitId);
             updates.push({
                 type: 'node_trait_removed',
                 id: node.id,
                 traitNetIndex: netIndex,
-                traitId: netIndex === undefined ? traitId : undefined,
+                traitId: netIndex === undefined ? traitKnowledge.id : undefined,
             });
-            known.traits.delete(traitId);
+            known.unresolvedTraits.delete(traitId);
         }
     }
 
@@ -1392,8 +1410,8 @@ function diffNodeKnowledge(
     // next tick. `readChangedFields` already knows which those are; it used to be
     // re-derived by walking every trait and field a second time.
     let allFieldsCurrent = true;
-    for (const traitKnowledge of known.traits.values()) {
-        if (traitKnowledge.behind) {
+    for (let traitSlot = 0; traitSlot < known.traits.length; traitSlot++) {
+        if (known.traits[traitSlot]?.behind === true) {
             allFieldsCurrent = false;
             break;
         }
@@ -1419,7 +1437,8 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     const parentId = node.parent?.id ?? 0;
     const childIndex = childIndexOf(node);
 
-    const traits = new Map<string, TraitKnowledge>();
+    const traits: Array<TraitKnowledge | undefined> = [];
+    let unresolvedTraits: Map<string, TraitKnowledge> | null = null;
     const nodeTraits = node._traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
@@ -1438,17 +1457,11 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
             lastSentTicks.push(v ? currentTick : 0);
         }
 
-        traits.set(def.id, {
-            behind: false,
-            versions,
-            lastSentTicks,
-        });
+        traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
     }
     // include unresolved traits so the diff system knows we already sent them
     for (const id of node._unresolvedTraits?.keys() ?? []) {
-        if (!traits.has(id)) {
-            traits.set(id, { behind: false, versions: [], lastSentTicks: [] });
-        }
+        (unresolvedTraits ??= new Map()).set(id, { id, behind: false, versions: [], lastSentTicks: [] });
     }
 
     nodeKnowledge.set(node.id, {
@@ -1459,6 +1472,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         owner: node.owner,
         realm: node.realm,
         traits,
+        unresolvedTraits,
         prefab: node.prefab ? encodePrefabConfig(node.prefab) : null,
     });
 }
