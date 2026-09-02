@@ -185,6 +185,10 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
         props,
 
         tick() {
+            // the real loop advances this in server.ts; without it `currentTick` stays 0
+            // and every rate-gated sync bypasses its throttle via the never-sent sentinel.
+            for (const room of server.rooms.rooms.values()) room.tick++;
+
             const out = Discovery.flush(discovery, server.rooms, resources, metrics);
 
             // pack every message onto the wire (this is what bills per-type bytes),
