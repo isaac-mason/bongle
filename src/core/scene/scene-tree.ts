@@ -1991,6 +1991,9 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
      * `matchNodes[i] === node`, the same trick koota's SparseSet uses.
      */
     _sparse: number[];
+    /** @internal `conditions` minus the `Not` terms, in tuple order. Precomputed so
+     *  `buildQueryTuple` knows its exact arity and can build a literal. */
+    _tupleTerms: Array<Condition<any, any, any>>;
     /** terms whose value comes from the hierarchy (`Up` / `Ancestor`), with the
      *  tuple slot each writes. empty for the ordinary self-only query, which is
      *  what lets structural mutations skip the resolve walk entirely. */
@@ -2145,6 +2148,7 @@ export function query<const Args extends ConditionArgs[]>(
         matches: [],
         matchNodes: [],
         _sparse: [],
+        _tupleTerms: parsedConditions.filter((c) => c.oper !== Oper.Not),
         traversals,
         onEnter: topic(),
         onExit: topic(),
@@ -2414,16 +2418,38 @@ function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
  * anyway, deferring turns O(nodes x depth) into O(nodes). Required terms are
  * never deferred: `nodeMatchesQuery` has to resolve them to decide membership.
  */
+function termValue(condition: Condition<any, any, any>, node: Node, deferTraversals: boolean): unknown {
+    if (deferTraversals && condition.oper === Oper.Optional && condition.src !== Src.Self) return null;
+    return resolveTerm(node, condition) ?? null;
+}
+
 function buildQueryTuple(q: Query<any>, node: Node, deferTraversals = false): any[] {
-    const tuple: any[] = [];
-    for (const condition of q.conditions) {
-        if (condition.oper === Oper.Not) continue;
-        if (deferTraversals && condition.oper === Oper.Optional && condition.src !== Src.Self) {
-            tuple.push(null);
-            continue;
-        }
-        tuple.push(resolveTerm(node, condition) ?? null);
+    // an array literal allocates its elements store at the exact arity; `[]` plus
+    // `push` allocates a 16-slot store no matter how few elements go in.
+    const terms = q._tupleTerms;
+    switch (terms.length) {
+        case 0:
+            return [];
+        case 1:
+            return [termValue(terms[0]!, node, deferTraversals)];
+        case 2:
+            return [termValue(terms[0]!, node, deferTraversals), termValue(terms[1]!, node, deferTraversals)];
+        case 3:
+            return [
+                termValue(terms[0]!, node, deferTraversals),
+                termValue(terms[1]!, node, deferTraversals),
+                termValue(terms[2]!, node, deferTraversals),
+            ];
+        case 4:
+            return [
+                termValue(terms[0]!, node, deferTraversals),
+                termValue(terms[1]!, node, deferTraversals),
+                termValue(terms[2]!, node, deferTraversals),
+                termValue(terms[3]!, node, deferTraversals),
+            ];
     }
+    const tuple: any[] = [];
+    for (let i = 0; i < terms.length; i++) tuple.push(termValue(terms[i]!, node, deferTraversals));
     return tuple;
 }
 
