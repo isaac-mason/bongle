@@ -20,7 +20,6 @@
 // Leaf module: imports nothing that imports it back, so a trait body can
 // declare a resolution at module scope without a module-init cycle.
 
-import { registry } from '../registry';
 import { type Condition, type Oper, Src } from './conditions';
 import type { Node } from './scene-tree';
 import { $directive, type Directive, SELF_SLOT, type TraitBase, type TraitHandle, type TraitType } from './traits';
@@ -46,29 +45,6 @@ export type Resolution = {
 
 /** a declared resolution, as stored on its owning `TraitDef`. */
 export type ResolutionDef = Resolution & { field: string };
-
-/**
- * Flattened view of every declared resolution, rebuilt when a declaration is added or
- * the trait registry changes shape. The walk reads this per structural
- * mutation, so it has to be a plain array rather than a registry crawl.
- */
-let _cache: Resolution[] | null = null;
-let _cachedRevision = -1;
-
-/** every declared resolution. Scene trees walk these plus their own query terms. */
-export function declaredResolutions(): Resolution[] {
-    // `trait()` registers directives, so a new or re-evaluated trait def bumps
-    // the registry revision — that is the only way the set can change.
-    if (_cache === null || _cachedRevision !== registry.traits.revision) {
-        const out: Resolution[] = [];
-        for (const [, def] of registry.traits.byId) {
-            for (const l of def.resolutions) out.push(l);
-        }
-        _cache = out;
-        _cachedRevision = registry.traits.revision;
-    }
-    return _cache;
-}
 
 /**
  * Declare that this field holds the trait resolved by `source`, and have the

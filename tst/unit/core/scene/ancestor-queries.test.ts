@@ -270,17 +270,35 @@ describe('Up / Ancestor — query identity', () => {
         expect(withUp).not.toBe(withAncestor);
     });
 
+    const termCount = (sceneTree: ReturnType<typeof createSceneTree>) =>
+        sceneTree._queryResolutionGroups.reduce((n: number, group) => n + group.length, 0);
+
     it('only traversal terms register a query resolution', () => {
         const sceneTree = createSceneTree();
         // resolutions declared in trait bodies (TransformTrait._parent) are global, not
         // per-tree, so a fresh tree starts with none of its own.
-        expect(sceneTree._queryResolutions.length).toBe(0);
+        expect(termCount(sceneTree)).toBe(0);
 
         query(sceneTree, [Mesh, Group]);
-        expect(sceneTree._queryResolutions.length).toBe(0);
+        expect(termCount(sceneTree)).toBe(0);
 
         query(sceneTree, [Mesh, Optional(Up(Group))]);
-        expect(sceneTree._queryResolutions.length).toBe(1);
+        expect(termCount(sceneTree)).toBe(1);
+    });
+
+    it('buckets terms by target slot, so one slot is one walk', () => {
+        const sceneTree = createSceneTree();
+
+        // two distinct queries, same traversal target: one bucket, two terms.
+        query(sceneTree, [Mesh, Optional(Up(Group))]);
+        query(sceneTree, [Other, Optional(Up(Group))]);
+        expect(sceneTree._queryResolutionGroups.length, 'one bucket for one target').toBe(1);
+        expect(termCount(sceneTree)).toBe(2);
+
+        // a different target opens a second bucket.
+        query(sceneTree, [Mesh, Optional(Up(Other))]);
+        expect(sceneTree._queryResolutionGroups.length).toBe(2);
+        expect(termCount(sceneTree)).toBe(3);
     });
 });
 

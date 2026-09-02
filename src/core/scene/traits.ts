@@ -1,5 +1,5 @@
 import { recordTrait } from '../capture/module-scope';
-import { registry, structuralHash, upsert } from '../registry';
+import { fileResolution, registry, structuralHash, upsert } from '../registry';
 import type { pack } from './pack';
 import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
@@ -421,7 +421,10 @@ export function trait<S extends TraitBody = Record<string, never>>(
     for (const [key, value] of Object.entries(def.body)) {
         if (!isDirective(value)) continue;
         const built = buildResolution(slot, key, value);
-        if (built !== null) def.resolutions.push(built);
+        if (built !== null) {
+            def.resolutions.push(built);
+            fileResolution(registry, built);
+        }
     }
 
     // compiled here rather than on first instantiation: ~27us for the widest trait, which belongs at

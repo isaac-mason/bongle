@@ -10,7 +10,7 @@ import { trait } from '../src/core/scene/traits';
 
 const Mesh = trait('resattach/mesh', { id: 0 });
 const Group = trait('resattach/group', { id: 0 });
-const Distinct = Array.from({ length: 32 }, (_, i) => trait(`resattach/distinct-${i}`, { id: 0 }));
+const Distinct = Array.from({ length: 40 }, (_, i) => trait(`resattach/distinct-${i}`, { id: 0 }));
 
 const NODES = 64;
 
@@ -27,14 +27,14 @@ function build(): Node {
     return root;
 }
 
-function measure(label: string, install: (t: ReturnType<typeof createSceneTree>) => void, bearTargets = 0) {
+function measure(label: string, install: (t: ReturnType<typeof createSceneTree>) => void, bearTargets = 0, bearFrom = 0) {
     const sceneTree = createSceneTree();
     install(sceneTree);
     const host = createNode({ name: 'host' });
     addTrait(host, Group);
     // the only variable between a pair of rows: whether the traversal targets are borne
     // above the attach point (descend) or absent everywhere (prunable).
-    for (let i = 0; i < bearTargets; i++) addTrait(host, Distinct[i]!);
+    for (let i = 0; i < bearTargets; i++) addTrait(host, Distinct[bearFrom + i]!);
     addChild(sceneTree.root, host);
     const sub = build();
 
@@ -66,4 +66,26 @@ for (const n of [1, 4, 16]) {
     };
     measure(`${n} queries, targets ABSENT (prunable)`, install, 0);
     measure(`${n} queries, targets BORNE above (descend)`, install, n);
+}
+
+// Isolates BUCKETING alone. Both rows register n traversal terms whose targets are borne
+// above (so nothing is pruned), and none of the queries match any node (so membership work
+// is ~0). The only difference is whether those n terms share one bucket or occupy n.
+console.log();
+for (const n of [4, 16]) {
+    measure(
+        `${n} terms, ONE shared target (1 walk)`,
+        (t) => {
+            for (let i = 0; i < n; i++) query(t, [Distinct[i]!, Optional(Up(Group))]);
+        },
+        0,
+    );
+    measure(
+        `${n} terms, distinct targets (${n} walks)`,
+        (t) => {
+            for (let i = 0; i < n; i++) query(t, [Distinct[i]!, Optional(Up(Distinct[16 + i]!))]);
+        },
+        n,
+        16,
+    );
 }

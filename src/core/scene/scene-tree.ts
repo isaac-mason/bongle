@@ -21,7 +21,7 @@ import {
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import type { ValidationIssue } from './prop/validate';
-import { declaredResolutions, type Resolution } from './resolutions';
+import type { Resolution } from './resolutions';
 import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
@@ -327,7 +327,10 @@ export type SceneTree = {
      * declared in trait bodies (`my()`) are global and walked first, so a
      * declared field is settled before any query term reads ancestry.
      */
-    _queryResolutions: Resolution[];
+    /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
+     *  they resolve. One bucket is one walk. Maintained as queries are registered and
+     *  released, so there is nothing to invalidate and nothing to rebuild. */
+    _queryResolutionGroups: Resolution[][];
 
     /**
      * @internal server-side discovery driver. nodes touched this tick (created,
@@ -386,7 +389,8 @@ export function createSceneTree(): SceneTree {
         _queriesAlways: [],
         _queryScratch: [],
         _visitGeneration: 0,
-        _queryResolutions: [],
+        _queryResolutionGroups: [],
+
         _nextNodeId: 1,
         _nextClientNodeId: -1,
         _idToNode: new Map(),
@@ -2210,7 +2214,7 @@ export function query<const Args extends ConditionArgs[]>(
             else list.push(q);
         }
     }
-    for (const term of traversals) sceneTree._queryResolutions.push(term);
+    for (const term of traversals) addQueryResolution(sceneTree, term);
 
     // populate with existing matching nodes
     for (const node of sceneTree.nodes) {
@@ -2250,11 +2254,7 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
             if (list !== undefined) swapRemove(list, q);
         }
         for (const term of q.traversals) {
-            const i = sceneTree._queryResolutions.indexOf(term);
-            if (i !== -1) {
-                sceneTree._queryResolutions[i] = sceneTree._queryResolutions[sceneTree._queryResolutions.length - 1]!;
-                sceneTree._queryResolutions.pop();
-            }
+            removeQueryResolution(sceneTree, term);
         }
     }
 }
@@ -2571,16 +2571,23 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
     }
 }
 
-/** re-resolve one resolution over `node` and, unless pruned, its descendants. */
-function resolveFrom(resolution: Resolution, node: Node, inherited: TraitBase | undefined, fill: boolean): void {
-    const own = node._traits[resolution.traitSlot];
-    resolution.apply(node, resolution.inclusive ? (own ?? inherited) : inherited);
+/**
+ * re-resolve one slot's worth of resolutions over `node` and, unless pruned, its
+ * descendants. Every member of `group` targets the same trait slot, so they share the
+ * walk, what the node bears, and the prune; only which value each is handed differs.
+ */
+function resolveFrom(group: Resolution[], node: Node, inherited: TraitBase | undefined, fill: boolean): void {
+    const own = node._traits[group[0]!.traitSlot];
+    const upValue = own ?? inherited;
+    for (let i = 0; i < group.length; i++) {
+        const resolution = group[i]!;
+        resolution.apply(node, resolution.inclusive ? upValue : inherited);
+    }
     // a re-resolve can stop at a bearer: everything below already resolves to it
     // and nothing above changed that. A fill can't — those slots start empty.
     if (own !== undefined && !fill) return;
-    const childInherited = own ?? inherited;
     for (const child of node.children) {
-        resolveFrom(resolution, child, childInherited, fill);
+        resolveFrom(group, child, upValue, fill);
     }
 }
 
@@ -2590,12 +2597,12 @@ function resolveFrom(resolution: Resolution, node: Node, inherited: TraitBase | 
  * changed shape (attach, detach, reparent).
  */
 export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null, querySlotsFilled = false): void {
-    resolveSubtreeFor(declaredResolutions(), node, movedFrom);
+    resolveSubtreeFor(registry.resolutionGroups, node, movedFrom);
     // `querySlotsFilled`: the subtree was freshly registered, so `registerSubtree`
     // already filled its deferred slots. Walking them again would re-derive the
     // same values.
     if (sceneTree !== null && !querySlotsFilled) {
-        resolveSubtreeFor(sceneTree._queryResolutions, node, movedFrom);
+        resolveSubtreeFor(sceneTree._queryResolutionGroups, node, movedFrom);
     }
 }
 
@@ -2608,9 +2615,9 @@ export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFro
  * value, not a rebind; `_fillingTuples` suppresses the events for this pass.
  */
 function fillQueryResolutions(sceneTree: SceneTree, node: Node, subtree: Node[]): void {
-    if (sceneTree._queryResolutions.length === 0) return;
+    if (sceneTree._queryResolutionGroups.length === 0) return;
     _fillingTuples = true;
-    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined, true, subtree);
+    resolveSubtreeFor(sceneTree._queryResolutionGroups, node, undefined, true, subtree);
     _fillingTuples = false;
 }
 
@@ -2620,6 +2627,35 @@ function fillQueryResolutions(sceneTree: SceneTree, node: Node, subtree: Node[])
  * already null (`buildQueryTuple` defers them), so that descent can be skipped outright.
  * Whole-subtree, not per node: this prunes entire descents, never branches within one.
  */
+/** file a query's traversal term under its target slot, opening a bucket if it is the first. */
+function addQueryResolution(sceneTree: SceneTree, term: Resolution): void {
+    const groups = sceneTree._queryResolutionGroups;
+    for (let i = 0; i < groups.length; i++) {
+        if (groups[i]![0]!.traitSlot === term.traitSlot) {
+            groups[i]!.push(term);
+            return;
+        }
+    }
+    groups.push([term]);
+}
+
+/** drop a released query's term, closing the bucket if it was the last one in it. */
+function removeQueryResolution(sceneTree: SceneTree, term: Resolution): void {
+    const groups = sceneTree._queryResolutionGroups;
+    for (let i = 0; i < groups.length; i++) {
+        const group = groups[i]!;
+        const j = group.indexOf(term);
+        if (j === -1) continue;
+        group[j] = group[group.length - 1]!;
+        group.pop();
+        if (group.length === 0) {
+            groups[i] = groups[groups.length - 1]!;
+            groups.pop();
+        }
+        return;
+    }
+}
+
 function subtreeTraitUnion(subtree: Node[]): Bitset {
     const mask = bitset.init();
     for (let i = 0; i < subtree.length; i++) {
@@ -2637,12 +2673,13 @@ function subtreeTraitUnion(subtree: Node[]): Bitset {
  *  signature shared with the declared resolutions. */
 let _fillingTuples = false;
 
-function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null, fill = false, subtree?: Node[]): void {
-    // built on the first resolution that could actually be pruned, so a subtree whose
-    // targets are all borne above never pays for it.
+function resolveSubtreeFor(groups: Resolution[][], node: Node, movedFrom?: Node | null, fill = false, subtree?: Node[]): void {
+    // built on the first group that could actually be pruned, so a subtree whose targets
+    // are all borne above never pays for it.
     let subtreeTraits: Bitset | undefined;
-    for (let i = 0; i < resolutions.length; i++) {
-        const resolution = resolutions[i]!;
+    for (let g = 0; g < groups.length; g++) {
+        const group = groups[g]!;
+        const resolution = group[0]!;
         const inherited = nearestTrait(node.parent, resolution.traitSlot, true);
         // nothing above bears the target. if nothing below does either, every node in the
         // subtree resolves to null, which is what a fill's slots already hold.
@@ -2659,7 +2696,7 @@ function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: No
         if (movedFrom !== undefined && movedFrom !== null) {
             if (nearestTrait(movedFrom, resolution.traitSlot, true) === inherited) continue;
         }
-        resolveFrom(resolution, node, inherited, fill);
+        resolveFrom(group, node, inherited, fill);
     }
 }
 
@@ -2670,23 +2707,27 @@ function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: No
  * prune at the node that changed.
  */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    resolveChildrenFor(declaredResolutions(), node, traitSlot);
-    if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutions, node, traitSlot);
+    resolveChildrenFor(registry.resolutionGroups, node, traitSlot);
+    if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutionGroups, node, traitSlot);
 }
 
-function resolveChildrenFor(resolutions: Resolution[], node: Node, traitSlot: number): void {
-    for (let i = 0; i < resolutions.length; i++) {
-        const resolution = resolutions[i]!;
-        if (resolution.traitSlot !== traitSlot) continue;
+function resolveChildrenFor(groups: Resolution[][], node: Node, traitSlot: number): void {
+    for (let g = 0; g < groups.length; g++) {
+        const group = groups[g]!;
+        if (group[0]!.traitSlot !== traitSlot) continue;
         const own = node._traits[traitSlot];
         const above = nearestTrait(node.parent, traitSlot, true);
+        const upValue = own ?? above;
         // an `Up` term on the node itself also just changed answer, and nothing
         // else re-resolves it: membership didn't change, so `reindex` no-ops.
-        resolution.apply(node, resolution.inclusive ? (own ?? above) : above);
-        const inherited = own ?? above;
-        for (const child of node.children) {
-            resolveFrom(resolution, child, inherited, false);
+        for (let i = 0; i < group.length; i++) {
+            const resolution = group[i]!;
+            resolution.apply(node, resolution.inclusive ? upValue : above);
         }
+        for (const child of node.children) {
+            resolveFrom(group, child, upValue, false);
+        }
+        return; // a slot has exactly one group
     }
 }
 
