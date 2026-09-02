@@ -132,6 +132,9 @@ describe.each([0x51e5ed, 0xbeef01, 0x1234ab, 0xfeed99])('scene tree invariants, 
             query(sceneTree, [Mesh, Ancestor(Model)]),
             query(sceneTree, [TransformTrait, Not(Tag)]),
             query(sceneTree, [Optional(Ancestor(TransformTrait))]),
+            // a Self-sourced Optional gates no membership, so nothing but `reindex`'s
+            // refresh keeps its tuple slot current as the trait comes and goes.
+            query(sceneTree, [Mesh, Optional(Model)]),
         ];
 
         const random = rng(SEED);
@@ -221,5 +224,41 @@ describe.each([0x51e5ed, 0xbeef01, 0x1234ab, 0xfeed99])('scene tree invariants, 
 
             if (op !== '') checkAll(sceneTree, queries, everyNode, destroyed, `${op} (step ${step})`);
         }
+    });
+});
+
+describe('Optional tuple slots stay current while membership does not change', () => {
+    it('tracks a Self-sourced Optional through add and remove', () => {
+        const sceneTree = createSceneTree();
+        const q = query(sceneTree, [Mesh, Optional(Model)]);
+
+        const node = createNode({ name: 'n' });
+        addTrait(node, Mesh);
+        addChild(sceneTree.root, node);
+        expect(q.matchNodes.length).toBe(1);
+        expect(q.matches[0]![1]).toBe(null);
+
+        const model = addTrait(node, Model);
+        expect(q.matches[0]![1], 'slot fills when the trait is added later').toBe(model);
+
+        removeTrait(node, Model);
+        expect(q.matches[0]![1], 'slot clears when the trait is removed').toBe(null);
+    });
+
+    it('leaves a required Self term to membership, not the refresh', () => {
+        const sceneTree = createSceneTree();
+        const q = query(sceneTree, [Mesh, Model]);
+
+        const node = createNode({ name: 'n' });
+        addTrait(node, Mesh);
+        addChild(sceneTree.root, node);
+        expect(q.matchNodes.length, 'not a member without the required trait').toBe(0);
+
+        const model = addTrait(node, Model);
+        expect(q.matchNodes.length).toBe(1);
+        expect(q.matches[0]![1]).toBe(model);
+
+        removeTrait(node, Model);
+        expect(q.matchNodes.length, 'membership drops with the required trait').toBe(0);
     });
 });

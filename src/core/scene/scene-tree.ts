@@ -2002,6 +2002,10 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
      *  (server positive, client negative), so interleaving doubled the length and left
      *  every other slot a permanent hole. */
     _sparseNeg: number[];
+    /** @internal Self-sourced `Optional` terms, with the tuple slot each writes. These are
+     *  the only terms whose value can change while membership does not: a required Self term
+     *  changing flips membership, and hierarchy terms are maintained by the resolve walk. */
+    _optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }>;
     /** @internal `conditions` minus the `Not` terms, in tuple order. Precomputed so
      *  `buildQueryTuple` knows its exact arity and can build a literal. */
     _tupleTerms: Array<Condition<any, any, any>>;
@@ -2083,6 +2087,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     withoutBitset: Bitset;
     withTraits: number[];
     traversals: TraversalTerm[];
+    optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }>;
 } {
     const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
         if (typeof cond === 'object' && cond !== null && '_slot' in cond) {
@@ -2096,6 +2101,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     let withoutBitset = bitset.init();
     const withTraits: number[] = [];
     const traversals: TraversalTerm[] = [];
+    const optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }> = [];
 
     // tuple index advances for every value-carrying term, i.e. everything but Not.
     let tupleIndex = 0;
@@ -2111,6 +2117,8 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
                 if (condition.oper === Oper.And) {
                     withBitset = bitset.add(withBitset, traitSlot);
                     withTraits.push(traitSlot);
+                } else {
+                    optionalSelfTerms.push({ traitSlot, tupleIndex });
                 }
             } else {
                 traversals.push({
@@ -2132,6 +2140,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         withoutBitset: bitset.trim(withoutBitset),
         withTraits,
         traversals,
+        optionalSelfTerms,
     };
 }
 
@@ -2139,7 +2148,8 @@ export function query<const Args extends ConditionArgs[]>(
     sceneTree: SceneTree,
     conditions: Args,
 ): Query<ConditionArgsToConditions<Args>> {
-    const { parsedConditions, withBitset, withoutBitset, withTraits, traversals } = buildConditionBitsets(conditions);
+    const { parsedConditions, withBitset, withoutBitset, withTraits, traversals, optionalSelfTerms } =
+        buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort). oper and src both belong in
     // the key: `[Mesh, Up(Model)]` and `[Mesh, Model]` are different queries.
@@ -2166,6 +2176,7 @@ export function query<const Args extends ConditionArgs[]>(
         matchNodes: [],
         _sparse: [],
         _sparseNeg: [],
+        _optionalSelfTerms: optionalSelfTerms,
         _tupleTerms: parsedConditions.filter((c) => c.oper !== Oper.Not),
         traversals,
         onEnter: topic(),
@@ -2663,12 +2674,37 @@ function reindex(sceneTree: SceneTree, node: Node, changedSlot?: number): void {
     for (let i = 0; i < count; i++) {
         const q = candidates[i]!;
         const matches = nodeMatchesQuery(node, q);
-        const wasInQuery = queryIndexOf(q, node) !== -1;
+        const index = queryIndexOf(q, node);
 
-        if (matches && !wasInQuery) {
+        if (matches && index === -1) {
             addNodeToQuery(q, node);
-        } else if (!matches && wasInQuery) {
+        } else if (!matches && index !== -1) {
             removeNodeFromQuery(q, node);
+        } else if (matches) {
+            // still a member, but a Self-sourced Optional it carries may have just come or
+            // gone. Nothing else refreshes those: they gate no membership, and only
+            // hierarchy terms have a resolve walk behind them.
+            refreshOptionalSelf(q, node, index, changedSlot);
+        }
+    }
+}
+
+/** rewrite the tuple slots of Self-sourced `Optional` terms for a node that stayed a member. */
+function refreshOptionalSelf(q: Query<any>, node: Node, index: number, changedSlot?: number): void {
+    const terms = q._optionalSelfTerms;
+    if (terms.length === 0) return;
+    const tuple = q.matches[index] as unknown as unknown[];
+    for (let i = 0; i < terms.length; i++) {
+        const term = terms[i]!;
+        if (changedSlot !== undefined && term.traitSlot !== changedSlot) continue;
+        // the bitset is the truth here, not `_traits`: `removeTraitBySlot` clears the bit
+        // before reindexing but keeps the instance until after, so `onExit` handlers can
+        // still read the departing value.
+        const next = bitset.has(node._bitset, term.traitSlot) ? (node._traits[term.traitSlot] ?? null) : null;
+        if (tuple[term.tupleIndex] === next) continue;
+        tuple[term.tupleIndex] = next;
+        if (!_fillingTuples && q.onRebind.listeners.size > 0) {
+            _pendingQueryEvents.push({ topic: q.onRebind, tuple: tuple as never });
         }
     }
 }
