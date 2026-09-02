@@ -62,7 +62,7 @@ export function sendOwnerSyncUpdates(
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const instance = nodeTraits[traitSlot];
             if (instance === undefined) continue;
-            const def = registry.slotToTrait.get(traitSlot);
+            const def = registry.slotToTrait[traitSlot];
             if (!def) continue;
 
             const codecs = getSyncCodecs(def);

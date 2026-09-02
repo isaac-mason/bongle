@@ -18,13 +18,13 @@
 
 import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
 import { onModulePop, onModulePush, owningModule } from './capture/module-scope';
-import { type Config, CONFIG_ID, DEFAULT_CONFIG } from './config';
+import { CONFIG_ID, type Config, DEFAULT_CONFIG } from './config';
 import type { ModelHandle } from './models/handle';
 import type { ParticleHandle } from './particles/particles';
 import type { CommandDef } from './rpc';
-import type { Realm } from './scene/scene-tree';
 import type { Schema } from './scene/prop/prop';
 import type { SceneHandle } from './scene/scene-handle';
+import type { Realm } from './scene/scene-tree';
 import type { ScriptDef } from './scene/scripts';
 import type { ControlDef, SyncDef, TraitDef } from './scene/traits';
 import type { SoundHandle } from './sounds/sounds';
@@ -606,8 +606,14 @@ export function buildInboundProtocol(manifest: ProtocolManifest, reg: Registry):
         const traitId = manifest.traits[i];
         const def = reg.traits.byId.get(traitId);
         if (!def) continue; // peer trait we lack; its refs drop at trait resolve, never remapped
-        syncRemap.set(traitId, (manifest.syncs[i] ?? []).map((sid) => def.syncById.get(sid)?.index));
-        controlRemap.set(traitId, (manifest.controls[i] ?? []).map((cid) => def.controlsById.get(cid)?.index));
+        syncRemap.set(
+            traitId,
+            (manifest.syncs[i] ?? []).map((sid) => def.syncById.get(sid)?.index),
+        );
+        controlRemap.set(
+            traitId,
+            (manifest.controls[i] ?? []).map((cid) => def.controlsById.get(cid)?.index),
+        );
     }
     return {
         traits: buildProtocolTable(manifest.traits),
@@ -640,8 +646,10 @@ export function resolveConfig(reg: Registry): Config {
  * refreshed here need no getter, revision key, or per-read check.
  */
 export function reindexRegistry(reg: Registry): void {
-    const slotToTrait = new Map<number, TraitDef>();
-    for (const [, def] of reg.traits.byId) slotToTrait.set(def.slot, def);
+    // indexed by slot rather than keyed by it: slots come from one dense counter, and this
+    // is read per trait per node per client in the replication fan-out.
+    const slotToTrait: Array<TraitDef | undefined> = [];
+    for (const [, def] of reg.traits.byId) slotToTrait[def.slot] = def;
     reg.slotToTrait = slotToTrait;
 
     const defs = new Map<string, BlockDef>();
@@ -658,6 +666,10 @@ export function reindexRegistry(reg: Registry): void {
         traits: buildProtocolTable(reg.traits.byId.keys()),
         commands: buildProtocolTable(reg.commands.byId.keys()),
     };
+
+    // the wire index is sort-by-id and moves whenever the trait set does, so it is stamped
+    // here rather than looked up by string id on every emitted trait.
+    for (const [, def] of reg.traits.byId) def.netIndex = reg.protocol.traits.idToIndex.get(def.id);
 }
 
 /* ── unified registry ───────────────────────────────────────────── */
@@ -694,7 +706,7 @@ export type Registry = {
      *  rebuilt by `reindexRegistry()` at boot + each dev flush — a plain field. */
     blockRegistry: Blocks;
     /** slot → trait def for O(1) runtime lookup. rebuilt by `reindexRegistry()`. */
-    slotToTrait: Map<number, TraitDef>;
+    slotToTrait: Array<TraitDef | undefined>;
     /** sort-by-id wire tables for the network protocol. rebuilt by `reindexRegistry()`. */
     protocol: { traits: ProtocolTable; commands: ProtocolTable };
 
@@ -898,7 +910,7 @@ export function init(): Registry {
         // boot (after user modules register) and at each dev flush. NOT built
         // here: `buildBlockRegistry` reaches into sibling modules that may not
         // have initialized yet at registry module-load (circular init / TDZ).
-        slotToTrait: new Map(),
+        slotToTrait: [] as Array<TraitDef | undefined>,
         blockRegistry: null! as Blocks,
         protocol: { traits: buildProtocolTable([]), commands: buildProtocolTable([]) },
     } as Registry;

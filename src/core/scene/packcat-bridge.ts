@@ -26,18 +26,16 @@ export type SyncCodec = {
     apply(data: Uint8Array, instance: TraitBase): void;
 };
 
-const syncCodecsCache = new WeakMap<TraitDef, SyncCodec[] | null>();
-
 /**
  * positional array of per-sync codecs, parallel to `def.syncDefs`.
  * returns null when the trait has no syncs registered.
  */
 export function getSyncCodecs(def: TraitDef): SyncCodec[] | null {
-    const cached = syncCodecsCache.get(def);
+    const cached = def._syncCodecs;
     if (cached !== undefined) return cached;
 
     const result = buildSyncCodecs(def);
-    syncCodecsCache.set(def, result);
+    def._syncCodecs = result;
     return result;
 }
 
@@ -130,18 +128,16 @@ export type ControlCodec = {
     apply(data: Uint8Array, instance: TraitBase): void;
 };
 
-const controlCodecsCache = new WeakMap<TraitDef, ControlCodec[] | null>();
-
 /**
  * positional array of per-control codecs, parallel to `def.controls`.
  * returns null when the trait has no controls registered.
  */
 export function getControlCodecs(def: TraitDef): ControlCodec[] | null {
-    const cached = controlCodecsCache.get(def);
+    const cached = def._controlCodecs;
     if (cached !== undefined) return cached;
 
     const result = buildControlCodecs(def);
-    controlCodecsCache.set(def, result);
+    def._controlCodecs = result;
     return result;
 }
 

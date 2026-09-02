@@ -1,6 +1,7 @@
 import { recordTrait } from '../capture/module-scope';
 import { registry, structuralHash, upsert } from '../registry';
 import type { pack } from './pack';
+import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
 import { buildResolution, type ResolutionDef } from './resolutions';
 import type { Node } from './scene-tree';
@@ -318,6 +319,14 @@ export type TraitDef = {
     /** compiled instance constructor, built with the def. Lives here rather than in a side map so an
      *  HMR re-eval, which mints a fresh def, gets a fresh one for free. */
     construct: () => TraitBase;
+
+    /** this trait's sort-by-id position in the protocol table, stamped by `reindexRegistry`
+     *  whenever that table is rebuilt. `undefined` until the first reindex. */
+    netIndex: number | undefined;
+
+    /** @internal packcat codecs, built on first use. See `packcat-bridge`. */
+    _syncCodecs?: SyncCodec[] | null;
+    _controlCodecs?: ControlCodec[] | null;
     /**
      * canonical handle for this def. populated by `trait()` immediately
      * after the def is constructed, so any registry lookup yields the
@@ -395,6 +404,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         scripts: [],
         scriptsById: new Map(),
         construct: null!,
+        netIndex: undefined,
         handle: null!,
     };
     const handle: TraitHandle<TraitInstance<S>> = {

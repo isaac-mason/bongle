@@ -885,7 +885,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 
     if (bitset.has(node._bitset, traitSlot)) {
         if (scene?.context) {
-            const def = registry.slotToTrait.get(traitSlot);
+            const def = registry.slotToTrait[traitSlot];
             if (def) disposeTraitScripts(scene.context, node, def);
         }
 
@@ -911,7 +911,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<string, unknown>): TraitBase | null {
     const scene = node.scene;
 
-    const def = registry.slotToTrait.get(traitSlot);
+    const def = registry.slotToTrait[traitSlot];
     if (!def) return null;
 
     const instance = buildTraitInstance(def, props);
@@ -1042,7 +1042,7 @@ export function initSceneTree(sceneTree: SceneTree): void {
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const trait = nodeTraits[traitSlot];
             if (trait === undefined) continue;
-            const def = registry.slotToTrait.get(traitSlot);
+            const def = registry.slotToTrait[traitSlot];
             if (!def || def.scripts.length === 0) continue;
             instantiateTraitScripts(sceneTree.context, node, trait, def);
         }
@@ -1335,7 +1335,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
             for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
                 const trait = nodeTraits[traitSlot];
                 if (trait === undefined) continue;
-                const def = registry.slotToTrait.get(traitSlot);
+                const def = registry.slotToTrait[traitSlot];
                 if (!def || def.scripts.length === 0) continue;
                 const created = instantiateTraitScripts(sceneTree.context, n, trait, def);
                 for (const i of created) newScriptInstances.push(i);
@@ -1567,7 +1567,7 @@ export type SerializedNode = {
  * only `control()`-decorated fields are serialized. tag traits get `controls: undefined`.
  */
 function serializeTrait(traitSlot: number, instance: TraitBase, options?: SerializeOptions): SerializedTrait | null {
-    const def = registry.slotToTrait.get(traitSlot);
+    const def = registry.slotToTrait[traitSlot];
     if (!def) return null;
     if (options?.persistOnly && !def.persist) return null;
 
@@ -1867,7 +1867,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const trait = nodeTraits[traitSlot];
             if (trait === undefined) continue;
-            const def = registry.slotToTrait.get(traitSlot);
+            const def = registry.slotToTrait[traitSlot];
             if (!def || def.scripts.length === 0) continue;
             const created = instantiateTraitScripts(sceneTree.context, root, trait, def);
             for (const i of created) initScriptInstance(i);

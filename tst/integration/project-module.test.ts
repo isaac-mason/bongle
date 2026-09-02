@@ -100,10 +100,10 @@ describe('project-module — deterministic wire indices', () => {
         expect(TraitBC._slot).toBe(slotBefore);
         expect(TraitBA._slot).not.toBe(slotBefore);
         expect(node._traits[slotBefore]).toBeDefined();
-        expect(registry.slotToTrait.get(slotBefore)?.id).toBe('wire-test-b/c-mid');
+        expect(registry.slotToTrait[slotBefore]?.id).toBe('wire-test-b/c-mid');
 
         expect(node._traits[TraitBM._slot]).toBeUndefined();
-        expect(registry.slotToTrait.get(TraitBM._slot)?.id).toBe('wire-test-b/m-middle');
+        expect(registry.slotToTrait[TraitBM._slot]?.id).toBe('wire-test-b/m-middle');
 
         server.dispose();
     });

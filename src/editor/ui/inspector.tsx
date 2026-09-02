@@ -18,7 +18,7 @@ function useTraits(): TraitDef[] {
     return [...registry.traits.byId.values()];
 }
 
-function useTraitsBySlot(): Map<number, TraitDef> {
+function useTraitsBySlot(): Array<TraitDef | undefined> {
     return registry.slotToTrait;
 }
 
@@ -700,7 +700,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const traitsBySlot = useTraitsBySlot();
     const removeTrait = useEditRoom((s) => s.removeTrait);
     const setTrait = useEditRoom((s) => s.setTrait);
-    const def = traitsBySlot.get(traitSlot);
+    const def = traitsBySlot[traitSlot];
     if (!def) return null;
 
     const instance = node._traits[traitSlot];

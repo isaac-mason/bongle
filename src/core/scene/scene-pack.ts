@@ -69,7 +69,7 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
             for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
                 const instance = nodeTraits[traitSlot];
                 if (instance === undefined) continue;
-                const def = registry.slotToTrait.get(traitSlot);
+                const def = registry.slotToTrait[traitSlot];
                 if (!def) continue;
                 traits.push({
                     netIndex: wireIndex.idToIndex.get(def.id),
