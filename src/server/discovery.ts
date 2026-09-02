@@ -10,6 +10,7 @@ import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
 import { packSceneTree } from '../core/scene/scene-pack';
 import {
     bumpFieldVersion,
+    childIndexOf,
     EMPTY_UNRESOLVED,
     encodePrefabConfig,
     getNodeById,
@@ -1197,7 +1198,7 @@ function readChangedFields(
 /** build a NodeCreated update from a live node with per-field binary entries. */
 function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const parentId = node.parent?.id ?? 0;
-    const index = node.parent ? node.parent.children.indexOf(node) : 0;
+    const index = childIndexOf(node);
 
     const wireIndex = registry.protocol.traits;
     const traits: BinaryTrait[] = [];
@@ -1245,7 +1246,7 @@ function diffNodeKnowledge(
 ): void {
     // structural change (parent or index)
     const parentId = node.parent?.id ?? 0;
-    const childIndex = node.parent ? node.parent.children.indexOf(node) : 0;
+    const childIndex = childIndexOf(node);
     if (known.parentId !== parentId || known.childIndex !== childIndex) {
         updates.push({
             type: 'node_structure',
@@ -1424,7 +1425,7 @@ function diffNodeKnowledge(
 /** snapshot the current state of a node into a knowledge map. */
 export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowledge>, node: Node, currentTick = 0): void {
     const parentId = node.parent?.id ?? 0;
-    const childIndex = node.parent ? node.parent.children.indexOf(node) : 0;
+    const childIndex = childIndexOf(node);
 
     const traits = new Map<string, TraitKnowledge>();
     const nodeTraits = node._traits;

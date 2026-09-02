@@ -56,6 +56,10 @@ export type Node = {
     /** ordered list of child nodes */
     children: Node[];
 
+    /** @internal position in `parent.children`. A hint, not a guarantee — read it through
+     *  `childIndexOf`, which re-derives and repairs when it doesn't match. */
+    _childIndex: number;
+
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
 
@@ -154,6 +158,7 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         name: name ?? undefined,
         parent: null,
         children: [],
+        _childIndex: 0,
         scene: null,
         owner: null,
         persist: persist ?? true,
@@ -1075,6 +1080,7 @@ export function addChild(parent: Node, child: Node): void {
     const wasDetached = child.scene === null;
 
     child.parent = parent;
+    child._childIndex = parent.children.length;
     parent.children.push(child);
 
     // if parent is in a scene tree, register child subtree
@@ -1124,6 +1130,29 @@ export function getChildren(node: Node): Node[] {
 }
 
 /**
+ * position of `node` among its siblings, 0 when it has no parent.
+ *
+ * The hint on the node makes this O(1) for the replication fan-out, which asks for it once per known
+ * node per client per flush and was scanning the sibling array every time. Any code that reorders
+ * `children` without updating the hint just costs one repair here.
+ */
+export function childIndexOf(node: Node): number {
+    const parent = node.parent;
+    if (parent === null) return 0;
+    const hint = node._childIndex;
+    if (parent.children[hint] === node) return hint;
+    const index = parent.children.indexOf(node);
+    node._childIndex = index;
+    return index;
+}
+
+/** renumber `children` from `start` after a splice. */
+function reindexChildren(parent: Node, start: number): void {
+    const children = parent.children;
+    for (let i = start; i < children.length; i++) children[i]!._childIndex = i;
+}
+
+/**
  * move a node to a new parent. the node must be in the same scene tree as
  * the new parent, or detached (will be registered if parent is in a scene tree).
  */
@@ -1151,6 +1180,7 @@ export function reparent(node: Node, newParent: Node): void {
         removeChildInternal(node.parent, node);
     }
     node.parent = newParent;
+    node._childIndex = newParent.children.length;
     newParent.children.push(node);
 
     // if node was detached, register it now (also fires onInit + onEnter + marks dirty)
@@ -1183,10 +1213,12 @@ export function reparent(node: Node, newParent: Node): void {
  */
 export function reorderChild(parent: Node, child: Node, index: number): void {
     if (child.parent !== parent) return;
-    const current = parent.children.indexOf(child);
+    const current = childIndexOf(child);
     if (current === -1) return;
     parent.children.splice(current, 1);
-    parent.children.splice(Math.min(index, parent.children.length), 0, child);
+    const target = Math.min(index, parent.children.length);
+    parent.children.splice(target, 0, child);
+    reindexChildren(parent, Math.min(current, target));
     // index change is a structural change discovery must replicate (it bumped
     // nothing before, the old per-client walk diffed childIndex directly).
     if (child.scene) bumpNodeVersion(child.scene, child);
@@ -1213,6 +1245,7 @@ export function replaceChildren(root: Node, node: Node): void {
         }
     }
     root.children = [node];
+    node._childIndex = 0;
 }
 
 /**
@@ -1232,11 +1265,13 @@ export function isAncestorOf(ancestor: Node, descendant: Node): boolean {
 
 /** remove a child from parent's children array (does not touch scene tree registration) */
 function removeChildInternal(parent: Node, child: Node): void {
-    const idx = parent.children.indexOf(child);
+    const idx = childIndexOf(child);
     if (idx !== -1) {
         parent.children.splice(idx, 1);
+        reindexChildren(parent, idx);
     }
     child.parent = null;
+    child._childIndex = 0;
 }
 
 /**

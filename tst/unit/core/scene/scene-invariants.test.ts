@@ -6,6 +6,7 @@ import {
     addChild,
     addTrait,
     addTraitBySlot,
+    childIndexOf,
     createNode,
     createSceneTree,
     destroyNode,
@@ -102,6 +103,12 @@ function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: N
                 expect(actual.has(child), `_children missing an entry after ${op} on ${node.name}`).toBe(true);
             }
         }
+    }
+
+    for (const node of everyNode) {
+        if (destroyed.has(node) || node.parent === null) continue;
+        expect(childIndexOf(node), `childIndexOf after ${op} on ${node.name}`).toBe(node.parent.children.indexOf(node));
+        expect(node._childIndex, `_childIndex hint after ${op} on ${node.name}`).toBe(node.parent.children.indexOf(node));
     }
 
     const live = liveNodes(sceneTree);
