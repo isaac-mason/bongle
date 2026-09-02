@@ -6,9 +6,9 @@ import {
     addTrait,
     createNode,
     createSceneTree,
+    flushQueryEvents,
     onQueryEnter,
     onQueryExit,
-    onQueryRebind,
     query,
     removeChild,
     removeTrait,
@@ -151,7 +151,7 @@ describe('Up / Ancestor — staying live', () => {
         expect(q.matches[0]![1]).toBe(gb);
     });
 
-    it('fires onQueryRebind once for a reparent', () => {
+    it('retires the old tuple and enters a new one when a reparent changes the resolved ancestor', () => {
         const sceneTree = createSceneTree();
         const a = createNode({ name: 'a' });
         const b = createNode({ name: 'b' });
@@ -164,11 +164,23 @@ describe('Up / Ancestor — staying live', () => {
         addTrait(leaf, Mesh);
 
         const q = query(sceneTree, [Mesh, Optional(Up(Group))]);
-        let rebinds = 0;
-        onQueryRebind(q, () => rebinds++);
+        const entered: unknown[] = [];
+        const exited: unknown[] = [];
+        onQueryEnter(q, (_mesh, group) => entered.push(group));
+        onQueryExit(q, (_mesh, group) => exited.push(group));
+        // enter backfills the existing match; only what follows the reparent matters.
+        entered.length = 0;
 
         reparent(leaf, b);
-        expect(rebinds).toBe(1);
+        flushQueryEvents();
+
+        // the ancestor it resolved to changed, so the match the consumer holds is retired
+        // and replaced rather than silently mutated underneath them.
+        expect(exited.length, 'one exit for the old resolution').toBe(1);
+        expect(entered.length, 'one enter for the new one').toBe(1);
+        expect((exited[0] as { name: string }).name).toBe('a');
+        expect((entered[0] as { name: string }).name).toBe('b');
+        expect(q.matchNodes.length, 'membership itself never churned').toBe(1);
     });
 
     it('adding a group above live matches rebinds the subtree', () => {

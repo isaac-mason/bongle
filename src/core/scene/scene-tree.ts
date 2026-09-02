@@ -2022,9 +2022,6 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
     onEnter: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     /** node stopped matching. subscribe with {@link onQueryExit}. */
     onExit: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    /** a still-matching node's hierarchy-sourced value changed (reparent, or the
-     *  target trait added/removed above it). subscribe with {@link onQueryRebind}. */
-    onRebind: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
     /**
      * live ref-count from script instances that called `query(ctx, ...)`.
      * 0 + `acquired` false → engine-persistent (never reaped).
@@ -2187,7 +2184,6 @@ export function query<const Args extends ConditionArgs[]>(
         traversals,
         onEnter: topic(),
         onExit: topic(),
-        onRebind: topic(),
         refcount: 0,
         acquired: false,
         _visitGeneration: 0,
@@ -2354,33 +2350,6 @@ export function onQueryEnter<Conditions extends Condition[]>(
         callQueryListener(fn as Listener<any>, tuple as any[]);
     }
     return () => offQueryEnter(q, fn);
-}
-
-/**
- * subscribe to a still-matching node's hierarchy-sourced value changing: the
- * node was reparented, or the trait an `Up` / `Ancestor` term resolves to was
- * added or removed above it. Enter/exit can't express this — the match never
- * stopped, only what it resolved to.
- *
- * Unlike {@link onQueryEnter} there is **no backfill**: nothing has rebound
- * yet at subscribe time. Consumers that iterate `matches` need this only when
- * they cache something derived from the resolved value; the tuple itself is
- * updated in place.
- */
-export function onQueryRebind<Conditions extends Array<Condition<any, any, any>>>(
-    q: Query<Conditions>,
-    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
-): Unsubscribe {
-    q.onRebind.add(fn as Listener<any>);
-    return () => offQueryRebind(q, fn);
-}
-
-/** drop an {@link onQueryRebind} subscription. idempotent. */
-export function offQueryRebind<Conditions extends Array<Condition<any, any, any>>>(
-    q: Query<Conditions>,
-    fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
-): void {
-    q.onRebind.remove(fn as Listener<any>);
 }
 
 /** drop an {@link onQueryEnter} subscription. no exit drain, enter has no
@@ -2567,10 +2536,29 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
     const tuple = q.matches[index] as any[];
     const next = resolved ?? null;
     if (tuple[term.tupleIndex] === next) return;
-    tuple[term.tupleIndex] = next;
-    if (!_fillingTuples && q.onRebind.listeners.size > 0) {
-        _pendingQueryEvents.push({ topic: q.onRebind, tuple });
+    replaceTuple(q, index, tuple, term.tupleIndex, next);
+}
+
+/**
+ * A still-matching node whose tuple contents changed: what the consumer was handed is no
+ * longer valid, so the old tuple is retired with an exit and a fresh one entered. Membership
+ * itself is untouched — `matchNodes` and the sparse index keep their slots — so this costs
+ * one tuple, not a remove-and-re-add.
+ *
+ * During the initial fill there is nothing to retire: `addNodeToQuery` already queued an
+ * enter holding this very array, and the fill writes through that same reference so the
+ * handler sees completed values. Mutating in place is what makes that aliasing work.
+ */
+function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, next: unknown): void {
+    if (_fillingTuples || (q.onExit.listeners.size === 0 && q.onEnter.listeners.size === 0)) {
+        tuple[slot] = next;
+        return;
     }
+    const replacement = tuple.slice();
+    replacement[slot] = next;
+    q.matches[index] = replacement as never;
+    if (q.onExit.listeners.size > 0) _pendingQueryEvents.push({ topic: q.onExit, tuple: tuple as never });
+    if (q.onEnter.listeners.size > 0) _pendingQueryEvents.push({ topic: q.onEnter, tuple: replacement as never });
 }
 
 /**
@@ -2613,8 +2601,8 @@ export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFro
  * them here rather than per node during registration is the difference between
  * O(nodes x depth) and O(nodes): the walk carries each resolved value down.
  *
- * These nodes just entered, so a slot going null → resolved is its initial
- * value, not a rebind; `_fillingTuples` suppresses the events for this pass.
+ * These nodes just entered, so a slot going null → resolved is its initial value, not a
+ * rebind; `_fillingTuples` suppresses the events for this pass.
  */
 function fillQueryResolutions(sceneTree: SceneTree, node: Node, subtree: Node[]): void {
     if (sceneTree._queryResolutionGroups.length === 0) return;
@@ -2670,9 +2658,8 @@ function subtreeTraitUnion(subtree: Node[]): Bitset {
     return mask;
 }
 
-/** set only for the duration of a fill pass; the walk is synchronous and never
- *  re-enters itself, so a module-scope flag is enough to keep `apply`'s
- *  signature shared with the declared resolutions. */
+/** set only for the duration of a fill pass; the walk is synchronous and never re-enters
+ *  itself, so a module-scope flag is enough to keep `apply`'s signature shared. */
 let _fillingTuples = false;
 
 function resolveSubtreeFor(groups: Resolution[][], node: Node, movedFrom?: Node | null, fill = false, subtree?: Node[]): void {
@@ -2773,9 +2760,6 @@ function refreshOptionalSelf(q: Query<any>, node: Node, index: number, changedSl
         const next = bitset.has(node._bitset, term.traitSlot) ? (node._traits[term.traitSlot] ?? null) : null;
         if (tuple[term.tupleIndex] === next) continue;
         tuple[term.tupleIndex] = next;
-        if (!_fillingTuples && q.onRebind.listeners.size > 0) {
-            _pendingQueryEvents.push({ topic: q.onRebind, tuple: tuple as never });
-        }
     }
 }
 
