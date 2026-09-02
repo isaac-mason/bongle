@@ -1032,7 +1032,9 @@ function buildSceneSyncUpdates(
     // nodeSyncKnowledge when the client catches up. these are already-known nodes, so
     // region membership is current (eviction/exit already removed them here). snapshot
     // first — the diff mutates the set. skip nodes already handled via dirtyNodes above.
-    for (const nodeId of [...nodeSyncKnowledge]) {
+    _pendingSyncScratch.length = 0;
+    for (const nodeId of nodeSyncKnowledge) _pendingSyncScratch.push(nodeId);
+    for (const nodeId of _pendingSyncScratch) {
         const node = getNodeById(sceneTree, nodeId);
         if (!node || node.scene === null || sceneTree.dirtyNodes.has(node)) continue;
         const known = nodeKnowledge.get(nodeId);
@@ -1135,17 +1137,18 @@ function readChangedFields(
     instance: TraitBase,
     known: TraitKnowledge,
     currentTick: number,
-    sentFields: Array<{ index: number; version: number }>,
     playerId: PlayerId,
-): BinaryField[] {
+): BinaryField[] | null {
     const def = registry.slotToTrait.get(traitSlot);
-    if (!def) return [];
+    if (!def) return null;
 
     const codecs = getSyncCodecs(def);
-    if (!codecs) return [];
+    if (!codecs) return null;
 
     const sync = instance._sync;
-    const entries: BinaryField[] = [];
+    // stays null while nothing has changed, which is the overwhelmingly common case: this
+    // runs per trait per known node per client per flush.
+    let entries: BinaryField[] | null = null;
 
     for (let i = 0; i < codecs.length; i++) {
         // current field version lives on the instance; known version is per-client.
@@ -1188,12 +1191,16 @@ function readChangedFields(
             data = codecs[i].pack(instance, node);
         }
 
-        entries.push({ index: i, data });
-        sentFields.push({ index: i, version: fieldVersion });
+        (entries ??= []).push({ index: i, data });
+        known.versions[i] = fieldVersion;
+        known.lastSentTicks[i] = currentTick;
     }
 
     return entries;
 }
+
+/** reused snapshot of `nodeSyncKnowledge`, which the diff below mutates as it drains. */
+const _pendingSyncScratch: number[] = [];
 
 /** build a NodeCreated update from a live node with per-field binary entries. */
 function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
@@ -1279,7 +1286,6 @@ function diffNodeKnowledge(
     }
 
     // trait changes, per-field granularity with per-field rate gating
-    const currentTraitIds = new Set<string>();
     const wireIndex = registry.protocol.traits;
 
     const nodeTraits = node._traits;
@@ -1288,7 +1294,6 @@ function diffNodeKnowledge(
         if (instance === undefined) continue;
         const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
-        currentTraitIds.add(def.id);
 
         const traitKnowledge = known.traits.get(def.id);
 
@@ -1318,9 +1323,9 @@ function diffNodeKnowledge(
             });
         } else {
             // existing trait, send only changed fields, with per-field rate gating
-            const sentFields: Array<{ index: number; version: number }> = [];
-            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, sentFields, playerId);
-            if (changedFields.length > 0) {
+            // readChangedFields commits per-field knowledge for the fields it sends.
+            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, playerId);
+            if (changedFields !== null) {
                 updates.push({
                     type: 'node_trait_fields',
                     id: node.id,
@@ -1328,19 +1333,12 @@ function diffNodeKnowledge(
                     fields: changedFields,
                 });
             }
-
-            // update knowledge for sent fields only
-            for (const sf of sentFields) {
-                traitKnowledge.versions[sf.index] = sf.version;
-                traitKnowledge.lastSentTicks[sf.index] = currentTick;
-            }
             traitKnowledge.version = instance._sync?.traitVersion ?? 0;
         }
     }
 
     // include unresolved traits in current set
     for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        currentTraitIds.add(id);
         const traitKnowledge = known.traits.get(id);
         if (!traitKnowledge) {
             updates.push({
@@ -1361,7 +1359,10 @@ function diffNodeKnowledge(
     // entry; fall back to the string id for traits that disappeared from
     // the registry between snapshot and now (rare HMR edge).
     for (const traitId of known.traits.keys()) {
-        if (!currentTraitIds.has(traitId)) {
+        const stillPresent =
+            node._traits[registry.traits.byId.get(traitId)?.slot ?? -1] !== undefined ||
+            node._unresolvedTraits?.has(traitId) === true;
+        if (!stillPresent) {
             const netIndex = wireIndex.idToIndex.get(traitId);
             updates.push({
                 type: 'node_trait_removed',
