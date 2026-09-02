@@ -324,7 +324,7 @@ export type SceneTree = {
     /**
      * @internal this tree's query-term resolutions, appended when a query with
      * `Up` / `Ancestor` terms is created and removed when it is reaped. The ones
-     * declared in trait bodies (`my()`) are global and walked first, so a
+     * declared with `context()` are global and walked first, so a
      * declared field is settled before any query term reads ancestry.
      */
     /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
@@ -738,7 +738,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
-    // resolve this node's own directive fields. `resolveChildren` below covers
+    // resolve this node's own context() fields. `resolveChildren` below covers
     // descendants; the node that just gained the trait has to be seeded here,
     // since nothing above it changed.
     resolveOwn(node, handle._def);
@@ -922,7 +922,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     node._traits[traitSlot] = instance;
     bitset.add(node._bitset, traitSlot);
 
-    // resolve this node's own directive fields. prev pose seeding is owned by
+    // resolve this node's own context() fields. prev pose seeding is owned by
     // `setInterpolation(node, true)`, callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
@@ -1960,7 +1960,7 @@ function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number):
 }
 
 /**
- * Seed the directive-declared fields a trait brings with it, for the node that
+ * Seed the `context()` fields a trait brings with it, for the node that
  * just gained it. Ancestry above the node is unchanged, so only this node needs
  * resolving — descendants are handled by `resolveChildren`.
  */

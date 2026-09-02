@@ -265,7 +265,7 @@ apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
 `getWorldMatrix`.
 
 ```ts
-/** get world-space position, decomposing from worldMatrix if needed. */
+/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
 export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
@@ -378,44 +378,6 @@ them for the wire, with explicit sizes since bytes matter:
 
 `sync`'s rate and authority (which side may write a field) get a fuller treatment
 under [replication and authority](#replication-and-authority).
-
-#### Resolved fields
-
-`my(condition)` is a *directive*: a body value the engine acts on rather than
-copies. It declares that a field holds a trait found by walking up from this
-node, re-resolved on every attach, reparent, and detach so it can never go
-stale. The condition is a hierarchy term from [queries](#queries), `Up` or
-`Ancestor`.
-
-```ts
-const VehicleTrait = trait('vehicle', { fuel: 100, speed: 0 });
-
-// riders are reparented into a seat under the vehicle when they board.
-const RiderTrait = trait('rider', {
-    // the vehicle this node is riding, or null when on foot. re-resolved on
-    // every board and exit, so any call site can just read it.
-    vehicle: my(Up(VehicleTrait)),
-});
-type RiderTrait = TraitType<typeof RiderTrait>;
-
-// called from input handling, UI, a physics callback: nowhere to iterate.
-export function canRefuel(rider: RiderTrait): boolean {
-    return rider.vehicle !== null && rider.vehicle.fuel < 100;
-}
-```
-
-**Prefer a query wherever you can.** `query(ctx, [RiderTrait, Up(VehicleTrait)])`
-says the same thing without `RiderTrait` having to know vehicles exist, and it
-stays the consumer's business rather than being baked into the trait. Reach for
-`my` only when reads come from arbitrary call sites with no tick to iterate on,
-as above. `TransformTrait._parent` is the builtin case: world matrices are
-composed on demand, so the pointer has to already be there.
-
-The field is `T | null`, read-only, and rejected as an `addTrait` prop, since
-anything you assigned would be overwritten the next time the tree moved. Don't
-`control()` or `sync()` it either; it is derived. `my` also takes
-`{ onResolve }`, called with the node and the new and old values whenever the
-field is re-resolved, for traits that need to invalidate something downstream.
 
 ### Scripts and lifecycle
 

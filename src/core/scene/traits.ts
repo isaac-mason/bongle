@@ -39,19 +39,6 @@ export type TraitOptions = {
 /** factory marker: a value-producing function called once per instance. */
 type Factory<T> = () => T;
 
-/**
- * The third kind of trait-body value, beside a literal and a factory: a
- * *directive*, an instruction to `trait()` rather than a default. `my()`
- * returns one. The engine initialises the field (to `null`) and registers
- * whatever the directive declares; the author never assigns it.
- *
- * Branded with a registry symbol rather than `Symbol()` so the check survives
- * an HMR re-evaluation that mints a fresh module scope — a plain unique symbol
- * would silently stop matching markers built by a module copy that didn't
- * re-run, and the field would quietly go unmaintained.
- */
-export const $directive: unique symbol = Symbol.for('bongle.directive');
-
 /** sentinel slot marking `Self`; swapped for the owning trait's slot at registration. */
 export const SELF_SLOT = -1;
 
@@ -63,8 +50,8 @@ declare const SELF_MARKER: unique symbol;
  * substitutes the real type:
  *
  * ```ts
- * export const TransformTrait = trait('transform', { _parent: my(Ancestor(Self)) });
- * // instance type: { _parent: TransformTrait | null }
+ * const T = trait('transform', { _parent: null as any });
+ * context(T, '_parent', { condition: Ancestor(Self) }); // resolves Self to T
  * ```
  *
  * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
@@ -73,10 +60,10 @@ declare const SELF_MARKER: unique symbol;
 export type Self = TraitBase & { readonly [SELF_MARKER]: true };
 
 /**
- * Stand-in handle for "the trait being defined", so a body can reference itself
- * in a directive: `parent: my(Ancestor(Self))`. Resolved to the enclosing
- * trait's slot when `trait()` registers the directive; it is never a real trait
- * and must not reach `addTrait` or a query.
+ * Stand-in handle for "the trait being defined", so a declaration can reference itself:
+ * `context(TransformTrait, '_parent', { condition: Ancestor(Self) })`. Resolved to the
+ * enclosing trait's slot at registration; it is never a real trait and must not reach
+ * `addTrait` or a query.
  */
 export const Self = { _id: 'bongle.self', _slot: SELF_SLOT } as unknown as TraitHandle<Self>;
 
@@ -279,7 +266,7 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** nearest-trait resolutions declared in this trait's body (`my()`), in order.
+    /** nearest-trait resolutions declared for this trait with `context()`, in order.
      *  Owned by the def so an HMR re-eval that drops a declaration drops the
      *  resolution with it, the same way controls and syncs are handled. */
     resolutions: ResolutionDef[];
@@ -412,13 +399,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
     return handle;
 }
 
-/**
- * Body with directives reduced to what they declare. A directive holds the
- * condition's trait *handle*, and a handle points back at its def which points
- * back at the handle — hashing that walks a cycle, and hashes unrelated def
- * internals besides. What actually matters for change detection is the target
- * trait, the source kind, and the hook's text.
- */
+/** the body IS the hashable shape now that it holds only literals, factories and arrays. */
 function hashableBody(body: TraitBody): Record<string, unknown> {
     return body as Record<string, unknown>;
 }

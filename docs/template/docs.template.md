@@ -283,29 +283,6 @@ them for the wire, with explicit sizes since bytes matter:
 `sync`'s rate and authority (which side may write a field) get a fuller treatment
 under [replication and authority](#replication-and-authority).
 
-#### Resolved fields
-
-`my(condition)` is a *directive*: a body value the engine acts on rather than
-copies. It declares that a field holds a trait found by walking up from this
-node, re-resolved on every attach, reparent, and detach so it can never go
-stale. The condition is a hierarchy term from [queries](#queries), `Up` or
-`Ancestor`.
-
-<Snippet source="define-trait.snippet.ts" select="my" />
-
-**Prefer a query wherever you can.** `query(ctx, [RiderTrait, Up(VehicleTrait)])`
-says the same thing without `RiderTrait` having to know vehicles exist, and it
-stays the consumer's business rather than being baked into the trait. Reach for
-`my` only when reads come from arbitrary call sites with no tick to iterate on,
-as above. `TransformTrait._parent` is the builtin case: world matrices are
-composed on demand, so the pointer has to already be there.
-
-The field is `T | null`, read-only, and rejected as an `addTrait` prop, since
-anything you assigned would be overwritten the next time the tree moved. Don't
-`control()` or `sync()` it either; it is derived. `my` also takes
-`{ onResolve }`, called with the node and the new and old values whenever the
-field is re-resolved, for traits that need to invalidate something downstream.
-
 ### Scripts and lifecycle
 
 `script(Trait, id, factory, opts?)` attaches behaviour. The factory runs once per

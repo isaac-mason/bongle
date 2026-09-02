@@ -1,10 +1,10 @@
 // nearest-trait resolutions: "which trait at or above me answers this, and
 // keep it current".
 //
-// A resolution is declared in a trait body with `my()`, the way `control()` and
-// `sync()` annotate a trait, and the scene tree maintains it: re-resolved
-// whenever the tree changes shape or the target trait is added or removed, so
-// the field can never hold a stale pointer. `TransformTrait._parent` is one.
+// A resolution is declared with `context()`, the way `control()` and `sync()` annotate a
+// trait, and the scene tree maintains it: re-resolved whenever the tree changes shape or
+// the target trait is added or removed, so the field can never hold a stale pointer.
+// `TransformTrait._parent` is the builtin case. The trait body stays plain data.
 //
 // The same `Resolution` shape also backs a query's `Up` / `Ancestor` terms,
 // whose `apply` writes a match tuple instead of a field. One mechanism, two
@@ -14,11 +14,8 @@
 // unlike a query term which is reaped with its query. Prefer a query term when
 // the relationship belongs to the consumer rather than to the trait:
 // `MeshTrait` shouldn't import `ModelTrait` to say that meshes are lit in
-// groups. Prefer `my()` when the reader pulls from arbitrary call sites rather
+// groups. Prefer `context()` when the reader pulls from arbitrary call sites rather
 // than iterating — which is why transform uses it and the renderers don't.
-//
-// Leaf module: imports nothing that imports it back, so a trait body can
-// declare a resolution at module scope without a module-init cycle.
 
 import { fileResolution, registry } from '../registry';
 import { type Condition, type Oper, Src } from './conditions';

@@ -144,20 +144,13 @@ export const TransformTrait = trait('transform', {
     /** last seen teleport counter for snap detection */
     lastTeleport: 0,
 
-    // the nearest TransformTrait strictly above this node, or null. A directive
-    // rather than a default: the scene tree resolves it and keeps it correct
-    // through every reparent and trait add/remove, and nothing assigns it by
-    // hand. `Self` names the trait being defined, which a body otherwise can't
-    // do, and `TraitInstance` substitutes it so readers get
-    // `TransformTrait | null` with no cast.
     /** the transforms directly below this one, passthrough nodes already skipped.
      *  Maintained alongside `_parent`, off the same resolve. */
     _children: [] as TransformSubtree[],
 
     /** nearest transform-bearing ancestor, maintained by the `context()` below. Typed as
      *  `any` here and narrowed on the exported `TransformTrait` type: naming the trait from
-     *  inside its own body is circular, which is the one thing the old in-body directive's
-     *  phantom type did for free. */
+     *  inside its own body is circular. */
     _parent: null as any,
 
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.

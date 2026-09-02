@@ -735,7 +735,7 @@ export type Registry = {
     blockRegistry: Blocks;
     /** slot → trait def for O(1) runtime lookup. rebuilt by `reindexRegistry()`. */
     slotToTrait: Array<TraitDef | undefined>;
-    /** derived: every declared `my()` resolution, bucketed by the trait slot it resolves.
+    /** derived: every `context()` resolution, bucketed by the trait slot it resolves.
      *  One bucket is one walk — everything a descent decides (what the subtree inherits,
      *  where to prune) depends on that slot alone. Built here with the other derived trait
      *  tables rather than cached behind a revision check, and reachable without a scene

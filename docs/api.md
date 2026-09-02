@@ -24,6 +24,10 @@ export type Node = {
     /** ordered list of child nodes */
     children: Node[];
 
+    /** @internal position in `parent.children`. A hint, not a guarantee — read it through
+     *  `childIndexOf`, which re-derives and repairs when it doesn't match. */
+    _childIndex: number;
+
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
 
@@ -57,8 +61,8 @@ export type Node = {
      */
     realm: Realm;
 
-    /** @internal trait data stored directly on the node, keyed by trait slot */
-    _traits: Map<number, TraitBase>;
+    /** @internal trait instances indexed by trait slot; holes for slots the node doesn't carry. */
+    _traits: Array<TraitBase | undefined>;
 
     /** @internal node-level replication version (send-path early-out gate). */
     _sync: NodeSyncState;
@@ -73,7 +77,7 @@ export type Node = {
      * hot-reload's serialize→deserialize cycle naturally reconciles these
      * when the def becomes available again.
      */
-    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }>;
+    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
 
     /**
      * @internal validation issues per trait (keyed by trait slot). populated
@@ -81,7 +85,7 @@ export type Node = {
      * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
      * empty entries are cleaned up.
      */
-    _traitIssues: Map<number, ValidationIssue[]>;
+    _traitIssues: Map<number, ValidationIssue[]> | null;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -385,34 +389,34 @@ export const TRANSFORM_DIRTY_WORLD_CHUNK;
 export const TRANSFORM_DIRTY_ALL;
 ```
 
+#### `TransformSubtree`
+
+```ts
+/** the slice of a transform its descendant walks touch; `_children` is self-referential
+ *  so the trait body can name it before `TransformTrait` itself exists. */
+export type TransformSubtree = {
+    _dirty: number;
+    _version: number;
+    _interpolated: 0 | 1;
+    _children: TransformSubtree[];
+    interpolatedWorldPosition: Vec3 | null;
+    interpolatedWorldQuaternion: Quat | null;
+    interpolatedWorldScale: Vec3 | null;
+    interpolatedWorldMatrix: Mat4 | null;
+};
+```
+
+#### `ensureInterpolatedPose`
+
+```ts
+/** allocate the visual pose. Every path that sets `_interpolated = 1` calls this, which is what
+ *  lets the readers behind that flag treat the four fields as present. */
+export function ensureInterpolatedPose(transform: TransformSubtree): void;
+```
+
 #### `TransformTrait`
 
 ```ts
-/**
- * spatial transform for a node. persisted to scene files, replicated
- * over the network.
- *
- * position/quaternion/scale are **local-space** (relative to parent).
- * they are what the user edits in the inspector, what gets persisted,
- * and what gets synced over the network. write via setPosition/
- * setQuaternion/setScale to trigger dirty-flag propagation.
- *
- * external writes (net sync, scene unpack, editor inspector) bypass the
- * setters and instead route through control.set / sync.unpack callbacks,
- * copy in-place, then markDirty. keeps the Vec3/Quat reference stable
- * for code that caches it.
- *
- * world-space values (worldPosition, worldQuaternion, worldScale,
- * worldMatrix) are computed lazily, read via getWorldPosition/
- * getWorldMatrix/etc which recompute on demand if dirty.
- *
- * visual values (interpolatedWorldPosition, interpolatedWorldQuaternion,
- * interpolatedWorldScale, interpolatedWorldMatrix) are world-space, computed
- * lazily for rendering. they parallel the world chain but compose
- * from `parent.interpolatedWorldMatrix` instead of `parent.worldMatrix`,
- * so interpolation writes upstream automatically flow down through
- * descendants. renderers read via getVisualWorld*, see below.
- */
 export const TransformTrait;
 ```
 
@@ -492,6 +496,13 @@ export function markTransformDirty(transform: TransformTrait): void;
  * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
  */
 export function markWorldDirty(transform: TransformTrait): void;
+```
+
+#### `releaseTransform`
+
+```ts
+/** drop a transform that is leaving the tree, so nothing keeps walking or ticking it. */
+export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void;
 ```
 
 #### `markAncestryChanged`
@@ -588,7 +599,7 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
  * descendant counts under Interp roots are small (player rigs, attached
  * props), the unconditional walk is fine.
  */
-export function markInterpolatedDescendantsDirty(node: Node): void;
+export function markInterpolatedDescendantsDirty(transform: TransformSubtree): void;
 ```
 
 #### `setInterpolation`
@@ -661,7 +672,7 @@ export function setTransform(transform: TransformTrait, position: Vec3, quaterni
 #### `getWorldPosition`
 
 ```ts
-/** get world-space position, decomposing from worldMatrix if needed. */
+/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
 export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
@@ -709,7 +720,7 @@ export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
 #### `getVisualWorldPosition`
 
 ```ts
-/** get visual world-space position, lazy-decomposing if deferred. */
+/** visual world-space position, read from the matrix translation. */
 export function getVisualWorldPosition(transform: TransformTrait): Vec3;
 ```
 
@@ -847,7 +858,7 @@ export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
 #### `getVisualWorldPosition`
 
 ```ts
-/** get visual world-space position, lazy-decomposing if deferred. */
+/** visual world-space position, read from the matrix translation. */
 export function getVisualWorldPosition(transform: TransformTrait): Vec3;
 ```
 
@@ -875,7 +886,7 @@ export function getWorldMatrix(transform: TransformTrait): Mat4;
 #### `getWorldPosition`
 
 ```ts
-/** get world-space position, decomposing from worldMatrix if needed. */
+/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
 export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
@@ -992,35 +1003,33 @@ export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Q
 
 Define traits and the schemas behind editor controls (`prop`) and network packing (`pack`).
 
-#### `my`
+#### `context`
 
 ```ts
 /**
- * Declare that this field holds the trait resolved by `source`, and have the
- * scene tree keep it correct. Used as a trait-body value — a *directive*, not
- * a default:
+ * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
+ * keep it correct as the hierarchy changes. The trait's own annotation, alongside
+ * `control()` and `sync()` — the body stays plain data.
  *
  * ```ts
- * export const TransformTrait = trait('transform', {
- *     position: () => vec3.create(),
- *     parent: my(Ancestor(Self), { onResolve: (node) => markAncestryChanged(node) }),
+ * context(TransformTrait, '_parent', {
+ *     condition: Ancestor(Self),
+ *     change: (t, next, prev) => { ... },
  * });
  * ```
  *
- * The field is always `T | null` — a resolution has no membership to gate, so there
- * is no required/optional distinction and `Optional(...)` is not accepted. It
- * is derived, so it is excluded from `addTrait` props and must never also be
- * `control()`ed or `sync()`ed; persisting or replicating it would fight the
- * maintainer.
+ * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
+ * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
+ * "nearest trait above me" wherever it appears.
  *
- * `onResolve` fires whenever the resolution ran for that node, changed or
- * not — which is what `TransformTrait` needs, since a re-point invalidates the
- * subtree's world matrices either way. The old and new values are passed so a
- * consumer that only cares about actual changes can compare them itself.
+ * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
+ * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
+ * job, walking the maintained child lists (see the transform tests that pin this).
  */
-export function my<T extends TraitHandle>(source: Condition<T, Oper.And, Src.Up | Src.Ancestor>, opts?: {
-    onResolve?(node: Node, next: TraitBase | null, prev: TraitBase | null): void;
-}): Directive<TraitType<T> | null>;
+export function context<T extends TraitBase, R extends TraitHandle>(handle: TraitHandle<T>, id: string, body: {
+    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
+    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
+}): void;
 ```
 
 #### `dirty`
@@ -1056,19 +1065,6 @@ export const rate: {
 ```ts
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
-```
-
-#### `Directive`
-
-```ts
-export type Directive<T> = {
-    readonly [$directive]: 'resolution';
-    /** phantom, carries the resolved field type. not present at runtime. */
-    readonly __type: T;
-    /** the hierarchy condition this field resolves. */
-    readonly source: unknown;
-    readonly opts?: unknown;
-};
 ```
 
 #### `DirtyConfig`
@@ -1178,7 +1174,7 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** nearest-trait resolutions declared in this trait's body (`my()`), in order.
+    /** nearest-trait resolutions declared for this trait with `context()`, in order.
      *  Owned by the def so an HMR re-eval that drops a declaration drops the
      *  resolution with it, the same way controls and syncs are handled. */
     resolutions: ResolutionDef[];
@@ -1194,6 +1190,18 @@ export type TraitDef = {
     scripts: ScriptDef[];
     /** lookup by script id (user-supplied, within this trait). */
     scriptsById: Map<string, { reg: ScriptDef; index: number }>;
+
+    /** compiled instance constructor, built with the def. Lives here rather than in a side map so an
+     *  HMR re-eval, which mints a fresh def, gets a fresh one for free. */
+    construct: () => TraitBase;
+
+    /** this trait's sort-by-id position in the protocol table, stamped by `reindexRegistry`
+     *  whenever that table is rebuilt. `undefined` until the first reindex. */
+    netIndex: number | undefined;
+
+    /** @internal packcat codecs, built on first use. See `packcat-bridge`. */
+    _syncCodecs?: SyncCodec[] | null;
+    _controlCodecs?: ControlCodec[] | null;
     /**
      * canonical handle for this def. populated by `trait()` immediately
      * after the def is constructed, so any registry lookup yields the
@@ -1294,8 +1302,8 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
  * substitutes the real type:
  *
  * ```ts
- * export const TransformTrait = trait('transform', { _parent: my(Ancestor(Self)) });
- * // instance type: { _parent: TransformTrait | null }
+ * const T = trait('transform', { _parent: null as any });
+ * context(T, '_parent', { condition: Ancestor(Self) }); // resolves Self to T
  * ```
  *
  * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
@@ -7956,7 +7964,7 @@ export function createTouchButton(ctx: ScriptContext, opts: CreateTouchButtonOpt
 } | null;
 ```
 
-Also exported: `CreateTouchJoystickOpts`, `CreateTouchButtonOpts`.
+Also exported: `CreateTouchButtonOpts`, `CreateTouchJoystickOpts`.
 #### `setPointerLock`
 
 ```ts
