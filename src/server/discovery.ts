@@ -69,49 +69,60 @@ export function runDiffDetection(sceneTree: SceneTree): void {
 }
 
 function diffNode(sceneTree: SceneTree, node: Node): void {
+    // walk the bitset's set bits, not `_traits` end to end: `_traits` is indexed by
+    // GLOBAL trait slot, so its length is the highest slot on this node and a node
+    // carrying one game trait registered after the engine builtins walks hundreds of
+    // holes to find it. Same extraction `collectQueries` uses.
     const nodeTraits = node._traits;
-    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
-        const instance = nodeTraits[traitSlot];
-        if (instance === undefined) continue;
+    const bits = node._bitset;
+    for (let w = 0; w < bits.length; w++) {
+        let word = bits[w]!;
+        while (word !== 0) {
+            const lowest = word & -word;
+            word ^= lowest;
+            const traitSlot = w * 32 + (31 - Math.clz32(lowest));
+            const instance = nodeTraits[traitSlot];
+            if (instance === undefined) continue;
 
-        // the instance carries its own def; no `registry.slotToTrait` hop needed.
-        const def = instance._def;
-        const codecs = getSyncCodecs(def);
-        if (!codecs) continue;
+            // the instance carries its own def; no `registry.slotToTrait` hop needed.
+            const def = instance._def;
+            const codecs = getSyncCodecs(def);
+            if (!codecs) continue;
 
-        const sync = instance._sync;
-        if (!sync) continue;
+            const sync = instance._sync;
+            if (!sync) continue;
 
-        for (let i = 0; i < codecs.length; i++) {
-            const codec = codecs[i];
+            for (let i = 0; i < codecs.length; i++) {
+                const codec = codecs[i];
 
-            // dirty fast path: read+clear sync-dirty bits before byte-diffing.
-            const word = i >> 5;
-            const bit = 1 << (i & 31);
-            if ((sync.dirty[word] & bit) !== 0) {
-                sync.dirty[word] &= ~bit;
-                // only 'explicit' slices emit purely on the dirty bit — that's their
-                // contract (SyncHandle.dirty() is the sole change signal). 'diff'
-                // and threshold slices consume the bit but still verify below, because
-                // setPosition / physics set the bit unconditionally every tick (even
-                // when the packed value is byte-identical), so trusting it here would
-                // re-emit a resting entity at the tick rate.
-                if (def.sync[i].dirty === 'explicit') {
-                    writeSnapshot(codec, instance, node, i, sync);
-                    bumpFieldVersion(sceneTree, node, instance, i);
-                    continue;
+                // dirty fast path: read+clear sync-dirty bits before byte-diffing.
+                const word = i >> 5;
+                const bit = 1 << (i & 31);
+                if ((sync.dirty[word] & bit) !== 0) {
+                    sync.dirty[word] &= ~bit;
+                    // only 'explicit' slices emit purely on the dirty bit — that's their
+                    // contract (SyncHandle.dirty() is the sole change signal). 'diff'
+                    // and threshold slices consume the bit but still verify below, because
+                    // setPosition / physics set the bit unconditionally every tick (even
+                    // when the packed value is byte-identical), so trusting it here would
+                    // re-emit a resting entity at the tick rate.
+                    if (def.sync[i].dirty === 'explicit') {
+                        writeSnapshot(codec, instance, node, i, sync);
+                        bumpFieldVersion(sceneTree, node, instance, i);
+                        continue;
+                    }
                 }
-            }
 
-            // 'explicit' dirtiness skips cold-path byte-diff entirely, only
-            // SyncHandle.dirty() above can flag emission.
-            if (def.sync[i].dirty === 'explicit') continue;
+                // 'explicit' dirtiness skips cold-path byte-diff entirely, only
+                // SyncHandle.dirty() above can flag emission.
+                if (def.sync[i].dirty === 'explicit') continue;
 
-            // shared cold path: byte-diff or threshold metric. the server seeds
-            // a first-seen slice silently (its initial version already covers it),
-            // so emitOnFirstSeen = false.
-            if (diffSync(codec, instance, node, i, sync, false)) {
-                bumpFieldVersion(sceneTree, node, instance, i);
+                // shared cold path: byte-diff or threshold metric. the server seeds
+                // a first-seen slice silently (its initial version already covers it),
+                // so emitOnFirstSeen = false.
+                if (diffSync(codec, instance, node, i, sync, false)) {
+                    bumpFieldVersion(sceneTree, node, instance, i);
+                }
             }
         }
     }
