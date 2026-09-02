@@ -100,12 +100,11 @@ type CharacterState = {
     modelNodes: Set<Node>;
 };
 
-import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from "../../avatar/rig";
 import type { Quat, Vec3 } from 'math';
 import { degreesToRadians, quat, vec3 } from 'math';
+import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from '../../avatar/rig';
 import { Animation } from '../api/animation';
 import { playAt, playMono } from '../api/audio';
-import { env } from '../env';
 import { ensureModel, getModel } from '../api/models';
 import { spawnParticle } from '../api/particles';
 import {
@@ -123,7 +122,7 @@ import {
 import { isOwner, onDispose, onFrame, onInit, query, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { dirty, sync, type TraitType, trait } from '../api/traits';
-import { getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
+import { getVisualWorldQuaternion, getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
@@ -132,6 +131,7 @@ import type { TraitProps } from '../core/scene/scene-tree';
 import type { ScriptContext } from '../core/scene/scripts';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
 import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
+import { env } from '../env';
 import { AnimatorTrait } from './animator';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
@@ -585,13 +585,10 @@ function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, t
     const headTransform = getTrait(headBone, TransformTrait);
     if (!headTransform) return;
 
-    // read yaw from the interpolated world quaternion, not the simulation
-    // local. the head bone's parent chain renders against the playerNode's
-    // visual (alpha-sampled) yaw, composing the head local against the
-    // sim yaw would leave a `(visual - sim)` residual that wobbles by up
-    // to one tick of body yaw between fixed ticks. playerNode is top-level
-    // and its yaw is pure-Y, so interpolatedWorldQuaternion is also pure-Y.
-    const bodyYaw = bodyYawFromQuat(transform.interpolatedWorldQuaternion);
+    // visual yaw, not sim: the head bone renders against the playerNode's
+    // alpha-sampled yaw, and composing against the sim yaw leaves a residual
+    // that wobbles by up to one tick of body yaw between fixed ticks.
+    const bodyYaw = bodyYawFromQuat(getVisualWorldQuaternion(transform));
     const headYaw = wrapPi(cc.input.look[1] - bodyYaw);
     let pitch = cc.input.look[2] - Math.PI / 2 - cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD;
     if (pitch < -HEAD_PITCH_LIMIT_RAD) pitch = -HEAD_PITCH_LIMIT_RAD;
