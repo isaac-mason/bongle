@@ -84,46 +84,50 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
             const instance = nodeTraits[traitSlot];
             if (instance === undefined) continue;
 
-            // the instance carries its own def; no `registry.slotToTrait` hop needed.
-            const def = instance._def;
-            const codecs = getSyncCodecs(def);
-            if (!codecs) continue;
+            diffInstance(sceneTree, node, instance);
+        }
+    }
+}
 
-            const sync = instance._sync;
-            if (!sync) continue;
+function diffInstance(sceneTree: SceneTree, node: Node, instance: TraitBase): void {
+    // the instance carries its own def; no `registry.slotToTrait` hop needed.
+    const def = instance._def;
+    const codecs = getSyncCodecs(def);
+    if (!codecs) return;
 
-            for (let i = 0; i < codecs.length; i++) {
-                const codec = codecs[i];
+    const sync = instance._sync;
+    if (!sync) return;
 
-                // dirty fast path: read+clear sync-dirty bits before byte-diffing.
-                const word = i >> 5;
-                const bit = 1 << (i & 31);
-                if ((sync.dirty[word] & bit) !== 0) {
-                    sync.dirty[word] &= ~bit;
-                    // only 'explicit' slices emit purely on the dirty bit — that's their
-                    // contract (SyncHandle.dirty() is the sole change signal). 'diff'
-                    // and threshold slices consume the bit but still verify below, because
-                    // setPosition / physics set the bit unconditionally every tick (even
-                    // when the packed value is byte-identical), so trusting it here would
-                    // re-emit a resting entity at the tick rate.
-                    if (def.sync[i].dirty === 'explicit') {
-                        writeSnapshot(codec, instance, node, i, sync);
-                        bumpFieldVersion(sceneTree, node, instance, i);
-                        continue;
-                    }
-                }
+    for (let i = 0; i < codecs.length; i++) {
+        const codec = codecs[i];
 
-                // 'explicit' dirtiness skips cold-path byte-diff entirely, only
-                // SyncHandle.dirty() above can flag emission.
-                if (def.sync[i].dirty === 'explicit') continue;
-
-                // shared cold path: byte-diff or threshold metric. the server seeds
-                // a first-seen slice silently (its initial version already covers it),
-                // so emitOnFirstSeen = false.
-                if (diffSync(codec, instance, node, i, sync, false)) {
-                    bumpFieldVersion(sceneTree, node, instance, i);
-                }
+        // dirty fast path: read+clear sync-dirty bits before byte-diffing.
+        const word = i >> 5;
+        const bit = 1 << (i & 31);
+        if ((sync.dirty[word] & bit) !== 0) {
+            sync.dirty[word] &= ~bit;
+            // only 'explicit' slices emit purely on the dirty bit — that's their
+            // contract (SyncHandle.dirty() is the sole change signal). 'diff'
+            // and threshold slices consume the bit but still verify below, because
+            // setPosition / physics set the bit unconditionally every tick (even
+            // when the packed value is byte-identical), so trusting it here would
+            // re-emit a resting entity at the tick rate.
+            if (def.sync[i].dirty === 'explicit') {
+                writeSnapshot(codec, instance, node, i, sync);
+                bumpFieldVersion(sceneTree, node, instance, i);
+                continue;
             }
+        }
+
+        // 'explicit' dirtiness skips cold-path byte-diff entirely, only
+        // SyncHandle.dirty() above can flag emission.
+        if (def.sync[i].dirty === 'explicit') continue;
+
+        // shared cold path: byte-diff or threshold metric. the server seeds
+        // a first-seen slice silently (its initial version already covers it),
+        // so emitOnFirstSeen = false.
+        if (diffSync(codec, instance, node, i, sync, false)) {
+            bumpFieldVersion(sceneTree, node, instance, i);
         }
     }
 }
