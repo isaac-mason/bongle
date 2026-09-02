@@ -10,7 +10,7 @@ import {
 import type { Client } from 'bongle/interface';
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import type { Quat, Spherical, Vec3 } from 'math';
-import { quat, spherical, vec3 } from 'math';
+import { spherical, vec3 } from 'math';
 import * as chat from '../api/chat';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import * as ClientChat from '../client/chat';
@@ -1207,8 +1207,6 @@ script(
                     _seedBodyPos[2] = _snapPos[2];
                     setWorldPosition(transform, _seedBodyPos);
                     resetInterpolation(node);
-                    vec3.copy(transform.interpolatedWorldPosition, transform.position);
-                    quat.copy(transform.interpolatedWorldQuaternion, transform.quaternion);
                     transform.teleport++;
 
                     // seed look from the snapshot orientation so the player

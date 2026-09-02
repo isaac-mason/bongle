@@ -1266,11 +1266,11 @@ describe('interpolate', () => {
         const expected: Mat4 = mat4.create();
         mat4.fromRotationTranslationScale(
             expected,
-            t.interpolatedWorldQuaternion,
-            t.interpolatedWorldPosition,
-            t.interpolatedWorldScale,
+            t.interpolatedWorldQuaternion!,
+            t.interpolatedWorldPosition!,
+            t.interpolatedWorldScale!,
         );
-        expectMat4Near(t.interpolatedWorldMatrix, expected);
+        expectMat4Near(t.interpolatedWorldMatrix!, expected);
     });
 
     it('child of interpolated ancestor composes visual chain against interpolated parent', () => {

@@ -32,9 +32,9 @@ import type { Physics } from '../../core/physics/physics';
 import { OBJECT_LAYER_NODE_MOVING } from '../../core/physics/physics';
 import { registry } from '../../core/registry';
 import type { Resources } from '../../core/resources';
+import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { Node, SceneTree, SerializedNode } from '../../core/scene/scene-tree';
 import { addChild, addTrait, createNode, deserializeNode, destroyNode, getNodeById, getTrait } from '../../core/scene/scene-tree';
-import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
@@ -687,7 +687,6 @@ function _setVoxelGhostModel(voxelNode: Node, voxels: Voxels): void {
 // align the standalone voxel ghost with the root pivot. the voxel model's origin
 // defaults to [size/2], so it renders centered on the node position; we offset by
 // -pivot + size/2 to sit the mesh min-corner on the commit anchor (root - pivot).
-// interpolatedWorldPosition is snapped so the ghost tracks the cursor with no lag.
 function _syncVoxelGhost(placement: PlacementState, rootTransform: TransformTrait): void {
     if (!placement.voxelNode) return;
     const vt = getTrait(placement.voxelNode, TransformTrait);
@@ -699,7 +698,6 @@ function _syncVoxelGhost(placement: PlacementState, rootTransform: TransformTrai
     _placeScratch[1] = tp[1] - py + sy * 0.5;
     _placeScratch[2] = tp[2] - pz + sz * 0.5;
     setPosition(vt, _placeScratch);
-    vec3.copy(vt.interpolatedWorldPosition, vt.position);
 }
 
 // returns the pivot world position, or null if root is missing.
@@ -799,7 +797,6 @@ export function setPlacementPivot(state: TransformToolState, preset: PivotPreset
         _placeScratch[1] = t.position[1] + (newPy - oldPy);
         _placeScratch[2] = t.position[2] + (newPz - oldPz);
         setPosition(t, _placeScratch);
-        vec3.copy(t.interpolatedWorldPosition, t.position);
     }
 
     placement.pivotPreset = preset;
@@ -855,7 +852,6 @@ export function enterPlacement(
     rootTransform.position[0] = blueprint.origin[0] + pivotOffset[0];
     rootTransform.position[1] = blueprint.origin[1] + pivotOffset[1];
     rootTransform.position[2] = blueprint.origin[2] + pivotOffset[2];
-    vec3.copy(rootTransform.interpolatedWorldPosition, rootTransform.position);
 
     // ── voxel ghost: standalone node (NOT a scene tree child of root) ──
     // we avoid parenting because the engine does not propagate parent transforms
@@ -873,7 +869,6 @@ export function enterPlacement(
         voxelTransform.position[0] = rootTransform.position[0] - px + sx * 0.5;
         voxelTransform.position[1] = rootTransform.position[1] - py + sy * 0.5;
         voxelTransform.position[2] = rootTransform.position[2] - pz + sz * 0.5;
-        vec3.copy(voxelTransform.interpolatedWorldPosition, voxelTransform.position);
 
         addTrait(voxelNode, VoxelMeshTrait);
         _setVoxelGhostModel(voxelNode, rotatedBlueprint.voxels);
@@ -1040,7 +1035,6 @@ export function updatePlacementFromRaycast(
             tt.position[0] += dx;
             tt.position[1] += dy;
             tt.position[2] += dz;
-            vec3.copy(tt.interpolatedWorldPosition, tt.position);
             markTransformDirty(tt);
         }
         return;
@@ -1150,7 +1144,6 @@ export function nudgePlacement(state: TransformToolState, dx: number, dy: number
     _placeScratch[1] = t.position[1] + dy;
     _placeScratch[2] = t.position[2] + dz;
     setPosition(t, _placeScratch);
-    vec3.copy(t.interpolatedWorldPosition, t.position);
 
     // move the voxel ghost too if present
     if (placement.voxelNode) {
@@ -1160,7 +1153,6 @@ export function nudgePlacement(state: TransformToolState, dx: number, dy: number
             _placeScratch[1] = vt.position[1] + dy;
             _placeScratch[2] = vt.position[2] + dz;
             setPosition(vt, _placeScratch);
-            vec3.copy(vt.interpolatedWorldPosition, vt.position);
         }
     }
 }
@@ -1413,7 +1405,6 @@ export function rotatePlacement(state: TransformToolState, direction: 1 | -1 = 1
             _placeScratch[1] = t.position[1] + (newPy - oldPy);
             _placeScratch[2] = t.position[2] + (newPz - oldPz);
             setPosition(t, _placeScratch);
-            vec3.copy(t.interpolatedWorldPosition, t.position);
         }
         placement.pivotOffset = newOffset;
         state.store.setState({ transformPivotOffset: [...newOffset] as Vec3 });
@@ -1633,7 +1624,6 @@ export function revertPlaceSelection(state: TransformToolState, sceneTree: Scene
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
         vec3.copy(t.position, s.position);
-        vec3.copy(t.interpolatedWorldPosition, s.position);
         markTransformDirty(t);
     }
 }
@@ -1803,8 +1793,6 @@ export function isVoxelPlacement(state: TransformToolState): boolean {
 function _initGhostInterpolation(node: Node): void {
     const t = getTrait(node, TransformTrait);
     if (t) {
-        vec3.copy(t.interpolatedWorldPosition, t.position);
-        quat.copy(t.interpolatedWorldQuaternion, t.quaternion);
     }
     for (const child of node.children) _initGhostInterpolation(child);
 }

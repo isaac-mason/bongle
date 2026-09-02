@@ -38,6 +38,7 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { RigidBodyTrait } from '../../builtins/rigid-body';
 import {
+    ensureInterpolatedPose,
     ensureRemoteInterpolation,
     getWorldMatrix,
     hasTransformedParent,
@@ -126,6 +127,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
         const node = transform._node!;
 
         transform._version++;
+        ensureInterpolatedPose(transform);
         transform._interpolated = 1;
 
         const rigidBody = getTrait(node, RigidBodyTrait);
@@ -293,14 +295,14 @@ function sampleRemotePose(t: TransformTrait, dt: number): void {
 function applyPredictionInterpolation(transform: TransformTrait): void {
     if (!hasTransformedParent(transform)) {
         applyPredictionBlend(transform, transform.position, transform.quaternion);
-        vec3.copy(transform.interpolatedWorldScale, transform.scale);
+        vec3.copy(transform.interpolatedWorldScale!, transform.scale);
     } else {
         // guarded by `hasTransformedParent` above, which the compiler can't see through
         const parent = transform._parent!;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
-            parentMat = parent.interpolatedWorldMatrix;
+            parentMat = parent.interpolatedWorldMatrix!;
         } else {
             parentMat = getWorldMatrix(parent);
         }
@@ -308,13 +310,13 @@ function applyPredictionInterpolation(transform: TransformTrait): void {
         mat4.multiply(_authWorldMat, parentMat, _interpLocalMat);
         mat4.decompose(_authWorldQuat, _authWorldPos, _authWorldScale, _authWorldMat);
         applyPredictionBlend(transform, _authWorldPos, _authWorldQuat);
-        vec3.copy(transform.interpolatedWorldScale, _authWorldScale);
+        vec3.copy(transform.interpolatedWorldScale!, _authWorldScale);
     }
     mat4.fromRotationTranslationScale(
-        transform.interpolatedWorldMatrix,
-        transform.interpolatedWorldQuaternion,
-        transform.interpolatedWorldPosition,
-        transform.interpolatedWorldScale,
+        transform.interpolatedWorldMatrix!,
+        transform.interpolatedWorldQuaternion!,
+        transform.interpolatedWorldPosition!,
+        transform.interpolatedWorldScale!,
     );
     transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
 }
@@ -329,27 +331,27 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
     if (transform._correctionFrames > 0) {
         const blendFactor = 1.0 / transform._correctionFrames;
         vec3.lerp(
-            transform.interpolatedWorldPosition,
-            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldPosition!,
+            transform.interpolatedWorldPosition!,
             transform._correctionTarget!,
             blendFactor,
         );
         quat.slerp(
-            transform.interpolatedWorldQuaternion,
-            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldQuaternion!,
+            transform.interpolatedWorldQuaternion!,
             transform._correctionTargetQuat!,
             blendFactor,
         );
         transform._correctionFrames--;
     } else {
-        const error = vec3.distance(transform.interpolatedWorldPosition, authPos);
+        const error = vec3.distance(transform.interpolatedWorldPosition!, authPos);
 
         if (error < CORRECTION_SNAP_THRESHOLD) {
-            vec3.copy(transform.interpolatedWorldPosition, authPos);
-            quat.copy(transform.interpolatedWorldQuaternion, authQuat);
+            vec3.copy(transform.interpolatedWorldPosition!, authPos);
+            quat.copy(transform.interpolatedWorldQuaternion!, authQuat);
         } else if (error >= CORRECTION_HARD_SNAP_THRESHOLD) {
-            vec3.copy(transform.interpolatedWorldPosition, authPos);
-            quat.copy(transform.interpolatedWorldQuaternion, authQuat);
+            vec3.copy(transform.interpolatedWorldPosition!, authPos);
+            quat.copy(transform.interpolatedWorldQuaternion!, authQuat);
         } else {
             const correctionTarget = (transform._correctionTarget ??= vec3.create());
             const correctionTargetQuat = (transform._correctionTargetQuat ??= quat.create());
@@ -358,10 +360,10 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
             transform._correctionFrames = CORRECTION_BLEND_FRAMES;
 
             const blendFactor = 1.0 / transform._correctionFrames;
-            vec3.lerp(transform.interpolatedWorldPosition, transform.interpolatedWorldPosition, correctionTarget, blendFactor);
+            vec3.lerp(transform.interpolatedWorldPosition!, transform.interpolatedWorldPosition!, correctionTarget, blendFactor);
             quat.slerp(
-                transform.interpolatedWorldQuaternion,
-                transform.interpolatedWorldQuaternion,
+                transform.interpolatedWorldQuaternion!,
+                transform.interpolatedWorldQuaternion!,
                 correctionTargetQuat,
                 blendFactor,
             );
@@ -377,14 +379,14 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
  */
 function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat: Quat): void {
     if (!hasTransformedParent(transform)) {
-        vec3.copy(transform.interpolatedWorldPosition, localPos);
-        quat.copy(transform.interpolatedWorldQuaternion, localQuat);
-        vec3.copy(transform.interpolatedWorldScale, transform.scale);
+        vec3.copy(transform.interpolatedWorldPosition!, localPos);
+        quat.copy(transform.interpolatedWorldQuaternion!, localQuat);
+        vec3.copy(transform.interpolatedWorldScale!, transform.scale);
         mat4.fromRotationTranslationScale(
-            transform.interpolatedWorldMatrix,
-            transform.interpolatedWorldQuaternion,
-            transform.interpolatedWorldPosition,
-            transform.interpolatedWorldScale,
+            transform.interpolatedWorldMatrix!,
+            transform.interpolatedWorldQuaternion!,
+            transform.interpolatedWorldPosition!,
+            transform.interpolatedWorldScale!,
         );
         transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
     } else {
@@ -393,12 +395,12 @@ function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat:
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
-            parentMat = parent.interpolatedWorldMatrix;
+            parentMat = parent.interpolatedWorldMatrix!;
         } else {
             parentMat = getWorldMatrix(parent);
         }
         mat4.fromRotationTranslationScale(_interpLocalMat, localQuat, localPos, transform.scale);
-        mat4.multiply(transform.interpolatedWorldMatrix, parentMat, _interpLocalMat);
+        mat4.multiply(transform.interpolatedWorldMatrix!, parentMat, _interpLocalMat);
         transform._dirty = (transform._dirty | TRANSFORM_DIRTY_INTERPOLATED_TRS) & ~TRANSFORM_DIRTY_INTERPOLATED_MATRIX;
     }
 }

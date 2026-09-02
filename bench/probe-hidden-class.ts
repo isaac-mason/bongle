@@ -6,6 +6,7 @@ import { addChild, addTrait, createNode, createSceneTree } from '../src/core/sce
 
 // %HaveSameMap can't be written in TS source; build it at runtime under --allow-natives-syntax.
 const haveSameMap = new Function('a', 'b', 'return %HaveSameMap(a, b);') as (a: object, b: object) => boolean;
+const hasFastProperties = new Function('a', 'return %HasFastProperties(a);') as (a: object) => boolean;
 
 const sceneTree = createSceneTree();
 
@@ -22,6 +23,9 @@ setInterpolation(enrolled._node, true);
 const chunked = spawn('chunked');
 getWorldChunk(chunked);
 
+console.log('fast properties? transform ', hasFastProperties(pristine));
+console.log('fast properties? node      ', hasFastProperties(pristine._node));
+console.log('fast properties? _sync     ', hasFastProperties(pristine._sync!));
 console.log('pristine vs pristine  ', haveSameMap(pristine, alsoPristine));
 console.log('pristine vs enrolled  ', haveSameMap(pristine, enrolled));
 console.log('pristine vs chunked   ', haveSameMap(pristine, chunked));
