@@ -62,6 +62,21 @@ export function containsNone(bitset: Bitset, mask: Bitset): boolean {
     return true;
 }
 
+/**
+ * drop trailing all-zero words. `containsAll` iterates the MASK's length, so trimming a
+ * query's mask once at registration takes the per-candidate-query check on every node from
+ * `init`'s 4 words down to however many the query actually spans. Safe for `containsNone`
+ * too, which already only reads `min(bitset, mask)` words.
+ */
+export function trim(bitset: Bitset): Bitset {
+    let end = bitset.length;
+    while (end > 1 && bitset[end - 1] === 0) end--;
+    if (end === bitset.length) return bitset;
+    const out: Bitset = [];
+    for (let i = 0; i < end; i++) out.push(bitset[i]!);
+    return out;
+}
+
 export function copy(bitset: Bitset): Bitset {
     return bitset.slice();
 }

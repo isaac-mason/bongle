@@ -2126,7 +2126,13 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         tupleIndex++;
     }
 
-    return { parsedConditions, withBitset, withoutBitset, withTraits, traversals };
+    return {
+        parsedConditions,
+        withBitset: bitset.trim(withBitset),
+        withoutBitset: bitset.trim(withoutBitset),
+        withTraits,
+        traversals,
+    };
 }
 
 export function query<const Args extends ConditionArgs[]>(
