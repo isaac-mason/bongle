@@ -113,7 +113,7 @@ export const TransformTrait = trait('transform', {
 
     // integer chunk coord of worldPosition (cx,cy,cz), lazily recomputed by
     // getWorldChunk. holds small ints, exactly representable in f32.
-    worldChunk: vec3.create(),
+    worldChunk: null as Vec3 | null,
 
     // ── visual world-space (runtime-only, lazy recompute) ─────────────
     // parallel chain to worldMatrix used by all rendering consumers.
@@ -179,8 +179,8 @@ export const TransformTrait = trait('transform', {
      *  `snapshot()` drain. only meaningful for owner-driven (fixed-step)
      *  transforms; remote-driven transforms chase the latest received pose
      *  (`_remoteInterp`) and don't read these fields. */
-    prevPosition: vec3.create(),
-    prevQuaternion: quat.create(),
+    prevPosition: null as Vec3 | null,
+    prevQuaternion: null as Quat | null,
 
     /** remote chase-latest translator (client-only). null until the first remote
      *  pose lands, so owner/local/static nodes pay nothing. holds the eased render
@@ -191,8 +191,8 @@ export const TransformTrait = trait('transform', {
     // ── prediction-correction blend state (predicted physics bodies) ──
     /** frames remaining in an active correction blend; 0 when idle */
     _correctionFrames: 0,
-    _correctionTarget: vec3.create(),
-    _correctionTargetQuat: quat.create(),
+    _correctionTarget: null as Vec3 | null,
+    _correctionTargetQuat: null as Quat | null,
 
     /** monotonic counter bumped on world-changing transitions */
     _version: 0,
@@ -903,8 +903,8 @@ export function setInterpolation(node: Node, on: boolean): void {
     if (on) {
         if (transform.interpolate) return;
         transform.interpolate = 1;
-        vec3.copy(transform.prevPosition, transform.position);
-        quat.copy(transform.prevQuaternion, transform.quaternion);
+        transform.prevPosition = vec3.clone(transform.position);
+        transform.prevQuaternion = quat.clone(transform.quaternion);
         // force the first interpolate() frame down the teleport branch so
         // it snaps `interpolatedWorld*` to the current pose instead of
         // chase-lerping from (0,0,0). matches godot's
@@ -931,8 +931,8 @@ export function setInterpolation(node: Node, on: boolean): void {
 export function resetInterpolation(node: Node): void {
     const transform = getTrait(node, TransformTrait);
     if (!transform?.interpolate) return;
-    vec3.copy(transform.prevPosition, transform.position);
-    quat.copy(transform.prevQuaternion, transform.quaternion);
+    vec3.copy(transform.prevPosition!, transform.position);
+    quat.copy(transform.prevQuaternion!, transform.quaternion);
     // also force a teleport-edge snap on next interpolate() so the chase
     // path (if this transform is non-owner) re-seats interpolatedWorld*
     // instead of smearing across the discontinuity.
@@ -1012,14 +1012,19 @@ export function getWorldPosition(transform: TransformTrait): Vec3 {
  * at all. the returned Vec3 is the cached instance, do not mutate.
  */
 export function getWorldChunk(transform: TransformTrait): Vec3 {
+    let worldChunk = transform.worldChunk;
+    if (worldChunk === null) {
+        worldChunk = vec3.create();
+        transform.worldChunk = worldChunk;
+    }
     if (transform._dirty & TRANSFORM_DIRTY_WORLD_CHUNK) {
         const p = getWorldPosition(transform);
-        transform.worldChunk[0] = toChunkCoord(Math.floor(p[0]));
-        transform.worldChunk[1] = toChunkCoord(Math.floor(p[1]));
-        transform.worldChunk[2] = toChunkCoord(Math.floor(p[2]));
+        worldChunk[0] = toChunkCoord(Math.floor(p[0]));
+        worldChunk[1] = toChunkCoord(Math.floor(p[1]));
+        worldChunk[2] = toChunkCoord(Math.floor(p[2]));
         transform._dirty &= ~TRANSFORM_DIRTY_WORLD_CHUNK;
     }
-    return transform.worldChunk;
+    return worldChunk;
 }
 
 /** get world-space quaternion, decomposing from worldMatrix if needed. */

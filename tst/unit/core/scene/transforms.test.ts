@@ -1138,8 +1138,8 @@ describe('snapshot', () => {
         snapshot(sceneTree);
 
         // snapshot drain copied the post-mutation pose into prev
-        expectVec3Near(t.prevPosition, vec3.fromValues(1, 2, 3));
-        expectQuatNear(t.prevQuaternion, rotY90());
+        expectVec3Near(t.prevPosition!, vec3.fromValues(1, 2, 3));
+        expectQuatNear(t.prevQuaternion!, rotY90());
     });
 
     it('prev values remain stable after position mutation without re-snapshot', () => {
@@ -1157,7 +1157,7 @@ describe('snapshot', () => {
         vec3.set(t.position, 99, 99, 99);
 
         // prev should still be old values
-        expectVec3Near(t.prevPosition, vec3.fromValues(1, 2, 3));
+        expectVec3Near(t.prevPosition!, vec3.fromValues(1, 2, 3));
     });
 });
 
@@ -1451,7 +1451,7 @@ describe('interpolate', () => {
         expectVec3Near(getVisualWorldPosition(ct), vec3.fromValues(13, 0, 0));
     });
 
-    it('setInterpolation(true) seeds prev = current immediately', () => {
+    it('allocates the prev pose only on opt-in, seeded to current', () => {
         const sceneTree = setup();
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
@@ -1461,14 +1461,14 @@ describe('interpolate', () => {
         });
 
         const t = getTrait(node, TransformTrait)!;
-        // before opt-in, prev is default (0,0,0) / identity
-        expectVec3Near(t.prevPosition, vec3.fromValues(0, 0, 0));
+        expect(t.prevPosition).toBeNull();
+        expect(t.prevQuaternion).toBeNull();
 
         setInterpolation(node, true);
 
         // prev now mirrors current, first interpolate frame won't lerp from origin
-        expectVec3Near(t.prevPosition, vec3.fromValues(7, 8, 9));
-        expectQuatNear(t.prevQuaternion, rotY90());
+        expectVec3Near(t.prevPosition!, vec3.fromValues(7, 8, 9));
+        expectQuatNear(t.prevQuaternion!, rotY90());
         expect(t.interpolate).toBe(1);
         expect(sceneTree._interpolating.has(t)).toBe(true);
     });
@@ -1501,10 +1501,10 @@ describe('interpolate', () => {
         setInterpolation(node, true);
         const t = getTrait(node, TransformTrait)!;
         // mutate prev so we can detect whether a second enable resets it
-        vec3.set(t.prevPosition, 99, 99, 99);
+        vec3.set(t.prevPosition!, 99, 99, 99);
         setInterpolation(node, true);
         // idempotent: prev was NOT re-seeded
-        expectVec3Near(t.prevPosition, vec3.fromValues(99, 99, 99));
+        expectVec3Near(t.prevPosition!, vec3.fromValues(99, 99, 99));
 
         setInterpolation(node, false);
         setInterpolation(node, false);
@@ -1523,10 +1523,10 @@ describe('interpolate', () => {
         vec3.set(t.position, 50, 0, 0);
         resetInterpolation(node);
 
-        expectVec3Near(t.prevPosition, vec3.fromValues(50, 0, 0));
+        expectVec3Near(t.prevPosition!, vec3.fromValues(50, 0, 0));
     });
 
-    it('resetInterpolation is a no-op for non-interpolated nodes', () => {
+    it('resetInterpolation allocates nothing for a non-interpolated node', () => {
         const sceneTree = setup();
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
@@ -1534,8 +1534,7 @@ describe('interpolate', () => {
 
         const t = getTrait(node, TransformTrait)!;
         resetInterpolation(node);
-        // prev stays at default
-        expectVec3Near(t.prevPosition, vec3.fromValues(0, 0, 0));
+        expect(t.prevPosition).toBeNull();
     });
 });
 

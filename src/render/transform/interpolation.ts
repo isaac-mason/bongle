@@ -87,13 +87,15 @@ export function snapshot(sceneTree: SceneTree): void {
     const dirty = sceneTree._transformDirty;
     for (const t of dirty) {
         if (!t.interpolate) continue;
-        t.prevPosition[0] = t.position[0];
-        t.prevPosition[1] = t.position[1];
-        t.prevPosition[2] = t.position[2];
-        t.prevQuaternion[0] = t.quaternion[0];
-        t.prevQuaternion[1] = t.quaternion[1];
-        t.prevQuaternion[2] = t.quaternion[2];
-        t.prevQuaternion[3] = t.quaternion[3];
+        const prevPosition = t.prevPosition!;
+        const prevQuaternion = t.prevQuaternion!;
+        prevPosition[0] = t.position[0];
+        prevPosition[1] = t.position[1];
+        prevPosition[2] = t.position[2];
+        prevQuaternion[0] = t.quaternion[0];
+        prevQuaternion[1] = t.quaternion[1];
+        prevQuaternion[2] = t.quaternion[2];
+        prevQuaternion[3] = t.quaternion[3];
     }
     dirty.clear();
 }
@@ -152,8 +154,8 @@ function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, out
         vec3.copy(outPos, t.position);
         quat.copy(outQuat, t.quaternion);
     } else {
-        vec3.lerp(outPos, t.prevPosition, t.position, alpha);
-        quat.slerp(outQuat, t.prevQuaternion, t.quaternion, alpha);
+        vec3.lerp(outPos, t.prevPosition!, t.position, alpha);
+        quat.slerp(outQuat, t.prevQuaternion!, t.quaternion, alpha);
     }
 }
 
@@ -329,13 +331,13 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
         vec3.lerp(
             transform.interpolatedWorldPosition,
             transform.interpolatedWorldPosition,
-            transform._correctionTarget,
+            transform._correctionTarget!,
             blendFactor,
         );
         quat.slerp(
             transform.interpolatedWorldQuaternion,
             transform.interpolatedWorldQuaternion,
-            transform._correctionTargetQuat,
+            transform._correctionTargetQuat!,
             blendFactor,
         );
         transform._correctionFrames--;
@@ -349,21 +351,18 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
             vec3.copy(transform.interpolatedWorldPosition, authPos);
             quat.copy(transform.interpolatedWorldQuaternion, authQuat);
         } else {
-            vec3.copy(transform._correctionTarget, authPos);
-            quat.copy(transform._correctionTargetQuat, authQuat);
+            const correctionTarget = (transform._correctionTarget ??= vec3.create());
+            const correctionTargetQuat = (transform._correctionTargetQuat ??= quat.create());
+            vec3.copy(correctionTarget, authPos);
+            quat.copy(correctionTargetQuat, authQuat);
             transform._correctionFrames = CORRECTION_BLEND_FRAMES;
 
             const blendFactor = 1.0 / transform._correctionFrames;
-            vec3.lerp(
-                transform.interpolatedWorldPosition,
-                transform.interpolatedWorldPosition,
-                transform._correctionTarget,
-                blendFactor,
-            );
+            vec3.lerp(transform.interpolatedWorldPosition, transform.interpolatedWorldPosition, correctionTarget, blendFactor);
             quat.slerp(
                 transform.interpolatedWorldQuaternion,
                 transform.interpolatedWorldQuaternion,
-                transform._correctionTargetQuat,
+                correctionTargetQuat,
                 blendFactor,
             );
             transform._correctionFrames--;
