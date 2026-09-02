@@ -2480,12 +2480,15 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
 }
 
 /** re-resolve one resolution over `node` and, unless pruned, its descendants. */
-function resolveFrom(resolution: Resolution, node: Node, inherited: TraitBase | undefined): void {
+function resolveFrom(resolution: Resolution, node: Node, inherited: TraitBase | undefined, fill: boolean): void {
     const own = node._traits[resolution.traitSlot];
     resolution.apply(node, resolution.inclusive ? (own ?? inherited) : inherited);
-    if (own !== undefined) return;
+    // a re-resolve can stop at a bearer: everything below already resolves to it
+    // and nothing above changed that. A fill can't — those slots start empty.
+    if (own !== undefined && !fill) return;
+    const childInherited = own ?? inherited;
     for (const child of node.children) {
-        resolveFrom(resolution, child, inherited);
+        resolveFrom(resolution, child, childInherited, fill);
     }
 }
 
@@ -2515,7 +2518,7 @@ export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFro
 function fillQueryResolutions(sceneTree: SceneTree, node: Node): void {
     if (sceneTree._queryResolutions.length === 0) return;
     _fillingTuples = true;
-    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined);
+    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined, true);
     _fillingTuples = false;
 }
 
@@ -2524,7 +2527,7 @@ function fillQueryResolutions(sceneTree: SceneTree, node: Node): void {
  *  signature shared with the declared resolutions. */
 let _fillingTuples = false;
 
-function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null): void {
+function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null, fill = false): void {
     for (let i = 0; i < resolutions.length; i++) {
         const resolution = resolutions[i]!;
         const inherited = nearestTrait(node.parent, resolution.traitSlot, true);
@@ -2537,7 +2540,7 @@ function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: No
         if (movedFrom !== undefined && movedFrom !== null) {
             if (nearestTrait(movedFrom, resolution.traitSlot, true) === inherited) continue;
         }
-        resolveFrom(resolution, node, inherited);
+        resolveFrom(resolution, node, inherited, fill);
     }
 }
 
@@ -2556,9 +2559,14 @@ function resolveChildrenFor(resolutions: Resolution[], node: Node, traitSlot: nu
     for (let i = 0; i < resolutions.length; i++) {
         const resolution = resolutions[i]!;
         if (resolution.traitSlot !== traitSlot) continue;
-        const inherited = nearestTrait(node, traitSlot, true);
+        const own = node._traits[traitSlot];
+        const above = nearestTrait(node.parent, traitSlot, true);
+        // an `Up` term on the node itself also just changed answer, and nothing
+        // else re-resolves it: membership didn't change, so `reindex` no-ops.
+        resolution.apply(node, resolution.inclusive ? (own ?? above) : above);
+        const inherited = own ?? above;
         for (const child of node.children) {
-            resolveFrom(resolution, child, inherited);
+            resolveFrom(resolution, child, inherited, false);
         }
     }
 }
