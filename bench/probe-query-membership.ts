@@ -110,6 +110,64 @@ function measure(c: Case) {
 console.log(`${'case'.padEnd(34)} ${'best'.padStart(10)}  alloc`);
 for (const c of CASES) measure(c);
 
+// The attach/detach-a-whole-container shape empties `sceneTree.nodes` and
+// `_idToNode` every cycle, so V8 shrinks and regrows those tables. A game
+// instead spawns a small prop into a scene that stays populated. Measures the
+// same per-node cost under that shape, where the containers never shrink.
+function measureSpawnChurn(label: string, install: (t: SceneTree) => void, resident: number): void {
+    const sceneTree = createSceneTree();
+    install(sceneTree);
+    const world = createNode({ name: 'world' });
+    addTrait(world, B);
+    addChild(sceneTree.root, world);
+    for (let i = 0; i < resident; i++) {
+        const n = createNode({ name: `r${i}` });
+        addTrait(n, A);
+        addChild(world, n);
+    }
+
+    const PROP_NODES = 6;
+    const prop = createNode({ name: 'prop' });
+    addTrait(prop, A);
+    for (let i = 0; i < PROP_NODES - 1; i++) {
+        const m = createNode({ name: `m${i}` });
+        addTrait(m, A);
+        addChild(prop, m);
+    }
+
+    const cycle = () => {
+        addChild(world, prop);
+        removeChild(world, prop);
+    };
+    for (let i = 0; i < 2000; i++) cycle();
+
+    let best = Infinity;
+    for (let r = 0; r < 2000; r++) {
+        const t0 = process.hrtime.bigint();
+        cycle();
+        const us = Number(process.hrtime.bigint() - t0) / 1000;
+        if (us < best) best = us;
+    }
+
+    const alloc = (cycles: number) => {
+        gc();
+        gc();
+        const before = process.memoryUsage().heapUsed;
+        for (let i = 0; i < cycles; i++) cycle();
+        return (process.memoryUsage().heapUsed - before) / cycles / PROP_NODES;
+    };
+    const a1 = alloc(400);
+    const a2 = alloc(800);
+    const agree = Math.abs(a1 - a2) / Math.max(a1, a2) < 0.15;
+    console.log(`${label.padEnd(40)} ${best.toFixed(2).padStart(7)} us  ${a2.toFixed(0).padStart(4)} B/node${agree ? '' : ' ?'}`);
+}
+
+console.log(`\n${'spawn a 6-node prop into a live scene'.padEnd(40)} ${'best'.padStart(10)}  alloc`);
+for (const resident of [0, 1200]) {
+    measureSpawnChurn(`no query, ${resident} resident nodes`, () => {}, resident);
+    measureSpawnChurn(`1 plain query, ${resident} resident nodes`, (t) => void query(t, [A]), resident);
+}
+
 // L4 is an O(depth) walk per node per required hierarchy term. Real scenes are
 // wide and shallow (see scene-shapes.bench.ts), so the gap's depth sensitivity
 // decides whether the lever is worth a registerSubtree restructure.

@@ -502,9 +502,7 @@ export function setRealm(node: Node, realm: Realm): void {
     node.realm = realm;
     const scene = node.scene;
     if (!scene) return;
-    const subtree: Node[] = [];
-    collectSubtree(node, subtree);
-    for (const n of subtree) bumpNodeVersion(scene, n);
+    bumpSubtreeVersions(scene, node);
 }
 
 /**
@@ -1192,9 +1190,7 @@ export function reparent(node: Node, newParent: Node): void {
         // mark the whole moved subtree for discovery: reparenting can flip
         // effective relevance (e.g. moving under a non-shared parent), and
         // descendants inherit it, the per-client fan-out must re-evaluate them.
-        const moved: Node[] = [];
-        collectSubtree(node, moved);
-        for (const n of moved) bumpNodeVersion(scene, n);
+        bumpSubtreeVersions(scene, node);
     }
 
     // re-resolve every resolution over the moved subtree. a node that was
@@ -1414,6 +1410,13 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
 }
 
 /** collect all nodes in a subtree (pre-order) into the output array */
+/** bump every node in the subtree, without materialising it. */
+function bumpSubtreeVersions(scene: SceneTree, node: Node): void {
+    bumpNodeVersion(scene, node);
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) bumpSubtreeVersions(scene, children[i]!);
+}
+
 function collectSubtree(node: Node, out: Node[]): void {
     out.push(node);
     for (let i = 0; i < node.children.length; i++) {
