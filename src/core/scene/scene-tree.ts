@@ -1891,8 +1891,10 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
  * down from -1, and a client tree holds both (replicated nodes arrive with
  * server ids), so the two runs are interleaved into one dense-ish key space.
  */
-function sparseKey(id: number): number {
-    return id >= 0 ? id * 2 : -id * 2 - 1;
+/** record `node`'s position in `q.matches`, in whichever sparse array owns its id's sign. */
+function sparseSet(q: Query<any>, id: number, index: number): void {
+    if (id >= 0) q._sparse[id] = index;
+    else q._sparseNeg[-id] = index;
 }
 
 /** remove `value` from `arr` by swap-pop, if present. */
@@ -1963,7 +1965,8 @@ function resolveOwn(node: Node, def: TraitDef): void {
 
 /** position of `node` in `q.matches`, or -1. */
 function queryIndexOf(q: Query<any>, node: Node): number {
-    const i = q._sparse[sparseKey(node.id)];
+    const id = node.id;
+    const i = id >= 0 ? q._sparse[id] : q._sparseNeg[-id];
     return i !== undefined && q.matchNodes[i] === node ? i : -1;
 }
 
@@ -1991,6 +1994,11 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
      * `matchNodes[i] === node`, the same trick koota's SparseSet uses.
      */
     _sparse: number[];
+    /** @internal the negative-id half of `_sparse`, indexed by `-id`. Split by sign rather
+     *  than zigzagged into one array: a scene tree's ids are effectively all one sign
+     *  (server positive, client negative), so interleaving doubled the length and left
+     *  every other slot a permanent hole. */
+    _sparseNeg: number[];
     /** @internal `conditions` minus the `Not` terms, in tuple order. Precomputed so
      *  `buildQueryTuple` knows its exact arity and can build a literal. */
     _tupleTerms: Array<Condition<any, any, any>>;
@@ -2148,6 +2156,7 @@ export function query<const Args extends ConditionArgs[]>(
         matches: [],
         matchNodes: [],
         _sparse: [],
+        _sparseNeg: [],
         _tupleTerms: parsedConditions.filter((c) => c.oper !== Oper.Not),
         traversals,
         onEnter: topic(),
@@ -2455,7 +2464,7 @@ function buildQueryTuple(q: Query<any>, node: Node, deferTraversals = false): an
 
 function addNodeToQuery(q: Query<any>, node: Node, deferTraversals = false): void {
     const tuple = buildQueryTuple(q, node, deferTraversals);
-    q._sparse[sparseKey(node.id)] = q.matches.length;
+    sparseSet(q, node.id, q.matches.length);
     q.matchNodes.push(node);
     q.matches.push(tuple as any);
 
@@ -2483,7 +2492,7 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
         q.matches[index] = q.matches[lastIndex] as any;
         const movedNode = q.matchNodes[lastIndex]!;
         q.matchNodes[index] = movedNode;
-        q._sparse[sparseKey(movedNode.id)] = index;
+        sparseSet(q, movedNode.id, index);
     }
 
     q.matches.pop();
