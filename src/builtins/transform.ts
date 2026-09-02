@@ -308,7 +308,7 @@ export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
  * walking `_children` instead (pinned by the transform tests).
  */
 context(TransformTrait, '_parent', {
-    of: Ancestor(Self),
+    condition: Ancestor(Self),
     change: (own, next, prev) => {
         if (prev !== null) removeTransformChild(prev as TransformTrait, own);
         if (next !== null) (next as TransformTrait)._children.push(own);

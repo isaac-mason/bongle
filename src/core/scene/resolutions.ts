@@ -52,19 +52,19 @@ export type Resolution = {
 export type ResolutionDef = Resolution & { field: string };
 
 /**
- * Declare that a trait field holds the nearest trait matching `of`, and have the scene tree
+ * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
  * keep it correct as the hierarchy changes. The trait's own annotation, alongside
  * `control()` and `sync()` — the body stays plain data.
  *
  * ```ts
  * context(TransformTrait, '_parent', {
- *     of: Ancestor(Self),
+ *     condition: Ancestor(Self),
  *     change: (t, next, prev) => { ... },
  * });
  * ```
  *
- * `id` is the field written, exactly as `control()`'s id is the field it fronts. `of` takes
- * the same `Up` / `Ancestor` conditions a query does, so there is one vocabulary for
+ * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
+ * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
  * "nearest trait above me" wherever it appears.
  *
  * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
@@ -75,13 +75,13 @@ export function context<T extends TraitBase, R extends TraitHandle>(
     handle: TraitHandle<T>,
     id: string,
     body: {
-        of: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
+        condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
         change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
     },
 ): void {
     const def = handle._def;
     const ownerSlot = handle._slot;
-    const declared = body.of.trait._slot;
+    const declared = body.condition.trait._slot;
     if (declared === undefined) return;
     const traitSlot = declared === SELF_SLOT ? ownerSlot : declared;
     const change = body.change;
@@ -90,7 +90,7 @@ export function context<T extends TraitBase, R extends TraitHandle>(
         field: id,
         traitSlot,
         ownerSlot,
-        inclusive: body.of.src === Src.Up,
+        inclusive: body.condition.src === Src.Up,
         apply(node, resolved) {
             const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
             // the walk visits every node on its way down; only nodes bearing the owning

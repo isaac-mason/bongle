@@ -10,7 +10,7 @@ describe('directives on detached subtrees', () => {
     // scene tree, so none of it is in a query.
     it('addTrait resolves the field on a detached node', () => {
         const Chain = trait('detached/chain', { parent: null as any });
-        context(Chain, 'parent', { of: Ancestor(Self) });
+        context(Chain, 'parent', { condition: Ancestor(Self) });
         const top = createNode({ name: 'top' });
         const mid = createNode({ name: 'mid' });
         addChild(top, mid);
@@ -22,7 +22,7 @@ describe('directives on detached subtrees', () => {
 
     it('addChild re-resolves a detached subtree under a detached parent', () => {
         const Chain = trait('detached/chain2', { parent: null as any });
-        context(Chain, 'parent', { of: Ancestor(Self) });
+        context(Chain, 'parent', { condition: Ancestor(Self) });
         const top = createNode({ name: 'top' });
         const t = addTrait(top, Chain);
 
@@ -44,7 +44,7 @@ describe('directives on detached subtrees', () => {
 
     it('a clone carries fresh resolutions, not pointers into the source tree', () => {
         const Chain = trait('detached/chain3', { parent: null as any });
-        context(Chain, 'parent', { of: Ancestor(Self) });
+        context(Chain, 'parent', { condition: Ancestor(Self) });
         const sceneTree = createSceneTree();
         const host = createNode({ name: 'host' });
         addChild(sceneTree.root, host);
@@ -85,14 +85,14 @@ describe('directives in a trait body', () => {
         const Group = trait('hash/group', { n: 0 });
         expect(() => {
             const T = trait('hash/mesh', { group: null as any });
-            context(T, 'group', { of: Up(Group) });
+            context(T, 'group', { condition: Up(Group) });
         }).not.toThrow();
     });
 
     it('a directive field cannot be set through addTrait props', () => {
         const Group = trait('hash/group2', { n: 0 });
         const Mesh = trait('hash/mesh2', { group: null as any });
-        context(Mesh, 'group', { of: Up(Group) });
+        context(Mesh, 'group', { condition: Up(Group) });
 
         const sceneTree = createSceneTree();
         const host = createNode({ name: 'host' });
@@ -110,7 +110,7 @@ describe('directives in a trait body', () => {
 
     it('a self-referential directive resolves to the enclosing trait', () => {
         const Chain = trait('hash/chain', { parent: null as any });
-        context(Chain, 'parent', { of: Ancestor(Self) });
+        context(Chain, 'parent', { condition: Ancestor(Self) });
         const sceneTree = createSceneTree();
         const top = createNode({ name: 'top' });
         const mid = createNode({ name: 'mid' });
