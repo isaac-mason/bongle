@@ -261,7 +261,7 @@ script(
                 for (const st of traits) {
                     const def = registry.traits.byId.get(st.id);
                     if (!def) {
-                        node._unresolvedTraits.set(st.id, { json: st.controls });
+                        (node._unresolvedTraits ??= new Map()).set(st.id, { json: st.controls });
                         continue;
                     }
                     addTraitBySlot(node, def.slot, st.controls);
@@ -372,7 +372,9 @@ script(
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId);
                 if (!def) {
-                    node._unresolvedTraits.set(args.traitId, { json: args.props ? JSON.parse(args.props) : undefined });
+                    (node._unresolvedTraits ??= new Map()).set(args.traitId, {
+                        json: args.props ? JSON.parse(args.props) : undefined,
+                    });
                     bumpNodeVersion(sceneTree, node);
                 } else {
                     addTraitBySlot(node, def.slot, args.props ? JSON.parse(args.props) : undefined);
@@ -391,7 +393,7 @@ script(
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId);
                 if (!def) {
-                    node._unresolvedTraits.delete(args.traitId);
+                    node._unresolvedTraits?.delete(args.traitId);
                     bumpNodeVersion(sceneTree, node);
                 } else {
                     removeTraitBySlot(node, def.slot);

@@ -781,7 +781,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
-            else n._unresolvedTraits.delete(traitId);
+            else n._unresolvedTraits?.delete(traitId);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
             state.markDirty();
         },
@@ -832,7 +832,7 @@ function captureNode(node: Node, out: CreateArgs[]): void {
 function captureTraitProps(node: Node, traitId: string): Record<string, unknown> | null {
     const def = registry.traits.byId.get(traitId);
     if (!def) {
-        const json = node._unresolvedTraits.get(traitId)?.json;
+        const json = node._unresolvedTraits?.get(traitId)?.json;
         return json ? structuredClone(json) : null;
     }
     const instance = node._traits[def.slot];
@@ -851,7 +851,7 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
 export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string, props: Record<string, unknown>): void {
     const def = registry.traits.byId.get(traitId);
     if (!def) {
-        const unresolved = node._unresolvedTraits.get(traitId);
+        const unresolved = node._unresolvedTraits?.get(traitId);
         if (unresolved) unresolved.json = { ...unresolved.json, ...props };
         bumpNodeVersion(sceneTree, node);
         return;

@@ -10,6 +10,7 @@ import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
 import { packSceneTree } from '../core/scene/scene-pack';
 import {
     bumpFieldVersion,
+    EMPTY_UNRESOLVED,
     encodePrefabConfig,
     getNodeById,
     getTrait,
@@ -1214,7 +1215,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
         });
     }
     // include unresolved traits (no wire-index entry, fall back to string id)
-    for (const [id] of node._unresolvedTraits) {
+    for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
         traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
     }
 
@@ -1337,7 +1338,7 @@ function diffNodeKnowledge(
     }
 
     // include unresolved traits in current set
-    for (const [id] of node._unresolvedTraits) {
+    for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
         currentTraitIds.add(id);
         const traitKnowledge = known.traits.get(id);
         if (!traitKnowledge) {
@@ -1451,7 +1452,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         });
     }
     // include unresolved traits so the diff system knows we already sent them
-    for (const id of node._unresolvedTraits.keys()) {
+    for (const id of node._unresolvedTraits?.keys() ?? []) {
         if (!traits.has(id)) {
             traits.set(id, { version: 0, versions: [], lastSentTicks: [] });
         }

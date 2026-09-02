@@ -76,8 +76,8 @@ export function populateScene(
     // clear current root traits before re-applying.
     handle.node._traits.length = 0;
     handle.node._bitset = bitset.init();
-    handle.node._unresolvedTraits.clear();
-    handle.node._traitIssues.clear();
+    handle.node._unresolvedTraits = null;
+    handle.node._traitIssues = null;
 
     // apply root-level traits. handle.node is free-floating (no sceneTree, no
     // runtime), so no reindex / script instantiation, closures over
@@ -87,7 +87,7 @@ export function populateScene(
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
-                handle.node._unresolvedTraits.set(st.id, {
+                (handle.node._unresolvedTraits ??= new Map()).set(st.id, {
                     json: structuredClone(st.controls) as Record<string, unknown> | undefined,
                 });
                 continue;

@@ -1168,14 +1168,14 @@ export function InspectorPanel() {
                 {/* ── traits ────────────────────────────────────────── */}
                 <div className="space-y-1.5">
                     <SectionDivider label="traits" action={<AddTraitAction node={node} />} />
-                    {traitSlots.length === 0 && node._unresolvedTraits.size === 0 ? (
+                    {traitSlots.length === 0 && (node._unresolvedTraits?.size ?? 0) === 0 ? (
                         <div className="text-[10px] font-mono text-fg-muted italic">no traits</div>
                     ) : (
                         <>
                             {traitSlots.map((index) => (
                                 <TraitSection key={index} node={node} traitSlot={index} />
                             ))}
-                            {Array.from(node._unresolvedTraits).map(([id, data]) => (
+                            {Array.from(node._unresolvedTraits ?? []).map(([id, data]) => (
                                 <UnresolvedTraitSection key={`unresolved-${id}`} node={node} traitId={id} data={data} />
                             ))}
                         </>

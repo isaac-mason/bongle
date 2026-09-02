@@ -20,6 +20,7 @@ import {
     createNode,
     decodePrefabConfig,
     destroyNode,
+    EMPTY_UNRESOLVED,
     encodePrefabConfig,
     getNodeById,
     type Node,
@@ -80,7 +81,7 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
             // include unresolved traits (round-trip preservation, no field data).
             // these never have a wire index (no local def), so always emit the
             // string id fallback.
-            for (const [id] of node._unresolvedTraits) {
+            for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
                 traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
             }
 
@@ -140,7 +141,7 @@ export function unpackSceneTree(
         }
     }
     root._traits.length = 0;
-    root._unresolvedTraits.clear();
+    root._unresolvedTraits = null;
 
     // first node is root
     const rootPacked = unpacked.nodes[0];
@@ -170,7 +171,7 @@ export function unpackSceneTree(
         const def = registry.traits.byId.get(traitId);
         if (!def) {
             console.warn(`[bongle] unresolved trait "${traitId}" on root node (binary) — preserving raw data`);
-            root._unresolvedTraits.set(traitId, { binary: new Uint8Array(0) });
+            (root._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));
@@ -266,7 +267,7 @@ export function applySceneSyncUpdate(
             const def = registry.traits.byId.get(traitId);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — preserving`);
-                node._unresolvedTraits.set(traitId, { binary: new Uint8Array(0) });
+                (node._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
                 bumpNodeVersion(sceneTree, node);
                 break;
             }
@@ -295,7 +296,7 @@ export function applySceneSyncUpdate(
             const def = registry.traits.byId.get(traitId);
             if (!def) {
                 // remove from unresolved if present
-                node._unresolvedTraits.delete(traitId);
+                node._unresolvedTraits?.delete(traitId);
                 bumpNodeVersion(sceneTree, node);
                 break;
             }
@@ -376,7 +377,7 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
         const def = registry.traits.byId.get(traitId);
         if (!def) {
             console.warn(`[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" (binary) — preserving raw data`);
-            node._unresolvedTraits.set(traitId, { binary: new Uint8Array(0) });
+            (node._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));

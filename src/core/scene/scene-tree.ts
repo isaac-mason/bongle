@@ -105,7 +105,7 @@ export type Node = {
      * hot-reload's serialize→deserialize cycle naturally reconciles these
      * when the def becomes available again.
      */
-    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }>;
+    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
 
     /**
      * @internal validation issues per trait (keyed by trait slot). populated
@@ -113,7 +113,7 @@ export type Node = {
      * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
      * empty entries are cleaned up.
      */
-    _traitIssues: Map<number, ValidationIssue[]>;
+    _traitIssues: Map<number, ValidationIssue[]> | null;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -130,6 +130,9 @@ export type Node = {
 };
 
 /* uuid, retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
+
+/** shared empty map, so read paths can iterate a node with no unresolved traits without a branch. */
+export const EMPTY_UNRESOLVED: ReadonlyMap<string, { binary?: Uint8Array; json?: Record<string, unknown> }> = new Map();
 
 export function generateUuid(): string {
     // use crypto.randomUUID if available (modern browsers + Node 19+),
@@ -157,8 +160,8 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         realm: realm ?? 'inherit',
         _traits: [],
         _bitset: bitset.init(),
-        _unresolvedTraits: new Map(),
-        _traitIssues: new Map(),
+        _unresolvedTraits: null,
+        _traitIssues: null,
         prefab: null,
         _prefabState: null,
         _sync: { version: 0 },
@@ -640,7 +643,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
             sceneTree.context.instances.delete(node.id);
         }
     }
-    node._unresolvedTraits.clear();
+    node._unresolvedTraits = null;
 
     // remove from all queries
     // a node can only be a member of a query that references one of its traits
@@ -973,24 +976,24 @@ export function computeTraitIssues(def: TraitDef, instance: TraitBase): Issue[] 
 
 /** read issues for a trait on a node. returns undefined if none recorded. */
 export function getTraitIssues(node: Node, traitSlot: number): Issue[] | undefined {
-    return node._traitIssues.get(traitSlot);
+    return node._traitIssues?.get(traitSlot);
 }
 
 /** set/clear issues for a trait. an empty array deletes the entry. */
 export function setTraitIssues(node: Node, traitSlot: number, issues: Issue[]): void {
-    if (issues.length === 0) node._traitIssues.delete(traitSlot);
-    else node._traitIssues.set(traitSlot, issues);
+    if (issues.length === 0) node._traitIssues?.delete(traitSlot);
+    else (node._traitIssues ??= new Map()).set(traitSlot, issues);
 }
 
 /** clear issues for one trait, or all traits when traitSlot is omitted. */
 export function clearTraitIssues(node: Node, traitSlot?: number): void {
-    if (traitSlot === undefined) node._traitIssues.clear();
-    else node._traitIssues.delete(traitSlot);
+    if (traitSlot === undefined) node._traitIssues = null;
+    else node._traitIssues?.delete(traitSlot);
 }
 
 /** true when the node has any trait with recorded issues. */
 export function hasNodeIssues(node: Node): boolean {
-    return node._traitIssues.size > 0;
+    return (node._traitIssues?.size ?? 0) > 0;
 }
 
 /**
@@ -1573,7 +1576,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
     }
 
     // include unresolved traits
-    for (const [id, data] of node._unresolvedTraits) {
+    for (const [id, data] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
         serializedTraits.push({ id, controls: data.json });
     }
 
@@ -1626,7 +1629,7 @@ export function deserializeNode(data: SerializedNode): Node {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone, _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
-            node._unresolvedTraits.set(st.id, {
+            (node._unresolvedTraits ??= new Map()).set(st.id, {
                 json: st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined,
             });
             continue;
@@ -1692,8 +1695,8 @@ export function cloneNode(source: Node): Node {
     }
 
     // round-trip preserve traits whose defs aren't in the registry
-    for (const [id, data] of source._unresolvedTraits) {
-        clone._unresolvedTraits.set(id, { json: data.json });
+    for (const [id, data] of source._unresolvedTraits ?? EMPTY_UNRESOLVED) {
+        (clone._unresolvedTraits ??= new Map()).set(id, { json: data.json });
     }
 
     // scripts ride on traits, clone needs no script copy; registerSubtree
@@ -1795,8 +1798,8 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     }
     root._traits.length = 0;
     root._bitset = bitset.init();
-    root._unresolvedTraits.clear();
-    root._traitIssues.clear();
+    root._unresolvedTraits = null;
+    root._traitIssues = null;
 
     // restore root name
     root.name = rootData.name;
@@ -1807,7 +1810,9 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
-                root._unresolvedTraits.set(st.id, { json: st.controls as Record<string, unknown> | undefined });
+                (root._unresolvedTraits ??= new Map()).set(st.id, {
+                    json: st.controls as Record<string, unknown> | undefined,
+                });
                 continue;
             }
 
