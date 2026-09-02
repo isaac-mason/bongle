@@ -18,9 +18,9 @@ import type { Mat4, Quat, Vec3 } from 'math';
 import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { Ancestor } from '../core/scene/conditions';
-import { my } from '../core/scene/resolutions';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
+import { my } from '../core/scene/resolutions';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
@@ -960,12 +960,15 @@ export function setTransform(transform: TransformTrait, position: Vec3, quaterni
 // if TRANSFORM_DIRTY_WORLD_MATRIX is set, fall through to the full updateWorldTransform
 // since worldMatrix is the source for all the others.
 
-/** get world-space position, decomposing from worldMatrix if needed. */
+/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
 export function getWorldPosition(transform: TransformTrait): Vec3 {
     if (transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(transform);
     if (transform._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
-        mat4.decompose(transform.worldQuaternion, transform.worldPosition, transform.worldScale, transform.worldMatrix);
-        transform._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
+        const m = transform.worldMatrix;
+        const worldPosition = transform.worldPosition;
+        worldPosition[0] = m[12];
+        worldPosition[1] = m[13];
+        worldPosition[2] = m[14];
     }
     return transform.worldPosition;
 }
@@ -1030,18 +1033,16 @@ export function getVisualWorldMatrix(transform: TransformTrait): Mat4 {
     return transform.interpolatedWorldMatrix;
 }
 
-/** get visual world-space position, lazy-decomposing if deferred. */
+/** visual world-space position, read from the matrix translation. */
 export function getVisualWorldPosition(transform: TransformTrait): Vec3 {
     if (!transform._interpolated) return getWorldPosition(transform);
     if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(transform);
     if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
-        mat4.decompose(
-            transform.interpolatedWorldQuaternion,
-            transform.interpolatedWorldPosition,
-            transform.interpolatedWorldScale,
-            transform.interpolatedWorldMatrix,
-        );
-        transform._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        const m = transform.interpolatedWorldMatrix;
+        const interpolatedWorldPosition = transform.interpolatedWorldPosition;
+        interpolatedWorldPosition[0] = m[12];
+        interpolatedWorldPosition[1] = m[13];
+        interpolatedWorldPosition[2] = m[14];
     }
     return transform.interpolatedWorldPosition;
 }
