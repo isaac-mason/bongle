@@ -87,6 +87,15 @@ export const TRANSFORM_DIRTY_ALL =
  * so interpolation writes upstream automatically flow down through
  * descendants. renderers read via getVisualWorld*, see below.
  */
+/** the slice of a transform its descendant walks touch; `_children` is self-referential
+ *  so the trait body can name it before `TransformTrait` itself exists. */
+export type TransformSubtree = {
+    _dirty: number;
+    _version: number;
+    _interpolated: 0 | 1;
+    _children: TransformSubtree[];
+};
+
 export const TransformTrait = trait('transform', {
     // ── local-space (persisted + synced) ─────────────────────────────
     position: vec3.create(),
@@ -127,8 +136,17 @@ export const TransformTrait = trait('transform', {
     // hand. `Self` names the trait being defined, which a body otherwise can't
     // do, and `TraitInstance` substitutes it so readers get
     // `TransformTrait | null` with no cast.
+    /** the transforms directly below this one, passthrough nodes already skipped.
+     *  Maintained alongside `_parent`, off the same resolve. */
+    _children: [] as TransformSubtree[],
+
     _parent: my(Ancestor(Self), {
-        onResolve: (node) => {
+        onResolve: (node, next, prev) => {
+            const own = getTrait(node, TransformTrait);
+            if (own !== undefined && next !== prev) {
+                if (prev !== null) removeTransformChild(prev as TransformTrait, own);
+                if (next !== null) (next as TransformTrait)._children.push(own);
+            }
             // the parent pointer moved, so every cached world value below is stale.
             markAncestryChanged(node);
             // a branch-topmost transform's nearest transform ancestor changing
@@ -393,7 +411,7 @@ function markTransformChanged(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    markDescendants(transform._node);
+    markDescendants(transform);
 }
 
 export function markTransformDirty(transform: TransformTrait): void {
@@ -421,23 +439,37 @@ export function markWorldDirty(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    if (transform._node) markDescendants(transform._node);
+    markDescendants(transform);
 }
 
-function markDescendants(node: Node): void {
-    for (const child of node.children) {
-        const childTransform = getTrait(child, TransformTrait);
-        if (childTransform) {
-            if (childTransform._dirty !== TRANSFORM_DIRTY_ALL) {
-                childTransform._dirty = TRANSFORM_DIRTY_ALL;
-                childTransform._version++;
-                // no pose/scaleSync.dirty here, descendants' local TRS is
-                // unchanged, only their world. replication is local-only.
-                markDescendants(child);
-            }
-        } else {
-            markDescendants(child);
-        }
+function markDescendants(transform: TransformSubtree): void {
+    const children = transform._children;
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i]!;
+        // descendants' local TRS is unchanged, only their world, so no sync dirty here.
+        if (child._dirty === TRANSFORM_DIRTY_ALL) continue;
+        child._dirty = TRANSFORM_DIRTY_ALL;
+        child._version++;
+        markDescendants(child);
+    }
+}
+
+/** swap-pop `child` out of `parent._children`. */
+function removeTransformChild(parent: TransformSubtree, child: TransformSubtree): void {
+    const children = parent._children;
+    const index = children.indexOf(child);
+    if (index === -1) return;
+    children[index] = children[children.length - 1]!;
+    children.pop();
+}
+
+/** drop a transform that is leaving the tree, so nothing keeps walking or ticking it. */
+export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void {
+    if (transform._parent !== null) removeTransformChild(transform._parent, transform);
+    transform._parent = null;
+    if (sceneTree !== null) {
+        sceneTree._transformDirty.delete(transform);
+        sceneTree._interpolating.delete(transform);
     }
 }
 
@@ -826,14 +858,13 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
  * descendant counts under Interp roots are small (player rigs, attached
  * props), the unconditional walk is fine.
  */
-export function markInterpolatedDescendantsDirty(node: Node): void {
-    for (const child of node.children) {
-        const ct = getTrait(child, TransformTrait);
-        if (ct) {
-            ct._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
-            ct._interpolated = 1;
-            ct._version++;
-        }
+export function markInterpolatedDescendantsDirty(transform: TransformSubtree): void {
+    const children = transform._children;
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i]!;
+        child._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        child._interpolated = 1;
+        child._version++;
         markInterpolatedDescendantsDirty(child);
     }
 }

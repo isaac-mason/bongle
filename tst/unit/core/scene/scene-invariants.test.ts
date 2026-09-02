@@ -74,6 +74,19 @@ function liveNodes(sceneTree: SceneTree): Node[] {
     return [...sceneTree.nodes];
 }
 
+function freshChildren(node: Node): unknown[] {
+    const out: unknown[] = [];
+    const visit = (n: Node) => {
+        for (const child of n.children) {
+            const t = child._traits[TransformTrait._slot!];
+            if (t !== undefined) out.push(t);
+            else visit(child);
+        }
+    };
+    visit(node);
+    return out;
+}
+
 function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: Node[], destroyed: Set<Node>, op: string) {
     for (const node of everyNode) {
         if (destroyed.has(node)) continue;
@@ -82,6 +95,12 @@ function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: N
             expect(transform._parent, `_parent after ${op} on ${node.name}`).toBe(
                 (nearest(node, TransformTrait._slot!, false) as typeof transform | undefined) ?? null,
             );
+            const expected = new Set(freshChildren(node));
+            const actual = new Set<unknown>(transform._children);
+            expect(actual.size, `_children count after ${op} on ${node.name}`).toBe(expected.size);
+            for (const child of expected) {
+                expect(actual.has(child), `_children missing an entry after ${op} on ${node.name}`).toBe(true);
+            }
         }
     }
 

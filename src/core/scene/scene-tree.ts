@@ -1,4 +1,4 @@
-import { getWorldChunk, TransformTrait } from '../../builtins/transform';
+import { getWorldChunk, releaseTransform, TransformTrait } from '../../builtins/transform';
 import { env } from '../../env';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';
@@ -665,10 +665,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     sceneTree._prefabNodes.delete(node);
     sceneTree._prefabsDirty.delete(node);
     const t = getTrait(node, TransformTrait);
-    if (t) {
-        sceneTree._transformDirty.delete(t);
-        sceneTree._interpolating.delete(t);
-    }
+    if (t) releaseTransform(sceneTree, t);
     node.scene = null;
 
     // recursive: each level flushes once its own node is fully detached, so a
@@ -839,6 +836,10 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         // the trait value is still resolvable.
         if (scene?.context) disposeTraitScripts(scene.context, node, handle._def);
 
+        if (traitSlot === TransformTrait._slot) {
+            releaseTransform(scene, getTrait(node, TransformTrait)!);
+        }
+
         // update bitset so queries see the node as no longer matching
         bitset.remove(node._bitset, traitSlot);
         if (scene) {
@@ -881,11 +882,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
         }
 
         if (traitSlot === TransformTrait._slot) {
-            const t = getTrait(node, TransformTrait)!;
-            if (scene) {
-                scene._transformDirty.delete(t);
-                scene._interpolating.delete(t);
-            }
+            releaseTransform(scene, getTrait(node, TransformTrait)!);
         }
 
         bitset.remove(node._bitset, traitSlot);
