@@ -550,13 +550,20 @@ enum FieldKind {
 type FieldPlan = { key: string; kind: FieldKind; value: unknown };
 
 /** per-def field plan, so `buildTraitInstance` doesn't re-walk `Object.entries` per instance. */
-const fieldPlans = new WeakMap<TraitDef, FieldPlan[]>();
+type DefShape = {
+    /** the per-instance work left after cloning `template`: Clone and Factory fields only. */
+    plan: FieldPlan[];
+    /** one fast-properties prototype of an instance, cloned per instance. */
+    template: TraitBase & Record<string, unknown>;
+};
 
-function fieldPlanFor(def: TraitDef): FieldPlan[] {
-    let plan = fieldPlans.get(def);
-    if (plan !== undefined) return plan;
+const defShapes = new WeakMap<TraitDef, DefShape>();
 
-    plan = [];
+function shapeFor(def: TraitDef): DefShape {
+    const cached = defShapes.get(def);
+    if (cached !== undefined) return cached;
+
+    const plan: FieldPlan[] = [];
     for (const key of Object.keys(def.body)) {
         const value = def.body[key];
         let kind: FieldKind;
@@ -566,30 +573,32 @@ function fieldPlanFor(def: TraitDef): FieldPlan[] {
         else kind = FieldKind.Literal;
         plan.push({ key, kind, value });
     }
-    fieldPlans.set(def, plan);
-    return plan;
+
+    // Successive stores put an object of more than ~16 properties into dictionary
+    // mode: 6.6x slower to read and 5.6x larger. Building the shape once and
+    // spreading it yields fast properties, and cloning that per instance keeps them.
+    const seed: Record<string, unknown> = { _node: null, _def: def, _sync: undefined };
+    for (const field of plan) seed[field.key] = field.kind === FieldKind.Literal ? field.value : null;
+    const template = { ...seed } as TraitBase & Record<string, unknown>;
+
+    // Literal and Directive fields are already correct in the template, so a
+    // clone only has to redo the ones that must not be shared between instances.
+    const perInstance = plan.filter((f) => f.kind === FieldKind.Clone || f.kind === FieldKind.Factory);
+
+    const shape: DefShape = { plan: perInstance, template };
+    defShapes.set(def, shape);
+    return shape;
 }
 
 export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
-    const instance: TraitBase & Record<string, unknown> = { _node: null!, _def: def };
+    const shape = shapeFor(def);
+    const instance = { ...shape.template };
 
-    const plan = fieldPlanFor(def);
+    const plan = shape.plan;
     for (let i = 0; i < plan.length; i++) {
         const field = plan[i]!;
-        switch (field.kind) {
-            case FieldKind.Directive:
-                instance[field.key] = null;
-                break;
-            case FieldKind.Factory:
-                instance[field.key] = (field.value as Factory<unknown>)();
-                break;
-            case FieldKind.Clone:
-                instance[field.key] = cloneTraitValue(field.value as object);
-                break;
-            default:
-                instance[field.key] = field.value;
-                break;
-        }
+        instance[field.key] =
+            field.kind === FieldKind.Factory ? (field.value as Factory<unknown>)() : cloneTraitValue(field.value as object);
     }
 
     if (overrides) {
