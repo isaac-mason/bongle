@@ -27,11 +27,14 @@ function build(): Node {
     return root;
 }
 
-function measure(label: string, install: (t: ReturnType<typeof createSceneTree>) => void) {
+function measure(label: string, install: (t: ReturnType<typeof createSceneTree>) => void, bearTargets = 0) {
     const sceneTree = createSceneTree();
     install(sceneTree);
     const host = createNode({ name: 'host' });
     addTrait(host, Group);
+    // the only variable between a pair of rows: whether the traversal targets are borne
+    // above the attach point (descend) or absent everywhere (prunable).
+    for (let i = 0; i < bearTargets; i++) addTrait(host, Distinct[i]!);
     addChild(sceneTree.root, host);
     const sub = build();
 
@@ -51,17 +54,16 @@ function measure(label: string, install: (t: ReturnType<typeof createSceneTree>)
     console.log(`${label.padEnd(46)} ${best.toFixed(2).padStart(7)} us/attach+detach`);
 }
 
+// The query COUNT is held constant within each pair, so membership maintenance costs the
+// same on both rows and the only variable is whether each query's traversal target is
+// actually borne (descend) or absent everywhere (prunable).
 console.log(`attach+detach a ${NODES}-node chain (no movedFrom early-out)\n`);
-measure('no resolutions', () => {});
+measure('no queries at all', () => {});
+
 for (const n of [1, 4, 16]) {
-    measure(`${n} DISTINCT-target resolutions`, (t) => {
+    const install = (t: ReturnType<typeof createSceneTree>) => {
         for (let i = 0; i < n; i++) query(t, [Mesh, Optional(Up(Distinct[i]!))]);
-    });
-}
-for (const n of [1, 4, 16]) {
-    measure(`${n} SHARED-target resolutions (all on Group)`, (t) => {
-        // distinct query hashes, identical traversal target
-        for (let i = 0; i < n; i++) query(t, [Distinct[i]!, Optional(Up(Group))]);
-        for (let i = 0; i < n; i++) query(t, [Mesh, Optional(Up(Group)), Optional(Up(Distinct[i]!))]);
-    });
+    };
+    measure(`${n} queries, targets ABSENT (prunable)`, install, 0);
+    measure(`${n} queries, targets BORNE above (descend)`, install, n);
 }

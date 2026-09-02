@@ -1342,7 +1342,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
     // fill the hierarchy slots pass 1 deferred, before any user code runs.
     // pass 2 fires `onInit`, and a script reading a query tuple there must not
     // see a half-built match.
-    fillQueryResolutions(sceneTree, node);
+    fillQueryResolutions(sceneTree, node, subtree);
 
     // pass 2: fire onInit on all new script instances
     for (const instance of newScriptInstances) {
@@ -2607,11 +2607,29 @@ export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFro
  * These nodes just entered, so a slot going null → resolved is its initial
  * value, not a rebind; `_fillingTuples` suppresses the events for this pass.
  */
-function fillQueryResolutions(sceneTree: SceneTree, node: Node): void {
+function fillQueryResolutions(sceneTree: SceneTree, node: Node, subtree: Node[]): void {
     if (sceneTree._queryResolutions.length === 0) return;
     _fillingTuples = true;
-    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined, true);
+    resolveSubtreeFor(sceneTree._queryResolutions, node, undefined, true, subtree);
     _fillingTuples = false;
+}
+
+/**
+ * Union of every trait borne anywhere in `subtree`. A fill descent whose target is absent
+ * both here and above resolves every node to null, and a fill's Optional traversal slots are
+ * already null (`buildQueryTuple` defers them), so that descent can be skipped outright.
+ * Whole-subtree, not per node: this prunes entire descents, never branches within one.
+ */
+function subtreeTraitUnion(subtree: Node[]): Bitset {
+    const mask = bitset.init();
+    for (let i = 0; i < subtree.length; i++) {
+        const bits = subtree[i]!._bitset;
+        for (let w = 0; w < bits.length; w++) {
+            while (w >= mask.length) mask.push(0);
+            mask[w] = (mask[w]! | bits[w]!) >>> 0;
+        }
+    }
+    return mask;
 }
 
 /** set only for the duration of a fill pass; the walk is synchronous and never
@@ -2619,10 +2637,19 @@ function fillQueryResolutions(sceneTree: SceneTree, node: Node): void {
  *  signature shared with the declared resolutions. */
 let _fillingTuples = false;
 
-function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null, fill = false): void {
+function resolveSubtreeFor(resolutions: Resolution[], node: Node, movedFrom?: Node | null, fill = false, subtree?: Node[]): void {
+    // built on the first resolution that could actually be pruned, so a subtree whose
+    // targets are all borne above never pays for it.
+    let subtreeTraits: Bitset | undefined;
     for (let i = 0; i < resolutions.length; i++) {
         const resolution = resolutions[i]!;
         const inherited = nearestTrait(node.parent, resolution.traitSlot, true);
+        // nothing above bears the target. if nothing below does either, every node in the
+        // subtree resolves to null, which is what a fill's slots already hold.
+        if (subtree !== undefined && inherited === undefined) {
+            subtreeTraits ??= subtreeTraitUnion(subtree);
+            if (!bitset.has(subtreeTraits, resolution.traitSlot)) continue;
+        }
         // A move whose old and new parents resolve this to the same value
         // changes nothing anywhere in the subtree: every resolution inside it
         // derives from what the subtree inherits, and the subtree's own shape
