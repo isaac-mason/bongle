@@ -314,6 +314,10 @@ export type TraitDef = {
     scripts: ScriptDef[];
     /** lookup by script id (user-supplied, within this trait). */
     scriptsById: Map<string, { reg: ScriptDef; index: number }>;
+
+    /** compiled instance constructor, built on first instantiation. Lives here rather than in a
+     *  side map so an HMR re-eval, which mints a fresh def, gets a fresh one for free. */
+    construct: (() => TraitBase) | null;
     /**
      * canonical handle for this def. populated by `trait()` immediately
      * after the def is constructed, so any registry lookup yields the
@@ -390,6 +394,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         syncById: new Map(),
         scripts: [],
         scriptsById: new Map(),
+        construct: null,
         handle: null!,
     };
     const handle: TraitHandle<TraitInstance<S>> = {
@@ -618,19 +623,9 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
     return build(def, cloneTraitValue, captured);
 }
 
-const defConstructors = new WeakMap<TraitDef, () => TraitBase & Record<string, unknown>>();
-
-function constructorFor(def: TraitDef): () => TraitBase & Record<string, unknown> {
-    let construct = defConstructors.get(def);
-    if (construct === undefined) {
-        construct = compileConstructor(def);
-        defConstructors.set(def, construct);
-    }
-    return construct;
-}
-
 export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
-    const instance = constructorFor(def)();
+    const construct = (def.construct ??= compileConstructor(def));
+    const instance = construct() as TraitBase & Record<string, unknown>;
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
