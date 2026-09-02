@@ -1,18 +1,7 @@
-// dbvt.ts, a dynamic bounding-volume tree (broadphase) over fat AABBs.
-//
-// Generic: it knows nothing about culling. Each LEAF carries an opaque
-// numeric `data` payload (callers use it as an index into their own array);
-// internal nodes have `data = -1`. Callers get `data` back from `remove` and
-// from the `frustumCull` callback, and can rewrite it with `setData`.
-//
-// A port of crashcat's broadphase, stripped to the visibility use-case:
-// fat-aabb expansion margin, freelist node pool, insert / remove / update
-// with fat-aabb containment skip, ancestor refit. Dropped: collision filter
-// / groups / mask, raycast and shape-cast helpers, previousAabb / velocity
-// prediction. `intersectAABB` is replaced by `frustumCull`, which prunes
-// internal subtrees via the 6-plane frustum test.
+// dynamic bounding-volume tree over fat AABBs. Leaves carry an opaque numeric `data`.
+// SAH sibling choice on insert, AVL rebalance to the root on every insert/remove.
 
-import { type Frustum, frustum } from 'gpucat';
+import type { Frustum } from 'gpucat';
 import { type Box3, box3 } from 'math/shapes';
 
 export type DbvtNode = {
@@ -21,6 +10,7 @@ export type DbvtNode = {
     left: number;
     right: number;
     aabb: Box3;
+    /** longest path down to a leaf; 0 for a leaf. drives the AVL rotation. */
     height: number;
     data: number;
 };
@@ -34,27 +24,26 @@ export type Dbvt = {
     expansionMargin: number;
 };
 
-type Stack = { entries: Int32Array; size: number };
+const DEFAULT_EXPANSION_MARGIN = 0.5;
+
+type Stack = { entries: Int32Array; masks: Uint8Array; size: number };
 
 function stackCreate(initialCapacity = 128): Stack {
-    return { entries: new Int32Array(initialCapacity), size: 0 };
+    return { entries: new Int32Array(initialCapacity), masks: new Uint8Array(initialCapacity), size: 0 };
 }
 
-function stackPush(s: Stack, nodeIndex: number): void {
+function stackPush(s: Stack, nodeIndex: number, mask: number): void {
     if (s.size >= s.entries.length) {
-        const grown = new Int32Array(s.entries.length * 2);
-        grown.set(s.entries);
-        s.entries = grown;
+        const grownEntries = new Int32Array(s.entries.length * 2);
+        grownEntries.set(s.entries);
+        s.entries = grownEntries;
+        const grownMasks = new Uint8Array(s.masks.length * 2);
+        grownMasks.set(s.masks);
+        s.masks = grownMasks;
     }
-    s.entries[s.size++] = nodeIndex;
-}
-
-function stackPop(s: Stack): number {
-    return s.entries[--s.size];
-}
-
-function stackReset(s: Stack): void {
-    s.size = 0;
+    s.entries[s.size] = nodeIndex;
+    s.masks[s.size] = mask;
+    s.size++;
 }
 
 const _stack = /* @__PURE__ */ stackCreate(128);
@@ -64,7 +53,7 @@ export function create(): Dbvt {
         nodes: [],
         freeNodeIndices: [],
         root: -1,
-        expansionMargin: 0.05,
+        expansionMargin: DEFAULT_EXPANSION_MARGIN,
     };
 }
 
@@ -103,28 +92,130 @@ function releaseNode(tree: Dbvt, nodeIndex: number): void {
     tree.freeNodeIndices.push(nodeIndex);
 }
 
-function isLeaf(node: DbvtNode): boolean {
-    return node.left === -1 && node.right === -1;
+function surfaceArea(b: Box3): number {
+    const dx = b[3] - b[0];
+    const dy = b[4] - b[1];
+    const dz = b[5] - b[2];
+    return 2 * (dx * dy + dy * dz + dz * dx);
 }
 
-function proximity(a: Box3, b: Box3): number {
-    const dx = a[0] + a[3] - (b[0] + b[3]);
-    const dy = a[1] + a[4] - (b[1] + b[4]);
-    const dz = a[2] + a[5] - (b[2] + b[5]);
-    return Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+function unionSurfaceArea(a: Box3, b: Box3): number {
+    const minX = a[0] < b[0] ? a[0] : b[0];
+    const minY = a[1] < b[1] ? a[1] : b[1];
+    const minZ = a[2] < b[2] ? a[2] : b[2];
+    const maxX = a[3] > b[3] ? a[3] : b[3];
+    const maxY = a[4] > b[4] ? a[4] : b[4];
+    const maxZ = a[5] > b[5] ? a[5] : b[5];
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    const dz = maxZ - minZ;
+    return 2 * (dx * dy + dy * dz + dz * dx);
 }
 
-function select(o: Box3, a: Box3, b: Box3): number {
-    return proximity(o, a) < proximity(o, b) ? 0 : 1;
+/** AVL rotation around `iA`; returns whichever index now sits where `iA` did. */
+function balance(tree: Dbvt, iA: number): number {
+    const A = tree.nodes[iA];
+    if (A.left === -1 || A.height < 2) return iA;
+
+    const iB = A.left;
+    const iC = A.right;
+    const B = tree.nodes[iB];
+    const C = tree.nodes[iC];
+    const skew = C.height - B.height;
+
+    if (skew > 1) {
+        const iF = C.left;
+        const iG = C.right;
+        const F = tree.nodes[iF];
+        const G = tree.nodes[iG];
+
+        C.left = iA;
+        C.parent = A.parent;
+        A.parent = iC;
+
+        if (C.parent !== -1) {
+            const P = tree.nodes[C.parent];
+            if (P.left === iA) P.left = iC;
+            else P.right = iC;
+        } else {
+            tree.root = iC;
+        }
+
+        if (F.height > G.height) {
+            C.right = iF;
+            A.right = iG;
+            G.parent = iA;
+            box3.union(A.aabb, B.aabb, G.aabb);
+            box3.union(C.aabb, A.aabb, F.aabb);
+            A.height = 1 + (B.height > G.height ? B.height : G.height);
+            C.height = 1 + (A.height > F.height ? A.height : F.height);
+        } else {
+            C.right = iG;
+            A.right = iF;
+            F.parent = iA;
+            box3.union(A.aabb, B.aabb, F.aabb);
+            box3.union(C.aabb, A.aabb, G.aabb);
+            A.height = 1 + (B.height > F.height ? B.height : F.height);
+            C.height = 1 + (A.height > G.height ? A.height : G.height);
+        }
+        return iC;
+    }
+
+    if (skew < -1) {
+        const iD = B.left;
+        const iE = B.right;
+        const D = tree.nodes[iD];
+        const E = tree.nodes[iE];
+
+        B.right = iA;
+        B.parent = A.parent;
+        A.parent = iB;
+
+        if (B.parent !== -1) {
+            const P = tree.nodes[B.parent];
+            if (P.left === iA) P.left = iB;
+            else P.right = iB;
+        } else {
+            tree.root = iB;
+        }
+
+        if (D.height > E.height) {
+            B.left = iD;
+            A.left = iE;
+            E.parent = iA;
+            box3.union(A.aabb, C.aabb, E.aabb);
+            box3.union(B.aabb, A.aabb, D.aabb);
+            A.height = 1 + (C.height > E.height ? C.height : E.height);
+            B.height = 1 + (A.height > D.height ? A.height : D.height);
+        } else {
+            B.left = iE;
+            A.left = iD;
+            D.parent = iA;
+            box3.union(A.aabb, C.aabb, D.aabb);
+            box3.union(B.aabb, A.aabb, E.aabb);
+            A.height = 1 + (C.height > D.height ? C.height : D.height);
+            B.height = 1 + (A.height > E.height ? A.height : E.height);
+        }
+        return iB;
+    }
+
+    return iA;
 }
 
-function indexof(tree: Dbvt, nodeIndex: number): number {
-    const node = tree.nodes[nodeIndex];
-    const parent = tree.nodes[node.parent];
-    return parent.right === nodeIndex ? 1 : 0;
+function refitAndBalance(tree: Dbvt, startIndex: number): void {
+    let index = startIndex;
+    while (index !== -1) {
+        index = balance(tree, index);
+        const node = tree.nodes[index];
+        const left = tree.nodes[node.left];
+        const right = tree.nodes[node.right];
+        node.height = 1 + (left.height > right.height ? left.height : right.height);
+        box3.union(node.aabb, left.aabb, right.aabb);
+        index = node.parent;
+    }
 }
 
-function insertLeaf(tree: Dbvt, rootIndex: number, leafIndex: number): void {
+function insertLeaf(tree: Dbvt, leafIndex: number): void {
     const leaf = tree.nodes[leafIndex];
 
     if (tree.root === -1) {
@@ -133,106 +224,84 @@ function insertLeaf(tree: Dbvt, rootIndex: number, leafIndex: number): void {
         return;
     }
 
-    let cur = rootIndex;
-    let curNode = tree.nodes[cur];
-    while (!isLeaf(curNode)) {
-        const leftNode = tree.nodes[curNode.left];
-        const rightNode = tree.nodes[curNode.right];
-        const child = select(leaf.aabb, leftNode.aabb, rightNode.aabb);
-        cur = child === 0 ? curNode.left : curNode.right;
-        curNode = tree.nodes[cur];
+    const leafAabb = leaf.aabb;
+    let siblingIndex = tree.root;
+    let sibling = tree.nodes[siblingIndex];
+    while (sibling.left !== -1) {
+        const area = surfaceArea(sibling.aabb);
+        const combined = unionSurfaceArea(sibling.aabb, leafAabb);
+
+        const stopCost = 2 * combined;
+        const inheritance = 2 * (combined - area);
+
+        const leftIndex = sibling.left;
+        const rightIndex = sibling.right;
+        const left = tree.nodes[leftIndex];
+        const right = tree.nodes[rightIndex];
+
+        const leftUnion = unionSurfaceArea(leafAabb, left.aabb);
+        const leftCost = (left.left === -1 ? leftUnion : leftUnion - surfaceArea(left.aabb)) + inheritance;
+        const rightUnion = unionSurfaceArea(leafAabb, right.aabb);
+        const rightCost = (right.left === -1 ? rightUnion : rightUnion - surfaceArea(right.aabb)) + inheritance;
+
+        if (stopCost < leftCost && stopCost < rightCost) break;
+
+        if (leftCost < rightCost) {
+            siblingIndex = leftIndex;
+            sibling = left;
+        } else {
+            siblingIndex = rightIndex;
+            sibling = right;
+        }
     }
 
-    const prev = curNode.parent;
+    const oldParentIndex = sibling.parent;
     const newParentIndex = requestNode(tree);
     const newParent = tree.nodes[newParentIndex];
 
-    newParent.parent = prev;
-    box3.union(newParent.aabb, leaf.aabb, curNode.aabb);
-    newParent.height = curNode.height + 1;
+    newParent.parent = oldParentIndex;
+    newParent.left = siblingIndex;
+    newParent.right = leafIndex;
+    newParent.height = sibling.height + 1;
+    box3.union(newParent.aabb, leafAabb, sibling.aabb);
+    sibling.parent = newParentIndex;
+    leaf.parent = newParentIndex;
 
-    if (prev !== -1) {
-        const prevNode = tree.nodes[prev];
-        if (indexof(tree, cur) === 0) {
-            prevNode.left = newParentIndex;
-        } else {
-            prevNode.right = newParentIndex;
-        }
-        newParent.left = cur;
-        curNode.parent = newParentIndex;
-        newParent.right = leafIndex;
-        leaf.parent = newParentIndex;
-
-        let childNode = newParent;
-        let parentIndex = prev;
-        while (parentIndex !== -1) {
-            const parentNode = tree.nodes[parentIndex];
-            if (!box3.containsBox3(parentNode.aabb, childNode.aabb)) {
-                const leftNode = tree.nodes[parentNode.left];
-                const rightNode = tree.nodes[parentNode.right];
-                box3.union(parentNode.aabb, leftNode.aabb, rightNode.aabb);
-            } else {
-                break;
-            }
-            childNode = parentNode;
-            parentIndex = parentNode.parent;
-        }
+    if (oldParentIndex !== -1) {
+        const oldParent = tree.nodes[oldParentIndex];
+        if (oldParent.left === siblingIndex) oldParent.left = newParentIndex;
+        else oldParent.right = newParentIndex;
     } else {
-        newParent.left = cur;
-        curNode.parent = newParentIndex;
-        newParent.right = leafIndex;
-        leaf.parent = newParentIndex;
         tree.root = newParentIndex;
     }
+
+    refitAndBalance(tree, newParentIndex);
 }
 
-const _prevAabb = /* @__PURE__ */ box3.create();
-
-function removeLeaf(tree: Dbvt, leafIndex: number): number {
+function removeLeaf(tree: Dbvt, leafIndex: number): void {
     if (leafIndex === tree.root) {
         tree.root = -1;
-        return -1;
+        return;
     }
 
     const leaf = tree.nodes[leafIndex];
     const parentIndex = leaf.parent;
     const parent = tree.nodes[parentIndex];
-    const prevIndex = parent.parent;
+    const grandparentIndex = parent.parent;
     const siblingIndex = parent.left === leafIndex ? parent.right : parent.left;
     const sibling = tree.nodes[siblingIndex];
 
-    if (prevIndex !== -1) {
-        const prev = tree.nodes[prevIndex];
-        if (indexof(tree, parentIndex) === 0) {
-            prev.left = siblingIndex;
-        } else {
-            prev.right = siblingIndex;
-        }
-        sibling.parent = prevIndex;
+    if (grandparentIndex !== -1) {
+        const grandparent = tree.nodes[grandparentIndex];
+        if (grandparent.left === parentIndex) grandparent.left = siblingIndex;
+        else grandparent.right = siblingIndex;
+        sibling.parent = grandparentIndex;
         releaseNode(tree, parentIndex);
-
-        let nodeIndex = prevIndex;
-        while (nodeIndex !== -1) {
-            const node = tree.nodes[nodeIndex];
-            box3.copy(_prevAabb, node.aabb);
-
-            const leftNode = tree.nodes[node.left];
-            const rightNode = tree.nodes[node.right];
-            box3.union(node.aabb, leftNode.aabb, rightNode.aabb);
-
-            if (!box3.exactEquals(node.aabb, _prevAabb)) {
-                nodeIndex = node.parent;
-            } else {
-                break;
-            }
-        }
-
-        return prevIndex;
+        refitAndBalance(tree, grandparentIndex);
     } else {
         tree.root = siblingIndex;
         sibling.parent = -1;
         releaseNode(tree, parentIndex);
-        return tree.root;
     }
 }
 
@@ -248,7 +317,7 @@ export function add(tree: Dbvt, aabb: Box3, data: number): number {
     leaf.height = 0;
     leaf.data = data;
 
-    insertLeaf(tree, tree.root, leafIndex);
+    insertLeaf(tree, leafIndex);
     return leafIndex;
 }
 
@@ -266,42 +335,109 @@ export function setData(tree: Dbvt, leafIndex: number, data: number): void {
     tree.nodes[leafIndex].data = data;
 }
 
-/**
- * refresh a leaf to a new tight aabb. fast path: if the new aabb still fits
- * inside the leaf's fat aabb, no tree mutation happens. otherwise the leaf is
- * removed and reinserted from the tree root. `data` is preserved.
- */
+/** refresh a leaf's aabb; no-op while it still fits the fat aabb, else reinsert from the root. */
 export function update(tree: Dbvt, leafIndex: number, aabb: Box3): void {
     const leaf = tree.nodes[leafIndex];
     if (box3.containsBox3(leaf.aabb, aabb)) return;
 
     box3.expandByMargin(_fatAabb, aabb, tree.expansionMargin);
 
-    const rootIndex = removeLeaf(tree, leafIndex);
+    removeLeaf(tree, leafIndex);
     box3.copy(leaf.aabb, _fatAabb);
-    insertLeaf(tree, rootIndex === -1 ? tree.root : rootIndex, leafIndex);
+    leaf.parent = -1;
+    leaf.left = -1;
+    leaf.right = -1;
+    leaf.height = 0;
+    insertLeaf(tree, leafIndex);
 }
 
-/** visit every leaf whose fat aabb intersects the frustum, passing its
- *  `data` payload and (fat, world-space) aabb. */
-export function frustumCull(tree: Dbvt, f: Frustum, onLeaf: (data: number, aabb: Box3) => void): void {
+/** longest root-to-leaf path; 0 for an empty or single-leaf tree. */
+export function height(tree: Dbvt): number {
+    return tree.root === -1 ? 0 : tree.nodes[tree.root].height;
+}
+
+const _planes = /* @__PURE__ */ new Float64Array(24);
+
+const ALL_PLANES = 0b111111;
+
+/** visit every leaf inside the frustum and within `radiusSq` of the camera. `Infinity` disables the sphere. */
+export function frustumCull(
+    tree: Dbvt,
+    f: Frustum,
+    cx: number,
+    cy: number,
+    cz: number,
+    radiusSq: number,
+    onLeaf: (data: number) => void,
+): void {
     if (tree.root === -1) return;
 
-    stackReset(_stack);
-    stackPush(_stack, tree.root);
+    for (let i = 0; i < 6; i++) {
+        const plane = f[i];
+        const o = i * 4;
+        _planes[o] = plane.normal[0];
+        _planes[o + 1] = plane.normal[1];
+        _planes[o + 2] = plane.normal[2];
+        _planes[o + 3] = plane.constant;
+    }
 
-    while (_stack.size > 0) {
-        const nodeIndex = stackPop(_stack);
-        const node = tree.nodes[nodeIndex];
+    const clipToSphere = radiusSq !== Number.POSITIVE_INFINITY;
+    const nodes = tree.nodes;
+    const stack = _stack;
+    stack.size = 0;
+    stackPush(stack, tree.root, ALL_PLANES);
 
-        if (!frustum.intersectsBox3(f, node.aabb)) continue;
+    while (stack.size > 0) {
+        stack.size--;
+        const nodeIndex = stack.entries[stack.size]!;
+        let mask = stack.masks[stack.size]!;
+        const node = nodes[nodeIndex]!;
+        const aabb = node.aabb;
+        const minX = aabb[0];
+        const minY = aabb[1];
+        const minZ = aabb[2];
+        const maxX = aabb[3];
+        const maxY = aabb[4];
+        const maxZ = aabb[5];
 
-        if (isLeaf(node)) {
-            onLeaf(node.data, node.aabb);
+        let outside = false;
+        for (let i = 0; i < 6; i++) {
+            const bit = 1 << i;
+            if ((mask & bit) === 0) continue;
+            const o = i * 4;
+            const nx = _planes[o]!;
+            const ny = _planes[o + 1]!;
+            const nz = _planes[o + 2]!;
+            const constant = _planes[o + 3]!;
+
+            const px = nx >= 0 ? maxX : minX;
+            const py = ny >= 0 ? maxY : minY;
+            const pz = nz >= 0 ? maxZ : minZ;
+            if (nx * px + ny * py + nz * pz + constant < 0) {
+                outside = true;
+                break;
+            }
+
+            const qx = nx >= 0 ? minX : maxX;
+            const qy = ny >= 0 ? minY : maxY;
+            const qz = nz >= 0 ? minZ : maxZ;
+            if (nx * qx + ny * qy + nz * qz + constant >= 0) mask &= ~bit;
+        }
+        if (outside) continue;
+
+        if (clipToSphere) {
+            const dx = cx < minX ? minX - cx : cx > maxX ? cx - maxX : 0;
+            const dy = cy < minY ? minY - cy : cy > maxY ? cy - maxY : 0;
+            const dz = cz < minZ ? minZ - cz : cz > maxZ ? cz - maxZ : 0;
+            if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
+        }
+
+        if (node.left === -1) {
+            onLeaf(node.data);
             continue;
         }
 
-        if (node.left !== -1) stackPush(_stack, node.left);
-        if (node.right !== -1) stackPush(_stack, node.right);
+        stackPush(stack, node.left, mask);
+        stackPush(stack, node.right, mask);
     }
 }
