@@ -73,9 +73,9 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
 
+        // the instance carries its own def; no `registry.slotToTrait` hop needed.
+        const def = instance._def;
         const codecs = getSyncCodecs(def);
         if (!codecs) continue;
 
