@@ -146,7 +146,6 @@ function zeros(n: number): number[] {
 }
 
 type ClientNodeKnowledge = {
-    nodeVersion: number;
     parentId: number;
     childIndex: number;
     name: string | undefined;
@@ -303,9 +302,8 @@ type ClientState = {
      * `rate.hz` field went dirty but its send was throttled and hasn't shipped yet.
      * (the field is what's pending; this indexes it by node, since the node is the
      * unit the fan-out revisits.) it carries no new truth — the field-level "behind"
-     * already lives in `nodeKnowledge` (`TraitKnowledge.versions[i]` lags the
-     * instance, so `ClientNodeKnowledge.nodeVersion` stays < `node._sync.version`).
-     * it exists only so the fan-out can revisit those nodes without scanning every
+     * already lives in `nodeKnowledge` as `TraitKnowledge.behind`. it exists only so
+     * the fan-out can revisit those nodes without scanning every
      * known node: `dirtyNodes` carries what CHANGED this tick, not what a node that
      * has since SETTLED still owes. mirrors the voxel `pendingLight`/`pendingFull`
      * sets. an id lands here when a diff leaves the client behind and clears once it
@@ -1008,7 +1006,8 @@ function buildSceneSyncUpdates(
         // presence pass via reconcile unfiling it; this handles the rest, per-node).
         if (known) {
             if (mode === 'edit' || isReplicable(node)) {
-                diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
+                diffNodeStructure(node, known, updateList, mode);
+                diffNodeTraits(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
             } else {
                 destroys.push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
@@ -1053,7 +1052,9 @@ function buildSceneSyncUpdates(
             nodeSyncKnowledge.delete(nodeId);
             continue;
         }
-        diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
+        // not in `dirtyNodes`, so nothing structural can have moved — only the rate gate's
+        // timing did. Fields only.
+        retryPendingFields(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
     }
 
     // assemble parent-first creates → updates → destroys.
@@ -1255,17 +1256,14 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     };
 }
 
-/** diff a known node against current state and emit updates. updates knowledge in-place for sent fields. */
-function diffNodeKnowledge(
-    _sceneTree: SceneTree,
-    node: Node,
-    known: ClientNodeKnowledge,
-    updates: SceneSyncUpdate[],
-    mode: RoomMode,
-    currentTick: number,
-    playerId: PlayerId,
-    nodeSyncKnowledge: Set<number>,
-): void {
+/**
+ * emit everything about a node that is not a sync field: structure, name, owner, trait
+ * add/remove and prefab.
+ *
+ * Only meaningful for a node whose version changed — every mutation this looks for calls
+ * `bumpNodeVersion`, so a node absent from `dirtyNodes` can produce nothing here.
+ */
+function diffNodeStructure(node: Node, known: ClientNodeKnowledge, updates: SceneSyncUpdate[], mode: RoomMode): void {
     // structural change (parent or index)
     const parentId = node.parent?.id ?? 0;
     const childIndex = childIndexOf(node);
@@ -1300,69 +1298,7 @@ function diffNodeKnowledge(
         known.owner = node.owner;
     }
 
-    // trait changes, per-field granularity with per-field rate gating
-
     const nodeTraits = node._traits;
-    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
-        const instance = nodeTraits[traitSlot];
-        if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
-
-        const traitKnowledge = known.traits[traitSlot];
-
-        if (!traitKnowledge) {
-            // new trait, send add with full state (controls + syncs, no rate gating)
-            updates.push({
-                type: 'node_trait_added',
-                id: node.id,
-                traitNetIndex: def.netIndex,
-                traitId: undefined,
-                fields: readAllFields(node, traitSlot, instance),
-                syncs: readAllSyncs(node, traitSlot, instance),
-            });
-
-            // snapshot knowledge for this new trait, dense PACKED arrays by field index.
-            const len = def.sync.length;
-            const versions: number[] = [];
-            const lastSentTicks: number[] = [];
-            for (let i = 0; i < len; i++) {
-                versions.push(instance._sync?.versions[i] ?? 0);
-                lastSentTicks.push(currentTick);
-            }
-            known.traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
-        } else {
-            // existing trait, send only changed fields, with per-field rate gating
-            // readChangedFields commits per-field knowledge for the fields it sends.
-            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, playerId);
-            if (changedFields !== null) {
-                updates.push({
-                    type: 'node_trait_fields',
-                    id: node.id,
-                    traitNetIndex: def.netIndex!,
-                    fields: changedFields,
-                });
-            }
-        }
-    }
-
-    // include unresolved traits in current set
-    for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        const traitKnowledge = known.unresolvedTraits?.get(id);
-        if (!traitKnowledge) {
-            updates.push({
-                type: 'node_trait_added',
-                id: node.id,
-                traitNetIndex: undefined,
-                traitId: id,
-                fields: [],
-                syncs: [],
-            });
-            (known.unresolvedTraits ??= new Map()).set(id, { id, behind: false, versions: [], lastSentTicks: [] });
-        }
-        // note: unresolved traits can't change in-place (no live instance),
-        // so we don't need to check version diffs for them
-    }
 
     // removed traits, wire-compressed to the net index; the id is only put on the wire for
     // a trait that left the registry between snapshot and now (rare HMR edge), which is why
@@ -1405,29 +1341,112 @@ function diffNodeKnowledge(
             known.prefab = currentPrefab;
         }
     }
+}
 
-    // if any field was rate-throttled, keep nodeVersion stale so the node is re-checked
-    // next tick. `readChangedFields` already knows which those are; it used to be
-    // re-derived by walking every trait and field a second time.
-    let allFieldsCurrent = true;
-    for (let traitSlot = 0; traitSlot < known.traits.length; traitSlot++) {
-        if (known.traits[traitSlot]?.behind === true) {
-            allFieldsCurrent = false;
-            break;
+/** emit one trait's changed sync fields. Returns whether rate gating left it behind. */
+function diffTraitFields(
+    node: Node,
+    traitSlot: number,
+    instance: TraitBase,
+    traitKnowledge: TraitKnowledge,
+    def: TraitDef,
+    updates: SceneSyncUpdate[],
+    currentTick: number,
+    playerId: PlayerId,
+): boolean {
+    // readChangedFields commits per-field knowledge for the fields it sends, and sets
+    // `behind` when the rate gate holds one back.
+    const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, playerId);
+    if (changedFields !== null) {
+        updates.push({ type: 'node_trait_fields', id: node.id, traitNetIndex: def.netIndex!, fields: changedFields });
+    }
+    return traitKnowledge.behind;
+}
+
+/**
+ * emit trait adds and changed sync fields for a node that CHANGED this tick. One walk of
+ * `node._traits`: any trait may be new to this client or hold a new field version.
+ */
+function diffNodeTraits(
+    node: Node,
+    known: ClientNodeKnowledge,
+    updates: SceneSyncUpdate[],
+    currentTick: number,
+    playerId: PlayerId,
+    nodeSyncKnowledge: Set<number>,
+): void {
+    let behind = false;
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
+        const def = registry.slotToTrait[traitSlot];
+        if (!def) continue;
+
+        const traitKnowledge = known.traits[traitSlot];
+        if (traitKnowledge === undefined) {
+            // new to this client: ship full state, no rate gating.
+            updates.push({
+                type: 'node_trait_added',
+                id: node.id,
+                traitNetIndex: def.netIndex,
+                traitId: undefined,
+                fields: readAllFields(node, traitSlot, instance),
+                syncs: readAllSyncs(node, traitSlot, instance),
+            });
+            const len = def.sync.length;
+            const versions: number[] = [];
+            const lastSentTicks: number[] = [];
+            for (let i = 0; i < len; i++) {
+                versions.push(instance._sync?.versions[i] ?? 0);
+                lastSentTicks.push(currentTick);
+            }
+            known.traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
+            continue;
         }
+
+        if (diffTraitFields(node, traitSlot, instance, traitKnowledge, def, updates, currentTick, playerId)) behind = true;
     }
-    // `nodeVersion` reaching `node._sync.version` IS this client's "fully caught up"
-    // marker, so it doubles as the pending-index truth: park the node while a field
-    // is still behind (rate-throttled this tick), drop it once current. the fan-out
-    // revisits `pending` even when the node isn't in `dirtyNodes` — otherwise a source
-    // that settled would strand its last throttled update and this client would hold a
-    // stale value. no new state: it indexes the `nodeVersion`/`versions` we already keep.
-    if (allFieldsCurrent) {
-        known.nodeVersion = node._sync.version;
-        nodeSyncKnowledge.delete(node.id);
-    } else {
-        nodeSyncKnowledge.add(node.id);
+    setPending(node, nodeSyncKnowledge, behind);
+}
+
+/**
+ * retry the fields a rate gate held back on a node that did NOT change this tick.
+ *
+ * Walks the knowledge rather than the node: only a trait already marked `behind` can have
+ * anything to send, and a pending node is typically behind on one trait (its transform)
+ * while the rest are current.
+ */
+function retryPendingFields(
+    node: Node,
+    known: ClientNodeKnowledge,
+    updates: SceneSyncUpdate[],
+    currentTick: number,
+    playerId: PlayerId,
+    nodeSyncKnowledge: Set<number>,
+): void {
+    let behind = false;
+    const nodeTraits = node._traits;
+    for (let traitSlot = 0; traitSlot < known.traits.length; traitSlot++) {
+        const traitKnowledge = known.traits[traitSlot];
+        if (traitKnowledge === undefined || !traitKnowledge.behind) continue;
+        const instance = nodeTraits[traitSlot];
+        if (instance === undefined) continue;
+        const def = registry.slotToTrait[traitSlot];
+        if (!def) continue;
+        if (diffTraitFields(node, traitSlot, instance, traitKnowledge, def, updates, currentTick, playerId)) behind = true;
     }
+    setPending(node, nodeSyncKnowledge, behind);
+}
+
+/**
+ * park the node while a field is still rate-throttled, drop it once current. The fan-out
+ * revisits pending nodes even when they aren't in `dirtyNodes` — otherwise a source that
+ * settled would strand its last throttled update and the client would hold a stale value.
+ */
+function setPending(node: Node, nodeSyncKnowledge: Set<number>, behind: boolean): void {
+    if (behind) nodeSyncKnowledge.add(node.id);
+    else nodeSyncKnowledge.delete(node.id);
 }
 
 /* ── knowledge snapshotting ── */
@@ -1465,7 +1484,6 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     }
 
     nodeKnowledge.set(node.id, {
-        nodeVersion: node._sync.version,
         parentId,
         childIndex: Math.max(0, childIndex),
         name: node.name,
