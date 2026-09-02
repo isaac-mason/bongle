@@ -60,7 +60,23 @@ describe('vcc voxel contacts -> ContactsTrait', () => {
 
         // the character is standing on the lava block at (3, 4, 7); surface->
         // character normal points up.
-        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, /* stateId */ 42, /* subAabbIndex */ -1, 0.5, 4, 0.5, 0, 1, 0, /* penetration */ 0, /* solid */ true);
+        Physics.pushVccVoxelContact(
+            physics,
+            body.id,
+            3,
+            4,
+            7,
+            /* stateId */ 42,
+            /* subAabbIndex */ -1,
+            0.5,
+            4,
+            0.5,
+            0,
+            1,
+            0,
+            /* penetration */ 0,
+            /* solid */ true,
+        );
 
         Physics.tick(physics, sceneTree, 1 / 60);
 

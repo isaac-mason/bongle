@@ -1,8 +1,16 @@
 import * as p from 'packcat';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { registry, reindexRegistry } from '../../../src/core/registry';
-import { addChild, addTrait, createNode, createSceneTree, destroyNode, getTrait, removeTrait } from '../../../src/core/scene/scene-tree';
 import { prop } from '../../../src/core/scene/prop';
+import {
+    addChild,
+    addTrait,
+    createNode,
+    createSceneTree,
+    destroyNode,
+    getTrait,
+    removeTrait,
+} from '../../../src/core/scene/scene-tree';
 import { control, sync, trait } from '../../../src/core/scene/traits';
 import { runDiffDetection } from '../../../src/server/discovery';
 

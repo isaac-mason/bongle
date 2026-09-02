@@ -46,7 +46,8 @@ export function recordBatch(pacing: RegionBatchPacing, regionCount: number, elap
     if (regionCount <= 0) return;
     const nanosPerRegion = elapsedNanos / regionCount;
     const clamped = Math.min(Math.max(nanosPerRegion, pacing.aggregatedNanosPerRegion / 3), pacing.aggregatedNanosPerRegion * 3);
-    pacing.aggregatedNanosPerRegion = (pacing.aggregatedNanosPerRegion * pacing.oldSamplesWeight + clamped) / (pacing.oldSamplesWeight + 1);
+    pacing.aggregatedNanosPerRegion =
+        (pacing.aggregatedNanosPerRegion * pacing.oldSamplesWeight + clamped) / (pacing.oldSamplesWeight + 1);
     pacing.oldSamplesWeight = Math.min(pacing.oldSamplesWeight + 1, OLD_SAMPLES_WEIGHT_CAP);
 }
 

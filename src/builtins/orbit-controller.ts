@@ -17,14 +17,21 @@
  */
 
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'math';
-import { env } from '../env';
-import { getCanvasTouches, getPinchDelta, isMouseDown, isMouseJustDown, isMouseJustUp, isPointerCapturedByUi } from '../api/input';
+import {
+    getCanvasTouches,
+    getPinchDelta,
+    isMouseDown,
+    isMouseJustDown,
+    isMouseJustUp,
+    isPointerCapturedByUi,
+} from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { env } from '../env';
 import { CameraTrait } from './camera';
 import { TransformTrait } from './transform';
 

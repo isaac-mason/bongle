@@ -78,7 +78,9 @@ export function config(c: Config): Config {
     if (server) {
         const maxPlayers = server.maxPlayers;
         if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > HARD_MAX_PLAYERS_PER_ROOM) {
-            throw new Error(`config({ server: { maxPlayers } }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`);
+            throw new Error(
+                `config({ server: { maxPlayers } }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`,
+            );
         }
     }
     upsert(registry.config, CONFIG_ID, c);

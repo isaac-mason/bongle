@@ -1,8 +1,8 @@
 import { move } from '@dnd-kit/helpers';
 import { DragDropProvider, DragOverlay } from '@dnd-kit/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import * as Icons from "../../../icons";
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as Icons from '../../../icons';
 import {
     Button,
     ContextMenu,

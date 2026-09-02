@@ -19,8 +19,8 @@
 // per-chunk binary payloads inside the json are gzip-base64 strings that
 // stay inert until `loadVoxels` decodes them at runtime.
 
-import type { ModuleVersion } from '../../internal';
 import type { Filesystem } from '../../../os/interface';
+import type { ModuleVersion } from '../../internal';
 
 const SCENES_DIR = 'content/scenes';
 const SCENE_EXT = '.scene.json';

@@ -1,8 +1,8 @@
 import * as gpu from 'gpucat';
 import { describe, expect, test } from 'vitest';
 import { ENVIRONMENT_DEFAULT } from '../../src/api/environment';
-import { createGpuQuadMaterial, createCpuQuadMaterial } from '../../src/render/voxels/voxel-material';
 import { createEnvironmentResources } from '../../src/render/environment/environment';
+import { createCpuQuadMaterial, createGpuQuadMaterial } from '../../src/render/voxels/voxel-material';
 
 const { compile, d } = gpu as unknown as {
     compile: (slots: { vertex: unknown; fragment: unknown; depth?: unknown }) => {
@@ -12,7 +12,11 @@ const { compile, d } = gpu as unknown as {
             binding: number;
             shared: boolean;
             totalBytes: number;
-            members: Array<{ node: { id: number; name: string; uniform: { value: unknown } }; schema: { type?: string; fields?: Record<string, unknown> }; offset: number }>;
+            members: Array<{
+                node: { id: number; name: string; uniform: { value: unknown } };
+                schema: { type?: string; fields?: Record<string, unknown> };
+                offset: number;
+            }>;
         }>;
     };
     d: typeof gpu.d;
@@ -48,10 +52,22 @@ describe('sky vs voxel frameGroup layout of shared EnvConfig', () => {
         const res = createEnvironmentResources(ENVIRONMENT_DEFAULT);
         const sky = compileMat(res.skyMaterial);
         const voxGpu = compileMat(
-            createGpuQuadMaterial({ atlas: makeStubAtlas(), texAnimBuffer: makeStubBuffer(), pass: 'opaque', elapsedTime: gpu.f32(0), env: res }),
+            createGpuQuadMaterial({
+                atlas: makeStubAtlas(),
+                texAnimBuffer: makeStubBuffer(),
+                pass: 'opaque',
+                elapsedTime: gpu.f32(0),
+                env: res,
+            }),
         );
         const voxCpu = compileMat(
-            createCpuQuadMaterial({ atlas: makeStubAtlas(), texAnimBuffer: makeStubBuffer(), pass: 'opaque', elapsedTime: gpu.f32(0), env: res }),
+            createCpuQuadMaterial({
+                atlas: makeStubAtlas(),
+                texAnimBuffer: makeStubBuffer(),
+                pass: 'opaque',
+                elapsedTime: gpu.f32(0),
+                env: res,
+            }),
         );
 
         const cfgOffset = (r: ReturnType<typeof compileMat>) => frameDump(r).find((m) => m.isCfg)!.offset;

@@ -17,7 +17,7 @@ import {
 import { env } from '../env';
 import type { ScriptContext } from './scripts';
 
-export type { CreateTouchJoystickOpts, CreateTouchButtonOpts };
+export type { CreateTouchButtonOpts, CreateTouchJoystickOpts };
 
 /**
  * Mounts a virtual joystick under the room's touch overlay. Returns a

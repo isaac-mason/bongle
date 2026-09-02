@@ -64,14 +64,7 @@ export function runBlockHooks(voxels: Voxels, wx: number, wy: number, wz: number
 
 /** BLOCK_EVENTS: fire this write's script observers. DEFAULT-only; call after
  *  runBlockHooks so observers see settled state. */
-export function runBlockEvents(
-    voxels: Voxels,
-    wx: number,
-    wy: number,
-    wz: number,
-    oldStateId: number,
-    newStateId: number,
-): void {
+export function runBlockEvents(voxels: Voxels, wx: number, wy: number, wz: number, oldStateId: number, newStateId: number): void {
     const observers = voxels.authority?.observers;
     if (!observers) return;
     const { stateToBlockIndex } = voxels.registry;

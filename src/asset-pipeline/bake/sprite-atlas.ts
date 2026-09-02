@@ -12,12 +12,12 @@
 // DrawSource frames are baked upstream by `draw-textures.ts` and threaded in
 // via `bakedDraws` as raster surfaces; the composite draws them directly.
 
+import type { Filesystem } from '../../../os/interface';
 import { addSkylineLevel, emptySkyline, findBestFit, type Region } from '../../core/atlas/skyline';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SpriteAtlasEntry, SpriteAtlasMetadata, SpriteFrameRect } from '../../core/sprites/atlas';
 import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
-import type { Filesystem } from '../../../os/interface';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import type { Raster, RasterCanvas, RasterImage } from './raster';

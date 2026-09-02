@@ -78,12 +78,7 @@ function makeMatchFn(
 
 // ── BFS ────────────────────────────────────────────────────────────
 
-function runBFS(
-    seed: [number, number, number],
-    voxels: Voxels,
-    blocks: Blocks,
-    opts: MagicSelectOptions,
-): Selection.Selection {
+function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, opts: MagicSelectOptions): Selection.Selection {
     const result = Selection.create();
 
     const [sx, sy, sz] = seed;

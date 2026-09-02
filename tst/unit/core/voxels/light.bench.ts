@@ -22,7 +22,14 @@ import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
 import { buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import { type BlockDef, type BlockTextureDef, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import { flushPendingLight, propagateAllLight, updateLightBatch } from '../../../../src/core/voxels/light';
-import { CHUNK_SIZE, createVoxels, createVoxelsAuthority, ensureChunk, setBlock, type Voxels } from '../../../../src/core/voxels/voxels';
+import {
+    CHUNK_SIZE,
+    createVoxels,
+    createVoxelsAuthority,
+    ensureChunk,
+    setBlock,
+    type Voxels,
+} from '../../../../src/core/voxels/voxels';
 
 // ── registry ────────────────────────────────────────────────────────
 

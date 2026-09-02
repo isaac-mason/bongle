@@ -10,6 +10,7 @@
  * `dispose(state)`. One `run` is the whole job: one revision-gated bake pass.
  */
 
+import type { Filesystem } from '../../os/interface';
 import type { Config } from '../core/config';
 import type { ResourceLoader } from '../core/resource-loader';
 import { buildBlockRegistry, registry } from '../internal';
@@ -23,7 +24,6 @@ import {
     runAssetPipelinePass,
 } from './bake/pass';
 import type { Raster } from './bake/raster';
-import type { Filesystem } from '../../os/interface';
 
 /** baked-output root, project-relative on the ctx filesystem. */
 const CLIENT_RESOURCES_DIR = 'resources/client';

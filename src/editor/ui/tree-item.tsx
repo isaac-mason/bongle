@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/react/sortable';
-import * as Icons from "../../../icons";
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import * as Icons from '../../../icons';
 import { IconButton } from '../../client/ui/components';
 import { useEditRoom } from '../edit-room-store';
 import type { FlattenedNode } from './tree-utils';

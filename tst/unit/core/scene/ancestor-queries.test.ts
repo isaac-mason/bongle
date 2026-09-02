@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TransformTrait } from '../../../../src/builtins/transform';
 import { Ancestor, Optional, Up } from '../../../../src/core/scene/conditions';
 import {
     addChild,
@@ -13,9 +14,8 @@ import {
     removeTrait,
     reparent,
 } from '../../../../src/core/scene/scene-tree';
-import { TransformTrait } from '../../../../src/builtins/transform';
-import { env } from '../../../../src/env';
 import { trait } from '../../../../src/core/scene/traits';
+import { env } from '../../../../src/env';
 
 /* ── test traits ── */
 

@@ -1,8 +1,8 @@
 import * as gpu from 'gpucat';
 import { describe, expect, test } from 'vitest';
 import { ENVIRONMENT_DEFAULT } from '../../src/api/environment';
-import { createGpuQuadMaterial } from '../../src/render/voxels/voxel-material';
 import { createEnvironmentResources } from '../../src/render/environment/environment';
+import { createGpuQuadMaterial } from '../../src/render/voxels/voxel-material';
 
 // Ground-truth probe for the "sky renders black" bug: cfg.enabled reads 0 in the
 // sky shader. We compile the REAL sky material + a REAL voxel material through
@@ -18,7 +18,11 @@ const { compile, d } = gpu as unknown as {
             binding: number;
             shared: boolean;
             totalBytes: number;
-            members: Array<{ node: { id: number; name: string; uniform: { value: unknown } }; schema: { type?: string }; offset: number }>;
+            members: Array<{
+                node: { id: number; name: string; uniform: { value: unknown } };
+                schema: { type?: string };
+                offset: number;
+            }>;
         }>;
     };
     d: typeof gpu.d;
@@ -52,7 +56,9 @@ describe('sky enabled offset agreement (ground truth for black-sky bug)', () => 
         for (const g of sky.uniformGroups) {
             console.log(
                 `group ${g.groupIndex} binding ${g.binding} shared=${g.shared} totalBytes=${g.totalBytes} members=` +
-                    g.members.map((m) => `${m.node.name}@${m.offset}[${(m.schema as { type?: string }).type ?? 'struct'}]`).join(', '),
+                    g.members
+                        .map((m) => `${m.node.name}@${m.offset}[${(m.schema as { type?: string }).type ?? 'struct'}]`)
+                        .join(', '),
             );
         }
 

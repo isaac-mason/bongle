@@ -3,10 +3,10 @@ import { MaterialCombineMode, MotionQuality, MotionType, type RigidBody } from '
 export { MaterialCombineMode, MotionQuality, MotionType } from 'crashcat';
 
 import { type Vec3, vec3 } from 'math';
-import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';
 import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
+import { TRANSFORM_SEND_HZ } from '../core/clock';
 
 // observer-normalized contact lifecycle lives on `ContactsTrait` (see
 // builtins/contacts.ts) and is driven by physics.ts fan-out.

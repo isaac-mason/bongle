@@ -8,9 +8,7 @@ export function migrateScene(raw: unknown): Record<string, unknown> {
     const start = typeof scene.version === 'number' ? scene.version : 0;
 
     if (start > SCENE_LATEST) {
-        throw new Error(
-            `scene file at version ${start} is newer than SCENE_LATEST (${SCENE_LATEST}) — engine is out of date`,
-        );
+        throw new Error(`scene file at version ${start} is newer than SCENE_LATEST (${SCENE_LATEST}) — engine is out of date`);
     }
 
     // 0 → 1: no-op placeholder. Proves the chain runs end to end.

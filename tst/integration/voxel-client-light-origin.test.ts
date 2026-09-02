@@ -242,5 +242,4 @@ describe('light-only changes re-queue their chunk for remesh', () => {
         expect(getRed(neighbour.light[acrossBoundary]!)).toBe(0);
         expect(mirror.dirty.blocks.has(neighbour)).toBe(true);
     });
-
 });

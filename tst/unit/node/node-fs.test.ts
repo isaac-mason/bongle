@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { openNodeFs } from '../../../src/node/node-fs';
-import { SCENES_DIR, scenePath, sceneIdFromPath } from '../../../src/server/content-manager';
+import { SCENES_DIR, sceneIdFromPath, scenePath } from '../../../src/server/content-manager';
 
 // Exercises the node host fs + the engine's scene path conventions at runtime — the
 // core new code the deployed play-room (M2) and the async load() seed (M1) rely on.

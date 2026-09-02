@@ -14,9 +14,9 @@ import type { Quat, Vec3 } from 'math';
 import { TransformTrait } from '../builtins/transform';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry as kindRegistry } from '../core/registry';
-import type { SceneTree, PrefabConfig, SerializedNode } from '../core/scene/scene-tree';
-import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/scene-tree';
 import { expandPrefab } from '../core/scene/prefab';
+import type { PrefabConfig, SceneTree, SerializedNode } from '../core/scene/scene-tree';
+import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/scene-tree';
 import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import type { Blocks } from '../core/voxels/block-registry';
@@ -246,7 +246,11 @@ export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selecti
 // selected nodes as children + serialized voxels in local space. used by
 // the "save selection as blueprint" flow (chat command, context menu).
 
-export function selectionToScenePayload(worldVoxels: Voxels, sceneTree: SceneTree, selection: Selection.Selection): ScenePayload | null {
+export function selectionToScenePayload(
+    worldVoxels: Voxels,
+    sceneTree: SceneTree,
+    selection: Selection.Selection,
+): ScenePayload | null {
     const bp = copySelection(worldVoxels, sceneTree, selection);
     if (!bp.hasVoxels && !bp.hasNodes) return null;
 

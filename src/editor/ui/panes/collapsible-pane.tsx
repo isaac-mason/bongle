@@ -1,6 +1,6 @@
-import * as Icons from "../../../../icons";
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
+import * as Icons from '../../../../icons';
 
 type CollapsiblePaneProps = {
     title: string;

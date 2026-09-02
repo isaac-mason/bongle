@@ -55,7 +55,13 @@ export function flushAcks(voxelNet: VoxelNet, net: ClientNet): void {
         }
         Pacing.recordBatch(pacing, regions.length, voxelNet.batchNanos.get(playerId) ?? 0);
 
-        Net.send(net, { type: 'voxel_ack', playerId, full, regions, desiredRegionsPerTick: Pacing.desiredRegionsPerTick(pacing) });
+        Net.send(net, {
+            type: 'voxel_ack',
+            playerId,
+            full,
+            regions,
+            desiredRegionsPerTick: Pacing.desiredRegionsPerTick(pacing),
+        });
     }
     voxelNet.batchNanos.clear();
     voxelNet.ackBuffer.clear();
@@ -95,7 +101,14 @@ function dirtyAllNeighbors(voxels: Voxels.Voxels, chunk: Voxels.Chunk): void {
  *  individual voxel_chunk_full (promotion) or as one entry in a
  *  voxel_region_full bundle (discovery) — same chunk data, same application
  *  logic either way, just a different envelope. */
-function applyOneChunkFull(voxels: Voxels.Voxels, cx: number, cy: number, cz: number, palette: number[], compressed: Uint8Array): void {
+function applyOneChunkFull(
+    voxels: Voxels.Voxels,
+    cx: number,
+    cy: number,
+    cz: number,
+    palette: number[],
+    compressed: Uint8Array,
+): void {
     const { data, light } = decodeChunk(compressed);
     const key = Voxels.chunkKey(cx, cy, cz);
 

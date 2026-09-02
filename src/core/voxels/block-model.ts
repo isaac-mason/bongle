@@ -356,7 +356,11 @@ function rotateNormal(n: Vec3, steps: number): Vec3 {
  * only opt in (uvlock: true) for blocks whose top/bottom should track world,
  * i.e. planar-tiled surfaces like stairs — not ones with a bespoke top atlas.
  */
-function lockUvsY(verts: readonly Vec3[], normal: Vec3, uvs: [Vec2, Vec2, Vec2, Vec2] | undefined): [Vec2, Vec2, Vec2, Vec2] | undefined {
+function lockUvsY(
+    verts: readonly Vec3[],
+    normal: Vec3,
+    uvs: [Vec2, Vec2, Vec2, Vec2] | undefined,
+): [Vec2, Vec2, Vec2, Vec2] | undefined {
     const ny = normal[1];
     if (ny > 0.5) {
         return [
@@ -395,7 +399,12 @@ export function rotateY(quads: BlockQuad[], steps: number, options?: { uvlock?: 
     if (s === 0 && !uvlock) return quads;
 
     return quads.map((q) => {
-        const verts: [Vec3, Vec3, Vec3, Vec3] = [rotatePos(q.verts[0], s), rotatePos(q.verts[1], s), rotatePos(q.verts[2], s), rotatePos(q.verts[3], s)];
+        const verts: [Vec3, Vec3, Vec3, Vec3] = [
+            rotatePos(q.verts[0], s),
+            rotatePos(q.verts[1], s),
+            rotatePos(q.verts[2], s),
+            rotatePos(q.verts[3], s),
+        ];
         return {
             verts,
             normal: rotateNormal(q.normal, s),

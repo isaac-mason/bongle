@@ -17,10 +17,10 @@
 // by `draw-textures.ts` and threaded in via `bakedDraws` as raster surfaces;
 // the composite loop draws them directly.
 
+import type { Filesystem } from '../../../os/interface';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { DrawSource } from '../../core/sprites/sprites';
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../../../os/interface';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import type { Raster, RasterCanvas, RasterContext2D } from './raster';

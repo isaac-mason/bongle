@@ -49,7 +49,7 @@ export function containsAll(bitset: Bitset, mask: Bitset): boolean {
         // word with bit 31 set comes back negative and would never equal the
         // unsigned `mask[i]`. normalise back to unsigned before comparing, else
         // any query requiring a trait at slot 31/63/… silently never matches.
-        if (((word & mask[i]) >>> 0) !== mask[i]) return false;
+        if ((word & mask[i]) >>> 0 !== mask[i]) return false;
     }
     return true;
 }

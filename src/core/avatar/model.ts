@@ -11,8 +11,8 @@
 // `acquireAvatarModel` MUST precede `assignAvatar` for runtime avatars: acquire
 // registers the resource entry that ensure + the rig reconciler load from.
 
-import { RIG_TYPE_6BONE } from "../../../avatar/rig";
 import type { ResolvedAvatar } from 'bongle/interface';
+import { RIG_TYPE_6BONE } from '../../../avatar/rig';
 import { getTrait, type Node } from '../../api/scene-tree';
 import { CharacterTrait, modelIdSync } from '../../builtins/character';
 import * as Resources from '../resources';

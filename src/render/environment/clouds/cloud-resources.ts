@@ -60,8 +60,8 @@ import {
     vertexIndex,
 } from 'gpucat';
 import { srgbBytesToLinear } from '../../../core/color';
-import { buildCloudUberGeometry, type CloudShapeMeta } from './cloud-shapes';
 import type { EnvironmentResources } from '../environment';
+import { buildCloudUberGeometry, type CloudShapeMeta } from './cloud-shapes';
 
 // ── tunables ────────────────────────────────────────────────────────
 

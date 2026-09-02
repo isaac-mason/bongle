@@ -13,12 +13,25 @@
  * esc or E again closes.
  */
 
-import * as Icons from "../../../icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { HoverCard, HoverCardContent, HoverCardTrigger, Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
+import * as Icons from '../../../icons';
+import {
+    HoverCard,
+    HoverCardContent,
+    HoverCardTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '../../client/ui/components';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
-import { BLOCK_FLAG_CLIMBABLE, BLOCK_FLAG_COLLISION, BLOCK_FLAG_LIQUID, parseKey, resolveKey } from '../../core/voxels/block-registry';
+import {
+    BLOCK_FLAG_CLIMBABLE,
+    BLOCK_FLAG_COLLISION,
+    BLOCK_FLAG_LIQUID,
+    parseKey,
+    resolveKey,
+} from '../../core/voxels/block-registry';
 import { MaterialType } from '../../core/voxels/blocks';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
@@ -239,9 +252,7 @@ function InventoryHoverBody({ item, display }: { item: InventoryItem; display: {
                     </span>
                 </div>
             </div>
-            {display.id !== display.name && (
-                <div className="mt-1 truncate font-mono text-[9px] text-fg-muted">{display.id}</div>
-            )}
+            {display.id !== display.name && <div className="mt-1 truncate font-mono text-[9px] text-fg-muted">{display.id}</div>}
             <div className="my-1.5 h-px bg-border" />
             <div className="flex flex-col gap-1 text-[10px] text-fg-muted">
                 <div className="flex items-center gap-1.5">

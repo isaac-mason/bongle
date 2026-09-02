@@ -15,16 +15,16 @@
  * builtin) are codegen-hydrated already.
  */
 
-import { RIG_TYPE_6BONE } from "../../avatar/rig";
 import type { Client, ResolvedAvatar } from 'bongle/interface';
+import { RIG_TYPE_6BONE } from '../../avatar/rig';
 import type { Avatar } from '../core/avatar/avatar';
 import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { PlayerId } from '../core/client';
 import { BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
 import * as Resources from '../core/resources';
 import type { ClientState } from './clients';
-import type { EngineServer } from './server';
 import type { Player, Room } from './rooms';
+import type { EngineServer } from './server';
 
 /**
  * Record the client's resolved avatar identity and kick its payload

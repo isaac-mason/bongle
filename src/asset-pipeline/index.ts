@@ -11,6 +11,6 @@
 //    icon render, so the editor's pipeline-worker is a thin driver that never touches
 //    bongle/internal.
 
-export * as AssetPipeline from './pipeline';
 export * as EditPipeline from './edit-session';
 export * as Icons from './icons';
+export * as AssetPipeline from './pipeline';

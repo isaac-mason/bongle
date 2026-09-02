@@ -117,12 +117,7 @@ export function update(
 
     // frustum planes, same math as the old WGSL cull. pass the clip-space convention
     // so the near plane is correct on WebGL (z=-1) as well as WebGPU (z=0).
-    frustum.setFromViewProjectionMatrix(
-        _cpuFrustum,
-        camera.projectionMatrix,
-        camera.matrixWorldInverse,
-        camera.coordinateSystem,
-    );
+    frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse, camera.coordinateSystem);
 
     const enabled = cfg.enabled && cfg.clouds.enabled;
 

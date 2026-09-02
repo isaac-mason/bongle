@@ -4,7 +4,16 @@ import { getWorldPosition, setPosition, TransformTrait } from '../../../src/buil
 import * as Debug from '../../../src/core/debug';
 import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
 import * as Resources from '../../../src/core/resources';
-import { addChild, addTrait, createNode, destroyNode, getNodeById, getTrait, reparent, setRealm } from '../../../src/core/scene/scene-tree';
+import {
+    addChild,
+    addTrait,
+    createNode,
+    destroyNode,
+    getNodeById,
+    getTrait,
+    reparent,
+    setRealm,
+} from '../../../src/core/scene/scene-tree';
 import { block } from '../../../src/core/voxels/blocks';
 import { chunkToRegionCoord, REGION_CHUNKS_PER_AXIS, setBlock, toChunkCoord } from '../../../src/core/voxels/voxels';
 import { nodeZstd } from '../../../src/node/zstd';
@@ -58,7 +67,11 @@ const REGION_OFFSETS: Array<[number, number, number]> = [
  *  (the region's local (0,0,0) corner chunk — enough to make that region
  *  discoverable/occupied, these tests don't need more than one per region). */
 function chunkInRegion(ax: number, ay: number, az: number, offset: [number, number, number]): [number, number, number] {
-    return [ax + offset[0] * REGION_CHUNKS_PER_AXIS, ay + offset[1] * REGION_CHUNKS_PER_AXIS, az + offset[2] * REGION_CHUNKS_PER_AXIS];
+    return [
+        ax + offset[0] * REGION_CHUNKS_PER_AXIS,
+        ay + offset[1] * REGION_CHUNKS_PER_AXIS,
+        az + offset[2] * REGION_CHUNKS_PER_AXIS,
+    ];
 }
 
 function regionKeyOf(cx: number, cy: number, cz: number): string {

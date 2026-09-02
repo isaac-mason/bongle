@@ -6,14 +6,7 @@ import { setInterpolation } from '../../builtins/transform';
 import type { PlayerId } from '../client';
 import type * as Resources from '../resources';
 import type { Node, SceneTree } from '../scene/scene-tree';
-import {
-    addTrait,
-    getNodeById,
-    getTrait,
-    query,
-    runOnPostPhysicsStep,
-    runOnPrePhysicsStep,
-} from '../scene/scene-tree';
+import { addTrait, getNodeById, getTrait, query, runOnPostPhysicsStep, runOnPrePhysicsStep } from '../scene/scene-tree';
 import type { Blocks } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';
@@ -554,7 +547,12 @@ function ensureContactsTrait(node: Node): ContactsTrait {
     return getTrait(node, ContactsTrait) ?? addTrait(node, ContactsTrait);
 }
 
-function fanOutBucket(physics: Physics, sceneTree: SceneTree, bucket: ContactPair[], phase: 'added' | 'persisted' | 'removed'): void {
+function fanOutBucket(
+    physics: Physics,
+    sceneTree: SceneTree,
+    bucket: ContactPair[],
+    phase: 'added' | 'persisted' | 'removed',
+): void {
     for (let i = 0; i < bucket.length; i++) {
         const pair = bucket[i]!;
         const aObserverNodeId = observerNodeIdForSide(pair, 'a');

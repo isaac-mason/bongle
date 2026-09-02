@@ -218,8 +218,18 @@ export const slime = block('kit:slime', {
     model: () => ({
         type: 'custom',
         quads: [
-            ...blockModel.box([0, 0, 0], [1, 1, 1], { all: { texture: tex.slimeTransparent } }, { material: MaterialType.TRANSLUCENT }),
-            ...blockModel.box([0.15, 0.15, 0.15], [0.85, 0.85, 0.85], { all: { texture: tex.slime } }, { material: MaterialType.OPAQUE }),
+            ...blockModel.box(
+                [0, 0, 0],
+                [1, 1, 1],
+                { all: { texture: tex.slimeTransparent } },
+                { material: MaterialType.TRANSLUCENT },
+            ),
+            ...blockModel.box(
+                [0.15, 0.15, 0.15],
+                [0.85, 0.85, 0.85],
+                { all: { texture: tex.slime } },
+                { material: MaterialType.OPAQUE },
+            ),
         ],
     }),
     cull: CullType.SELF,

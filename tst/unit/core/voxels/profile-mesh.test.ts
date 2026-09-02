@@ -16,7 +16,14 @@ import * as blockModel from '../../../../src/core/voxels/block-model';
 import { buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import { type BlockDef, type BlockQuad, type BlockTextureDef, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../../../src/core/voxels/chunk-mesher';
-import { CHUNK_SIZE, type Chunk, createChunk, createVoxels, setChunkBlock, type Voxels } from '../../../../src/core/voxels/voxels';
+import {
+    CHUNK_SIZE,
+    type Chunk,
+    createChunk,
+    createVoxels,
+    setChunkBlock,
+    type Voxels,
+} from '../../../../src/core/voxels/voxels';
 
 const SHOULD_RUN = process.env.PROFILE_MESH === '1';
 
@@ -182,8 +189,7 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
                 const lx = tx + dx,
                     ly = 8 + dy,
                     lz = tz + dz;
-                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE)
-                    setChunkBlock(voxels, chunk, lx, ly, lz, 'leaves');
+                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) setChunkBlock(voxels, chunk, lx, ly, lz, 'leaves');
             }
     }
     for (let z = 13; z < CHUNK_SIZE; z++)

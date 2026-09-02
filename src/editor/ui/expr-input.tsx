@@ -179,9 +179,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                     type="button"
                                     key={sug.text}
                                     className={`w-full flex items-baseline justify-between text-left px-1.5 py-0.5 cursor-pointer ${
-                                        i === selectedIndex
-                                            ? 'bg-accent text-on-accent'
-                                            : 'text-fg hover:bg-surface-muted'
+                                        i === selectedIndex ? 'bg-accent text-on-accent' : 'text-fg hover:bg-surface-muted'
                                     }`}
                                     onMouseDown={(e) => {
                                         // mousedown (not click) so the input keeps focus

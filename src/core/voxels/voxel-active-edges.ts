@@ -37,14 +37,7 @@ function isSolidCube(voxels: Voxels, blocks: Blocks, x: number, y: number, z: nu
 
 export type EdgeAxis = 0 | 1 | 2;
 
-export function isCubeEdgeActive(
-    voxels: Voxels,
-    blocks: Blocks,
-    axis: EdgeAxis,
-    gx: number,
-    gy: number,
-    gz: number,
-): boolean {
+export function isCubeEdgeActive(voxels: Voxels, blocks: Blocks, axis: EdgeAxis, gx: number, gy: number, gz: number): boolean {
     let c00: boolean;
     let c01: boolean;
     let c10: boolean;

@@ -11,7 +11,14 @@ import * as blockModel from '../../../../src/core/voxels/block-model';
 import { buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import { type BlockDef, type BlockQuad, type BlockTextureDef, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../../../src/core/voxels/chunk-mesher';
-import { CHUNK_SIZE, type Chunk, createChunk, createVoxels, setChunkBlock, type Voxels } from '../../../../src/core/voxels/voxels';
+import {
+    CHUNK_SIZE,
+    type Chunk,
+    createChunk,
+    createVoxels,
+    setChunkBlock,
+    type Voxels,
+} from '../../../../src/core/voxels/voxels';
 
 // ── helpers ─────────────────────────────────────────────────────────
 
@@ -125,8 +132,7 @@ function makeDenseChunk(): Voxels {
     const chunk = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', chunk);
     for (let y = 0; y < CHUNK_SIZE; y++)
-        for (let z = 0; z < CHUNK_SIZE; z++)
-            for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
+        for (let z = 0; z < CHUNK_SIZE; z++) for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
     chunk.dirty = true;
     return voxels;
 }
@@ -138,8 +144,7 @@ function makeDenseWithNeighbors(): Voxels {
     const center = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', center);
     for (let y = 0; y < CHUNK_SIZE; y++)
-        for (let z = 0; z < CHUNK_SIZE; z++)
-            for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, center, x, y, z, 'stone');
+        for (let z = 0; z < CHUNK_SIZE; z++) for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, center, x, y, z, 'stone');
 
     // 6 neighbors, all solid
     const dirs = [
@@ -154,8 +159,7 @@ function makeDenseWithNeighbors(): Voxels {
         const nc = createChunk(dx!, dy!, dz!);
         voxels.chunks.set(`${dx},${dy},${dz}`, nc);
         for (let y = 0; y < CHUNK_SIZE; y++)
-            for (let z = 0; z < CHUNK_SIZE; z++)
-                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, nc, x, y, z, 'stone');
+            for (let z = 0; z < CHUNK_SIZE; z++) for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, nc, x, y, z, 'stone');
     }
 
     center.dirty = true;
@@ -313,8 +317,7 @@ function makeVillage(): Voxels {
                 const lx = tx + dx,
                     ly = 8 + dy,
                     lz = tz + dz;
-                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE)
-                    setChunkBlock(voxels, chunk, lx, ly, lz, 'leaves');
+                if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) setChunkBlock(voxels, chunk, lx, ly, lz, 'leaves');
             }
     }
 

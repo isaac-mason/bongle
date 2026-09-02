@@ -40,21 +40,19 @@ function world() {
 }
 
 describe('reconcileRootRegions', () => {
-    {
-        // COLD (build): the true join / mass-spawn one-off — CONSTRUCT N transform
-        // nodes AND file them. dominated by addTrait(TransformTrait) + setPosition,
-        // NOT by reconcile; kept to show where the join cost actually goes.
-        bench(`cold-build: construct + file ${N} roots`, () => {
-            const sceneTree = createSceneTree();
-            for (let i = 0; i < N; i++) {
-                const node = createNode();
-                addChild(sceneTree.root, node);
-                setPosition(addTrait(node, TransformTrait), [i * REGION_SIZE, 0, 0]);
-                sceneTree.dirtyNodes.add(node);
-            }
-            reconcileRootRegions(sceneTree);
-        });
-    }
+    // COLD (build): the true join / mass-spawn one-off — CONSTRUCT N transform
+    // nodes AND file them. dominated by addTrait(TransformTrait) + setPosition,
+    // NOT by reconcile; kept to show where the join cost actually goes.
+    bench(`cold-build: construct + file ${N} roots`, () => {
+        const sceneTree = createSceneTree();
+        for (let i = 0; i < N; i++) {
+            const node = createNode();
+            addChild(sceneTree.root, node);
+            setPosition(addTrait(node, TransformTrait), [i * REGION_SIZE, 0, 0]);
+            sceneTree.dirtyNodes.add(node);
+        }
+        reconcileRootRegions(sceneTree);
+    });
     {
         // COLD (index): the file-all bookkeeping in isolation — scene built once
         // outside the loop, then each iteration resets the index and re-files all N.

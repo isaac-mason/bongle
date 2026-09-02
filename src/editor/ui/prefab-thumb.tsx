@@ -19,15 +19,7 @@ export function usePrefabIcon(prefabId: string): string | undefined {
 
 /** A `size`×`size` prefab thumbnail. Renders the in-browser icon once ready,
  *  a neutral placeholder box until then. `className` styles the box (rounding). */
-export function PrefabThumb({
-    prefabId,
-    size,
-    className,
-}: {
-    prefabId: string;
-    size: number;
-    className?: string;
-}) {
+export function PrefabThumb({ prefabId, size, className }: { prefabId: string; size: number; className?: string }) {
     const url = usePrefabIcon(prefabId);
     return (
         <div

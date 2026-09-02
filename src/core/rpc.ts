@@ -1,6 +1,6 @@
 import { recordCommand } from './capture/module-scope';
 import type { NetMessage } from './protocol';
-import { get, registry, upsert, type ProtocolTable } from './registry';
+import { get, type ProtocolTable, registry, upsert } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 
@@ -96,7 +96,12 @@ export function unlisten(rpc: Rpc, commandId: string, entry: ListenerEntry): voi
  * stale `CommandHandle.serdes` captured in user closures is not consulted
  * on the dispatch path.
  */
-export function dispatchNetMessage(rpc: Rpc, commandProtocolTable: ProtocolTable, message: NetMessage, from: unknown | undefined): void {
+export function dispatchNetMessage(
+    rpc: Rpc,
+    commandProtocolTable: ProtocolTable,
+    message: NetMessage,
+    from: unknown | undefined,
+): void {
     const commandId = commandProtocolTable.indexToId[message.commandIndex];
     if (commandId === undefined) return;
     const def = get(registry.commands, commandId);

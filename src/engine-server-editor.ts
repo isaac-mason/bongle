@@ -13,8 +13,8 @@
 import * as api from 'bongle';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import * as Editor from './editor/index';
-import type { EngineServer } from './server/server';
 import { applyRegistryChanges } from './server/registry-dispatch';
+import type { EngineServer } from './server/server';
 
 export async function setup(state: EngineServer): Promise<void> {
     // register the editor's server commands before load builds the derived indexes.

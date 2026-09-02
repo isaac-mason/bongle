@@ -30,8 +30,7 @@ function BlockIcon({ stateKey, size = 24 }: { stateKey: string; size?: number })
     const rows = useEditor((s) => s.blockIconRows);
 
     const pos = coords[stateKey];
-    if (!atlasUrl || !pos || !cols || !rows)
-        return <div style={{ width: size, height: size }} className="bg-surface-muted" />;
+    if (!atlasUrl || !pos || !cols || !rows) return <div style={{ width: size, height: size }} className="bg-surface-muted" />;
 
     const [col, row] = pos;
     return (

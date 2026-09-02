@@ -3,8 +3,8 @@ import type { PlayerMode } from '../core/protocol';
 import { addTrait, type Node } from '../core/scene/scene-tree';
 import { addCharacter } from './character';
 import { CharacterControllerTrait } from './character-controller';
-import { PlayerControllerTrait } from './player-controller';
 import { PlayerTrait } from './player';
+import { PlayerControllerTrait } from './player-controller';
 import { setPosition, TransformTrait } from './transform';
 
 export type PlayerNodeSetup = {

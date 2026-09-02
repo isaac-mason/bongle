@@ -17,8 +17,8 @@
 // blank canvas.
 
 import type { DeviceLostInfo } from 'gpucat';
+import type { RenderDeviceCaps, Renderer } from './backend';
 import * as RenderCamera from './camera';
-import type { Renderer, RenderDeviceCaps } from './backend';
 import * as Time from './time';
 
 const kind = 'none' as const;

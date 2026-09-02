@@ -13,12 +13,7 @@ import { type RenderDeviceCaps, type Renderer, type RendererBackendKind, readRen
 
 /** create + run the device handshake for one backend. */
 async function createAndLoad(kind: RendererBackendKind): Promise<{ renderer: Renderer; caps: RenderDeviceCaps }> {
-    const mod =
-        kind === 'none'
-            ? await import('./none')
-            : kind === 'webgl'
-              ? await import('./webgl')
-              : await import('./webgpu');
+    const mod = kind === 'none' ? await import('./none') : kind === 'webgl' ? await import('./webgl') : await import('./webgpu');
     const renderer = mod.create();
     const caps = await renderer.load();
     return { renderer, caps };

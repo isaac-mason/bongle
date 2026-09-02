@@ -953,9 +953,7 @@ export function TransformOptions() {
     return (
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <SelectionSummary />
-            {placementActive && (
-                <div className="text-[10px] font-mono text-fg-muted italic">enter to commit · esc to cancel</div>
-            )}
+            {placementActive && <div className="text-[10px] font-mono text-fg-muted italic">enter to commit · esc to cancel</div>}
             <Row label="mode">
                 {modeBtn('translate', 'translate')}
                 {modeBtn('rotate', 'rotate')}

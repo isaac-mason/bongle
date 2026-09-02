@@ -11,7 +11,7 @@
 // ground / contacts back to a specific voxel for debug + ground velocity.
 
 import { type SweepResult, sweepAabbVsAabb } from '../physics/aabb/aabb-sweep';
-import { AIR, type Blocks, BLOCK_FLAG_COLLISION, MISSING, SHAPE_AABBS } from './block-registry';
+import { AIR, BLOCK_FLAG_COLLISION, type Blocks, MISSING, SHAPE_AABBS } from './block-registry';
 import { CHUNK_BITS, CHUNK_SIZE, getChunk, type Voxels, voxelIndex } from './voxels';
 
 /** result of a voxel sweep. mutated in place. */
@@ -221,7 +221,22 @@ export function sweepAabbVsVoxels(
                             // measured against the block's real shape.
                             if ((reg.flags[stateId]! & BLOCK_FLAG_COLLISION) === 0) {
                                 if (collect) {
-                                    const depth = sweptPassablePenetration(reg, stateId, mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz, wx, wy, wz);
+                                    const depth = sweptPassablePenetration(
+                                        reg,
+                                        stateId,
+                                        mcX,
+                                        mcY,
+                                        mcZ,
+                                        mhX,
+                                        mhY,
+                                        mhZ,
+                                        dx,
+                                        dy,
+                                        dz,
+                                        wx,
+                                        wy,
+                                        wz,
+                                    );
                                     if (depth > PASSABLE_MARGIN) pushCrossedVoxel(out.crossed, wx, wy, wz, stateId, depth);
                                 }
                                 continue;
@@ -397,11 +412,21 @@ function pushCrossedVoxel(out: CrossedVoxels, x: number, y: number, z: number, s
 /** min-axis overlap (MTV depth) of the box at sweep time `t` with the world-space
  *  shape box [s0..s1]; <= 0 when not overlapping on some axis. */
 function penetrationAt(
-    mcX: number, mcY: number, mcZ: number,
-    mhX: number, mhY: number, mhZ: number,
-    dx: number, dy: number, dz: number,
-    s0x: number, s0y: number, s0z: number,
-    s1x: number, s1y: number, s1z: number,
+    mcX: number,
+    mcY: number,
+    mcZ: number,
+    mhX: number,
+    mhY: number,
+    mhZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    s0x: number,
+    s0y: number,
+    s0z: number,
+    s1x: number,
+    s1y: number,
+    s1z: number,
     t: number,
 ): number {
     const cx = mcX + dx * t;
@@ -418,11 +443,21 @@ function penetrationAt(
  *  (minkowski slab test) then samples penetration at the window's midpoint
  *  (deepest for a pass-through) and its end (deepest for coming to rest inside). */
 function sweptBoxPenetration(
-    mcX: number, mcY: number, mcZ: number,
-    mhX: number, mhY: number, mhZ: number,
-    dx: number, dy: number, dz: number,
-    s0x: number, s0y: number, s0z: number,
-    s1x: number, s1y: number, s1z: number,
+    mcX: number,
+    mcY: number,
+    mcZ: number,
+    mhX: number,
+    mhY: number,
+    mhZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    s0x: number,
+    s0y: number,
+    s0z: number,
+    s1x: number,
+    s1y: number,
+    s1z: number,
 ): number {
     let tEnter = -Infinity;
     let tExit = Infinity;
@@ -491,10 +526,18 @@ function sweptBoxPenetration(
 function sweptPassablePenetration(
     reg: Blocks,
     stateId: number,
-    mcX: number, mcY: number, mcZ: number,
-    mhX: number, mhY: number, mhZ: number,
-    dx: number, dy: number, dz: number,
-    wx: number, wy: number, wz: number,
+    mcX: number,
+    mcY: number,
+    mcZ: number,
+    mhX: number,
+    mhY: number,
+    mhZ: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    wx: number,
+    wy: number,
+    wz: number,
 ): number {
     const cid = reg.colliderId[stateId]!;
     if (cid === 0) {
@@ -505,8 +548,21 @@ function sweptPassablePenetration(
     for (let i = 0; i < boxes.length; i++) {
         const b = boxes[i]!;
         const d = sweptBoxPenetration(
-            mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz,
-            wx + b[0], wy + b[1], wz + b[2], wx + b[3], wy + b[4], wz + b[5],
+            mcX,
+            mcY,
+            mcZ,
+            mhX,
+            mhY,
+            mhZ,
+            dx,
+            dy,
+            dz,
+            wx + b[0],
+            wy + b[1],
+            wz + b[2],
+            wx + b[3],
+            wy + b[4],
+            wz + b[5],
         );
         if (d > best) best = d;
     }

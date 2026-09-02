@@ -14,7 +14,6 @@
  */
 
 import { type Quat, quat, type Vec3, vec3 } from 'math';
-import { env } from '../env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
@@ -23,6 +22,7 @@ import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { control, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { env } from '../env';
 import { TransformTrait } from './transform';
 
 const _EPS = 0.000001;

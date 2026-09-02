@@ -80,10 +80,7 @@ export function bindAspect(camera: PerspectiveCamera, width: number, height: num
  * camera is left untouched. Aspect is bound separately/globally via `bindAspect`.
  * Used by the client's per-frame cull + the editor tools + the backend's active-room drive.
  */
-export function resolvePovCamera(
-    camera: PerspectiveCamera,
-    cameraTrait: CameraTrait | null,
-): PerspectiveCamera | null {
+export function resolvePovCamera(camera: PerspectiveCamera, cameraTrait: CameraTrait | null): PerspectiveCamera | null {
     if (!cameraTrait) return null;
     syncCamera(camera, cameraTrait);
     return camera;

@@ -44,9 +44,7 @@ export function DropdownMenuContent({ children, className, align = 'start', side
     return (
         <Menu.Portal>
             <Menu.Positioner align={align} sideOffset={sideOffset}>
-                <Menu.Popup
-                    className={`z-50 min-w-[120px] py-0.5 bg-surface border border-border shadow-md ${className ?? ''}`}
-                >
+                <Menu.Popup className={`z-50 min-w-[120px] py-0.5 bg-surface border border-border shadow-md ${className ?? ''}`}>
                     {children}
                 </Menu.Popup>
             </Menu.Positioner>

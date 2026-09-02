@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
     checkAvatarHeight,
     RIG_6BONE_LOCOMOTION_CLIPS,
@@ -9,7 +10,6 @@ import {
     type RigSceneView,
     validateRig6Bone,
 } from '../../../../avatar/rig';
-import { describe, expect, it } from 'vitest';
 
 // Small builder so each test reads as a tree literal rather than an
 // imperative chain of pushes.

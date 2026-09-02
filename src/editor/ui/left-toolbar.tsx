@@ -1,5 +1,5 @@
-import { MonitorPlay, ShoppingBag } from "../../../icons";
 import { useRef, useState } from 'react';
+import { MonitorPlay, ShoppingBag } from '../../../icons';
 import { Button } from '../../client/ui/components';
 import { useClient } from '../../client/ui/stores/client-store';
 import { useEditRoom } from '../edit-room-store';

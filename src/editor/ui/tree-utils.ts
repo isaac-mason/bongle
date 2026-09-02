@@ -321,7 +321,11 @@ export type ReparentInstruction = { nodeId: number; parentId: number; index: num
  *
  * parentId in FlattenedNode is String(node.id). null means child of root.
  */
-export function computeReorderOps(sceneTree: SceneTree, flatItems: FlattenedNode[], removedItems: FlattenedNode[]): ReparentInstruction[] {
+export function computeReorderOps(
+    sceneTree: SceneTree,
+    flatItems: FlattenedNode[],
+    removedItems: FlattenedNode[],
+): ReparentInstruction[] {
     // merge removed items (dragged node's descendants) back in
     const allItems = [...flatItems];
 

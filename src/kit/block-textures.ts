@@ -152,8 +152,7 @@ export const woolPink = multiplyTintedTexture('kit:wool_pink', WOOL_BASE, 237, 1
 // multiplying by the target leaves the color intact with only the faint grain
 // showing through. RGB values are Minecraft's per-color concrete averages.
 const CONCRETE_BASE = asset('./assets/textures/concrete_base.png', import.meta.url);
-const concreteTexture = (id: string, r: number, g: number, b: number) =>
-    multiplyTintedTexture(id, CONCRETE_BASE, r, g, b);
+const concreteTexture = (id: string, r: number, g: number, b: number) => multiplyTintedTexture(id, CONCRETE_BASE, r, g, b);
 
 export const concreteWhite = concreteTexture('kit:concrete_white', 207, 213, 214);
 export const concreteLightGray = concreteTexture('kit:concrete_light_gray', 125, 125, 115);

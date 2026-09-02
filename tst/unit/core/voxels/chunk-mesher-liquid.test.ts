@@ -10,7 +10,13 @@
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CullType, MaterialType } from '../../../../src/core/voxels/blocks';
-import { buildMeshInput, type ChunkMeshResult, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../../../src/core/voxels/chunk-mesher';
+import {
+    buildMeshInput,
+    type ChunkMeshResult,
+    createMeshOutput,
+    meshChunk,
+    QUAD_STRIDE_U32S,
+} from '../../../../src/core/voxels/chunk-mesher';
 import { buildTestRegistry as buildVoxelTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
 import { createChunk, createVoxels, setChunkBlock } from '../../../../src/core/voxels/voxels';
 

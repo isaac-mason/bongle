@@ -137,7 +137,12 @@ function referenceStableSort(keys: number[], payload: number[]): { keys: number[
 /** per-block stable local sort by the pass digit (the scatter's in-workgroup
  *  phase): returns the sorted local ordering + per-digit run starts. Exact
  *  mirror of the 4×2-bit split + boundary-detection code above. */
-function stableSortBlock(srcK: number[], blockBase: number, blockCount: number, shift: number): { idx: number[]; runStart: number[] } {
+function stableSortBlock(
+    srcK: number[],
+    blockBase: number,
+    blockCount: number,
+    shift: number,
+): { idx: number[]; runStart: number[] } {
     const digOf = (item: number): number => (item < blockCount ? (srcK[blockBase + item]! >>> shift) & 255 : 255);
     let idx = Array.from({ length: RADIX_BLOCK }, (_, i) => i);
     for (let r = 0; r < 4; r++) {

@@ -25,13 +25,13 @@ type HDT = {
     s: Uint8Array;
     // num bits
     n: Uint8Array;
-}
+};
 
 // FSE decoding table
 type FSEDT = HDT & {
     // next state
     t: Uint16Array;
-}
+};
 
 // decompress Zstandard state
 type DZstdState = {
@@ -59,7 +59,7 @@ type DZstdState = {
     t?: [FSEDT, FSEDT, FSEDT];
     // last block
     l: number;
-}
+};
 
 // upstream carried polyfill fallbacks for these; bongle targets evergreen
 // (WebGPU) browsers where the native methods always exist, so call them direct.

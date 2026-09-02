@@ -48,7 +48,7 @@ describe('directives on detached subtrees', () => {
         const hostChain = addTrait(host, Chain);
 
         const src = createNode({ name: 'src' });
-        const gap = createNode({ name: 'gap' });  // no trait: descendants resolve past it
+        const gap = createNode({ name: 'gap' }); // no trait: descendants resolve past it
         const leaf = createNode({ name: 'leaf' });
         addChild(src, gap);
         addChild(gap, leaf);

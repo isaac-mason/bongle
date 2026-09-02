@@ -1,5 +1,5 @@
-import { ChevronDown } from "../../../../icons";
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from '../../../../icons';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
 /**
@@ -147,9 +147,7 @@ export function SearchableSelect<T extends string | number = string>({
                                     {it.leading}
                                     <span className="flex flex-col min-w-0 flex-1">
                                         <span className="truncate">{it.label}</span>
-                                        {it.sublabel && (
-                                            <span className="truncate text-[9px] text-fg-muted">{it.sublabel}</span>
-                                        )}
+                                        {it.sublabel && <span className="truncate text-[9px] text-fg-muted">{it.sublabel}</span>}
                                     </span>
                                     {it.badge && <span className="ml-auto text-[10px] text-fg-muted">{it.badge}</span>}
                                 </button>

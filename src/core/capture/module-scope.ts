@@ -352,7 +352,12 @@ function hasNonHandleExport(mod: Record<string, unknown>): boolean {
 function isHandle(value: unknown): value is DepHandle {
     if (typeof value !== 'object' || value === null) return false;
     const dep = (value as { dependency?: unknown }).dependency;
-    return typeof dep === 'object' && dep !== null && typeof (dep as DepKey).registry === 'string' && typeof (dep as DepKey).id === 'string';
+    return (
+        typeof dep === 'object' &&
+        dep !== null &&
+        typeof (dep as DepKey).registry === 'string' &&
+        typeof (dep as DepKey).id === 'string'
+    );
 }
 
 /**

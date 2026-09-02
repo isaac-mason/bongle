@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { MeshTrait } from '../../../../src/builtins/mesh';
 import { TransformTrait } from '../../../../src/builtins/transform';
-import { getTrait } from '../../../../src/core/scene/scene-tree';
 import { createEmptyHandle, hydrateRuntimeHandle } from '../../../../src/core/models/build-runtime-handle';
 import type { Model, ModelNode } from '../../../../src/core/models/model';
+import { getTrait } from '../../../../src/core/scene/scene-tree';
 
 function makeMinimalModel(): Model {
     // root → head (mesh) + arm (transform only, identity-TRS)

@@ -19,7 +19,7 @@
 
 import type { Node } from '../core/scene/scene-tree';
 import { addTrait, hasTrait } from '../core/scene/scene-tree';
-import { trait, type TraitType } from '../core/scene/traits';
+import { type TraitType, trait } from '../core/scene/traits';
 
 export const WorldTrait = trait('world', {}, { persist: false });
 

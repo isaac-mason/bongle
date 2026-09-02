@@ -1,8 +1,8 @@
-import * as Icons from "../../../icons";
-import { Button } from '../../client/ui/components';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Icons from '../../../icons';
 import { setEditorEnabledForRoom, setRoomView } from '../../client/editor';
 import { LOCAL_ROOM_PREFIX, type RoomView, type RoomViewId } from '../../client/rooms';
+import { Button } from '../../client/ui/components';
 import type { PlayerMode, RoomInfo } from '../../core/protocol';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
@@ -291,9 +291,7 @@ function RoomTab({
                     onContextMenu={onContextMenu}
                     title={`${info.sceneId} · ${pillLabel}`}
                     className={`flex items-center px-1.5 text-[10px] font-mono cursor-pointer border border-r-0 ${
-                        isActive
-                            ? activeBg
-                            : 'bg-surface text-fg-muted border-border hover:bg-surface-muted hover:text-fg'
+                        isActive ? activeBg : 'bg-surface text-fg-muted border-border hover:bg-surface-muted hover:text-fg'
                     }`}
                 >
                     {pillLabel}
