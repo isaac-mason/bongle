@@ -109,3 +109,52 @@ function measure(c: Case) {
 
 console.log(`${'case'.padEnd(34)} ${'best'.padStart(10)}  alloc`);
 for (const c of CASES) measure(c);
+
+// L4 is an O(depth) walk per node per required hierarchy term. Real scenes are
+// wide and shallow (see scene-shapes.bench.ts), so the gap's depth sensitivity
+// decides whether the lever is worth a registerSubtree restructure.
+function buildDepth(depth: number): Node {
+    const container = createNode({ name: 'container' });
+    addTrait(container, B);
+    const chains = Math.max(1, Math.floor(NODES / depth));
+    let made = 0;
+    for (let c = 0; c < chains; c++) {
+        let cursor = container;
+        for (let d = 0; d < depth && made < NODES; d++) {
+            const n = createNode({ name: `n${made++}` });
+            addTrait(n, A);
+            addChild(cursor, n);
+            cursor = n;
+        }
+    }
+    return container;
+}
+
+function timeOnly(install: (t: SceneTree) => void, depth: number): number {
+    const sceneTree = createSceneTree();
+    install(sceneTree);
+    const container = buildDepth(depth);
+    const cycle = () => {
+        addChild(sceneTree.root, container);
+        removeChild(sceneTree.root, container);
+    };
+    for (let i = 0; i < 60; i++) cycle();
+    let best = Infinity;
+    for (let r = 0; r < 40; r++) {
+        const t0 = process.hrtime.bigint();
+        cycle();
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+        if (ms < best) best = ms;
+    }
+    return best;
+}
+
+console.log(`\n${'depth'.padStart(6)} ${'Optional(Anc)'.padStart(14)} ${'required Anc'.padStart(14)}   required cost`);
+for (const depth of [2, 3, 5, 10, 20, 40]) {
+    const opt = timeOnly((t) => void query(t, [A, Optional(Ancestor(B))]), depth);
+    const req = timeOnly((t) => void query(t, [A, Ancestor(B)]), depth);
+    console.log(
+        `${String(depth).padStart(6)} ${opt.toFixed(3).padStart(13)}m ${req.toFixed(3).padStart(13)}m` +
+            `   ${(req / opt).toFixed(2)}x  (+${((req - opt) * 1000).toFixed(0)} us)`,
+    );
+}
