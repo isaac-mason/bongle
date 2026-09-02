@@ -921,11 +921,16 @@ function buildSceneSyncUpdates(
     presence: ClientEntityPresence | undefined,
     ownRootId: number | undefined,
 ): SceneSyncUpdate[] {
-    const creates = new Set<Node>();
+    // field updates flow nearly every tick, so this one is worth allocating eagerly. the
+    // rest are empty in the steady state (nothing entered or left this client's view), so
+    // they stay null until something needs them.
     const updateList: SceneSyncUpdate[] = [];
-    const destroys: SceneSyncUpdate[] = [];
-    // node ids whose presence the AOI pass already settled (created or destroyed) this
-    // tick, so the dirtyNodes loop skips them (it owns field updates, not presence).
+    let creates: Set<Node> | null = null;
+    let destroys: SceneSyncUpdate[] | null = null;
+    /** node ids whose presence the AOI pass already settled (created or destroyed) this
+     *  tick, so the dirtyNodes loop skips them (it owns field updates, not presence). Eager
+     *  where the others are lazy: it is written from inside `createSubtree`/`destroySubtree`,
+     *  and TS does not widen a narrowed `let` back out across a closure assignment. */
     const presenceSettled = new Set<number>();
 
     // subtree-coherent create/destroy for a transform root: a bulk-in static subtree
@@ -938,7 +943,7 @@ function buildSceneSyncUpdates(
             // only settle nodes we actually create. an already-known node in this subtree
             // may carry a pending field update in dirtyNodes — leave it for the diff path.
             if (!nodeKnowledge.has(n.id)) {
-                creates.add(n);
+                (creates ??= new Set()).add(n);
                 presenceSettled.add(n.id);
             }
         });
@@ -946,7 +951,7 @@ function buildSceneSyncUpdates(
     const destroySubtree = (root: Node): void => {
         walkReplicable(root, mode, 'shared', (n) => {
             if (nodeKnowledge.has(n.id)) {
-                destroys.push({ type: 'node_destroyed', id: n.id });
+                (destroys ??= []).push({ type: 'node_destroyed', id: n.id });
                 nodeKnowledge.delete(n.id);
                 nodeSyncKnowledge.delete(n);
             }
@@ -962,7 +967,7 @@ function buildSceneSyncUpdates(
     // knownRegions) vs have (known) — iterating ROOTS, so we never climb the tree.
     // destruction of an actually-destroyed root (scene === null) is left to the
     // dirtyNodes loop; here we handle live AOI in/out.
-    if (presence) {
+    if (presence && (presence.left.size > 0 || presence.entered.size > 0 || sceneTree.rootRegionChanges.length > 0)) {
         const candidates = new Set<Node>();
         for (const key of presence.left) {
             const roots = rootsInRegion(sceneTree, key);
@@ -996,7 +1001,7 @@ function buildSceneSyncUpdates(
         // tick is live here, node.scene set, so it flows to create/update below.)
         if (node.scene === null) {
             if (known) {
-                destroys.push({ type: 'node_destroyed', id: node.id });
+                (destroys ??= []).push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
                 nodeSyncKnowledge.delete(node);
             }
@@ -1014,7 +1019,7 @@ function buildSceneSyncUpdates(
                 diffNodeStructure(node, known, updateList, mode);
                 diffNodeTraits(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
             } else {
-                destroys.push({ type: 'node_destroyed', id: node.id });
+                (destroys ??= []).push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
                 nodeSyncKnowledge.delete(node);
             }
@@ -1023,14 +1028,14 @@ function buildSceneSyncUpdates(
 
         // not known → decide creation. edit sees everything; play needs replicable.
         if (mode === 'edit') {
-            creates.add(node);
+            (creates ??= new Set()).add(node);
             continue;
         }
         if (!isReplicable(node)) continue;
         // a node with no transform root (or a non-voxel room) is not region-gated → visible.
         const root = presence ? transformRootOf(node) : null;
         if (root === null) {
-            creates.add(node);
+            (creates ??= new Set()).add(node);
             continue;
         }
         // a region-gated node became newly relevant (spawned, or added under a present
@@ -1067,6 +1072,13 @@ function buildSceneSyncUpdates(
     }
     _pendingSyncScratch.length = 0; // don't retain nodes between flushes
 
+    // nothing entered this client's view, which is the steady state: the field updates
+    // already are the message, in order, so hand back the list rather than copying it.
+    if (creates === null) {
+        if (destroys !== null) for (let i = 0; i < destroys.length; i++) updateList.push(destroys[i]!);
+        return updateList;
+    }
+
     // assemble parent-first creates → updates → destroys.
     const updates: SceneSyncUpdate[] = [];
     const createArr = [...creates];
@@ -1075,8 +1087,8 @@ function buildSceneSyncUpdates(
         updates.push(buildNodeCreatedUpdate(node, mode));
         snapshotNodeKnowledge(nodeKnowledge, node, currentTick);
     }
-    for (let i = 0; i < updateList.length; i++) updates.push(updateList[i]);
-    for (let i = 0; i < destroys.length; i++) updates.push(destroys[i]);
+    for (let i = 0; i < updateList.length; i++) updates.push(updateList[i]!);
+    if (destroys !== null) for (let i = 0; i < destroys.length; i++) updates.push(destroys[i]!);
     return updates;
 }
 
