@@ -42,17 +42,17 @@
 
 import { type Mat4, mat4 } from 'math';
 import { Ancestor } from '../src/core/scene/conditions';
-import { my } from '../src/core/scene/resolutions';
 import { addChild, addTrait, createNode, createSceneTree, getTrait, type Node, removeChild } from '../src/core/scene/scene-tree';
-import { Self, trait } from '../src/core/scene/traits';
+import { context, Self, trait } from '../src/core/scene/traits';
 
 /** stands in for TransformTrait: a local matrix, a cached world, and the maintained parent. */
 const Xf = trait('contraction/xf', {
     local: () => mat4.create(),
     world: () => mat4.create(),
     valid: false,
-    _parent: my(Ancestor(Self)),
+    _parent: null as any,
 });
+context(Xf, '_parent', { condition: Ancestor(Self) });
 
 const XF_SLOT = Xf._slot;
 

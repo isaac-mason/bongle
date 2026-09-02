@@ -1003,35 +1003,6 @@ export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Q
 
 Define traits and the schemas behind editor controls (`prop`) and network packing (`pack`).
 
-#### `context`
-
-```ts
-/**
- * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
- * keep it correct as the hierarchy changes. The trait's own annotation, alongside
- * `control()` and `sync()` — the body stays plain data.
- *
- * ```ts
- * context(TransformTrait, '_parent', {
- *     condition: Ancestor(Self),
- *     change: (t, next, prev) => { ... },
- * });
- * ```
- *
- * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
- * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
- * "nearest trait above me" wherever it appears.
- *
- * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
- * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
- * job, walking the maintained child lists (see the transform tests that pin this).
- */
-export function context<T extends TraitBase, R extends TraitHandle>(handle: TraitHandle<T>, id: string, body: {
-    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
-    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
-}): void;
-```
-
 #### `dirty`
 
 ```ts
@@ -1278,6 +1249,35 @@ export type TraitOptions = {
 ```ts
 /** extract the instance type from a trait handle. */
 export type TraitType<H extends TraitHandle> = H['__type'];
+```
+
+#### `context`
+
+```ts
+/**
+ * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
+ * keep it correct as the hierarchy changes. The trait's own annotation, alongside
+ * `control()` and `sync()` — the body stays plain data.
+ *
+ * ```ts
+ * context(TransformTrait, '_parent', {
+ *     condition: Ancestor(Self),
+ *     change: (t, next, prev) => { ... },
+ * });
+ * ```
+ *
+ * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
+ * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
+ * "nearest trait above me" wherever it appears.
+ *
+ * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
+ * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
+ * job, walking the maintained child lists (see the transform tests that pin this).
+ */
+export function context<T extends TraitBase, R extends TraitHandle>(handle: TraitHandle<T>, id: string, body: {
+    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
+    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
+}): void;
 ```
 
 #### `control`

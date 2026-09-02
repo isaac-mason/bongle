@@ -20,11 +20,10 @@ import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { Ancestor } from '../core/scene/conditions';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
-import { context } from '../core/scene/resolutions';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
-import { control, Self, sync, type TraitType, trait } from '../core/scene/traits';
+import { context, control, Self, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 import { toChunkCoord } from '../core/voxels/voxels';
 

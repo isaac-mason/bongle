@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Ancestor, Up } from '../../../../src/core/scene/conditions';
-import { context } from '../../../../src/core/scene/resolutions';
 import { addChild, addTrait, cloneNode, createNode, createSceneTree, getTrait } from '../../../../src/core/scene/scene-tree';
-import { Self, trait } from '../../../../src/core/scene/traits';
+import { context, Self, trait } from '../../../../src/core/scene/traits';
 
 describe('directives on detached subtrees', () => {
     // A resolution must be correct BEFORE attachment: scene-pack hydrates whole trees

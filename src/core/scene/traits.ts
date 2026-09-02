@@ -1,9 +1,9 @@
 import { recordTrait } from '../capture/module-scope';
-import { registry, structuralHash, upsert } from '../registry';
+import { fileResolution, registry, structuralHash, upsert } from '../registry';
+import { type Condition, type Oper, Src } from './conditions';
 import type { pack } from './pack';
 import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
-import type { ResolutionDef } from './resolutions';
 import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
 
@@ -611,4 +611,92 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
     }
 
     return instance;
+}
+
+/* ── context: nearest-trait resolutions ── */
+
+/**
+ * one maintained "nearest trait at or above me" relationship.
+ *
+ * `traitSlot` is both what gets resolved and where the walk prunes: below a
+ * node bearing it, the answer is that node and cannot have been changed by
+ * anything above.
+ */
+export type Resolution = {
+    traitSlot: number;
+    /** `Up` counts the node itself; `Ancestor` starts at the parent. */
+    inclusive: boolean;
+    /** the trait whose instances hold the destination. A subtree bearing none of them has
+     *  nowhere to write, so the whole descent can be skipped. `-1` for a query term, whose
+     *  destinations are its members rather than one trait. */
+    ownerSlot: number;
+    /**
+     * write the resolved value wherever this resolution keeps it. Called for every
+     * node the walk visits; implementations that only care about some of them
+     * (a query's members, or nodes bearing the owning trait) filter here.
+     */
+    apply(node: Node, resolved: TraitBase | undefined): void;
+};
+
+/** a declared resolution, as stored on its owning `TraitDef`. */
+export type ResolutionDef = Resolution & { field: string };
+
+/**
+ * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
+ * keep it correct as the hierarchy changes. The trait's own annotation, alongside
+ * `control()` and `sync()` — the body stays plain data.
+ *
+ * ```ts
+ * context(TransformTrait, '_parent', {
+ *     condition: Ancestor(Self),
+ *     change: (t, next, prev) => { ... },
+ * });
+ * ```
+ *
+ * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
+ * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
+ * "nearest trait above me" wherever it appears.
+ *
+ * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
+ * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
+ * job, walking the maintained child lists (see the transform tests that pin this).
+ */
+export function context<T extends TraitBase, R extends TraitHandle>(
+    handle: TraitHandle<T>,
+    id: string,
+    body: {
+        condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
+        change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
+    },
+): void {
+    const def = handle._def;
+    const ownerSlot = handle._slot;
+    const declared = body.condition.trait._slot;
+    if (declared === undefined) return;
+    const traitSlot = declared === SELF_SLOT ? ownerSlot : declared;
+    const change = body.change;
+
+    const resolution: ResolutionDef = {
+        field: id,
+        traitSlot,
+        ownerSlot,
+        inclusive: body.condition.src === Src.Up,
+        apply(node, resolved) {
+            const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
+            // the walk visits every node on its way down; only nodes bearing the owning
+            // trait have a field to write.
+            if (instance === undefined) return;
+            const next = (resolved ?? null) as TraitBase | null;
+            const prev = (instance[id] ?? null) as TraitBase | null;
+            if (next === prev) return;
+            instance[id] = next;
+            change?.(instance as unknown as T, next, prev);
+        },
+    };
+
+    // replace rather than append, so a re-evaluated module does not stack duplicates.
+    const existing = def.resolutions.findIndex((r) => (r as ResolutionDef).field === id);
+    if (existing !== -1) def.resolutions[existing] = resolution;
+    else def.resolutions.push(resolution);
+    fileResolution(registry, resolution);
 }
