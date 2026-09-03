@@ -33,15 +33,7 @@ export type TraitOptions = {
      * being filtered.
      */
     persist?: boolean;
-    /**
-     * fields the engine owns and keeps correct itself, e.g. `TransformTrait._parent`.
-     * Overrides for them passed to `addTrait` are ignored rather than briefly
-     * appearing to work, since the next resolve would overwrite them anyway.
-     */
-    managed?: readonly string[];
 };
-
-const EMPTY_MANAGED: readonly string[] = [];
 
 /** factory marker: a value-producing function called once per instance. */
 type Factory<T> = () => T;
@@ -272,8 +264,6 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** fields the engine maintains, see `TraitOptions.managed`. */
-    managed: readonly string[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -369,7 +359,6 @@ export function trait<S extends TraitBody = Record<string, never>>(
         persist: options?.persist ?? true,
         controls: [],
         controlsById: new Map(),
-        managed: options?.managed ?? EMPTY_MANAGED,
         sync: [],
         syncById: new Map(),
         scripts: [],
@@ -587,7 +576,6 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
-            if (def.managed.includes(key)) continue;
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.

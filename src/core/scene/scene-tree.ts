@@ -1,8 +1,8 @@
 import {
     getWorldChunk,
+    invalidateTransformAncestry,
+    invalidateTransformChildren,
     releaseTransform,
-    resolveTransformChildren,
-    resolveTransformSubtree,
     TransformTrait,
 } from '../../builtins/transform';
 import { env } from '../../env';
@@ -2579,7 +2579,7 @@ function resolveFrom(group: Resolution[], node: Node, inherited: TraitBase | und
  * changed shape (attach, detach, reparent).
  */
 export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null): void {
-    resolveTransformSubtree(node, movedFrom);
+    invalidateTransformAncestry(node, movedFrom);
     if (sceneTree !== null) resolveSubtreeFor(sceneTree._queryResolutionGroups, node, movedFrom);
 }
 
@@ -2637,7 +2637,7 @@ function resolveSubtreeFor(groups: Resolution[][], node: Node, movedFrom?: Node 
  * prune at the node that changed.
  */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    if (traitSlot === TransformTrait._slot) resolveTransformChildren(node);
+    if (traitSlot === TransformTrait._slot) invalidateTransformChildren(node);
     if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutionGroups, node, traitSlot);
 }
 

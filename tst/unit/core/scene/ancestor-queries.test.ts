@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TransformTrait } from '../../../../src/builtins/transform';
+import { parentTransform, TransformTrait } from '../../../../src/builtins/transform';
 import { Ancestor, Optional, Up } from '../../../../src/core/scene/conditions';
 import {
     addChild,
@@ -388,7 +388,7 @@ describe('Up / Ancestor — resolutions sharing one descent', () => {
         addTrait(leaf, Mesh);
 
         reparent(leaf, b);
-        expect(lt._parent).toBe(bt);
+        expect(parentTransform(lt)).toBe(bt);
         expect(q.matches[0]![1]).toBe(bt);
     });
 });

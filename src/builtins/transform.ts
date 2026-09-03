@@ -85,13 +85,12 @@ export const TRANSFORM_DIRTY_ALL =
  * so interpolation writes upstream automatically flow down through
  * descendants. renderers read via getVisualWorld*, see below.
  */
-/** the slice of a transform its descendant walks touch; `_children` is self-referential
- *  so the trait body can name it before `TransformTrait` itself exists. */
+/** the slice of a transform the descendant walks touch. The walks recurse over `Node`s, so
+ *  this names only the fields they write. */
 export type TransformSubtree = {
     _dirty: number;
     _version: number;
     _interpolated: 0 | 1;
-    _children: TransformSubtree[];
     interpolatedWorldPosition: Vec3 | null;
     interpolatedWorldQuaternion: Quat | null;
     interpolatedWorldScale: Vec3 | null;
@@ -142,15 +141,6 @@ export const TransformTrait = trait('transform', {
     /** last seen teleport counter for snap detection */
     lastTeleport: 0,
 
-    /** the transforms directly below this one, passthrough nodes already skipped.
-     *  Maintained alongside `_parent`, off the same resolve. */
-    _children: [] as TransformSubtree[],
-
-    /** nearest transform-bearing ancestor, maintained by `resolveTransformSubtree` /
-     *  `resolveTransformChildren` below. Typed as `any` here and narrowed on the exported
-     *  `TransformTrait` type: naming the trait from inside its own body is circular. */
-    _parent: null as any,
-
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.
     // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
     _dirty: TRANSFORM_DIRTY_ALL,
@@ -190,13 +180,10 @@ export const TransformTrait = trait('transform', {
 
     /** monotonic counter bumped on world-changing transitions */
     _version: 0,
-}, { managed: ['_parent'] });
+});
 
 /** instance type for TransformTrait */
-export type TransformTrait = Omit<TraitType<typeof TransformTrait>, '_parent'> & {
-    /** nearest transform-bearing ancestor, or null at a transform root. */
-    _parent: TransformTrait | null;
-};
+export type TransformTrait = TraitType<typeof TransformTrait>;
 
 /* ── remote chase-latest translator ───────────────────────────────────────
  *
@@ -289,16 +276,21 @@ export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
 
 /* ── controls (editor + persistence) ── */
 
+/* ── the transform hierarchy ── */
+
 /**
- * `_parent` is the nearest transform-bearing ancestor, which is what contracts the node
- * hierarchy into the transform hierarchy: nodes without a transform are passthrough, and a
- * transform's parent is the first bearer above it, however many plain nodes intervene.
+ * The transform hierarchy is the node hierarchy with the non-bearers contracted out: a
+ * transform composes against the first bearer above it, however many plain nodes intervene.
+ * It is derived on demand rather than materialised, so attaching, detaching and reparenting
+ * a node maintain nothing.
  *
- * `change` fires only when that pointer actually moves. A transform whose ANCESTOR moved
- * keeps the same `_parent` and is not notified — `markTransformDirty` invalidates it by
- * walking `_children` instead (pinned by the transform tests).
+ * Measured before choosing this: real scenes run 99.9% bearer density with zero intervening
+ * plain nodes (`bench/probe-gap-density.ts`), which is the density at which the walk costs
+ * ~1.1x a stored pointer (`bench/probe-transform-contraction.ts`) and 92.6% of transforms
+ * are roots whose stored pointer would have been null anyway.
  */
-/** nearest transform at or above `node`, or null at a transform root. */
+
+/** nearest transform at or above `node`, or null when there is none. */
 function nearestTransformAt(node: Node | null): TransformTrait | null {
     for (let cur = node; cur !== null; cur = cur.parent) {
         const t = cur._traits[TransformTrait._slot] as TransformTrait | undefined;
@@ -307,54 +299,9 @@ function nearestTransformAt(node: Node | null): TransformTrait | null {
     return null;
 }
 
-/** re-point one transform, keeping both child lists and the cached world values honest. */
-function setTransformParent(own: TransformTrait, next: TransformTrait | null): void {
-    const prev = own._parent;
-    if (prev === next) return;
-    if (prev !== null) removeTransformChild(prev, own);
-    own._parent = next;
-    if (next !== null) next._children.push(own);
-    // the parent pointer moved, so every cached world value below is stale.
-    markAncestryChanged(own._node);
-    // a branch-topmost transform's nearest transform ancestor changing can flip its AOI
-    // transform-root status (`isTransformRoot`). markAncestryChanged deliberately stays out
-    // of `dirtyNodes` (no replication retransmit), so signal a revisit explicitly.
-    if (own._node.scene) markNodeDirty(own._node.scene, own._node);
-}
-
-/**
- * Re-point the transforms at the top of `node`'s subtree at `inherited`, stopping at each
- * bearer: below one, transforms already point at it and nothing above changed that.
- */
-function retargetTransforms(node: Node, inherited: TransformTrait | null): void {
-    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
-    if (own !== undefined) {
-        setTransformParent(own, inherited);
-        return;
-    }
-    const children = node.children;
-    for (let i = 0; i < children.length; i++) retargetTransforms(children[i]!, inherited);
-}
-
-/**
- * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
- * already-live node: if it resolved to the same transform, nothing inside the subtree can
- * have changed, so two climbs replace a whole descent.
- */
-export function resolveTransformSubtree(node: Node, movedFrom?: Node | null): void {
-    const inherited = nearestTransformAt(node.parent);
-    if (movedFrom !== undefined && movedFrom !== null && nearestTransformAt(movedFrom) === inherited) return;
-    retargetTransforms(node, inherited);
-}
-
-/** a transform was added to or removed from `node` itself, so its descendants inherit anew. */
-export function resolveTransformChildren(node: Node): void {
-    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
-    const above = nearestTransformAt(node.parent);
-    if (own !== undefined) setTransformParent(own, above);
-    const inherited = own ?? above;
-    const children = node.children;
-    for (let i = 0; i < children.length; i++) retargetTransforms(children[i]!, inherited);
+/** the transform `transform` composes against: the nearest one strictly above its node. */
+export function parentTransform(transform: TransformTrait): TransformTrait | null {
+    return nearestTransformAt(transform._node.parent);
 }
 
 control(TransformTrait, 'position', {
@@ -476,7 +423,7 @@ function markTransformChanged(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    markDescendants(transform);
+    if (node !== null) markDescendants(node);
 }
 
 export function markTransformDirty(transform: TransformTrait): void {
@@ -504,34 +451,34 @@ export function markWorldDirty(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    markDescendants(transform);
+    markDescendants(transform._node);
 }
 
-function markDescendants(transform: TransformSubtree): void {
-    const children = transform._children;
+/**
+ * Mark every transform below `node` world-dirty. Recurses the node tree, passing straight
+ * through nodes without a transform: they contribute identity, and their descendants still
+ * compose against whatever is above them.
+ */
+function markDescendants(node: Node): void {
+    const children = node.children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
+        const t = child._traits[TransformTrait._slot] as TransformTrait | undefined;
+        if (t === undefined) {
+            markDescendants(child);
+            continue;
+        }
+        // a transform already maximally dirty has an equally dirty subtree; prune.
+        if (t._dirty === TRANSFORM_DIRTY_ALL) continue;
         // descendants' local TRS is unchanged, only their world, so no sync dirty here.
-        if (child._dirty === TRANSFORM_DIRTY_ALL) continue;
-        child._dirty = TRANSFORM_DIRTY_ALL;
-        child._version++;
+        t._dirty = TRANSFORM_DIRTY_ALL;
+        t._version++;
         markDescendants(child);
     }
 }
 
-/** swap-pop `child` out of `parent._children`. */
-function removeTransformChild(parent: TransformSubtree, child: TransformSubtree): void {
-    const children = parent._children;
-    const index = children.indexOf(child);
-    if (index === -1) return;
-    children[index] = children[children.length - 1]!;
-    children.pop();
-}
-
 /** drop a transform that is leaving the tree, so nothing keeps walking or ticking it. */
 export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void {
-    if (transform._parent !== null) removeTransformChild(transform._parent, transform);
-    transform._parent = null;
     if (sceneTree !== null) {
         sceneTree._transformDirty.delete(transform);
         sceneTree._interpolating.delete(transform);
@@ -539,30 +486,53 @@ export function releaseTransform(sceneTree: SceneTree | null, transform: Transfo
 }
 
 /**
- * mark a subtree dirty because its *ancestry* changed (reparent, or an
- * ancestor's TransformTrait was added/removed), `parent transform`
- * pointers shifted but local TRS values didn't.
+ * Mark a subtree dirty because its *ancestry* changed (reparent, or an ancestor's
+ * TransformTrait was added/removed): what each transform composes against shifted, but
+ * local TRS values didn't.
  *
- * unlike `markDirty`, this:
- *   - has no "already maximally dirty" early-out, `_version` must bump
- *     unconditionally so consumers gated on `_version` (e.g. editor
- *     body-sync) catch the world-matrix change even when the node was
- *     already dirty from a prior local write this frame.
- *   - does NOT flag pose/scaleSync dirty, local TRS is unchanged, so
- *     replication doesn't need to retransmit. structural reparenting is
- *     replicated separately by the scene-graph layer.
+ * Nothing is stored to repair, but the cached world values are stale and must be dropped.
+ * Unlike `markTransformChanged`, this:
+ *   - has no "already maximally dirty" early-out, `_version` must bump unconditionally so
+ *     consumers gated on `_version` (e.g. editor body-sync) catch the world-matrix change
+ *     even when the node was already dirty from a prior local write this frame.
+ *   - does NOT flag pose/scaleSync dirty, local TRS is unchanged, so replication doesn't
+ *     need to retransmit. Structural reparenting is replicated separately by the
+ *     scene-graph layer.
+ *
+ * `topmost` tracks whether we are still above the first bearer on this branch: those are
+ * the transforms whose `isTransformRoot` status can have flipped, which the AOI index keys
+ * on, so they get a replication revisit as well.
  */
-export function markAncestryChanged(node: Node): void {
-    const transform = getTrait(node, TransformTrait);
-
-    if (transform) {
+function invalidateFrom(node: Node, scene: SceneTree | null, topmost: boolean): void {
+    const transform = node._traits[TransformTrait._slot] as TransformTrait | undefined;
+    if (transform !== undefined) {
         transform._dirty = TRANSFORM_DIRTY_ALL;
         transform._version++;
+        if (topmost && scene !== null) markNodeDirty(scene, node);
+        topmost = false;
     }
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) invalidateFrom(children[i]!, scene, topmost);
+}
 
-    for (const child of node.children) {
-        markAncestryChanged(child);
-    }
+/**
+ * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
+ * already-live node: when it contracted to the same transform, nothing inside the subtree
+ * composes differently, so two climbs replace a whole descent.
+ */
+export function invalidateTransformAncestry(node: Node, movedFrom?: Node | null): void {
+    const inherited = nearestTransformAt(node.parent);
+    if (movedFrom !== undefined && movedFrom !== null && nearestTransformAt(movedFrom) === inherited) return;
+    invalidateFrom(node, node.scene, true);
+}
+
+/** a transform was added to or removed from `node` itself, so its descendants compose anew. */
+export function invalidateTransformChildren(node: Node): void {
+    const scene = node.scene;
+    // `node`'s own transform-root status flips too: it just gained or lost the trait.
+    if (scene !== null && node._traits[TransformTrait._slot] !== undefined) markNodeDirty(scene, node);
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) invalidateFrom(children[i]!, scene, true);
 }
 
 // ── scratch mats/vecs (reused to avoid allocation) ──────────────────────
@@ -599,7 +569,7 @@ const _interpolatedWalkStack: TransformTrait[] = [];
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
 export function composeWorldMatrix(transform: TransformTrait): void {
-    const parent = transform._parent;
+    const parent = parentTransform(transform);
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -732,7 +702,7 @@ function updateWorldTransform(transform: TransformTrait): void {
     let cursor: TransformTrait | null = transform;
     while (cursor !== null && cursor._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
         stack.push(cursor);
-        cursor = cursor._parent;
+        cursor = parentTransform(cursor);
     }
 
     for (let i = stack.length - 1; i >= 0; i--) {
@@ -758,7 +728,7 @@ function updateWorldTransform(transform: TransformTrait): void {
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
 export function composeInterpolatedWorldMatrix(transform: TransformTrait): void {
-    const parent = transform._parent;
+    const parent = parentTransform(transform);
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -893,7 +863,7 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
     let cursor: TransformTrait | null = transform;
     while (cursor?._interpolated && cursor._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) {
         stack.push(cursor);
-        cursor = cursor._parent;
+        cursor = parentTransform(cursor);
     }
 
     // boundary parent (cursor) is null, a clean interp ancestor, or a
@@ -926,14 +896,17 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
  * descendant counts under Interp roots are small (player rigs, attached
  * props), the unconditional walk is fine.
  */
-export function markInterpolatedDescendantsDirty(transform: TransformSubtree): void {
-    const children = transform._children;
+export function markInterpolatedDescendantsDirty(node: Node): void {
+    const children = node.children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
-        child._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
-        ensureInterpolatedPose(child);
-        child._interpolated = 1;
-        child._version++;
+        const t = child._traits[TransformTrait._slot] as TransformSubtree | undefined;
+        if (t !== undefined) {
+            t._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+            ensureInterpolatedPose(t);
+            t._interpolated = 1;
+            t._version++;
+        }
         markInterpolatedDescendantsDirty(child);
     }
 }
@@ -1210,12 +1183,12 @@ export function computeWorldTransforms(nodes: SceneTree): void {
  * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3 {
-    const parentTransform = t._parent;
-    if (parentTransform === null) {
+    const parent = parentTransform(t);
+    if (parent === null) {
         if (out !== worldPosition) vec3.copy(out, worldPosition);
         return out;
     }
-    mat4.invert(_invParent, getWorldMatrix(parentTransform));
+    mat4.invert(_invParent, getWorldMatrix(parent));
     // transform point by inverse parent matrix
     const x = worldPosition[0];
     const y = worldPosition[1];
@@ -1235,13 +1208,13 @@ const _worldToLocalQuaternion_invParentQuat: Quat = quat.create();
  * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat {
-    const parentTransform = transform._parent;
-    if (parentTransform === null) {
+    const parent = parentTransform(transform);
+    if (parent === null) {
         if (out !== worldQuaternion) quat.copy(out, worldQuaternion);
         return out;
     }
     // extract parent's world rotation and invert it
-    mat4.getRotation(_worldToLocalQuaternion_parentQuat, getWorldMatrix(parentTransform));
+    mat4.getRotation(_worldToLocalQuaternion_parentQuat, getWorldMatrix(parent));
     quat.invert(_worldToLocalQuaternion_invParentQuat, _worldToLocalQuaternion_parentQuat);
     // local = inverse(parentRot) * worldRot
     quat.multiply(out, _worldToLocalQuaternion_invParentQuat, worldQuaternion);
@@ -1273,7 +1246,7 @@ export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Q
  * used as a fast path check, if false, local === world and no conversion is needed.
  */
 export function hasTransformedParent(transform: TransformTrait): boolean {
-    return transform._parent !== null;
+    return parentTransform(transform) !== null;
 }
 
 // ── collapse (premultiply anchor.local into descendants) ────────────────

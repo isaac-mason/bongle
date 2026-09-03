@@ -10,6 +10,7 @@ import {
     getWorldQuaternion,
     getWorldScale,
     hasTransformedParent,
+    parentTransform,
     markTransformDirty,
     resetInterpolation,
     setInterpolation,
@@ -332,7 +333,7 @@ describe('parent transform bookkeeping', () => {
         addTrait(node, TransformTrait);
 
         const t = getTrait(node, TransformTrait)!;
-        expect(t._parent).toBeNull();
+        expect(parentTransform(t)).toBeNull();
     });
 
     it('child under transform parent gets parent transform set', () => {
@@ -348,7 +349,7 @@ describe('parent transform bookkeeping', () => {
 
         const pt = getTrait(parent, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
-        expect(ct._parent).toBe(pt);
+        expect(parentTransform(ct)).toBe(pt);
     });
 
     it('child under non-transform parent has null parent transform', () => {
@@ -363,7 +364,7 @@ describe('parent transform bookkeeping', () => {
         addTrait(child, TransformTrait);
 
         const ct = getTrait(child, TransformTrait)!;
-        expect(ct._parent).toBeNull();
+        expect(parentTransform(ct)).toBeNull();
     });
 
     it('adding transform to parent updates existing children', () => {
@@ -377,12 +378,12 @@ describe('parent transform bookkeeping', () => {
 
         // initially no parent transform
         const ct = getTrait(child, TransformTrait)!;
-        expect(ct._parent).toBeNull();
+        expect(parentTransform(ct)).toBeNull();
 
         // now add transform to parent, child should update
         addTrait(parent, TransformTrait);
         const pt = getTrait(parent, TransformTrait)!;
-        expect(ct._parent).toBe(pt);
+        expect(parentTransform(ct)).toBe(pt);
     });
 
     it('removing transform from parent updates children to inherit grandparent', () => {
@@ -405,11 +406,11 @@ describe('parent transform bookkeeping', () => {
         const ct = getTrait(child, TransformTrait)!;
 
         // initially child → parent
-        expect(ct._parent).toBe(pt);
+        expect(parentTransform(ct)).toBe(pt);
 
         // remove parent's transform, child should now point to grandparent
         removeTrait(parent, TransformTrait);
-        expect(ct._parent).toBe(gpt);
+        expect(parentTransform(ct)).toBe(gpt);
     });
 
     it('removing transform from parent with no grandparent sets children to null', () => {
@@ -425,10 +426,10 @@ describe('parent transform bookkeeping', () => {
 
         const pt = getTrait(parent, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
-        expect(ct._parent).toBe(pt);
+        expect(parentTransform(ct)).toBe(pt);
 
         removeTrait(parent, TransformTrait);
-        expect(ct._parent).toBeNull();
+        expect(parentTransform(ct)).toBeNull();
     });
 
     it('addChild updates parent transform for moved subtree', () => {
@@ -452,11 +453,11 @@ describe('parent transform bookkeeping', () => {
         const npt = getTrait(newParent, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
 
-        expect(ct._parent).toBe(opt);
+        expect(parentTransform(ct)).toBe(opt);
 
         // move child to new parent
         addChild(newParent, child);
-        expect(ct._parent).toBe(npt);
+        expect(parentTransform(ct)).toBe(npt);
     });
 
     it('reparent updates parent transform for moved subtree', () => {
@@ -478,10 +479,10 @@ describe('parent transform bookkeeping', () => {
         const bt = getTrait(parentB, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
 
-        expect(ct._parent).toBe(at);
+        expect(parentTransform(ct)).toBe(at);
 
         reparent(child, parentB);
-        expect(ct._parent).toBe(bt);
+        expect(parentTransform(ct)).toBe(bt);
     });
 
     it('reparent updates deep subtree pointers', () => {
@@ -510,15 +511,15 @@ describe('parent transform bookkeeping', () => {
         const childT = getTrait(child, TransformTrait)!;
 
         // container points to parentA, child points to container
-        expect(contT._parent).toBe(at);
-        expect(childT._parent).toBe(contT);
+        expect(parentTransform(contT)).toBe(at);
+        expect(parentTransform(childT)).toBe(contT);
 
         // reparent container to parentB
         reparent(container, parentB);
 
         // container now points to parentB, child still points to container
-        expect(contT._parent).toBe(bt);
-        expect(childT._parent).toBe(contT);
+        expect(parentTransform(contT)).toBe(bt);
+        expect(parentTransform(childT)).toBe(contT);
     });
 
     it('detached subtree: adding a transform above re-resolves descendants', () => {
@@ -529,10 +530,10 @@ describe('parent transform bookkeeping', () => {
         const child = createNode({ name: 'Child' });
         addChild(parent, child);
         const ct = addTrait(child, TransformTrait);
-        expect(ct._parent).toBeNull();
+        expect(parentTransform(ct)).toBeNull();
 
         addTraitBySlot(parent, TransformTrait._slot!);
-        expect(ct._parent).toBe(getTrait(parent, TransformTrait));
+        expect(parentTransform(ct)).toBe(getTrait(parent, TransformTrait));
     });
 
     it('a detached subtree reads as its own root, and stops tracking its old parent', () => {
@@ -561,8 +562,8 @@ describe('parent transform bookkeeping', () => {
 
         // the subtree is now its own root: the container's offset is gone, but
         // the transforms *within* the subtree still compose.
-        expect(propTransform._parent).toBeNull();
-        expect(partTransform._parent).toBe(propTransform);
+        expect(parentTransform(propTransform)).toBeNull();
+        expect(parentTransform(partTransform)).toBe(propTransform);
         expectVec3Near(getWorldPosition(propTransform), vec3.fromValues(10, 0, 0));
         expectVec3Near(getWorldPosition(partTransform), vec3.fromValues(11, 0, 0));
 
@@ -602,7 +603,7 @@ describe('parent transform bookkeeping', () => {
 
         removeTraitBySlot(parent, TransformTrait._slot!);
 
-        expect(ct._parent).toBe(gpt);
+        expect(parentTransform(ct)).toBe(gpt);
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(101, 0, 0));
     });
 
@@ -623,7 +624,7 @@ describe('parent transform bookkeeping', () => {
 
         const gpt = getTrait(gp, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
-        expect(ct._parent).toBe(gpt);
+        expect(parentTransform(ct)).toBe(gpt);
     });
 
     it('deserializeNode sets parent transform correctly', () => {
@@ -655,9 +656,9 @@ describe('parent transform bookkeeping', () => {
         const rct = getTrait(restoredChild, TransformTrait)!;
 
         // child's parent transform should point to parent's transform
-        expect(rct._parent).toBe(rpt);
+        expect(parentTransform(rct)).toBe(rpt);
         // parent is top-level (under root), no transform ancestor
-        expect(rpt._parent).toBeNull();
+        expect(parentTransform(rpt)).toBeNull();
     });
 });
 

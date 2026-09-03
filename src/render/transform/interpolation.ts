@@ -43,6 +43,7 @@ import {
     getWorldMatrix,
     hasTransformedParent,
     markInterpolatedDescendantsDirty,
+    parentTransform,
     type RemoteInterpolation,
     TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
     TRANSFORM_DIRTY_INTERPOLATED_TRS,
@@ -141,7 +142,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
             sampleRemotePose(transform, delta);
         }
 
-        if (transform._children.length > 0) markInterpolatedDescendantsDirty(transform);
+        if (transform._node.children.length > 0) markInterpolatedDescendantsDirty(transform._node);
     }
 }
 
@@ -298,7 +299,7 @@ function applyPredictionInterpolation(transform: TransformTrait): void {
         vec3.copy(transform.interpolatedWorldScale!, transform.scale);
     } else {
         // guarded by `hasTransformedParent` above, which the compiler can't see through
-        const parent = transform._parent!;
+        const parent = parentTransform(transform)!;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
@@ -391,7 +392,7 @@ function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat:
         transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
     } else {
         // guarded by `hasTransformedParent` above, which the compiler can't see through
-        const parent = transform._parent!;
+        const parent = parentTransform(transform)!;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);

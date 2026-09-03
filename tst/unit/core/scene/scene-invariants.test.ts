@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { TransformTrait } from '../../../../src/builtins/transform';
+import { parentTransform, TransformTrait } from '../../../../src/builtins/transform';
 import { registry, reindexRegistry } from '../../../../src/core/registry';
 import { Ancestor, Not, Oper, Optional, Src, Up } from '../../../../src/core/scene/conditions';
 import {
@@ -93,14 +93,12 @@ function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: N
         if (destroyed.has(node)) continue;
         const transform = getTrait(node, TransformTrait);
         if (transform) {
-            expect(transform._parent, `_parent after ${op} on ${node.name}`).toBe(
+            expect(parentTransform(transform), `parentTransform after ${op} on ${node.name}`).toBe(
                 (nearest(node, TransformTrait._slot!, false) as typeof transform | undefined) ?? null,
             );
-            const expected = new Set(freshChildren(node));
-            const actual = new Set<unknown>(transform._children);
-            expect(actual.size, `_children count after ${op} on ${node.name}`).toBe(expected.size);
-            for (const child of expected) {
-                expect(actual.has(child), `_children missing an entry after ${op} on ${node.name}`).toBe(true);
+            // the other direction: every contracted child points back at this transform.
+            for (const child of freshChildren(node)) {
+                expect(parentTransform(child as typeof transform), `child of ${node.name} after ${op}`).toBe(transform);
             }
         }
     }

@@ -5,6 +5,7 @@ import { ModelTrait } from '../../builtins/model';
 import {
     composeWorldMatrix,
     getWorldMatrix,
+    parentTransform,
     TRANSFORM_DIRTY_ALL,
     TRANSFORM_DIRTY_WORLD_MATRIX,
     TransformTrait,
@@ -905,7 +906,7 @@ function tickAnimator(
         // earlier in boneOrder and was composed by this loop's prior
         // iteration. exception: rig-root bones whose `parent transform`
         // lives outside the rig, refresh it via the lazy walk-up.
-        const parent = t._parent;
+        const parent = parentTransform(t);
         if (parent !== null && parent._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
             getWorldMatrix(parent);
         }

@@ -1,24 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { TransformTrait } from '../../../../src/builtins/transform';
-import { addChild, addTrait, createNode, createSceneTree } from '../../../../src/core/scene/scene-tree';
+import { addChild, addTrait, createNode, createSceneTree, getTrait } from '../../../../src/core/scene/scene-tree';
+import { Self, trait } from '../../../../src/core/scene/traits';
 
 describe('Self marker', () => {
     it('types a self-referential field as the trait instance, no cast', () => {
-        const sceneTree = createSceneTree();
-        const parent = createNode({ name: 'parent' });
-        const child = createNode({ name: 'child' });
-        addChild(sceneTree.root, parent);
-        addChild(parent, child);
-        const pt = addTrait(parent, TransformTrait);
-        const ct = addTrait(child, TransformTrait);
+        const Link = trait('self-marker/link', {
+            label: 'x',
+            next: null as Self | null,
+        });
 
-        // the compile-time half: reading TransformTrait-only members straight
-        // off `_parent` only typechecks if `Self` resolved to the real type.
-        const resolved = ct._parent;
-        expect(resolved).toBe(pt);
-        if (resolved === null) throw new Error('expected a parent transform');
-        expect(resolved.worldMatrix.length).toBe(16);
-        expect(resolved.position.length).toBe(3);
-        expect(resolved._parent).toBe(null);
+        const sceneTree = createSceneTree();
+        const head = createNode({ name: 'head' });
+        const tail = createNode({ name: 'tail' });
+        addChild(sceneTree.root, head);
+        addChild(head, tail);
+        const h = addTrait(head, Link);
+        const t = addTrait(tail, Link);
+
+        // the compile-time half: reading Link-only members straight off `next`
+        // only typechecks if `Self` resolved to the real instance type.
+        h.next = t;
+        const resolved = h.next;
+        if (resolved === null) throw new Error('expected a link');
+        expect(resolved).toBe(t);
+        expect(resolved.label).toBe('x');
+        expect(resolved.next).toBe(null);
+        expect(getTrait(tail, Link)).toBe(resolved);
     });
 });
