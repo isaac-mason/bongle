@@ -77,7 +77,6 @@ export function populateScene(
     handle.node._traits.length = 0;
     handle.node._bitset = bitset.init();
     handle.node._unresolvedTraits = null;
-    handle.node._traitIssues = null;
 
     // apply root-level traits. handle.node is free-floating (no sceneTree, no
     // runtime), so no reindex / script instantiation, closures over
@@ -97,7 +96,7 @@ export function populateScene(
             instance._node = handle.node;
             handle.node._traits[def.slot] = instance;
             bitset.add(handle.node._bitset, def.slot);
-            refreshTraitIssues(handle.node, def, instance, `root of scene "${id}"`);
+            refreshTraitIssues(def, instance, `root of scene "${id}"`);
         }
     }
 

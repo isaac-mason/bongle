@@ -83,14 +83,6 @@ export type Node = {
     _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
 
     /**
-     * @internal validation issues per trait (keyed by trait slot). populated
-     * at scene load and at inspector commit time. derived state, not persisted,
-     * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
-     * empty entries are cleaned up.
-     */
-    _traitIssues: Map<number, ValidationIssue[]> | null;
-
-    /**
      * if non-null, this node is a prefab instance. its children are
      * instantiated from the referenced scene. only the prefab config
      * is persisted, children have persist: false.
@@ -392,29 +384,12 @@ export const TRANSFORM_DIRTY_WORLD_CHUNK;
 export const TRANSFORM_DIRTY_ALL;
 ```
 
-#### `TransformSubtree`
-
-```ts
-/** the slice of a transform its descendant walks touch; `_children` is self-referential
- *  so the trait body can name it before `TransformTrait` itself exists. */
-export type TransformSubtree = {
-    _dirty: number;
-    _version: number;
-    _interpolated: 0 | 1;
-    _children: TransformSubtree[];
-    interpolatedWorldPosition: Vec3 | null;
-    interpolatedWorldQuaternion: Quat | null;
-    interpolatedWorldScale: Vec3 | null;
-    interpolatedWorldMatrix: Mat4 | null;
-};
-```
-
 #### `ensureInterpolatedPose`
 
 ```ts
 /** allocate the visual pose. Every path that sets `_interpolated = 1` calls this, which is what
  *  lets the readers behind that flag treat the four fields as present. */
-export function ensureInterpolatedPose(transform: TransformSubtree): void;
+export function ensureInterpolatedPose(transform: TransformTrait): void;
 ```
 
 #### `TransformTrait`
@@ -479,22 +454,11 @@ export function noteRemotePosition(t: TransformTrait, time: number): void;
 export function noteRemoteQuaternion(t: TransformTrait, time: number): void;
 ```
 
-#### `resolveTransformSubtree`
+#### `parentTransform`
 
 ```ts
-/**
- * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
- * already-live node: if it resolved to the same transform, nothing inside the subtree can
- * have changed, so two climbs replace a whole descent.
- */
-export function resolveTransformSubtree(node: Node, movedFrom?: Node | null): void;
-```
-
-#### `resolveTransformChildren`
-
-```ts
-/** a transform was added to or removed from `node` itself, so its descendants inherit anew. */
-export function resolveTransformChildren(node: Node): void;
+/** the transform `transform` composes against: the nearest one strictly above its node. */
+export function parentTransform(transform: TransformTrait): TransformTrait | null;
 ```
 
 #### `markTransformDirty`
@@ -526,24 +490,22 @@ export function markWorldDirty(transform: TransformTrait): void;
 export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void;
 ```
 
-#### `markAncestryChanged`
+#### `invalidateTransformAncestry`
 
 ```ts
 /**
- * mark a subtree dirty because its *ancestry* changed (reparent, or an
- * ancestor's TransformTrait was added/removed), `parent transform`
- * pointers shifted but local TRS values didn't.
- *
- * unlike `markDirty`, this:
- *   - has no "already maximally dirty" early-out, `_version` must bump
- *     unconditionally so consumers gated on `_version` (e.g. editor
- *     body-sync) catch the world-matrix change even when the node was
- *     already dirty from a prior local write this frame.
- *   - does NOT flag pose/scaleSync dirty, local TRS is unchanged, so
- *     replication doesn't need to retransmit. structural reparenting is
- *     replicated separately by the scene-graph layer.
+ * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
+ * already-live node: when it contracted to the same transform, nothing inside the subtree
+ * composes differently, so two climbs replace a whole descent.
  */
-export function markAncestryChanged(node: Node): void;
+export function invalidateTransformAncestry(node: Node, movedFrom?: Node | null): void;
+```
+
+#### `invalidateTransformChildren`
+
+```ts
+/** a transform was added to or removed from `node` itself, so its descendants compose anew. */
+export function invalidateTransformChildren(node: Node): void;
 ```
 
 #### `composeWorldMatrix`
@@ -620,7 +582,7 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
  * descendant counts under Interp roots are small (player rigs, attached
  * props), the unconditional walk is fine.
  */
-export function markInterpolatedDescendantsDirty(transform: TransformSubtree): void;
+export function markInterpolatedDescendantsDirty(node: Node): void;
 ```
 
 #### `setInterpolation`
@@ -1166,8 +1128,6 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** fields the engine maintains, see `TraitOptions.managed`. */
-    managed: readonly string[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -1260,12 +1220,6 @@ export type TraitOptions = {
      * being filtered.
      */
     persist?: boolean;
-    /**
-     * fields the engine owns and keeps correct itself, e.g. `TransformTrait._parent`.
-     * Overrides for them passed to `addTrait` are ignored rather than briefly
-     * appearing to work, since the next resolve would overwrite them anyway.
-     */
-    managed?: readonly string[];
 };
 ```
 

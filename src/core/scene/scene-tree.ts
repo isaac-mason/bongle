@@ -27,7 +27,6 @@ import {
 } from './conditions';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
-import type { ValidationIssue } from './prop/validate';
 import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
@@ -121,14 +120,6 @@ export type Node = {
     _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
 
     /**
-     * @internal validation issues per trait (keyed by trait slot). populated
-     * at scene load and at inspector commit time. derived state, not persisted,
-     * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
-     * empty entries are cleaned up.
-     */
-    _traitIssues: Map<number, ValidationIssue[]> | null;
-
-    /**
      * if non-null, this node is a prefab instance. its children are
      * instantiated from the referenced scene. only the prefab config
      * is persisted, children have persist: false.
@@ -176,7 +167,6 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         _traits: [],
         _bitset: bitset.init(),
         _unresolvedTraits: null,
-        _traitIssues: null,
         prefab: null,
         _prefabState: null,
         _sync: { version: 0 },
@@ -954,7 +944,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
  * compute issues for every prop field on a trait instance against its def.
  * returned array is empty when the instance conforms to all schemas.
  */
-export function computeTraitIssues(def: TraitDef, instance: TraitBase): Issue[] {
+function computeTraitIssues(def: TraitDef, instance: TraitBase): Issue[] {
     if (def.controls.length === 0) return [];
     const issues: Issue[] = [];
     for (const reg of def.controls) {
@@ -970,36 +960,16 @@ export function computeTraitIssues(def: TraitDef, instance: TraitBase): Issue[] 
     return issues;
 }
 
-/** read issues for a trait on a node. returns undefined if none recorded. */
-export function getTraitIssues(node: Node, traitSlot: number): Issue[] | undefined {
-    return node._traitIssues?.get(traitSlot);
-}
-
-/** set/clear issues for a trait. an empty array deletes the entry. */
-export function setTraitIssues(node: Node, traitSlot: number, issues: Issue[]): void {
-    if (issues.length === 0) node._traitIssues?.delete(traitSlot);
-    else (node._traitIssues ??= new Map()).set(traitSlot, issues);
-}
-
-/** clear issues for one trait, or all traits when traitSlot is omitted. */
-export function clearTraitIssues(node: Node, traitSlot?: number): void {
-    if (traitSlot === undefined) node._traitIssues = null;
-    else node._traitIssues?.delete(traitSlot);
-}
-
-/** true when the node has any trait with recorded issues. */
-export function hasNodeIssues(node: Node): boolean {
-    return (node._traitIssues?.size ?? 0) > 0;
-}
-
 /**
- * recompute and store issues for a trait, logging a console warning per
- * issue. label is prepended to the warning (e.g. node name or scene path)
- * so the source of the bad data is identifiable in mixed logs.
+ * Validate a trait's control values and warn once per issue. `label` is prepended (e.g.
+ * node name or scene path) so the source of the bad data is identifiable in mixed logs.
+ *
+ * The issues are reported, not retained: nothing reads them back, and an inspector that
+ * wanted to surface them would want its own shape anyway. `_unresolvedTraits` is the
+ * pattern for that, see the inspector's card for a trait whose def is missing.
  */
-export function refreshTraitIssues(node: Node, def: TraitDef, instance: TraitBase, label?: string): Issue[] {
+export function refreshTraitIssues(def: TraitDef, instance: TraitBase, label?: string): Issue[] {
     const issues = computeTraitIssues(def, instance);
-    setTraitIssues(node, def.slot, issues);
     if (issues.length > 0) {
         const prefix = label ? `[bongle] ${label}` : '[bongle]';
         for (const issue of issues) {
@@ -1660,7 +1630,7 @@ export function deserializeNode(data: SerializedNode): Node {
         instance._node = node;
         node._traits[def.slot] = instance;
         bitset.add(node._bitset, def.slot);
-        refreshTraitIssues(node, def, instance, `node "${data.name ?? '(unnamed)'}"`);
+        refreshTraitIssues(def, instance, `node "${data.name ?? '(unnamed)'}"`);
     }
 
     for (let i = 0; i < data.children.length; i++) {
@@ -1815,7 +1785,6 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     root._traits.length = 0;
     root._bitset = bitset.init();
     root._unresolvedTraits = null;
-    root._traitIssues = null;
 
     // restore root name
     root.name = rootData.name;
@@ -1837,7 +1806,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             instance._node = root;
             root._traits[def.slot] = instance;
             bitset.add(root._bitset, def.slot);
-            refreshTraitIssues(root, def, instance, 'root node');
+            refreshTraitIssues(def, instance, 'root node');
         }
         reindex(sceneTree, root);
     }
