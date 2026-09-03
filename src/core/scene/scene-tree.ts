@@ -62,6 +62,9 @@ export type Node = {
 
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
+    /** @internal the tree whose `dirtyNodes` list currently holds this node, or null. Holds
+     *  the tree rather than a bool so a node that moves between trees is filed in each. */
+    _dirtyIn: SceneTree | null;
 
     /**
      * which Player owns this node. null = server-owned (default).
@@ -160,6 +163,7 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         children: [],
         _childIndex: 0,
         scene: null,
+        _dirtyIn: null,
         owner: null,
         persist: persist ?? true,
         realm: realm ?? 'inherit',
@@ -189,7 +193,16 @@ export type NodeSyncState = {
  *  and field changes all land in `dirtyNodes` for the per-client fan-out. room
  *  scene trees are drained + cleared each tick by `Discovery.flush`. */
 export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
-    if (!env.client) sceneTree.dirtyNodes.add(node);
+    if (env.client || node._dirtyIn === sceneTree) return;
+    node._dirtyIn = sceneTree;
+    sceneTree.dirtyNodes.push(node);
+}
+
+/** drop everything filed this tick. Pairs with `markNodeDirty`; nothing else clears the marks. */
+export function clearDirtyNodes(sceneTree: SceneTree): void {
+    const dirty = sceneTree.dirtyNodes;
+    for (let i = 0; i < dirty.length; i++) dirty[i]!._dirtyIn = null;
+    dirty.length = 0;
 }
 
 /** bump a node's structural version */
@@ -342,7 +355,7 @@ export type SceneTree = {
      * `!env.client`, so it stays empty in the client bundle), drained + cleared each
      * tick by `Discovery.flush`.
      */
-    dirtyNodes: Set<Node>;
+    dirtyNodes: Node[];
 
     /**
      * server-side region index of transform roots, for region-tied AOI (see
@@ -400,7 +413,7 @@ export function createSceneTree(): SceneTree {
         _prefabsDirty: new Set(),
         _transformDirty: new Set(),
         _interpolating: new Set(),
-        dirtyNodes: new Set(),
+        dirtyNodes: [],
         regionToRoots: new Map(),
         rootToRegion: new Map(),
         rootRegionChanges: [],
@@ -600,7 +613,10 @@ export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | un
  */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
     sceneTree.rootRegionChanges.length = 0;
-    for (const node of sceneTree.dirtyNodes) {
+    // length re-read each step: a node filed during the pass is still picked up, matching
+    // what iterating the set used to do.
+    for (let i = 0; i < sceneTree.dirtyNodes.length; i++) {
+        const node = sceneTree.dirtyNodes[i]!;
         const filed = sceneTree.rootToRegion.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
@@ -632,7 +648,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // === null and emits node_destroyed. recurses, so each destroyed node lands
     // here. if the same node is re-added this tick it becomes live again → the
     // fan-out treats it as a create/update instead (add→remove→add correctness).
-    if (!env.client) sceneTree.dirtyNodes.add(node);
+    markNodeDirty(sceneTree, node);
 
     // destroy children first (iterate a copy since we mutate)
     const childrenCopy = node.children.slice();

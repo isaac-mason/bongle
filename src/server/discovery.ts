@@ -12,6 +12,7 @@ import { packSceneTree } from '../core/scene/scene-pack';
 import {
     bumpFieldVersion,
     childIndexOf,
+    clearDirtyNodes,
     EMPTY_UNRESOLVED,
     encodePrefabConfig,
     getNodeById,
@@ -871,7 +872,7 @@ export function flush(
     // both read dirtyNodes, so clearing any earlier would strand one of them. nodes
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
     for (const room of rooms.rooms.values()) {
-        if (room.scene.dirtyNodes.size > 0) room.scene.dirtyNodes.clear();
+        if (room.scene.dirtyNodes.length > 0) clearDirtyNodes(room.scene);
     }
 
     Debug.end(metrics, 'discovery/scene');
@@ -1008,7 +1009,10 @@ function buildSceneSyncUpdates(
 
     // --- dirtyNodes: field updates for present nodes, incremental adds, destruction,
     //     and (non-voxel / non-transform) realm-gated create/destroy ---
-    for (const node of sceneTree.dirtyNodes) {
+    // length re-read each step so a node filed during the pass is still seen, matching the
+    // set iteration this replaced.
+    for (let di = 0; di < sceneTree.dirtyNodes.length; di++) {
+        const node = sceneTree.dirtyNodes[di]!;
         if (presenceSettled.has(node.id)) continue; // AOI pass already created/destroyed it
         const known = nodeKnowledge.get(node.id);
 
@@ -1071,7 +1075,7 @@ function buildSceneSyncUpdates(
     for (const node of _pendingSyncScratch) {
         // a still-moving source is dirty again this tick and was handled above, which is
         // the overwhelmingly common case; test that before any lookup.
-        if (sceneTree.dirtyNodes.has(node)) continue;
+        if (node._dirtyIn === sceneTree) continue;
         if (node.scene === null) {
             nodeSyncKnowledge.delete(node);
             continue;
