@@ -344,12 +344,12 @@ export type SceneTree = {
      *  released, so there is nothing to invalidate and nothing to rebuild. */
     _queryResolutionGroups: TraversalTerm[][];
 
-    /** @internal enter/exit staged during the current mutation, drained by
-     *  `flushQueryEvents` once the tree is consistent again. Per tree, so a mutation
-     *  on one scene never drains another's. */
-    _pendingQueryEvents: QueryEvent[];
-    /** @internal guards re-entry: a handler that mutates the tree appends to
-     *  `_pendingQueryEvents` and is drained by the outer loop. */
+    /** @internal queries holding staged enter/exit tuples, drained by `flushQueryEvents`
+     *  once the tree is consistent again. Per tree, so a mutation on one scene never
+     *  drains another's. */
+    _queriesWithEvents: Array<Query<any>>;
+    /** @internal guards re-entry: a handler that mutates the tree stages more events and
+     *  is drained by the outer loop rather than starting a nested flush. */
     _flushingQueryEvents: boolean;
 
     /**
@@ -410,7 +410,7 @@ export function createSceneTree(): SceneTree {
         _queryScratch: [],
         _visitGeneration: 0,
         _queryResolutionGroups: [],
-        _pendingQueryEvents: [],
+        _queriesWithEvents: [],
         _flushingQueryEvents: false,
 
         _nextNodeId: 1,
@@ -1978,7 +1978,12 @@ function queryIndexOf(q: Query<any>, node: Node): number {
 
 export type Query<Conditions extends Array<Condition<any, any, any>>> = {
     /** @internal the tree this query is registered on. */
-    _tree: SceneTree;
+    scene: SceneTree;
+    /** @internal tuples staged for `onExit` / `onEnter`, drained by `flushQueryEvents`.
+     *  Exits are emitted before enters, so a replaced tuple always retires the old value
+     *  before the new one is announced. */
+    _pendingExits: any[][];
+    _pendingEnters: any[][];
     hash: string;
     conditions: [...Conditions];
     withTraits: number[];
@@ -2172,7 +2177,9 @@ export function query<const Args extends ConditionArgs[]>(
 
     // create query
     const q: Query<ConditionArgsToConditions<Args>> = {
-        _tree: sceneTree,
+        scene: sceneTree,
+        _pendingExits: [],
+        _pendingEnters: [],
         hash,
         conditions: parsedConditions as unknown as [...ConditionArgsToConditions<Args>],
         withTraits,
@@ -2289,8 +2296,15 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
  * outer loop picks up whatever was appended.
  */
 
-type QueryEvent = { topic: Topic<any>; tuple: any[] };
 
+
+/** stage `tuple` on one of the query's pending lists, enrolling the query for the drain. */
+function stageQueryEvent(q: Query<any>, list: any[][], tuple: any[]): void {
+    if (q._pendingExits.length === 0 && q._pendingEnters.length === 0) {
+        q.scene._queriesWithEvents.push(q);
+    }
+    list.push(tuple);
+}
 
 function callQueryListener(listener: Listener<any>, tuple: any[]): void {
     try {
@@ -2302,9 +2316,11 @@ function callQueryListener(listener: Listener<any>, tuple: any[]): void {
     }
 }
 
-function emitQueryEvent(t: Topic<any>, tuple: any[]): void {
-    for (const listener of t.listeners) {
-        callQueryListener(listener, tuple);
+function emitQueryEvents(t: Topic<any>, tuples: any[][]): void {
+    for (let i = 0; i < tuples.length; i++) {
+        for (const listener of t.listeners) {
+            callQueryListener(listener, tuples[i]!);
+        }
     }
 }
 
@@ -2316,15 +2332,22 @@ function emitQueryEvent(t: Topic<any>, tuple: any[]): void {
 export function flushQueryEvents(sceneTree: SceneTree | null): void {
     // a detached tree has no queries, so nothing can have been staged.
     if (sceneTree === null || sceneTree._flushingQueryEvents) return;
-    const pending = sceneTree._pendingQueryEvents;
+    const queued = sceneTree._queriesWithEvents;
     sceneTree._flushingQueryEvents = true;
-    // length is read every iteration on purpose: a handler that mutates the
-    // tree appends to this same queue and gets drained by this loop.
-    for (let i = 0; i < pending.length; i++) {
-        const event = pending[i]!;
-        emitQueryEvent(event.topic, event.tuple);
+    // length is read every iteration on purpose: a handler that mutates the tree stages
+    // more events, re-enrolling its query, and this loop picks it up.
+    for (let i = 0; i < queued.length; i++) {
+        const q = queued[i]!;
+        const exits = q._pendingExits;
+        const enters = q._pendingEnters;
+        // detach both before emitting, so a handler re-staging on this same query
+        // enrolls it afresh rather than appending to a list being iterated.
+        q._pendingExits = [];
+        q._pendingEnters = [];
+        emitQueryEvents(q.onExit, exits);
+        emitQueryEvents(q.onEnter, enters);
     }
-    pending.length = 0;
+    queued.length = 0;
     sceneTree._flushingQueryEvents = false;
 }
 
@@ -2457,9 +2480,7 @@ function addNodeToQuery(q: Query<any>, node: Node): void {
 
     // the tuple pushed above is the event payload: it stays valid even if a
     // later swap-remove moves it out of `matches` before the flush.
-    if (q.onEnter.listeners.size > 0) {
-        q._tree._pendingQueryEvents.push({ topic: q.onEnter, tuple });
-    }
+    if (q.onEnter.listeners.size > 0) stageQueryEvent(q, q._pendingEnters, tuple);
 }
 
 function removeNodeFromQuery(q: Query<any>, node: Node): void {
@@ -2485,20 +2506,14 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     q.matches.pop();
     q.matchNodes.pop();
 
-    if (tuple !== null) {
-        q._tree._pendingQueryEvents.push({ topic: q.onExit, tuple });
-    }
+    if (tuple !== null) stageQueryEvent(q, q._pendingExits, tuple);
 }
 
-/* ── resolutions ──────────────────────────────────────────────────────
+/* ── traversal terms ──────────────────────────────────────────────────
  *
- * A traversal term keeps "the nearest trait at or above me" resolved for
- * every node, and is re-resolved when the tree changes shape or the target
- * trait is added/removed. Two kinds of consumer, one mechanism:
- *
- *   - a query's `Up` / `Ancestor` terms, whose apply writes the match tuple
- *   - `TransformTrait._parent`, whose apply writes the field and marks the
- *     subtree's world matrices stale
+ * A query's `Up` / `Ancestor` term keeps "the nearest trait at or above me" resolved into
+ * every member's match tuple, and is re-resolved when the tree changes shape or the target
+ * trait is added or removed.
  *
  * Invalidation is pushed from the mutation rather than discovered by
  * rescanning: `resolveSubtree` after the tree around a node changed shape,
@@ -2536,31 +2551,22 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
 }
 
 /**
- * A still-matching node whose tuple contents changed: what the consumer was handed is no
- * longer valid, so the old tuple is retired with an exit and a fresh one entered. Membership
- * itself is untouched — `matchNodes` and the sparse index keep their slots — so this costs
- * one tuple, not a remove-and-re-add.
+ * A still-matching node whose tuple contents changed. Membership is untouched, but the
+ * values the consumer was handed are no longer current, so the old tuple is retired with an
+ * exit and a fresh one announced with an enter. `matchNodes` and the sparse index keep their
+ * slots, so this costs one tuple, not a remove-and-re-add.
  *
- * During the initial fill there is nothing to retire: `addNodeToQuery` already queued an
- * enter holding this very array, and the fill writes through that same reference so the
- * handler sees completed values. Mutating in place is what makes that aliasing work.
- *
- * CONTRACT: a tuple read out of `q.matches` is valid until the next tree mutation and must
- * not be retained past it. With no subscribers this rewrites the tuple in place; with
- * subscribers it swaps in a fresh one so exit and enter can carry the old and new values.
- * A retained tuple therefore either changes underneath the holder or goes stale depending
- * on whether anything is listening. Re-read from `q.matches` instead.
+ * The replacement is always a new array, whether or not anyone is subscribed: a tuple handed
+ * out is a snapshot and is never written through again. That is what lets a consumer hold
+ * one without it changing underneath them, and it is why a value change is always visible as
+ * an exit followed by an enter rather than a silent edit.
  */
 function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, next: unknown): void {
-    if (q.onExit.listeners.size === 0 && q.onEnter.listeners.size === 0) {
-        tuple[slot] = next;
-        return;
-    }
     const replacement = tuple.slice();
     replacement[slot] = next;
     q.matches[index] = replacement as never;
-    if (q.onExit.listeners.size > 0) q._tree._pendingQueryEvents.push({ topic: q.onExit, tuple: tuple as never });
-    if (q.onEnter.listeners.size > 0) q._tree._pendingQueryEvents.push({ topic: q.onEnter, tuple: replacement as never });
+    if (q.onExit.listeners.size > 0) stageQueryEvent(q, q._pendingExits, tuple);
+    if (q.onEnter.listeners.size > 0) stageQueryEvent(q, q._pendingEnters, replacement);
 }
 
 /**
