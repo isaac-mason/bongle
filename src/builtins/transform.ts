@@ -85,21 +85,9 @@ export const TRANSFORM_DIRTY_ALL =
  * so interpolation writes upstream automatically flow down through
  * descendants. renderers read via getVisualWorld*, see below.
  */
-/** the slice of a transform the descendant walks touch. The walks recurse over `Node`s, so
- *  this names only the fields they write. */
-export type TransformSubtree = {
-    _dirty: number;
-    _version: number;
-    _interpolated: 0 | 1;
-    interpolatedWorldPosition: Vec3 | null;
-    interpolatedWorldQuaternion: Quat | null;
-    interpolatedWorldScale: Vec3 | null;
-    interpolatedWorldMatrix: Mat4 | null;
-};
-
 /** allocate the visual pose. Every path that sets `_interpolated = 1` calls this, which is what
  *  lets the readers behind that flag treat the four fields as present. */
-export function ensureInterpolatedPose(transform: TransformSubtree): void {
+export function ensureInterpolatedPose(transform: TransformTrait): void {
     if (transform.interpolatedWorldMatrix !== null) return;
     transform.interpolatedWorldPosition = vec3.create();
     transform.interpolatedWorldQuaternion = quat.create();
@@ -900,7 +888,7 @@ export function markInterpolatedDescendantsDirty(node: Node): void {
     const children = node.children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
-        const t = child._traits[TransformTrait._slot] as TransformSubtree | undefined;
+        const t = child._traits[TransformTrait._slot] as TransformTrait | undefined;
         if (t !== undefined) {
             t._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
             ensureInterpolatedPose(t);

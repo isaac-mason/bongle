@@ -46,8 +46,8 @@ import { addChild, addTrait, createNode, createSceneTree, getTrait, type Node, r
 import { trait } from '../src/core/scene/traits';
 
 /** stands in for TransformTrait: a local matrix, a cached world, and the maintained parent.
- *  `_parent` is filled by hand here; the real trait's is maintained by
- *  `resolveTransformSubtree`, which this probe is not measuring. */
+ *  `_parent` is filled by hand here; the real trait derives it by walking, which this
+ *  probe is not measuring. */
 const Xf = trait('contraction/xf', {
     local: () => mat4.create(),
     world: () => mat4.create(),

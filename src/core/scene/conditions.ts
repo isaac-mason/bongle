@@ -1,4 +1,4 @@
-// query conditions: the terms a query (or a `context()` resolution) is built from.
+// query conditions: the terms a query is built from.
 //
 // A term has two orthogonal axes: an operator (what it does to a match) and a
 // source (where it looks). `With(T)` is and/self, `Not(T)` is not/self,

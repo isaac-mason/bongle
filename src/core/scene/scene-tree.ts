@@ -759,10 +759,6 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
-    // resolve this node's own context() fields. `resolveChildren` below covers
-    // descendants; the node that just gained the trait has to be seeded here,
-    // since nothing above it changed.
-
     const scene = node.scene;
     // descendants resolving this trait from the hierarchy now resolve to it.
     // runs detached too: a subtree is often fully built before it is attached.

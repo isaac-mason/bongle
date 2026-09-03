@@ -603,13 +603,12 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
     return instance;
 }
 
-/* ── context: nearest-trait resolutions ── */
+/* ── query traversal terms ── */
 
 /**
- * What the SCENE TREE walks, derived from a declaration rather than authored: `traitSlot`
- * has had `Self` substituted, `inclusive` has been read off the condition, and `apply` is
- * system behaviour. A query's `Up`/`Ancestor` term is one of these too, which is why it is
- * not named for `context()`.
+ * What the SCENE TREE walks for a query's `Up`/`Ancestor` term, derived from the term rather
+ * than authored: `traitSlot` has had `Self` substituted, `inclusive` has been read off the
+ * condition, and `apply` is system behaviour.
  *
  * `traitSlot` is both what gets resolved and where the walk prunes: below a
  * node bearing it, the answer is that node and cannot have been changed by
