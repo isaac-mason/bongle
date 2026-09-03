@@ -672,8 +672,13 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
     sceneTree._idToNode.delete(node.id);
-    sceneTree._prefabNodes.delete(node);
-    sceneTree._prefabsDirty.delete(node);
+    // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
+    // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
+    // node never needs the two deletes.
+    if (node.prefab !== null) {
+        sceneTree._prefabNodes.delete(node);
+        sceneTree._prefabsDirty.delete(node);
+    }
     const t = getTrait(node, TransformTrait);
     if (t) releaseTransform(sceneTree, t);
     node.scene = null;
@@ -1389,8 +1394,13 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
     sceneTree._idToNode.delete(node.id);
-    sceneTree._prefabNodes.delete(node);
-    sceneTree._prefabsDirty.delete(node);
+    // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
+    // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
+    // node never needs the two deletes.
+    if (node.prefab !== null) {
+        sceneTree._prefabNodes.delete(node);
+        sceneTree._prefabsDirty.delete(node);
+    }
     // a node leaving the live tree is a destroy for the discovery fan-out,
     // symmetric with registerSubtree marking entering nodes dirty. server-only
     // (gated inside markNodeDirty). the node ends this fn in dirtyNodes with
