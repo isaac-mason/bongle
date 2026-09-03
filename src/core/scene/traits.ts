@@ -602,30 +602,3 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 
     return instance;
 }
-
-/* ── query traversal terms ── */
-
-/**
- * What the SCENE TREE walks for a query's `Up`/`Ancestor` term, derived from the term rather
- * than authored: `traitSlot` has had `Self` substituted, `inclusive` has been read off the
- * condition, and `apply` is system behaviour.
- *
- * `traitSlot` is both what gets resolved and where the walk prunes: below a
- * node bearing it, the answer is that node and cannot have been changed by
- * anything above.
- */
-export type Resolution = {
-    traitSlot: number;
-    /** `Up` counts the node itself; `Ancestor` starts at the parent. */
-    inclusive: boolean;
-    /** the trait whose instances hold the destination. A subtree bearing none of them has
-     *  nowhere to write, so the whole descent can be skipped. `-1` for a query term, whose
-     *  destinations are its members rather than one trait. */
-    ownerSlot: number;
-    /**
-     * write the resolved value wherever this resolution keeps it. Called for every
-     * node the walk visits; implementations that only care about some of them
-     * (a query's members, or nodes bearing the owning trait) filter here.
-     */
-    apply(node: Node, resolved: TraitBase | undefined): void;
-};

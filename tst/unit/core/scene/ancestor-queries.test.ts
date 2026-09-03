@@ -172,7 +172,7 @@ describe('Up / Ancestor — staying live', () => {
         entered.length = 0;
 
         reparent(leaf, b);
-        flushQueryEvents();
+        flushQueryEvents(sceneTree);
 
         // the ancestor it resolved to changed, so the match the consumer holds is retired
         // and replaced rather than silently mutated underneath them.

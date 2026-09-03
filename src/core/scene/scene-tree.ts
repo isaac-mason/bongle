@@ -30,7 +30,6 @@ import type { ValidationIssue } from './prop/validate';
 import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
-import type { Resolution } from './traits';
 import { buildTraitInstance, cloneTraitValue, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
 export type { TraitHandle } from './traits';
@@ -343,7 +342,15 @@ export type SceneTree = {
     /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
      *  they resolve. One bucket is one walk. Maintained as queries are registered and
      *  released, so there is nothing to invalidate and nothing to rebuild. */
-    _queryResolutionGroups: Resolution[][];
+    _queryResolutionGroups: TraversalTerm[][];
+
+    /** @internal enter/exit staged during the current mutation, drained by
+     *  `flushQueryEvents` once the tree is consistent again. Per tree, so a mutation
+     *  on one scene never drains another's. */
+    _pendingQueryEvents: QueryEvent[];
+    /** @internal guards re-entry: a handler that mutates the tree appends to
+     *  `_pendingQueryEvents` and is drained by the outer loop. */
+    _flushingQueryEvents: boolean;
 
     /**
      * @internal server-side discovery driver. nodes touched this tick (created,
@@ -403,6 +410,8 @@ export function createSceneTree(): SceneTree {
         _queryScratch: [],
         _visitGeneration: 0,
         _queryResolutionGroups: [],
+        _pendingQueryEvents: [],
+        _flushingQueryEvents: false,
 
         _nextNodeId: 1,
         _nextClientNodeId: -1,
@@ -701,19 +710,13 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
 
     // recursive: each level flushes once its own node is fully detached, so a
     // handler always sees a coherent (bottom-up) teardown.
-    flushQueryEvents();
+    flushQueryEvents(sceneTree);
 }
 
 /* trait operations */
 
 // ── parent transform bookkeeping ──────────────────────────────────────
 //
-// every TransformTrait instance has a parent transform pointer to the
-// nearest ancestor node's TransformTrait (or null if none), maintained
-// eagerly on hierarchy and trait mutations so it's always fresh. The
-// maintenance itself is a `Resolution` like any other (see the
-// `resolutions` section below); only the initial resolve for a node's own
-// pointer lives here.
 
 /**
  * nearest ancestor's TransformTrait, or null. A typed adapter over the shared
@@ -783,7 +786,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
             }
         }
         // after the new trait's own scripts exist and have inited
-        flushQueryEvents();
+        flushQueryEvents(scene);
     }
 
     return instance;
@@ -878,7 +881,7 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         // descendants that resolved to this trait now fall through to the next
         // one above. runs after the delete so the walk sees the new answer.
         resolveChildren(scene, node, traitSlot);
-        flushQueryEvents();
+        flushQueryEvents(scene);
     }
 }
 
@@ -918,7 +921,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
         }
         node._traits[traitSlot] = undefined;
         resolveChildren(scene, node, traitSlot);
-        flushQueryEvents();
+        flushQueryEvents(scene);
     }
 }
 
@@ -964,7 +967,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
         }
     }
 
-    flushQueryEvents();
+    flushQueryEvents(scene);
 
     return instance;
 }
@@ -1100,7 +1103,7 @@ export function addChild(parent: Node, child: Node): void {
     resolveSubtree(parent.scene, child, undefined);
 
     // last, so an enter handler reading a world matrix sees fresh pointers
-    flushQueryEvents();
+    flushQueryEvents(parent.scene);
 }
 
 /**
@@ -1119,7 +1122,7 @@ export function removeChild(parent: Node, child: Node): void {
 
     resolveSubtree(null, child, parent);
 
-    flushQueryEvents();
+    flushQueryEvents(parent.scene);
 }
 
 /**
@@ -1207,7 +1210,7 @@ export function reparent(node: Node, newParent: Node): void {
     // either side of the move skip their walk entirely.
     resolveSubtree(scene, node, wasInTree ? oldParent : null);
 
-    flushQueryEvents();
+    flushQueryEvents(scene);
 }
 
 /**
@@ -1886,7 +1889,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     }
 
     // the root's own reindex above is staged; drain it before children land
-    flushQueryEvents();
+    flushQueryEvents(sceneTree);
 
     // deserialize children of root (registerSubtree fires via addChild, creating instances)
     for (const nodeData of rootData.children) {
@@ -1972,9 +1975,10 @@ function queryIndexOf(q: Query<any>, node: Node): number {
 }
 
 /** placeholder until `query()` binds a term's apply to its query. */
-function noopApply(): void {}
 
 export type Query<Conditions extends Array<Condition<any, any, any>>> = {
+    /** @internal the tree this query is registered on. */
+    _tree: SceneTree;
     hash: string;
     conditions: [...Conditions];
     withTraits: number[];
@@ -2048,10 +2052,18 @@ export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number
  * one `Up` / `Ancestor` term of a query, resolved against the hierarchy rather
  * than the node's own bitset. `tupleIndex` is the slot it writes in a match;
  * `required` terms also gate membership, so a re-resolve can add or drop a node.
+ *
+ * `traitSlot` is both what gets resolved and where the walk prunes: below a node
+ * bearing it, the answer is that node and nothing above can have changed it.
  */
-export type TraversalTerm = Resolution & {
+export type TraversalTerm = {
+    traitSlot: number;
+    /** `Up` counts the node itself; `Ancestor` starts at the parent. */
+    inclusive: boolean;
     required: boolean;
     tupleIndex: number;
+    /** the query whose matches this term writes into. */
+    query: Query<any>;
 };
 
 /**
@@ -2081,7 +2093,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     withBitset: Bitset;
     withoutBitset: Bitset;
     withTraits: number[];
-    traversals: TraversalTerm[];
+    traversalSpecs: Array<Omit<TraversalTerm, 'query'>>;
     optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }>;
 } {
     const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
@@ -2095,7 +2107,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     let withBitset = bitset.init();
     let withoutBitset = bitset.init();
     const withTraits: number[] = [];
-    const traversals: TraversalTerm[] = [];
+    const traversalSpecs: Array<Omit<TraversalTerm, 'query'>> = [];
     const optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }> = [];
 
     // tuple index advances for every value-carrying term, i.e. everything but Not.
@@ -2116,15 +2128,11 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
                     optionalSelfTerms.push({ traitSlot, tupleIndex });
                 }
             } else {
-                traversals.push({
+                traversalSpecs.push({
                     traitSlot,
-                    // a query term writes into its members, not into one trait's instances.
-                    ownerSlot: -1,
                     inclusive: condition.src === Src.Up,
                     required: condition.oper === Oper.And,
                     tupleIndex,
-                    // bound to the query below, once it exists.
-                    apply: noopApply,
                 });
             }
         }
@@ -2136,7 +2144,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         withBitset: bitset.trim(withBitset),
         withoutBitset: bitset.trim(withoutBitset),
         withTraits,
-        traversals,
+        traversalSpecs,
         optionalSelfTerms,
     };
 }
@@ -2145,7 +2153,7 @@ export function query<const Args extends ConditionArgs[]>(
     sceneTree: SceneTree,
     conditions: Args,
 ): Query<ConditionArgsToConditions<Args>> {
-    const { parsedConditions, withBitset, withoutBitset, withTraits, traversals, optionalSelfTerms } =
+    const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs, optionalSelfTerms } =
         buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort). oper and src both belong in
@@ -2164,6 +2172,7 @@ export function query<const Args extends ConditionArgs[]>(
 
     // create query
     const q: Query<ConditionArgsToConditions<Args>> = {
+        _tree: sceneTree,
         hash,
         conditions: parsedConditions as unknown as [...ConditionArgsToConditions<Args>],
         withTraits,
@@ -2175,7 +2184,7 @@ export function query<const Args extends ConditionArgs[]>(
         _sparseNeg: [],
         _optionalSelfTerms: optionalSelfTerms,
         _tupleTerms: parsedConditions.filter((c) => c.oper !== Oper.Not),
-        traversals,
+        traversals: [],
         onEnter: topic(),
         onExit: topic(),
         refcount: 0,
@@ -2186,11 +2195,10 @@ export function query<const Args extends ConditionArgs[]>(
         },
     };
 
-    // bind each traversal term's apply to this query. one closure per term for
-    // the life of the query, so the resolve walk allocates nothing.
-    for (const term of traversals) {
-        term.apply = (node, resolved) => applyTraversal(q, term, node, resolved);
-    }
+    // terms carry their query, so the resolve walk calls `applyTraversal` directly
+    // rather than through a per-term closure.
+    const traversals = q.traversals;
+    for (const spec of traversalSpecs) traversals.push({ ...spec, query: q });
 
     // register query
     sceneTree.queries.set(hash, q);
@@ -2283,8 +2291,6 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
 
 type QueryEvent = { topic: Topic<any>; tuple: any[] };
 
-const _pendingQueryEvents: QueryEvent[] = [];
-let _flushingQueryEvents = false;
 
 function callQueryListener(listener: Listener<any>, tuple: any[]): void {
     try {
@@ -2307,17 +2313,19 @@ function emitQueryEvent(t: Topic<any>, tuple: any[]): void {
  * (addChild, removeChild, reparent, destroyNode, addTrait, removeTrait, ...),
  * once the tree is consistent again.
  */
-export function flushQueryEvents(): void {
-    if (_flushingQueryEvents) return;
-    _flushingQueryEvents = true;
+export function flushQueryEvents(sceneTree: SceneTree | null): void {
+    // a detached tree has no queries, so nothing can have been staged.
+    if (sceneTree === null || sceneTree._flushingQueryEvents) return;
+    const pending = sceneTree._pendingQueryEvents;
+    sceneTree._flushingQueryEvents = true;
     // length is read every iteration on purpose: a handler that mutates the
     // tree appends to this same queue and gets drained by this loop.
-    for (let i = 0; i < _pendingQueryEvents.length; i++) {
-        const event = _pendingQueryEvents[i]!;
+    for (let i = 0; i < pending.length; i++) {
+        const event = pending[i]!;
         emitQueryEvent(event.topic, event.tuple);
     }
-    _pendingQueryEvents.length = 0;
-    _flushingQueryEvents = false;
+    pending.length = 0;
+    sceneTree._flushingQueryEvents = false;
 }
 
 /**
@@ -2450,7 +2458,7 @@ function addNodeToQuery(q: Query<any>, node: Node): void {
     // the tuple pushed above is the event payload: it stays valid even if a
     // later swap-remove moves it out of `matches` before the flush.
     if (q.onEnter.listeners.size > 0) {
-        _pendingQueryEvents.push({ topic: q.onEnter, tuple });
+        q._tree._pendingQueryEvents.push({ topic: q.onEnter, tuple });
     }
 }
 
@@ -2478,13 +2486,13 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     q.matchNodes.pop();
 
     if (tuple !== null) {
-        _pendingQueryEvents.push({ topic: q.onExit, tuple });
+        q._tree._pendingQueryEvents.push({ topic: q.onExit, tuple });
     }
 }
 
 /* ── resolutions ──────────────────────────────────────────────────────
  *
- * A `Resolution` keeps "the nearest trait at or above me" resolved for
+ * A traversal term keeps "the nearest trait at or above me" resolved for
  * every node, and is re-resolved when the tree changes shape or the target
  * trait is added/removed. Two kinds of consumer, one mechanism:
  *
@@ -2536,6 +2544,12 @@ function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved
  * During the initial fill there is nothing to retire: `addNodeToQuery` already queued an
  * enter holding this very array, and the fill writes through that same reference so the
  * handler sees completed values. Mutating in place is what makes that aliasing work.
+ *
+ * CONTRACT: a tuple read out of `q.matches` is valid until the next tree mutation and must
+ * not be retained past it. With no subscribers this rewrites the tuple in place; with
+ * subscribers it swaps in a fresh one so exit and enter can carry the old and new values.
+ * A retained tuple therefore either changes underneath the holder or goes stale depending
+ * on whether anything is listening. Re-read from `q.matches` instead.
  */
 function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, next: unknown): void {
     if (q.onExit.listeners.size === 0 && q.onEnter.listeners.size === 0) {
@@ -2545,8 +2559,8 @@ function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, 
     const replacement = tuple.slice();
     replacement[slot] = next;
     q.matches[index] = replacement as never;
-    if (q.onExit.listeners.size > 0) _pendingQueryEvents.push({ topic: q.onExit, tuple: tuple as never });
-    if (q.onEnter.listeners.size > 0) _pendingQueryEvents.push({ topic: q.onEnter, tuple: replacement as never });
+    if (q.onExit.listeners.size > 0) q._tree._pendingQueryEvents.push({ topic: q.onExit, tuple: tuple as never });
+    if (q.onEnter.listeners.size > 0) q._tree._pendingQueryEvents.push({ topic: q.onEnter, tuple: replacement as never });
 }
 
 /**
@@ -2554,12 +2568,12 @@ function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, 
  * descendants. Every member of `group` targets the same trait slot, so they share the
  * walk, what the node bears, and the prune; only which value each is handed differs.
  */
-function resolveFrom(group: Resolution[], node: Node, inherited: TraitBase | undefined): void {
+function resolveFrom(group: TraversalTerm[], node: Node, inherited: TraitBase | undefined): void {
     const own = node._traits[group[0]!.traitSlot];
     const upValue = own ?? inherited;
     for (let i = 0; i < group.length; i++) {
-        const resolution = group[i]!;
-        resolution.apply(node, resolution.inclusive ? upValue : inherited);
+        const term = group[i]!;
+        applyTraversal(term.query, term, node, term.inclusive ? upValue : inherited);
     }
     // stop at a bearer: everything below already resolves to it, and nothing above
     // changed that.
@@ -2580,7 +2594,7 @@ export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFro
 }
 
 /** file a query's traversal term under its target slot, opening a bucket if it is the first. */
-function addQueryResolution(sceneTree: SceneTree, term: Resolution): void {
+function addQueryResolution(sceneTree: SceneTree, term: TraversalTerm): void {
     const groups = sceneTree._queryResolutionGroups;
     for (let i = 0; i < groups.length; i++) {
         if (groups[i]![0]!.traitSlot === term.traitSlot) {
@@ -2592,7 +2606,7 @@ function addQueryResolution(sceneTree: SceneTree, term: Resolution): void {
 }
 
 /** drop a released query's term, closing the bucket if it was the last one in it. */
-function removeQueryResolution(sceneTree: SceneTree, term: Resolution): void {
+function removeQueryResolution(sceneTree: SceneTree, term: TraversalTerm): void {
     const groups = sceneTree._queryResolutionGroups;
     for (let i = 0; i < groups.length; i++) {
         const group = groups[i]!;
@@ -2608,7 +2622,7 @@ function removeQueryResolution(sceneTree: SceneTree, term: Resolution): void {
     }
 }
 
-function resolveSubtreeFor(groups: Resolution[][], node: Node, movedFrom?: Node | null): void {
+function resolveSubtreeFor(groups: TraversalTerm[][], node: Node, movedFrom?: Node | null): void {
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g]!;
         const resolution = group[0]!;
@@ -2637,7 +2651,7 @@ function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: num
     if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutionGroups, node, traitSlot);
 }
 
-function resolveChildrenFor(groups: Resolution[][], node: Node, traitSlot: number): void {
+function resolveChildrenFor(groups: TraversalTerm[][], node: Node, traitSlot: number): void {
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g]!;
         if (group[0]!.traitSlot !== traitSlot) continue;
@@ -2647,8 +2661,8 @@ function resolveChildrenFor(groups: Resolution[][], node: Node, traitSlot: numbe
         // an `Up` term on the node itself also just changed answer, and nothing
         // else re-resolves it: membership didn't change, so `reindex` no-ops.
         for (let i = 0; i < group.length; i++) {
-            const resolution = group[i]!;
-            resolution.apply(node, resolution.inclusive ? upValue : above);
+            const term = group[i]!;
+            applyTraversal(term.query, term, node, term.inclusive ? upValue : above);
         }
         for (const child of node.children) {
             resolveFrom(group, child, upValue);
