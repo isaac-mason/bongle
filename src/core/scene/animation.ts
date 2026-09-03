@@ -915,7 +915,7 @@ function tickAnimator(
             t._dirty = TRANSFORM_DIRTY_ALL;
             t._version++;
         }
-        composeWorldMatrix(t);
+        composeWorldMatrix(t, parent);
     }
 }
 

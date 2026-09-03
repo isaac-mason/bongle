@@ -556,8 +556,7 @@ const _interpolatedWalkStack: TransformTrait[] = [];
  * called by both `updateWorldTransform`'s lazy walk-up-then-down loop and
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
-export function composeWorldMatrix(transform: TransformTrait): void {
-    const parent = parentTransform(transform);
+export function composeWorldMatrix(transform: TransformTrait, parent: TransformTrait | null): void {
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -693,8 +692,11 @@ function updateWorldTransform(transform: TransformTrait): void {
         cursor = parentTransform(cursor);
     }
 
-    for (let i = stack.length - 1; i >= 0; i--) {
-        composeWorldMatrix(stack[i]!);
+    // the stack IS the chain, so `stack[i + 1]` is `stack[i]`'s parent; only the topmost
+    // needs `cursor`, the first clean ancestor the walk stopped at. No second resolve.
+    const top = stack.length - 1;
+    for (let i = top; i >= 0; i--) {
+        composeWorldMatrix(stack[i]!, i === top ? cursor : stack[i + 1]!);
     }
     stack.length = 0;
 }
@@ -715,8 +717,7 @@ function updateWorldTransform(transform: TransformTrait): void {
  * TRANSFORM_DIRTY_INTERPOLATED_TRS since interpolatedWorld P/Q/S are seeded directly.
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
-export function composeInterpolatedWorldMatrix(transform: TransformTrait): void {
-    const parent = parentTransform(transform);
+export function composeInterpolatedWorldMatrix(transform: TransformTrait, parent: TransformTrait | null): void {
 
     const q = transform.quaternion;
     const p = transform.position;
@@ -853,6 +854,7 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
         stack.push(cursor);
         cursor = parentTransform(cursor);
     }
+    const boundary = cursor;
 
     // boundary parent (cursor) is null, a clean interp ancestor, or a
     // non-interp ancestor. only the non-interp case needs setup: ensure
@@ -862,8 +864,9 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
         updateWorldTransform(cursor);
     }
 
-    for (let i = stack.length - 1; i >= 0; i--) {
-        composeInterpolatedWorldMatrix(stack[i]!);
+    const top = stack.length - 1;
+    for (let i = top; i >= 0; i--) {
+        composeInterpolatedWorldMatrix(stack[i]!, i === top ? boundary : stack[i + 1]!);
     }
     stack.length = 0;
 }

@@ -41,7 +41,6 @@ import {
     ensureInterpolatedPose,
     ensureRemoteInterpolation,
     getWorldMatrix,
-    hasTransformedParent,
     markInterpolatedDescendantsDirty,
     parentTransform,
     type RemoteInterpolation,
@@ -294,12 +293,12 @@ function sampleRemotePose(t: TransformTrait, dt: number): void {
  * world space rather than local.
  */
 function applyPredictionInterpolation(transform: TransformTrait): void {
-    if (!hasTransformedParent(transform)) {
+    const parentOfTransform = parentTransform(transform);
+    if (parentOfTransform === null) {
         applyPredictionBlend(transform, transform.position, transform.quaternion);
         vec3.copy(transform.interpolatedWorldScale!, transform.scale);
     } else {
-        // guarded by `hasTransformedParent` above, which the compiler can't see through
-        const parent = parentTransform(transform)!;
+        const parent = parentOfTransform;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
@@ -379,7 +378,8 @@ function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat
  * world, nested composes with the parent's visual matrix.
  */
 function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat: Quat): void {
-    if (!hasTransformedParent(transform)) {
+    const parentOfTransform = parentTransform(transform);
+    if (parentOfTransform === null) {
         vec3.copy(transform.interpolatedWorldPosition!, localPos);
         quat.copy(transform.interpolatedWorldQuaternion!, localQuat);
         vec3.copy(transform.interpolatedWorldScale!, transform.scale);
@@ -391,8 +391,7 @@ function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat:
         );
         transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
     } else {
-        // guarded by `hasTransformedParent` above, which the compiler can't see through
-        const parent = parentTransform(transform)!;
+        const parent = parentOfTransform;
         let parentMat: Mat4;
         if (parent._interpolated) {
             updateInterpolatedWorldTransform(parent);
