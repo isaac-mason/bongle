@@ -181,6 +181,11 @@ export const TransformTrait = trait('transform', {
      *  `profile-rig-world.ts` shows is the term that scales: three dependent loads per child
      *  through the node tree versus one straight to the transform. */
     _children: [] as any[],
+
+    /** this transform's slot in `_parent._children`, or -1 when it has no parent. Godot's
+     *  `index_in_parent`: without it, removal is an `indexOf` scan and detaching every child
+     *  of a wide parent is O(n^2) (`probe-wide-fanout.ts`). */
+    _childIndex: -1,
 });
 
 /** instance type for TransformTrait */
@@ -313,10 +318,17 @@ export function parentTransform(transform: TransformTrait): TransformTrait | nul
 /** swap-pop `child` out of `parent._children`. */
 function removeTransformChild(parent: TransformTrait, child: TransformTrait): void {
     const children = parent._children;
-    const index = children.indexOf(child);
-    if (index === -1) return;
-    children[index] = children[children.length - 1]!;
+    const index = child._childIndex;
+    const last = children.length - 1;
+    // the index is authoritative, but stay defensive: a stale one would corrupt the list.
+    if (index < 0 || index > last || children[index] !== child) return;
+    if (index !== last) {
+        const moved = children[last]!;
+        children[index] = moved;
+        moved._childIndex = index;
+    }
     children.pop();
+    child._childIndex = -1;
 }
 
 /** re-point one transform, keeping both child lists in step. Invalidation is the caller's
@@ -326,7 +338,10 @@ function setTransformParent(own: TransformTrait, next: TransformTrait | null): v
     if (prev === next) return;
     if (prev !== null) removeTransformChild(prev, own);
     own._parent = next;
-    if (next !== null) next._children.push(own);
+    if (next !== null) {
+        own._childIndex = next._children.length;
+        next._children.push(own);
+    }
 }
 
 /**
