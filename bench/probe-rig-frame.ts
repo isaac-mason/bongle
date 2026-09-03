@@ -2,15 +2,18 @@
 //
 //   ./node_modules/.bin/tsx bench/probe-rig-frame.ts [maxRigs]
 //
-// The per-frame shape a rig actually costs, in three parts:
+// One number: a whole frame's worth of work, measured as one loop.
 //
-//   move    setPosition on each rig root. Dirties the root and, via `markDescendants`,
-//           every bone under it.
-//   world   read every bone's world matrix. This is the lazy walk-up-then-compose-down,
-//           i.e. where the matrix math lands.
-//   query   iterate `[MeshTrait, TransformTrait, Optional(Up(ModelTrait))]` exactly as
-//           `model-visuals` phase 1 does, including the tuple destructure and the
-//           `_state`/`meshId` fast-path check.
+//   move each rig root (`setPosition`, which dirties the subtree via `markDescendants`),
+//   read every bone's world matrix (the lazy walk-up-then-compose-down),
+//   iterate `[MeshTrait, TransformTrait, Optional(Up(ModelTrait))]` exactly as
+//   `model-visuals` phase 1 does, tuple destructure and `_state`/`meshId` check included.
+//
+// Deliberately NOT reported per phase. `markDescendants` prunes any subtree already at
+// TRANSFORM_DIRTY_ALL, so timing `move` on its own leaves everything permanently dirty and
+// measures almost nothing, while the real sequence re-dirties 32k nodes each frame after
+// the reads clean them. Subtracting the two mis-attributed ~25% of the frame from move to
+// world. For a per-phase breakdown use `profile-rig-world.ts`, which samples it.
 //
 // Stops short of the GPU instance-buffer writes: `ModelVisuals.update` needs a ModelBatch,
 // ModelResources, Resources, Visibility and Voxels, which is the reason no bench for this
@@ -81,7 +84,7 @@ function best(fn: () => void, reps: number): number {
 
 console.log(`\n6-bone rigs, ${BONES.length} bones + 1 root each. best-of; budget 16.67 ms/frame\n`);
 console.log(
-    `${'rigs'.padStart(6)} ${'nodes'.padStart(7)} ${'move'.padStart(8)} ${'world'.padStart(8)} ${'query'.padStart(8)} ${'total'.padStart(8)}   ${'us/rig'.padStart(7)}  frames@16.67ms`,
+    `${'rigs'.padStart(6)} ${'nodes'.padStart(7)} ${'frame'.padStart(9)} ${'us/rig'.padStart(8)} ${'ns/node'.padStart(8)}  rigs@16.67ms`,
 );
 
 for (const rigCount of [64, 256, 1024, 2048, MAX].filter((n, i, a) => n <= MAX && a.indexOf(n) === i)) {
@@ -118,17 +121,14 @@ for (const rigCount of [64, 256, 1024, 2048, MAX].filter((n, i, a) => n <= MAX &
         }
     };
 
-    const tMove = best(move, 200);
-    const tWorld = best(() => {
+    const frame = best(() => {
         move();
         world();
+        iterate();
     }, 200);
-    const tQuery = best(iterate, 200);
-    const worldOnly = Math.max(tWorld - tMove, 0);
-    const total = tMove + worldOnly + tQuery;
     const nodes = rigCount * (BONES.length + 1);
     console.log(
-        `${String(rigCount).padStart(6)} ${String(nodes).padStart(7)} ${tMove.toFixed(3).padStart(8)} ${worldOnly.toFixed(3).padStart(8)} ${tQuery.toFixed(3).padStart(8)} ${total.toFixed(3).padStart(8)}   ${((total / rigCount) * 1000).toFixed(2).padStart(7)}  ${Math.floor((16.67 / total) * rigCount)}`,
+        `${String(rigCount).padStart(6)} ${String(nodes).padStart(7)} ${frame.toFixed(3).padStart(9)} ${((frame / rigCount) * 1000).toFixed(2).padStart(8)} ${((frame / nodes) * 1e6).toFixed(0).padStart(8)}  ${Math.floor((16.67 / frame) * rigCount)}`,
     );
     if (seen < 0) throw new Error('unreachable');
 }
