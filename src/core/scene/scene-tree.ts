@@ -1325,12 +1325,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
 
         const candidates = sceneTree._queryScratch;
         const candidateCount = collectQueries(sceneTree, n);
-        for (let qi = 0; qi < candidateCount; qi++) {
-            const q = candidates[qi]!;
-            if (nodeMatchesQuery(n, q) && queryIndexOf(q, n) === -1) {
-                addNodeToQuery(q, n);
-            }
-        }
+        for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
 
         // create script instances for every trait on this node
         if (sceneTree.context) {
@@ -2009,10 +2004,6 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
      *  (server positive, client negative), so interleaving doubled the length and left
      *  every other slot a permanent hole. */
     _sparseNeg: number[];
-    /** @internal Self-sourced `Optional` terms, with the tuple slot each writes. These are
-     *  the only terms whose value can change while membership does not: a required Self term
-     *  changing flips membership, and hierarchy terms are maintained by the resolve walk. */
-    _optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }>;
     /** @internal `conditions` minus the `Not` terms, in tuple order. Precomputed so
      *  `buildQueryTuple` knows its exact arity and can build a literal. */
     _tupleTerms: Array<Condition<any, any, any>>;
@@ -2089,7 +2080,11 @@ function nearestTrait(node: Node | null, traitSlot: number, inclusive: boolean):
 function resolveTerm(node: Node, condition: Condition<any, any, any>): TraitBase | undefined {
     const traitSlot = condition.trait._slot;
     if (traitSlot === undefined) return undefined;
-    if (condition.src === Src.Self) return node._traits[traitSlot];
+    // the bitset is the truth, not `_traits`: `removeTraitBySlot` clears the bit before
+    // reindexing but keeps the instance until after, so the two disagree mid-removal.
+    if (condition.src === Src.Self) {
+        return bitset.has(node._bitset, traitSlot) ? node._traits[traitSlot] : undefined;
+    }
     return nearestTrait(node, traitSlot, condition.src === Src.Up);
 }
 
@@ -2099,7 +2094,6 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     withoutBitset: Bitset;
     withTraits: number[];
     traversalSpecs: Array<Omit<TraversalTerm, 'query'>>;
-    optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }>;
 } {
     const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
         if (typeof cond === 'object' && cond !== null && '_slot' in cond) {
@@ -2113,7 +2107,6 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     let withoutBitset = bitset.init();
     const withTraits: number[] = [];
     const traversalSpecs: Array<Omit<TraversalTerm, 'query'>> = [];
-    const optionalSelfTerms: Array<{ traitSlot: number; tupleIndex: number }> = [];
 
     // tuple index advances for every value-carrying term, i.e. everything but Not.
     let tupleIndex = 0;
@@ -2125,12 +2118,12 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         }
         if (traitSlot !== undefined) {
             if (condition.src === Src.Self) {
-                // only a self-sourced requirement is a bitmask test on the node.
+                // only a self-sourced requirement is a bitmask test on the node. A
+                // self-sourced Optional needs no registration at all: it gates nothing, and
+                // `reconcile` notices its value moving like any other tuple change.
                 if (condition.oper === Oper.And) {
                     withBitset = bitset.add(withBitset, traitSlot);
                     withTraits.push(traitSlot);
-                } else {
-                    optionalSelfTerms.push({ traitSlot, tupleIndex });
                 }
             } else {
                 traversalSpecs.push({
@@ -2150,7 +2143,6 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         withoutBitset: bitset.trim(withoutBitset),
         withTraits,
         traversalSpecs,
-        optionalSelfTerms,
     };
 }
 
@@ -2158,7 +2150,7 @@ export function query<const Args extends ConditionArgs[]>(
     sceneTree: SceneTree,
     conditions: Args,
 ): Query<ConditionArgsToConditions<Args>> {
-    const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs, optionalSelfTerms } =
+    const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs } =
         buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort). oper and src both belong in
@@ -2189,7 +2181,6 @@ export function query<const Args extends ConditionArgs[]>(
         matchNodes: [],
         _sparse: [],
         _sparseNeg: [],
-        _optionalSelfTerms: optionalSelfTerms,
         _tupleTerms: parsedConditions.filter((c) => c.oper !== Oper.Not),
         traversals: [],
         onEnter: topic(),
@@ -2487,10 +2478,10 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     const index = queryIndexOf(q, node);
     if (index === -1) return;
 
-    // capture the payload BEFORE the swap-remove: removeTrait deletes the
-    // trait value from `_traits` right after reindexing, so it has to be read
-    // here, and a handler must never see the departing node still in `matches`.
-    const tuple = q.onExit.listeners.size > 0 ? buildQueryTuple(q, node) : null;
+    // the payload is the tuple the consumer was actually handed, captured before the
+    // swap-remove. Rebuilding here would read post-change state and report values the
+    // node never had while it was a member.
+    const tuple = q.onExit.listeners.size > 0 ? (q.matches[index] as unknown as any[]) : null;
 
     // swap-remove from matches, keeping matchNodes in lockstep. The moved
     // entry's sparse slot is repointed; the departing node's is left stale,
@@ -2524,68 +2515,24 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
  * changed above it, so the descent stops there.
  */
 
-/** apply a freshly resolved value for one query term to one node. */
-function applyTraversal(q: Query<any>, term: TraversalTerm, node: Node, resolved: TraitBase | undefined): void {
-    const index = queryIndexOf(q, node);
-    if (term.required) {
-        // a required term gates membership, so its resolution flipping can add
-        // or drop the node. re-test the whole query: cheap, and correct against
-        // the node's other conditions.
-        const matches = nodeMatchesQuery(node, q);
-        if (matches && index === -1) {
-            addNodeToQuery(q, node);
-            return;
-        }
-        if (!matches) {
-            if (index !== -1) removeNodeFromQuery(q, node);
-            return;
-        }
-        // still a member and nothing was added or removed, so the index above still stands.
-    }
-
-    if (index === -1) return;
-    const tuple = q.matches[index] as any[];
-    const next = resolved ?? null;
-    if (tuple[term.tupleIndex] === next) return;
-    replaceTuple(q, index, tuple, term.tupleIndex, next);
-}
-
 /**
- * A still-matching node whose tuple contents changed. Membership is untouched, but the
- * values the consumer was handed are no longer current, so the old tuple is retired with an
- * exit and a fresh one announced with an enter. `matchNodes` and the sparse index keep their
- * slots, so this costs one tuple, not a remove-and-re-add.
- *
- * The replacement is always a new array, whether or not anyone is subscribed: a tuple handed
- * out is a snapshot and is never written through again. That is what lets a consumer hold
- * one without it changing underneath them, and it is why a value change is always visible as
- * an exit followed by an enter rather than a silent edit.
+ * Reconcile `node` against every query with a term on this slot and, unless pruned, its
+ * descendants. Every member of `group` targets the same trait slot, so they share the walk
+ * and the prune. The walk only says WHICH nodes to reconcile; `reconcile` re-reads the
+ * values itself, so nothing is threaded down.
  */
-function replaceTuple(q: Query<any>, index: number, tuple: any[], slot: number, next: unknown): void {
-    const replacement = tuple.slice();
-    replacement[slot] = next;
-    q.matches[index] = replacement as never;
-    if (q.onExit.listeners.size > 0) stageQueryEvent(q, q._pendingExits, tuple);
-    if (q.onEnter.listeners.size > 0) stageQueryEvent(q, q._pendingEnters, replacement);
-}
-
-/**
- * re-resolve one slot's worth of resolutions over `node` and, unless pruned, its
- * descendants. Every member of `group` targets the same trait slot, so they share the
- * walk, what the node bears, and the prune; only which value each is handed differs.
- */
-function resolveFrom(group: TraversalTerm[], node: Node, inherited: TraitBase | undefined): void {
-    const own = node._traits[group[0]!.traitSlot];
-    const upValue = own ?? inherited;
+function resolveFrom(group: TraversalTerm[], node: Node, above: TraitBase | undefined): void {
+    const traitSlot = group[0]!.traitSlot;
     for (let i = 0; i < group.length; i++) {
         const term = group[i]!;
-        applyTraversal(term.query, term, node, term.inclusive ? upValue : inherited);
+        reconcile(term.query, node, term.required, traitSlot, above);
     }
     // stop at a bearer: everything below already resolves to it, and nothing above
-    // changed that.
-    if (own !== undefined) return;
+    // changed that. Below this point nothing bears the slot, so `above` carries down
+    // unchanged and the whole descent resolves it exactly once.
+    if (node._traits[traitSlot] !== undefined) return;
     for (const child of node.children) {
-        resolveFrom(group, child, upValue);
+        resolveFrom(group, child, above);
     }
 }
 
@@ -2661,63 +2608,102 @@ function resolveChildrenFor(groups: TraversalTerm[][], node: Node, traitSlot: nu
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g]!;
         if (group[0]!.traitSlot !== traitSlot) continue;
-        const own = node._traits[traitSlot];
         const above = nearestTrait(node.parent, traitSlot, true);
-        const upValue = own ?? above;
-        // an `Up` term on the node itself also just changed answer, and nothing
-        // else re-resolves it: membership didn't change, so `reindex` no-ops.
+        // an `Up` term on the node itself also just changed answer, and nothing else
+        // re-resolves it: membership didn't change, so `reindex` alone would no-op.
         for (let i = 0; i < group.length; i++) {
             const term = group[i]!;
-            applyTraversal(term.query, term, node, term.inclusive ? upValue : above);
+            reconcile(term.query, node, term.required, traitSlot, above);
         }
+        const inherited = node._traits[traitSlot] ?? above;
         for (const child of node.children) {
-            resolveFrom(group, child, upValue);
+            resolveFrom(group, child, inherited as TraitBase | undefined);
         }
         return; // a slot has exactly one group
     }
 }
 
 /**
- * Re-test `node`'s membership. `changedSlot` narrows the work to queries that
- * reference the trait that just came or went; omit it when several traits
+ * Bring `node`'s standing in `q` up to date, whatever changed: its own traits, its
+ * ancestry, or a value one of its terms resolves to.
+ *
+ * A match IS its tuple, so a tuple whose contents moved is a different match and is retired
+ * and re-announced like any other membership change. That is why there is one function here
+ * rather than a membership path and a keep-the-value-fresh path: `Optional` terms never gate
+ * membership, so nothing else would ever tell a subscriber their value changed.
+ *
+ * The two cases are split because they need different work, not different meanings. A node
+ * that is not a member only has to answer "does it match", which no `Optional` term can
+ * affect, so none are resolved. A node that is a member answers "does it still match" and
+ * "did any slot move" in one pass, since both need the same resolved values.
+ *
+ * `mayJoin` is what the caller knows about its own event: a trait change or a node entering
+ * the tree can make a stranger a member, but an ancestry change can only do so through a
+ * required traversal term. Passing `false` skips the membership test for non-members, which
+ * is most of the nodes a subtree walk visits.
+ *
+ * `knownSlot`/`knownAbove` are a memo, not a behaviour switch: a subtree walk resolves one
+ * slot once for a whole descent, so it hands the answer in rather than making every node
+ * re-derive it. `knownAbove` is what the node inherits from strictly above, so an `Up` term
+ * still has to consider the node's own trait first.
+ */
+function reconcile(
+    q: Query<any>,
+    node: Node,
+    mayJoin: boolean,
+    knownSlot = -1,
+    knownAbove: TraitBase | undefined = undefined,
+): void {
+    const index = queryIndexOf(q, node);
+
+    if (index === -1) {
+        if (mayJoin && nodeMatchesQuery(node, q)) addNodeToQuery(q, node);
+        return;
+    }
+
+    // `_tupleTerms` excludes `Not` terms, so the negative bitmask is checked separately.
+    if (!bitset.containsNone(node._bitset, q.withoutBitset)) {
+        removeNodeFromQuery(q, node);
+        return;
+    }
+
+    const terms = q._tupleTerms;
+    const stored = q.matches[index] as unknown as unknown[];
+    let differs = false;
+    for (let i = 0; i < terms.length; i++) {
+        const term = terms[i]!;
+        // a slot walk only re-resolves its own slot; nothing it did can have moved a term
+        // sourced from the node's own traits or from a different ancestry slot, each of
+        // which gets its own walk.
+        if (knownSlot >= 0 && term.trait._slot !== knownSlot) continue;
+        const value =
+            term.trait._slot === knownSlot && term.src !== Src.Self
+                ? term.src === Src.Up
+                    ? (node._traits[knownSlot] ?? knownAbove)
+                    : knownAbove
+                : resolveTerm(node, term);
+        if (value === undefined && term.oper === Oper.And) {
+            // a required term that no longer resolves drops the node.
+            removeNodeFromQuery(q, node);
+            return;
+        }
+        if (stored[i] !== (value ?? null)) differs = true;
+    }
+
+    if (!differs) return;
+    removeNodeFromQuery(q, node);
+    addNodeToQuery(q, node);
+}
+
+/**
+ * Re-test `node` against every query that could care. `changedSlot` narrows the work to
+ * queries referencing the trait that just came or went; omit it when several traits
  * changed at once and every trait the node bears should be considered.
  */
 function reindex(sceneTree: SceneTree, node: Node, changedSlot?: number): void {
     const candidates = sceneTree._queryScratch;
     const count = collectQueries(sceneTree, node, changedSlot);
-    for (let i = 0; i < count; i++) {
-        const q = candidates[i]!;
-        const matches = nodeMatchesQuery(node, q);
-        const index = queryIndexOf(q, node);
-
-        if (matches && index === -1) {
-            addNodeToQuery(q, node);
-        } else if (!matches && index !== -1) {
-            removeNodeFromQuery(q, node);
-        } else if (matches) {
-            // still a member, but a Self-sourced Optional it carries may have just come or
-            // gone. Nothing else refreshes those: they gate no membership, and only
-            // hierarchy terms have a resolve walk behind them.
-            refreshOptionalSelf(q, node, index, changedSlot);
-        }
-    }
-}
-
-/** rewrite the tuple slots of Self-sourced `Optional` terms for a node that stayed a member. */
-function refreshOptionalSelf(q: Query<any>, node: Node, index: number, changedSlot?: number): void {
-    const terms = q._optionalSelfTerms;
-    if (terms.length === 0) return;
-    const tuple = q.matches[index] as unknown as unknown[];
-    for (let i = 0; i < terms.length; i++) {
-        const term = terms[i]!;
-        if (changedSlot !== undefined && term.traitSlot !== changedSlot) continue;
-        // the bitset is the truth here, not `_traits`: `removeTraitBySlot` clears the bit
-        // before reindexing but keeps the instance until after, so `onExit` handlers can
-        // still read the departing value.
-        const next = bitset.has(node._bitset, term.traitSlot) ? (node._traits[term.traitSlot] ?? null) : null;
-        if (tuple[term.tupleIndex] === next) continue;
-        tuple[term.tupleIndex] = next;
-    }
+    for (let i = 0; i < count; i++) reconcile(candidates[i]!, node, true);
 }
 
 /* ── findAncestor ── */
