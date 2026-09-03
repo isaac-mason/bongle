@@ -168,10 +168,28 @@ export const TransformTrait = trait('transform', {
 
     /** monotonic counter bumped on world-changing transitions */
     _version: 0,
+
+    /** nearest transform-bearing ancestor, or null at a transform root. Maintained by
+     *  `resolveTransformSubtree` / `resolveTransformChildren`, not derived: the read path
+     *  hits it once per compose and `probe-parent-chase.ts` prices the walk at 1.20x by
+     *  32k transforms. Typed `any` here and narrowed on the exported type, since a body
+     *  cannot name the trait being inferred from it. */
+    _parent: null as any,
+
+    /** the transforms directly below this one, passthrough nodes already skipped. Kept in
+     *  step with `_parent`. `markDescendants` walks this rather than `node.children`, which
+     *  `profile-rig-world.ts` shows is the term that scales: three dependent loads per child
+     *  through the node tree versus one straight to the transform. */
+    _children: [] as any[],
 });
 
 /** instance type for TransformTrait */
-export type TransformTrait = TraitType<typeof TransformTrait>;
+export type TransformTrait = Omit<TraitType<typeof TransformTrait>, '_parent' | '_children'> & {
+    /** nearest transform-bearing ancestor, or null at a transform root. */
+    _parent: TransformTrait | null;
+    /** the transforms directly below this one, passthrough nodes skipped. */
+    _children: TransformTrait[];
+};
 
 /* ── remote chase-latest translator ───────────────────────────────────────
  *
@@ -289,7 +307,40 @@ function nearestTransformAt(node: Node | null): TransformTrait | null {
 
 /** the transform `transform` composes against: the nearest one strictly above its node. */
 export function parentTransform(transform: TransformTrait): TransformTrait | null {
-    return nearestTransformAt(transform._node.parent);
+    return transform._parent;
+}
+
+/** swap-pop `child` out of `parent._children`. */
+function removeTransformChild(parent: TransformTrait, child: TransformTrait): void {
+    const children = parent._children;
+    const index = children.indexOf(child);
+    if (index === -1) return;
+    children[index] = children[children.length - 1]!;
+    children.pop();
+}
+
+/** re-point one transform, keeping both child lists in step. Invalidation is the caller's
+ *  job, so a subtree walk dirties once rather than once per re-pointed bearer. */
+function setTransformParent(own: TransformTrait, next: TransformTrait | null): void {
+    const prev = own._parent;
+    if (prev === next) return;
+    if (prev !== null) removeTransformChild(prev, own);
+    own._parent = next;
+    if (next !== null) next._children.push(own);
+}
+
+/**
+ * Re-point the transforms at the top of `node`'s subtree at `inherited`, stopping at each
+ * bearer: below one, transforms already point at it and nothing above changed that.
+ */
+function retargetTransforms(node: Node, inherited: TransformTrait | null): void {
+    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
+    if (own !== undefined) {
+        setTransformParent(own, inherited);
+        return;
+    }
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) retargetTransforms(children[i]!, inherited);
 }
 
 control(TransformTrait, 'position', {
@@ -411,7 +462,7 @@ function markTransformChanged(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    if (node !== null) markDescendants(node);
+    markDescendants(transform);
 }
 
 export function markTransformDirty(transform: TransformTrait): void {
@@ -439,34 +490,27 @@ export function markWorldDirty(transform: TransformTrait): void {
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
-    markDescendants(transform._node);
+    markDescendants(transform);
 }
 
-/**
- * Mark every transform below `node` world-dirty. Recurses the node tree, passing straight
- * through nodes without a transform: they contribute identity, and their descendants still
- * compose against whatever is above them.
- */
-function markDescendants(node: Node): void {
-    const children = node.children;
+/** Mark every transform below `transform` world-dirty, over the maintained child list. */
+function markDescendants(transform: TransformTrait): void {
+    const children = transform._children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
-        const t = child._traits[TransformTrait._slot] as TransformTrait | undefined;
-        if (t === undefined) {
-            markDescendants(child);
-            continue;
-        }
         // a transform already maximally dirty has an equally dirty subtree; prune.
-        if (t._dirty === TRANSFORM_DIRTY_ALL) continue;
+        if (child._dirty === TRANSFORM_DIRTY_ALL) continue;
         // descendants' local TRS is unchanged, only their world, so no sync dirty here.
-        t._dirty = TRANSFORM_DIRTY_ALL;
-        t._version++;
+        child._dirty = TRANSFORM_DIRTY_ALL;
+        child._version++;
         markDescendants(child);
     }
 }
 
 /** drop a transform that is leaving the tree, so nothing keeps walking or ticking it. */
 export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void {
+    if (transform._parent !== null) removeTransformChild(transform._parent, transform);
+    transform._parent = null;
     if (sceneTree !== null) {
         sceneTree._transformDirty.delete(transform);
         sceneTree._interpolating.delete(transform);
@@ -511,16 +555,23 @@ function invalidateFrom(node: Node, scene: SceneTree | null, topmost: boolean): 
 export function invalidateTransformAncestry(node: Node, movedFrom?: Node | null): void {
     const inherited = nearestTransformAt(node.parent);
     if (movedFrom !== undefined && movedFrom !== null && nearestTransformAt(movedFrom) === inherited) return;
+    retargetTransforms(node, inherited);
     invalidateFrom(node, node.scene, true);
 }
 
 /** a transform was added to or removed from `node` itself, so its descendants compose anew. */
 export function invalidateTransformChildren(node: Node): void {
     const scene = node.scene;
+    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
     // `node`'s own transform-root status flips too: it just gained or lost the trait.
-    if (scene !== null && node._traits[TransformTrait._slot] !== undefined) markNodeDirty(scene, node);
+    if (scene !== null && own !== undefined) markNodeDirty(scene, node);
+    if (own !== undefined) setTransformParent(own, nearestTransformAt(node.parent));
+    const inherited = own ?? nearestTransformAt(node.parent);
     const children = node.children;
-    for (let i = 0; i < children.length; i++) invalidateFrom(children[i]!, scene, true);
+    for (let i = 0; i < children.length; i++) {
+        retargetTransforms(children[i]!, inherited);
+        invalidateFrom(children[i]!, scene, true);
+    }
 }
 
 // ── scratch mats/vecs (reused to avoid allocation) ──────────────────────
@@ -887,17 +938,14 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
  * descendant counts under Interp roots are small (player rigs, attached
  * props), the unconditional walk is fine.
  */
-export function markInterpolatedDescendantsDirty(node: Node): void {
-    const children = node.children;
+export function markInterpolatedDescendantsDirty(transform: TransformTrait): void {
+    const children = transform._children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
-        const t = child._traits[TransformTrait._slot] as TransformTrait | undefined;
-        if (t !== undefined) {
-            t._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
-            ensureInterpolatedPose(t);
-            t._interpolated = 1;
-            t._version++;
-        }
+        child._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        ensureInterpolatedPose(child);
+        child._interpolated = 1;
+        child._version++;
         markInterpolatedDescendantsDirty(child);
     }
 }

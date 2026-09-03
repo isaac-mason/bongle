@@ -141,7 +141,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
             sampleRemotePose(transform, delta);
         }
 
-        if (transform._node.children.length > 0) markInterpolatedDescendantsDirty(transform._node);
+        if (transform._children.length > 0) markInterpolatedDescendantsDirty(transform);
     }
 }
 
