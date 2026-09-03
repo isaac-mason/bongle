@@ -1,5 +1,6 @@
 import {
     getWorldChunk,
+    parentTransform,
     invalidateTransformAncestry,
     invalidateTransformChildren,
     releaseTransform,
@@ -334,9 +335,6 @@ export type SceneTree = {
      * would find, so they are always consulted.
      */
     _queriesAlways: Array<Query<any>>;
-    /** @internal reused candidate buffer; `_visitGeneration` dedupes a query
-     *  reachable through two of a node's traits without allocating a Set. */
-    _queryScratch: Array<Query<any>>;
     _visitGeneration: number;
 
     /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
@@ -407,7 +405,6 @@ export function createSceneTree(): SceneTree {
         _queryList: [],
         _queriesByTrait: [],
         _queriesAlways: [],
-        _queryScratch: [],
         _visitGeneration: 0,
         _queryResolutionGroups: [],
         _queriesWithEvents: [],
@@ -477,13 +474,6 @@ export function createNode(options?: CreateNodeOptions): Node {
  */
 export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
     return sceneTree._idToNode.get(id);
-}
-
-/**
- * returns whether a node is alive (registered in a scene tree).
- */
-export function nodeExists(node: Node): boolean {
-    return node.scene !== null;
 }
 
 /**
@@ -575,7 +565,10 @@ export function isLocalNode(node: Node): boolean {
  * Derived on demand (no maintained set), reconciled per tick off `dirtyNodes`.
  */
 export function isTransformRoot(node: Node): boolean {
-    return node.scene !== null && isReplicable(node) && hasTrait(node, TransformTrait) && findTransformAncestor(node) === null;
+    const transform = getTrait(node, TransformTrait);
+    return (
+        node.scene !== null && transform !== undefined && isReplicable(node) && parentTransform(transform) === null
+    );
 }
 
 /* ── transform-root region index (server-side AOI) ─────────────────────── */
@@ -681,12 +674,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // a node can only be a member of a query that references one of its traits
     // (or of one with no positive self-trait at all), so the candidate set is
     // sufficient here — no need to sweep every query in the tree.
-    const candidates = sceneTree._queryScratch;
-    const count = collectQueries(sceneTree, node);
-    for (let i = 0; i < count; i++) {
-        const q = candidates[i]!;
-        if (queryIndexOf(q, node) !== -1) removeNodeFromQuery(q, node);
-    }
+    removeNodeFromAllQueries(sceneTree, node, []);
 
     // detach from parent
     if (node.parent) {
@@ -717,18 +705,6 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
 
 // ── parent transform bookkeeping ──────────────────────────────────────
 //
-
-/**
- * nearest ancestor's TransformTrait, or null. A typed adapter over the shared
- * `nearestTrait` walk: `_parent` is `TransformTrait | null` and consumers
- * compare against null (`hasTransformedParent`), so the undefined the generic
- * walk returns is normalised here rather than at four call sites.
- */
-function findTransformAncestor(node: Node): TransformTrait | null {
-    const traitSlot = TransformTrait._slot;
-    if (traitSlot === undefined) return null;
-    return (nearestTrait(node, traitSlot, false) as TransformTrait | undefined) ?? null;
-}
 
 /** user-facing props for addTrait, only the trait's own declared fields, minus base fields. */
 export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | '_sync'>>;
@@ -1300,6 +1276,8 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
 
     // pass 1: register all nodes in the scene tree + index into queries + create script instances
     const newScriptInstances: ScriptInstance[] = [];
+    // one candidate buffer for the whole subtree, refilled per node by `collectQueries`.
+    const candidates: Array<Query<any>> = [];
 
     for (const n of subtree) {
         n.scene = sceneTree;
@@ -1323,8 +1301,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         }
         sceneTree._idToNode.set(n.id, n);
 
-        const candidates = sceneTree._queryScratch;
-        const candidateCount = collectQueries(sceneTree, n);
+        const candidateCount = collectQueries(sceneTree, n, candidates);
         for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
 
         // create script instances for every trait on this node
@@ -1364,10 +1341,10 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
  * unregister a node and all its descendants from a scene tree.
  * disposes scripts, removes from queries, detaches from scene tree.
  */
-function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
+function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Query<any>> = []): void {
     // unregister children first (bottom-up)
     for (let i = 0; i < node.children.length; i++) {
-        unregisterSubtree(sceneTree, node.children[i]);
+        unregisterSubtree(sceneTree, node.children[i]!, candidates);
     }
 
     // fire onExit before disposing, parent is still set here
@@ -1387,12 +1364,7 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
         }
     }
 
-    const candidates = sceneTree._queryScratch;
-    const candidateCount = collectQueries(sceneTree, node);
-    for (let i = 0; i < candidateCount; i++) {
-        const q = candidates[i]!;
-        if (queryIndexOf(q, node) !== -1) removeNodeFromQuery(q, node);
-    }
+    removeNodeFromAllQueries(sceneTree, node, candidates);
 
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
@@ -1935,9 +1907,8 @@ function pushCandidates(sceneTree: SceneTree, slot: number, gen: number, out: Ar
  * Walks the node's bitset words rather than its trait map: iterating a Map
  * allocates an iterator, and this runs once per node per membership site.
  */
-function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number): number {
+function collectQueries(sceneTree: SceneTree, node: Node, out: Array<Query<any>>, changedSlot?: number): number {
     const gen = ++sceneTree._visitGeneration;
-    const out = sceneTree._queryScratch;
     let n = 0;
 
     const always = sceneTree._queriesAlways;
@@ -2052,7 +2023,7 @@ export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number
  * `traitSlot` is both what gets resolved and where the walk prunes: below a node
  * bearing it, the answer is that node and nothing above can have changed it.
  */
-export type TraversalTerm = {
+type TraversalTerm = {
     traitSlot: number;
     /** `Up` counts the node itself; `Ancestor` starts at the parent. */
     inclusive: boolean;
@@ -2541,7 +2512,7 @@ function resolveFrom(group: TraversalTerm[], node: Node, above: TraitBase | unde
  * `node` inherits from strictly above. Call after the tree around `node` has
  * changed shape (attach, detach, reparent).
  */
-export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null): void {
+function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null): void {
     invalidateTransformAncestry(node, movedFrom);
     if (sceneTree !== null) resolveSubtreeFor(sceneTree._queryResolutionGroups, node, movedFrom);
 }
@@ -2696,13 +2667,28 @@ function reconcile(
 }
 
 /**
+ * Drop `node` from every query it is currently a member of. `candidates` is the caller's
+ * scratch: a subtree detach reuses one array for the whole walk rather than allocating per
+ * node, and nothing shares a buffer across calls that could nest.
+ */
+function removeNodeFromAllQueries(sceneTree: SceneTree, node: Node, candidates: Array<Query<any>>): void {
+    // a node can only be a member of a query that references one of its traits (or of one
+    // with no positive self-trait at all), so the candidate set is sufficient here.
+    const count = collectQueries(sceneTree, node, candidates);
+    for (let i = 0; i < count; i++) {
+        const q = candidates[i]!;
+        if (queryIndexOf(q, node) !== -1) removeNodeFromQuery(q, node);
+    }
+}
+
+/**
  * Re-test `node` against every query that could care. `changedSlot` narrows the work to
  * queries referencing the trait that just came or went; omit it when several traits
  * changed at once and every trait the node bears should be considered.
  */
 function reindex(sceneTree: SceneTree, node: Node, changedSlot?: number): void {
-    const candidates = sceneTree._queryScratch;
-    const count = collectQueries(sceneTree, node, changedSlot);
+    const candidates: Array<Query<any>> = [];
+    const count = collectQueries(sceneTree, node, candidates, changedSlot);
     for (let i = 0; i < count; i++) reconcile(candidates[i]!, node, true);
 }
 
