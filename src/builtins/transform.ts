@@ -17,13 +17,12 @@
 import type { Mat4, Quat, Vec3 } from 'math';
 import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
-import { Ancestor } from '../core/scene/conditions';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait, markNodeDirty } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
-import { context, control, Self, sync, type TraitType, trait } from '../core/scene/traits';
+import { control, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 import { toChunkCoord } from '../core/voxels/voxels';
 
@@ -147,9 +146,9 @@ export const TransformTrait = trait('transform', {
      *  Maintained alongside `_parent`, off the same resolve. */
     _children: [] as TransformSubtree[],
 
-    /** nearest transform-bearing ancestor, maintained by the `context()` below. Typed as
-     *  `any` here and narrowed on the exported `TransformTrait` type: naming the trait from
-     *  inside its own body is circular. */
+    /** nearest transform-bearing ancestor, maintained by `resolveTransformSubtree` /
+     *  `resolveTransformChildren` below. Typed as `any` here and narrowed on the exported
+     *  `TransformTrait` type: naming the trait from inside its own body is circular. */
     _parent: null as any,
 
     // dirty bitmask (godot-style); see TRANSFORM_DIRTY_* above.
@@ -191,7 +190,7 @@ export const TransformTrait = trait('transform', {
 
     /** monotonic counter bumped on world-changing transitions */
     _version: 0,
-});
+}, { managed: ['_parent'] });
 
 /** instance type for TransformTrait */
 export type TransformTrait = Omit<TraitType<typeof TransformTrait>, '_parent'> & {
@@ -299,19 +298,64 @@ export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
  * keeps the same `_parent` and is not notified — `markTransformDirty` invalidates it by
  * walking `_children` instead (pinned by the transform tests).
  */
-context(TransformTrait, '_parent', {
-    condition: Ancestor(Self),
-    change: (own, next, prev) => {
-        if (prev !== null) removeTransformChild(prev as TransformTrait, own);
-        if (next !== null) (next as TransformTrait)._children.push(own);
-        // the parent pointer moved, so every cached world value below is stale.
-        markAncestryChanged(own._node);
-        // a branch-topmost transform's nearest transform ancestor changing can flip its AOI
-        // transform-root status (`isTransformRoot`). markAncestryChanged deliberately stays
-        // out of `dirtyNodes` (no replication retransmit), so signal a revisit explicitly.
-        if (own._node.scene) markNodeDirty(own._node.scene, own._node);
-    },
-});
+/** nearest transform at or above `node`, or null at a transform root. */
+function nearestTransformAt(node: Node | null): TransformTrait | null {
+    for (let cur = node; cur !== null; cur = cur.parent) {
+        const t = cur._traits[TransformTrait._slot] as TransformTrait | undefined;
+        if (t !== undefined) return t;
+    }
+    return null;
+}
+
+/** re-point one transform, keeping both child lists and the cached world values honest. */
+function setTransformParent(own: TransformTrait, next: TransformTrait | null): void {
+    const prev = own._parent;
+    if (prev === next) return;
+    if (prev !== null) removeTransformChild(prev, own);
+    own._parent = next;
+    if (next !== null) next._children.push(own);
+    // the parent pointer moved, so every cached world value below is stale.
+    markAncestryChanged(own._node);
+    // a branch-topmost transform's nearest transform ancestor changing can flip its AOI
+    // transform-root status (`isTransformRoot`). markAncestryChanged deliberately stays out
+    // of `dirtyNodes` (no replication retransmit), so signal a revisit explicitly.
+    if (own._node.scene) markNodeDirty(own._node.scene, own._node);
+}
+
+/**
+ * Re-point the transforms at the top of `node`'s subtree at `inherited`, stopping at each
+ * bearer: below one, transforms already point at it and nothing above changed that.
+ */
+function retargetTransforms(node: Node, inherited: TransformTrait | null): void {
+    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
+    if (own !== undefined) {
+        setTransformParent(own, inherited);
+        return;
+    }
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) retargetTransforms(children[i]!, inherited);
+}
+
+/**
+ * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
+ * already-live node: if it resolved to the same transform, nothing inside the subtree can
+ * have changed, so two climbs replace a whole descent.
+ */
+export function resolveTransformSubtree(node: Node, movedFrom?: Node | null): void {
+    const inherited = nearestTransformAt(node.parent);
+    if (movedFrom !== undefined && movedFrom !== null && nearestTransformAt(movedFrom) === inherited) return;
+    retargetTransforms(node, inherited);
+}
+
+/** a transform was added to or removed from `node` itself, so its descendants inherit anew. */
+export function resolveTransformChildren(node: Node): void {
+    const own = node._traits[TransformTrait._slot] as TransformTrait | undefined;
+    const above = nearestTransformAt(node.parent);
+    if (own !== undefined) setTransformParent(own, above);
+    const inherited = own ?? above;
+    const children = node.children;
+    for (let i = 0; i < children.length; i++) retargetTransforms(children[i]!, inherited);
+}
 
 control(TransformTrait, 'position', {
     label: 'Position',

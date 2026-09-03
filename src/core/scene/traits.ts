@@ -1,6 +1,5 @@
 import { recordTrait } from '../capture/module-scope';
-import { fileResolution, registry, structuralHash, upsert } from '../registry';
-import { type Condition, type Oper, Src } from './conditions';
+import { registry, structuralHash, upsert } from '../registry';
 import type { pack } from './pack';
 import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
@@ -34,7 +33,15 @@ export type TraitOptions = {
      * being filtered.
      */
     persist?: boolean;
+    /**
+     * fields the engine owns and keeps correct itself, e.g. `TransformTrait._parent`.
+     * Overrides for them passed to `addTrait` are ignored rather than briefly
+     * appearing to work, since the next resolve would overwrite them anyway.
+     */
+    managed?: readonly string[];
 };
+
+const EMPTY_MANAGED: readonly string[] = [];
 
 /** factory marker: a value-producing function called once per instance. */
 type Factory<T> = () => T;
@@ -51,7 +58,7 @@ declare const SELF_MARKER: unique symbol;
  *
  * ```ts
  * const T = trait('transform', { _parent: null as any });
- * context(T, '_parent', { condition: Ancestor(Self) }); // resolves Self to T
+ * const q = query([Ancestor(Self)]); // inside T's own declarations, Self is T
  * ```
  *
  * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
@@ -60,10 +67,9 @@ declare const SELF_MARKER: unique symbol;
 export type Self = TraitBase & { readonly [SELF_MARKER]: true };
 
 /**
- * Stand-in handle for "the trait being defined", so a declaration can reference itself:
- * `context(TransformTrait, '_parent', { condition: Ancestor(Self) })`. Resolved to the
- * enclosing trait's slot at registration; it is never a real trait and must not reach
- * `addTrait` or a query.
+ * Stand-in handle for "the trait being defined", so a declaration can reference itself,
+ * e.g. `Ancestor(Self)` in a query owned by that trait. Resolved to the enclosing trait's
+ * slot at registration; it is never a real trait and must not reach `addTrait`.
  */
 export const Self = { _id: 'bongle.self', _slot: SELF_SLOT } as unknown as TraitHandle<Self>;
 
@@ -266,14 +272,8 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** `context()` declarations for this trait, in order. Owned by the def so an HMR
-     *  re-eval that drops a declaration drops it here too, the same way controls and syncs
-     *  are handled. */
-    contexts: ContextDef[];
-    /** derived from `contexts`, in the same order: what the scene tree's walk consumes.
-     *  Cached on the def like `_syncCodecs` and `construct`, so the registry can rebuild its
-     *  index without reaching back into the trait module. */
-    _resolutions: Resolution[];
+    /** fields the engine maintains, see `TraitOptions.managed`. */
+    managed: readonly string[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -369,8 +369,7 @@ export function trait<S extends TraitBody = Record<string, never>>(
         persist: options?.persist ?? true,
         controls: [],
         controlsById: new Map(),
-        contexts: [],
-        _resolutions: [],
+        managed: options?.managed ?? EMPTY_MANAGED,
         sync: [],
         syncById: new Map(),
         scripts: [],
@@ -588,9 +587,7 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
-            // a `context()` field is maintained by the engine; an override would be
-            // silently overwritten by the next resolve, so it is ignored outright.
-            if (def.contexts.some((c) => c.contextId === key)) continue;
+            if (def.managed.includes(key)) continue;
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.
@@ -645,90 +642,3 @@ export type Resolution = {
      */
     apply(node: Node, resolved: TraitBase | undefined): void;
 };
-
-/** body passed by the user to `context()`, fields only, no stamps. */
-export type ContextBody<T extends TraitBase = TraitBase, R extends TraitHandle = TraitHandle> = {
-    /** where to look: an `Up` or `Ancestor` term, the same vocabulary a query uses. */
-    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
-    /** runs when the resolved value actually differs, after the field is written. */
-    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
-};
-
-/** a `context()` declaration as stored on its owning `TraitDef`: what the author wrote,
- *  plus its identity. Everything derived from it lives on the `Resolution` the walk sees. */
-export type ContextDef<T extends TraitBase = TraitBase, R extends TraitHandle = TraitHandle> = ContextBody<T, R> &
-    TraitChildStamp<'contextId'>;
-
-/**
- * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
- * keep it correct as the hierarchy changes. The trait's own annotation, alongside
- * `control()` and `sync()` — the body stays plain data.
- *
- * ```ts
- * context(TransformTrait, '_parent', {
- *     condition: Ancestor(Self),
- *     change: (t, next, prev) => { ... },
- * });
- * ```
- *
- * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
- * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
- * "nearest trait above me" wherever it appears.
- *
- * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
- * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
- * job, walking the maintained child lists (see the transform tests that pin this).
- */
-export function context<T extends TraitBase, R extends TraitHandle>(
-    handle: TraitHandle<T>,
-    id: string,
-    body: {
-        condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
-        change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
-    },
-): void {
-    const def = handle._def;
-    const reg = { ...body, traitId: def.id, contextId: id } as unknown as ContextDef;
-
-    // replace rather than append, so a re-evaluated module does not stack duplicates.
-    const resolution = buildContextResolution(def, reg);
-    if (resolution === null) return;
-    const existing = def.contexts.findIndex((c) => c.contextId === id);
-    if (existing !== -1) {
-        def.contexts[existing] = reg;
-        def._resolutions[existing] = resolution;
-    } else {
-        def.contexts.push(reg);
-        def._resolutions.push(resolution);
-    }
-    fileResolution(registry, resolution);
-}
-
-/**
- * Turn a `context()` declaration into the walk's `Resolution`. Separate from the def so the
- * def stays what the author wrote and the registry can rebuild its index from defs alone.
- */
-export function buildContextResolution(def: TraitDef, reg: ContextDef): Resolution | null {
-    const ownerSlot = def.slot;
-    const declared = reg.condition.trait._slot;
-    if (declared === undefined) return null;
-    const field = reg.contextId;
-    const change = reg.change;
-
-    return {
-        traitSlot: declared === SELF_SLOT ? ownerSlot : declared,
-        ownerSlot,
-        inclusive: reg.condition.src === Src.Up,
-        apply(node, resolved) {
-            const instance = node._traits[ownerSlot] as Record<string, unknown> | undefined;
-            // the walk visits every node on its way down; only nodes bearing the owning
-            // trait have a field to write.
-            if (instance === undefined) return;
-            const next = (resolved ?? null) as TraitBase | null;
-            const prev = (instance[field] ?? null) as TraitBase | null;
-            if (next === prev) return;
-            instance[field] = next;
-            change?.(instance as unknown as TraitBase, next, prev);
-        },
-    };
-}

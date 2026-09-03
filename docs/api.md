@@ -30,6 +30,9 @@ export type Node = {
 
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
+    /** @internal the tree whose `dirtyNodes` list currently holds this node, or null. Holds
+     *  the tree rather than a bool so a node that moves between trees is filed in each. */
+    _dirtyIn: SceneTree | null;
 
     /**
      * which Player owns this node. null = server-owned (default).
@@ -474,6 +477,24 @@ export function noteRemotePosition(t: TransformTrait, time: number): void;
 ```ts
 /** record a freshly-unpacked remote quaternion (see `noteRemotePosition`). */
 export function noteRemoteQuaternion(t: TransformTrait, time: number): void;
+```
+
+#### `resolveTransformSubtree`
+
+```ts
+/**
+ * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
+ * already-live node: if it resolved to the same transform, nothing inside the subtree can
+ * have changed, so two climbs replace a whole descent.
+ */
+export function resolveTransformSubtree(node: Node, movedFrom?: Node | null): void;
+```
+
+#### `resolveTransformChildren`
+
+```ts
+/** a transform was added to or removed from `node` itself, so its descendants inherit anew. */
+export function resolveTransformChildren(node: Node): void;
 ```
 
 #### `markTransformDirty`
@@ -1145,14 +1166,8 @@ export type TraitDef = {
     controls: ControlDef[];
     /** lookup by control id. */
     controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** `context()` declarations for this trait, in order. Owned by the def so an HMR
-     *  re-eval that drops a declaration drops it here too, the same way controls and syncs
-     *  are handled. */
-    contexts: ContextDef[];
-    /** derived from `contexts`, in the same order: what the scene tree's walk consumes.
-     *  Cached on the def like `_syncCodecs` and `construct`, so the registry can rebuild its
-     *  index without reaching back into the trait module. */
-    _resolutions: Resolution[];
+    /** fields the engine maintains, see `TraitOptions.managed`. */
+    managed: readonly string[];
 
     /** sync registrations in registration order. position in this array is
      *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
@@ -1245,6 +1260,12 @@ export type TraitOptions = {
      * being filtered.
      */
     persist?: boolean;
+    /**
+     * fields the engine owns and keeps correct itself, e.g. `TransformTrait._parent`.
+     * Overrides for them passed to `addTrait` are ignored rather than briefly
+     * appearing to work, since the next resolve would overwrite them anyway.
+     */
+    managed?: readonly string[];
 };
 ```
 
@@ -1253,35 +1274,6 @@ export type TraitOptions = {
 ```ts
 /** extract the instance type from a trait handle. */
 export type TraitType<H extends TraitHandle> = H['__type'];
-```
-
-#### `context`
-
-```ts
-/**
- * Declare that a trait field holds the nearest trait matching `condition`, and have the scene tree
- * keep it correct as the hierarchy changes. The trait's own annotation, alongside
- * `control()` and `sync()` — the body stays plain data.
- *
- * ```ts
- * context(TransformTrait, '_parent', {
- *     condition: Ancestor(Self),
- *     change: (t, next, prev) => { ... },
- * });
- * ```
- *
- * `id` is the field written, exactly as `control()`'s id is the field it fronts. `condition` takes
- * the same `Up` / `Ancestor` terms a query does, so there is one vocabulary for
- * "nearest trait above me" wherever it appears.
- *
- * `change` runs only when the resolved value actually differs. A node whose ANCESTOR moved
- * keeps the same value and is not notified — invalidating that is `markTransformDirty`'s
- * job, walking the maintained child lists (see the transform tests that pin this).
- */
-export function context<T extends TraitBase, R extends TraitHandle>(handle: TraitHandle<T>, id: string, body: {
-    condition: Condition<R, Oper.And, Src.Up | Src.Ancestor>;
-    change?: (instance: T, next: TraitBase | null, prev: TraitBase | null) => void;
-}): void;
 ```
 
 #### `control`
@@ -1307,7 +1299,7 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
  *
  * ```ts
  * const T = trait('transform', { _parent: null as any });
- * context(T, '_parent', { condition: Ancestor(Self) }); // resolves Self to T
+ * const q = query([Ancestor(Self)]); // inside T's own declarations, Self is T
  * ```
  *
  * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is

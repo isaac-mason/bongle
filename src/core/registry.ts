@@ -26,7 +26,7 @@ import type { Schema } from './scene/prop/prop';
 import type { SceneHandle } from './scene/scene-handle';
 import type { Realm } from './scene/scene-tree';
 import type { ScriptDef } from './scene/scripts';
-import type { ControlDef, Resolution, SyncDef, TraitDef } from './scene/traits';
+import type { ControlDef, SyncDef, TraitDef } from './scene/traits';
 import type { SoundHandle } from './sounds/sounds';
 import type { SpriteHandle } from './sprites/sprites';
 import { type Blocks, buildBlockRegistry } from './voxels/block-registry';
@@ -645,31 +645,6 @@ export function resolveConfig(reg: Registry): Config {
  * flush. Registrations only change at those two moments, so plain fields
  * refreshed here need no getter, revision key, or per-read check.
  */
-/**
- * File one declared resolution under the trait slot it resolves. Called by `trait()` as the
- * declaration is registered, so a resolution works immediately — a scene tree built in a
- * bare unit test never reindexes, and detached-subtree hydration runs with no scene tree at
- * all. `reindexRegistry` rebuilds the whole table afterwards for HMR, where a re-evaluated
- * def replaces its predecessor's resolutions.
- */
-export function fileResolution(reg: Registry, resolution: Resolution): void {
-    const groups = reg.resolutionGroups;
-    for (let i = 0; i < groups.length; i++) {
-        if (groups[i]![0]!.traitSlot === resolution.traitSlot) {
-            groups[i]!.push(resolution);
-            return;
-        }
-    }
-    groups.push([resolution]);
-}
-
-function rebuildResolutionGroups(reg: Registry): void {
-    reg.resolutionGroups = [];
-    for (const [, def] of reg.traits.byId) {
-        for (const r of def._resolutions) fileResolution(reg, r);
-    }
-}
-
 export function reindexRegistry(reg: Registry): void {
     // indexed by slot rather than keyed by it: slots come from one dense counter, and this
     // is read per trait per node per client in the replication fan-out.
@@ -692,7 +667,6 @@ export function reindexRegistry(reg: Registry): void {
         commands: buildProtocolTable(reg.commands.byId.keys()),
     };
 
-    rebuildResolutionGroups(reg);
 
     // the wire index is sort-by-id and moves whenever the trait set does, so it is stamped
     // here rather than looked up by string id on every emitted trait.
@@ -734,12 +708,6 @@ export type Registry = {
     blockRegistry: Blocks;
     /** slot → trait def for O(1) runtime lookup. rebuilt by `reindexRegistry()`. */
     slotToTrait: Array<TraitDef | undefined>;
-    /** derived: every `context()` resolution, bucketed by the trait slot it resolves.
-     *  One bucket is one walk — everything a descent decides (what the subtree inherits,
-     *  where to prune) depends on that slot alone. Built here with the other derived trait
-     *  tables rather than cached behind a revision check, and reachable without a scene
-     *  tree, which detached-subtree hydration needs. */
-    resolutionGroups: Resolution[][];
     /** sort-by-id wire tables for the network protocol. rebuilt by `reindexRegistry()`. */
     protocol: { traits: ProtocolTable; commands: ProtocolTable };
 
@@ -944,7 +912,6 @@ export function init(): Registry {
         // here: `buildBlockRegistry` reaches into sibling modules that may not
         // have initialized yet at registry module-load (circular init / TDZ).
         slotToTrait: [] as Array<TraitDef | undefined>,
-        resolutionGroups: [] as Resolution[][],
         blockRegistry: null! as Blocks,
         protocol: { traits: buildProtocolTable([]), commands: buildProtocolTable([]) },
     } as Registry;

@@ -1,4 +1,10 @@
-import { getWorldChunk, releaseTransform, TransformTrait } from '../../builtins/transform';
+import {
+    getWorldChunk,
+    releaseTransform,
+    resolveTransformChildren,
+    resolveTransformSubtree,
+    TransformTrait,
+} from '../../builtins/transform';
 import { env } from '../../env';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';
@@ -334,12 +340,6 @@ export type SceneTree = {
     _queryScratch: Array<Query<any>>;
     _visitGeneration: number;
 
-    /**
-     * @internal this tree's query-term resolutions, appended when a query with
-     * `Up` / `Ancestor` terms is created and removed when it is reaped. The ones
-     * declared with `context()` are global and walked first, so a
-     * declared field is settled before any query term reads ancestry.
-     */
     /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
      *  they resolve. One bucket is one walk. Maintained as queries are registered and
      *  released, so there is nothing to invalidate and nothing to rebuild. */
@@ -762,7 +762,6 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     // resolve this node's own context() fields. `resolveChildren` below covers
     // descendants; the node that just gained the trait has to be seeded here,
     // since nothing above it changed.
-    resolveOwn(node, handle._def);
 
     const scene = node.scene;
     // descendants resolving this trait from the hierarchy now resolve to it.
@@ -943,12 +942,6 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     node._traits[traitSlot] = instance;
     bitset.add(node._bitset, traitSlot);
 
-    // resolve this node's own context() fields. prev pose seeding is owned by
-    // `setInterpolation(node, true)`, callers that want interpolation
-    // (physics coordinator, character controller scripts) opt in
-    // explicitly, which seeds prev = current at that point and avoids the
-    // "addTrait happens before node.scene is wired" hydration race.
-    resolveOwn(node, def);
 
     // descendants resolving this trait from the hierarchy now resolve to it.
     // outside the `scene` guard: this path hydrates detached trees (scene-pack).
@@ -1974,16 +1967,6 @@ function collectQueries(sceneTree: SceneTree, node: Node, changedSlot?: number):
     return n;
 }
 
-/**
- * Seed the `context()` fields a trait brings with it, for the node that
- * just gained it. Ancestry above the node is unchanged, so only this node needs
- * resolving — descendants are handled by `resolveChildren`.
- */
-function resolveOwn(node: Node, def: TraitDef): void {
-    for (const l of def._resolutions) {
-        l.apply(node, nearestTrait(node, l.traitSlot, l.inclusive));
-    }
-}
 
 /** position of `node` in `q.matches`, or -1. */
 function queryIndexOf(q: Query<any>, node: Node): number {
@@ -2596,7 +2579,7 @@ function resolveFrom(group: Resolution[], node: Node, inherited: TraitBase | und
  * changed shape (attach, detach, reparent).
  */
 export function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null): void {
-    resolveSubtreeFor(registry.resolutionGroups, node, movedFrom);
+    resolveTransformSubtree(node, movedFrom);
     if (sceneTree !== null) resolveSubtreeFor(sceneTree._queryResolutionGroups, node, movedFrom);
 }
 
@@ -2654,7 +2637,7 @@ function resolveSubtreeFor(groups: Resolution[][], node: Node, movedFrom?: Node 
  * prune at the node that changed.
  */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    resolveChildrenFor(registry.resolutionGroups, node, traitSlot);
+    if (traitSlot === TransformTrait._slot) resolveTransformChildren(node);
     if (sceneTree !== null) resolveChildrenFor(sceneTree._queryResolutionGroups, node, traitSlot);
 }
 

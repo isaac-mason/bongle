@@ -8,8 +8,9 @@
 //
 //   read  — recompute every world matrix, caching parent results either way. The only
 //           difference is `t._parent` versus walking `node.parent` to the nearest bearer.
-//   write — attach+detach the subtree, with and without a self-targeting `my()` registered,
-//           so the delta is what maintaining the field actually costs.
+//
+// Only the READ half is measured here; the maintenance half is `probe-reparent.ts` and
+// `probe-attach-gcdelta.ts` against the real TransformTrait.
 //
 // Swept over passthrough density, since that is the variable the whole question turns on
 // and the one we have never measured on a real scene.
@@ -28,31 +29,31 @@
 // sweep is within 7% of `_parent` while needing no maintenance, no field and nothing to
 // invalidate.
 //
-// The maintenance half was measured separately, by toggling the declared-resolution descent
-// off on this same fixture: ~5-10% of an attach. So materialising `_parent` is right — it
-// pays per frame and costs per spawn — but the margin is 1.07-1.33x, nothing like the 45x
-// `_children` bought for invalidation.
+// The maintenance half was measured separately on this same fixture: ~5-10% of an attach.
+// So materialising `_parent` is right — it pays per frame and costs per spawn — but the
+// margin is 1.07-1.33x, nothing like the 45x `_children` bought for invalidation.
 //
 // Memoising the walk (path compression on the gap nodes) does NOT help: the compression pass
 // costs about what it saves.
 //
-// Do NOT compare against a second trait without `my()`: it lands on a different slot, so
-// `_traits.length` differs and the fixture measures slot density instead. That comparison
-// read `my()` as FASTER than no-`my()`, which is how the confound announced itself.
+// Do NOT compare against a second trait that does not maintain `_parent`: it lands on a
+// different slot, so `_traits.length` differs and the fixture measures slot density
+// instead. That comparison read the maintained field as FASTER than the unmaintained one,
+// which is how the confound announced itself.
 
 import { type Mat4, mat4 } from 'math';
-import { Ancestor } from '../src/core/scene/conditions';
 import { addChild, addTrait, createNode, createSceneTree, getTrait, type Node, removeChild } from '../src/core/scene/scene-tree';
-import { context, Self, trait } from '../src/core/scene/traits';
+import { trait } from '../src/core/scene/traits';
 
-/** stands in for TransformTrait: a local matrix, a cached world, and the maintained parent. */
+/** stands in for TransformTrait: a local matrix, a cached world, and the maintained parent.
+ *  `_parent` is filled by hand here; the real trait's is maintained by
+ *  `resolveTransformSubtree`, which this probe is not measuring. */
 const Xf = trait('contraction/xf', {
     local: () => mat4.create(),
     world: () => mat4.create(),
     valid: false,
     _parent: null as any,
 });
-context(Xf, '_parent', { condition: Ancestor(Self) });
 
 const XF_SLOT = Xf._slot;
 
@@ -153,7 +154,16 @@ function build(passthrough: number, branch: number, T: any = Xf): { root: Node; 
                 const n = createNode({ name: 'xf' });
                 addTrait(n, T);
                 addChild(attachTo, n);
-                bearers.push(getTrait(n, T));
+                const t: any = getTrait(n, T);
+                // this fixture's trait is synthetic, so fill the contracted parent by hand.
+                for (let cursor: Node | null = attachTo; cursor !== null; cursor = cursor.parent) {
+                    const found = cursor._traits[XF_SLOT];
+                    if (found !== undefined) {
+                        t._parent = found;
+                        break;
+                    }
+                }
+                bearers.push(t);
                 next.push(n);
             }
         }
