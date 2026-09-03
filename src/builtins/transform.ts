@@ -469,11 +469,17 @@ const transformScaleSync = sync(TransformTrait, 'scale', {
 // descendant invalidation, WITHOUT flagging any replication sync. callers pair
 // this with the specific `transform*Sync.dirty(t)` for the slice they wrote.
 function markTransformChanged(transform: TransformTrait): void {
-    // always enqueue for snapshot, even when _dirty is already maxed,
-    // the node may have moved again this tick and prev snapshot needs to
-    // catch the new pose.
+    // enqueue for the interpolation snapshot, even when _dirty is already maxed: the node
+    // may have moved again this tick and prev needs to catch the new pose.
+    //
+    // Gated on `interpolate` at the ENQUEUE, not at the drain, which is Godot's
+    // `notify_transform`: only a node that asked for transform notifications joins
+    // `xform_change_list`. `snapshot` skips `!interpolate` anyway, so enqueueing them was a
+    // hash insert per moved transform per frame for something immediately discarded. A
+    // transform that starts interpolating later seeds its own prev in `setInterpolation`,
+    // so nothing depends on having been enqueued beforehand.
     const node = transform._node;
-    if (node?.scene) node.scene._transformDirty.add(transform);
+    if (transform.interpolate && node?.scene) node.scene._transformDirty.add(transform);
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
