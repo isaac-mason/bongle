@@ -262,16 +262,16 @@ describe('discovery — region-tied node AOI', () => {
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flush(discovery, server.rooms, resources); // reconcile files `child`
-        expect(st.rootToRegion.has(child)).toBe(true);
-        expect(st.rootToRegion.has(parent)).toBe(false);
+        expect(st.regions.ofRoot.has(child)).toBe(true);
+        expect(st.regions.ofRoot.has(parent)).toBe(false);
 
         // give the PARENT a transform → it shadows child. the completeness fix (markNodeDirty
         // in updateChildTransformPointers) must dirty `child` so reconcile re-files: parent
         // becomes the root, child stops being one. without that fix, child stays stale-filed.
         setPosition(addTrait(parent, TransformTrait), [2, 2, 2]); // chunk (0,0,0)
         flush(discovery, server.rooms, resources);
-        expect(st.rootToRegion.has(parent)).toBe(true);
-        expect(st.rootToRegion.has(child)).toBe(false);
+        expect(st.regions.ofRoot.has(parent)).toBe(true);
+        expect(st.regions.ofRoot.has(child)).toBe(false);
 
         server.dispose();
     });

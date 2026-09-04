@@ -91,7 +91,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         let guard = 0;
         do {
             Prefab.tick(room.scene, room.context, deps.resources, room.voxels, 'client');
-        } while (room.scene._prefabsDirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
+        } while (room.scene.prefabs.dirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
 
         // ── preload referenced models + upload to the GPU pools ──
         const modelIds = new Set<string>();

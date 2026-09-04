@@ -203,13 +203,13 @@ export function clearDirtyNodes(sceneTree: SceneTree): void {
 
 /** bump a node's structural version */
 export function bumpNodeVersion(sceneTree: SceneTree, node: Node): void {
-    node._sync.version = ++sceneTree._versions.counter;
+    node._sync.version = ++sceneTree._versionCounter;
     markNodeDirty(sceneTree, node);
 }
 
 /** bump a specific trait's version on a node (+ the node version). */
 export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: number): void {
-    const v = ++sceneTree._versions.counter;
+    const v = ++sceneTree._versionCounter;
     const inst = node._traits[traitSlot];
     if (inst?._sync) inst._sync.traitVersion = v;
     node._sync.version = v;
@@ -219,7 +219,7 @@ export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: nu
 /** bump a single field's version (+ the trait + node versions). takes the
  *  instance + slice index directly, the diff already has both in hand. */
 export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: TraitBase, i: number): void {
-    const v = ++sceneTree._versions.counter;
+    const v = ++sceneTree._versionCounter;
     if (instance._sync) {
         instance._sync.versions[i] = v;
         instance._sync.traitVersion = v;
@@ -255,34 +255,21 @@ export type SceneTree = {
      */
     playerIdToOwnedNodes: Map<PlayerId, Set<Node>>;
 
-    /** single monotonic source for replication versions. the per-node/trait/field
-     *  versions live on `node._sync` / `instance._sync`; this is just the counter. */
-    _versions: {
-        counter: number;
+    /** @internal monotonic source for node and trait sync versions. */
+    _versionCounter: number;
+
+
+
+
+    /**
+     * @internal prefab anchors. `nodes` is every anchor in the tree; `dirty` is the subset
+     * awaiting reconcile, and membership in it IS the work list (no version compare). An
+     * anchor whose deps aren't ready stays in `dirty` across ticks.
+     */
+    prefabs: {
+        nodes: Set<Node>;
+        dirty: Set<Node>;
     };
-
-    /**
-     * @internal index of live nodes whose `prefab !== null`. maintained by
-     * registerSubtree / unregisterSubtree (lifecycle) and by setPrefab
-     * (mid-life mutation). used by `markPrefabAnchorsDirty` to translate a
-     * dispatch-resolved set of dirty prefab ids into anchor reconciles
-     * without walking the full tree.
-     */
-    _prefabNodes: Set<Node>;
-
-    /**
-     * @internal subset of `_prefabNodes` that needs reconcile. populated by:
-     *   - prefab anchor entering the graph (registerSubtree), first init
-     *   - setPrefab (set or change), config / args edits
-     *   - markPrefabAnchorsDirty, dispatch DepGraph propagation
-     * drained by the prefab tick once each node finishes reconcile (or is
-     * filtered out by realm/cycle/deps-not-ready). steady-state size is zero
-     * → tick is O(churn), not O(prefab count). same path on both edit and
-     * play modes, play rooms just don't get dispatch-driven dirty marks,
-     * so they stay stable across HMR.
-     */
-    _prefabsDirty: Set<Node>;
-
 
     /**
      * @internal transforms whose owner called `setInterpolation(node, true)`.
@@ -322,6 +309,20 @@ export type SceneTree = {
 
 
     /**
+     * @internal the transform-root region index, the server-side AOI granularity. A root's
+     * world chunk gates the presence of its whole subtree on a client; `changes` records
+     * this tick's transitions so the per-player pass can re-evaluate moved roots without
+     * climbing the tree.
+     */
+    regions: {
+        /** region key -> the transform roots filed under it. */
+        toRoots: Map<string, Set<Node>>;
+        /** transform root -> the region key it is filed under. */
+        ofRoot: Map<Node, string>;
+        changes: RootRegionChange[];
+    };
+
+    /**
      * @internal server-side discovery driver. nodes touched this tick (created,
      * structural change, trait add/remove, field change, or destroyed), the set
      * the per-client scene-sync fan-out iterates instead of walking the whole tree.
@@ -333,32 +334,7 @@ export type SceneTree = {
      */
     dirtyNodes: Node[];
 
-    /**
-     * server-side region index of transform roots, for region-tied AOI (see
-     * `isTransformRoot`). region is the AOI/streaming granularity (bigger than a
-     * storage chunk, see `REGION_CHUNKS_PER_AXIS` in voxels.ts) so this index shares
-     * the same coordinate system voxel discovery streams by, which is what keeps a
-     * root's presence test and its invalidation trigger synchronized. `regionToRoots`
-     * maps a region key → the roots currently filed in it (the reverse lookup the
-     * per-player discovery consumes); `rootToRegion` maps a root → the region key it
-     * is filed under (so a mover can be pulled from its stale bucket, and so its
-     * current region is an O(1) lookup). Maintained by `reconcileRootRegions` off
-     * `dirtyNodes` each tick, gated `!env.client` like `dirtyNodes` itself, so both
-     * stay empty in the client bundle. The filed-root set is exactly `rootToRegion`'s
-     * keys, so there is no separate membership set.
-     */
-    regionToRoots: Map<string, Set<Node>>;
-    rootToRegion: Map<Node, string>;
 
-    /**
-     * transform-root region transitions produced by `reconcileRootRegions` this tick:
-     * a root that was filed, unfiled, or moved between regions. `from`/`to` are region
-     * keys, `null` meaning "not filed" (newly eligible, or destroyed/shadowed). The
-     * per-player AOI presence pass reads this to (re)evaluate a moved root's presence
-     * against each client's region without ever climbing the tree. Cleared + refilled
-     * each `reconcileRootRegions`, consumed by the same tick's scene fan-out.
-     */
-    rootRegionChanges: RootRegionChange[];
 
     /**
      * optional runtime reference. when set, registerSubtree creates script instances,
@@ -386,14 +362,11 @@ export function createSceneTree(): SceneTree {
         _nextClientNodeId: -1,
         _idToNode: new Map(),
         playerIdToOwnedNodes: new Map(),
-        _versions: { counter: 0 },
-        _prefabNodes: new Set(),
-        _prefabsDirty: new Set(),
+        _versionCounter: 0,
+        prefabs: { nodes: new Set(), dirty: new Set() },
         _interpolating: new Set(),
+        regions: { toRoots: new Map(), ofRoot: new Map(), changes: [] },
         dirtyNodes: [],
-        regionToRoots: new Map(),
-        rootToRegion: new Map(),
-        rootRegionChanges: [],
         context: undefined,
     };
 
@@ -550,29 +523,29 @@ export function isTransformRoot(node: Node): boolean {
 export type RootRegionChange = { root: Node; from: string | null; to: string | null };
 
 function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    let set = sceneTree.regionToRoots.get(key);
+    let set = sceneTree.regions.toRoots.get(key);
     if (!set) {
         set = new Set();
-        sceneTree.regionToRoots.set(key, set);
+        sceneTree.regions.toRoots.set(key, set);
     }
     set.add(node);
-    sceneTree.rootToRegion.set(node, key);
+    sceneTree.regions.ofRoot.set(node, key);
 }
 
 function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    const set = sceneTree.regionToRoots.get(key);
+    const set = sceneTree.regions.toRoots.get(key);
     if (set) {
         set.delete(node);
         // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
-        if (set.size === 0) sceneTree.regionToRoots.delete(key);
+        if (set.size === 0) sceneTree.regions.toRoots.delete(key);
     }
-    sceneTree.rootToRegion.delete(node);
+    sceneTree.regions.ofRoot.delete(node);
 }
 
 /** the transform roots currently filed in a region, or undefined if none. read by
  *  the per-player AOI discovery to turn a region transition into node create/destroy. */
 export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | undefined {
-    return sceneTree.regionToRoots.get(key);
+    return sceneTree.regions.toRoots.get(key);
 }
 
 /**
@@ -585,12 +558,12 @@ export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | un
  * per-player AOI discovery reads the index.
  */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
-    sceneTree.rootRegionChanges.length = 0;
+    sceneTree.regions.changes.length = 0;
     // length re-read each step: a node filed during the pass is still picked up, matching
     // what iterating the set used to do.
     for (let i = 0; i < sceneTree.dirtyNodes.length; i++) {
         const node = sceneTree.dirtyNodes[i]!;
-        const filed = sceneTree.rootToRegion.get(node);
+        const filed = sceneTree.regions.ofRoot.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
             const c = getWorldChunk(t);
@@ -598,10 +571,10 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
             if (filed === key) continue; // already filed here, nothing moved
             if (filed !== undefined) unfileRoot(sceneTree, node, filed);
             fileRoot(sceneTree, node, key);
-            sceneTree.rootRegionChanges.push({ root: node, from: filed ?? null, to: key });
+            sceneTree.regions.changes.push({ root: node, from: filed ?? null, to: key });
         } else if (filed !== undefined) {
             unfileRoot(sceneTree, node, filed);
-            sceneTree.rootRegionChanges.push({ root: node, from: filed, to: null });
+            sceneTree.regions.changes.push({ root: node, from: filed, to: null });
         }
     }
 }
@@ -660,8 +633,8 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.
     if (node.prefab !== null) {
-        sceneTree._prefabNodes.delete(node);
-        sceneTree._prefabsDirty.delete(node);
+        sceneTree.prefabs.nodes.delete(node);
+        sceneTree.prefabs.dirty.delete(node);
     }
     const t = getTrait(node, TransformTrait);
     if (t) releaseTransform(sceneTree, t);
@@ -1238,8 +1211,8 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         // parent-first (fan-out also depth-orders as a backstop).
         markNodeDirty(sceneTree, n);
         if (n.prefab) {
-            sceneTree._prefabNodes.add(n);
-            sceneTree._prefabsDirty.add(n);
+            sceneTree.prefabs.nodes.add(n);
+            sceneTree.prefabs.dirty.add(n);
         }
 
         // assign runtime ID if needed (node entering scene tree from detached state).
@@ -1324,8 +1297,8 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Q
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.
     if (node.prefab !== null) {
-        sceneTree._prefabNodes.delete(node);
-        sceneTree._prefabsDirty.delete(node);
+        sceneTree.prefabs.nodes.delete(node);
+        sceneTree.prefabs.dirty.delete(node);
     }
     // a node leaving the live tree is a destroy for the discovery fan-out,
     // symmetric with registerSubtree marking entering nodes dirty. server-only
@@ -2739,11 +2712,11 @@ export function setPrefab(node: Node, config: PrefabConfig | null): void {
     const scene = node.scene;
     if (!scene) return;
     if (config) {
-        scene._prefabNodes.add(node);
-        scene._prefabsDirty.add(node);
+        scene.prefabs.nodes.add(node);
+        scene.prefabs.dirty.add(node);
     } else {
-        scene._prefabNodes.delete(node);
-        scene._prefabsDirty.delete(node);
+        scene.prefabs.nodes.delete(node);
+        scene.prefabs.dirty.delete(node);
     }
 }
 
@@ -2767,9 +2740,9 @@ export function setNodePersist(node: Node, persist: boolean): void {
  */
 export function markPrefabAnchorsDirty(sceneTree: SceneTree, dirtyPrefabIds: ReadonlySet<string>): void {
     if (dirtyPrefabIds.size === 0) return;
-    for (const node of sceneTree._prefabNodes) {
+    for (const node of sceneTree.prefabs.nodes) {
         if (!node.prefab) continue;
-        if (dirtyPrefabIds.has(node.prefab.prefabId)) sceneTree._prefabsDirty.add(node);
+        if (dirtyPrefabIds.has(node.prefab.prefabId)) sceneTree.prefabs.dirty.add(node);
     }
 }
 

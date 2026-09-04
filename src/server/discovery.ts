@@ -983,7 +983,7 @@ function buildSceneSyncUpdates(
     // knownRegions) vs have (known) — iterating ROOTS, so we never climb the tree.
     // destruction of an actually-destroyed root (scene === null) is left to the
     // dirtyNodes loop; here we handle live AOI in/out.
-    if (presence && (presence.left.size > 0 || presence.entered.size > 0 || sceneTree.rootRegionChanges.length > 0)) {
+    if (presence && (presence.left.size > 0 || presence.entered.size > 0 || sceneTree.regions.changes.length > 0)) {
         const candidates = new Set<Node>();
         for (const key of presence.left) {
             const roots = rootsInRegion(sceneTree, key);
@@ -993,12 +993,12 @@ function buildSceneSyncUpdates(
             const roots = rootsInRegion(sceneTree, key);
             if (roots) for (const r of roots) candidates.add(r);
         }
-        for (const ch of sceneTree.rootRegionChanges) candidates.add(ch.root);
+        for (const ch of sceneTree.regions.changes) candidates.add(ch.root);
 
         for (const root of candidates) {
             // the own-player subtree is the always-visible anchor, never region-gated.
             if (root.id === ownRootId || root.scene === null) continue;
-            const filed = sceneTree.rootToRegion.get(root); // current region, O(1); undefined if unfiled
+            const filed = sceneTree.regions.ofRoot.get(root); // current region, O(1); undefined if unfiled
             const want = filed !== undefined && presence.knownRegions.has(filed);
             const have = nodeKnowledge.has(root.id);
             if (want && !have) createSubtree(root);
@@ -1061,7 +1061,7 @@ function buildSceneSyncUpdates(
         // subtree): create from its root iff that root is in region — createSubtree walks
         // only the not-yet-known nodes, so an incremental add under a present root emits
         // just the new nodes, and a spawn out of region waits for the AOI pass.
-        const filed = sceneTree.rootToRegion.get(root);
+        const filed = sceneTree.regions.ofRoot.get(root);
         if (root.id === ownRootId || (filed !== undefined && presence!.knownRegions.has(filed))) createSubtree(root);
     }
 

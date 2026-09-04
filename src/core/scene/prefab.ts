@@ -347,30 +347,30 @@ export function tick(
     // snapshot so we can mutate the dirty set during iteration,
     // reconcilePrefabNode destroys nested prefab outputs which can also be
     // anchors (nested prefabs), and the drain mutates `_prefabsDirty`.
-    const work = Array.from(sceneTree._prefabsDirty);
+    const work = Array.from(sceneTree.prefabs.dirty);
 
     for (const node of work) {
         // node may have been destroyed by an earlier iteration's reconcile
         // (nested-prefab teardown). detached nodes are already off the sets.
         if (node.scene !== sceneTree) continue;
         if (!node.prefab) {
-            sceneTree._prefabsDirty.delete(node);
+            sceneTree.prefabs.dirty.delete(node);
             continue;
         }
         const def = registry.prefabs.byId.get(node.prefab.prefabId);
         if (!def) {
-            sceneTree._prefabsDirty.delete(node);
+            sceneTree.prefabs.dirty.delete(node);
             continue;
         }
         // skip nodes not owned by this side (play mode only)
         if (!isEdit) {
             const effective = effectiveRealm(node);
             if (side === 'server' && effective === 'client') {
-                sceneTree._prefabsDirty.delete(node);
+                sceneTree.prefabs.dirty.delete(node);
                 continue;
             }
             if (side === 'client' && effective === 'server') {
-                sceneTree._prefabsDirty.delete(node);
+                sceneTree.prefabs.dirty.delete(node);
                 continue;
             }
         }
@@ -379,11 +379,11 @@ export function tick(
         if (!depsReady(def)) continue;
         if (hasPrefabCycle(node)) {
             console.warn(`[bongle] prefab cycle detected for "${node.prefab.prefabId}" — skipping`);
-            sceneTree._prefabsDirty.delete(node);
+            sceneTree.prefabs.dirty.delete(node);
             continue;
         }
         reconcilePrefabNode(sceneTree, node, runtime, worldVoxels);
-        sceneTree._prefabsDirty.delete(node);
+        sceneTree.prefabs.dirty.delete(node);
 
         // play-mode bake: sever the prefab link, collapse the anchor's
         // transform into its children's first TransformTrait, then dissolve
