@@ -8,8 +8,8 @@
  *  commit date (YYYYMMDD) the dist was built from. */
 export const BONGLE_BUILD = {
     version: '0.0.0-alpha.1',
-    sha: 'e09e13e6',
-    date: '20260902',
+    sha: '04ab562e',
+    date: '20260904',
 } as const;
 
 /** Composed engine identity: the package semver with git build metadata appended

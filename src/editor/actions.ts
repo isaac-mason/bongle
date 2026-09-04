@@ -489,7 +489,7 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
 
 export function createNodeAction(state: EditRoomState, ctx: ScriptContext, parentId: number, index: number, name?: string): void {
     send(ctx, CreateNodeCommand, {
-        id: ctx.scene._ids.nextServer,
+        id: ctx.scene.ids.nextServer,
         parentId,
         index,
         name,

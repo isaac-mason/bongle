@@ -144,7 +144,7 @@ export const TransformTrait = trait('transform', {
     // ── interpolation participation (set via setInterpolation API) ────
     /** sticky flag: does this node currently want interpolation? toggled
      *  by `setInterpolation(node, on)`. enrolls this transform in the
-     *  `_interpolating` set on Nodes, per-frame iterate target. */
+     *  `interpolating` set on Nodes, per-frame iterate target. */
     interpolate: 0 as 0 | 1,
     /** local pose at the start of the current fixed tick. seeded by
      *  `setInterpolation(true)` / `resetInterpolation` and refreshed by
@@ -171,7 +171,7 @@ export const TransformTrait = trait('transform', {
 
     /** local TRS moved since the last `Interpolation.snapshot` drain, so `prev` still needs
      *  refreshing. Only meaningful while `interpolate` is set: `snapshot` walks
-     *  `_interpolating`, which `interpolate()` already walks every frame anyway, so the
+     *  `interpolating`, which `interpolate()` already walks every frame anyway, so the
      *  moved subset needs a flag rather than a second set on the scene tree. */
     _movedSinceSnapshot: 0 as 0 | 1,
 
@@ -538,7 +538,7 @@ export function releaseTransform(sceneTree: SceneTree | null, transform: Transfo
     if (transform._parent !== null) removeTransformChild(transform._parent, transform);
     transform._parent = null;
     if (sceneTree !== null) {
-        sceneTree._interpolating.delete(transform);
+        sceneTree.interpolating.delete(transform);
     }
 }
 
@@ -989,7 +989,7 @@ export function markInterpolatedDescendantsDirty(transform: TransformTrait): voi
  * godot's `set_physics_interpolated`.
  *
  * on enable: flips `interpolate` flag, seeds prev pose from the current
- * local pose, and adds the transform to the per-room `_interpolating` set,
+ * local pose, and adds the transform to the per-room `interpolating` set,
  * which the per-frame `interpolate()` loop in `render/interpolation.ts`
  * iterates.
  *
@@ -999,7 +999,7 @@ export function markInterpolatedDescendantsDirty(transform: TransformTrait): voi
  * idempotent: re-enabling a node that is already on is a no-op; same for
  * disabling. nodes without TransformTrait are silently ignored.
  *
- * server-safe: `_interpolating` exists on both sides but is never iterated
+ * server-safe: `interpolating` exists on both sides but is never iterated
  * server-side. calling this from shared script code (onInit/onDispose) is
  * fine.
  */
@@ -1016,13 +1016,13 @@ export function setInterpolation(node: Node, on: boolean): void {
         // chase-lerping from (0,0,0). matches godot's
         // `reset_physics_interpolation` cold-start guarantee.
         transform.lastTeleport = transform.teleport - 1;
-        if (node.scene) node.scene._interpolating.add(transform);
+        if (node.scene) node.scene.interpolating.add(transform);
     } else {
         if (!transform.interpolate) return;
         transform.interpolate = 0;
         transform._interpolated = 0;
         transform._correctionFrames = 0;
-        if (node.scene) node.scene._interpolating.delete(transform);
+        if (node.scene) node.scene.interpolating.delete(transform);
     }
 }
 

@@ -238,11 +238,12 @@ export type SceneTree = {
     nodes: Set<Node>;
 
     /**
-     * @internal node identity: the id space and the reverse lookup. Server ids count up
-     * from 1, client-created ones down from -1, so the two never collide on the wire.
+     * @internal the node id space. Server ids count up from 1, client-created ones down
+     * from -1, so the two never collide on the wire.
      */
-    _ids: {
-        byId: Map<number, Node>;
+    ids: {
+        /** node id -> the node. */
+        toNode: Map<number, Node>;
         nextServer: number;
         nextClient: number;
     };
@@ -282,7 +283,7 @@ export type SceneTree = {
      * a query. populated by `setInterpolation`, cleared by
      * `setInterpolation(node, false)` and by trait/node removal.
      */
-    _interpolating: Set<TransformTrait>;
+    interpolating: Set<TransformTrait>;
 
     /**
      * @internal every query on this tree, in the shapes the hot paths need. One group
@@ -342,7 +343,7 @@ export function createSceneTree(): SceneTree {
     const sceneTree: SceneTree = {
         root: null!,
         nodes: new Set(),
-        _ids: { byId: new Map(), nextServer: 1, nextClient: -1 },
+        ids: { toNode: new Map(), nextServer: 1, nextClient: -1 },
         replication: { dirty: [], versionCounter: 0, owners: new Map() },
         queries: {
             hashToQuery: new Map(),
@@ -355,7 +356,7 @@ export function createSceneTree(): SceneTree {
         },
 
         prefabs: { nodes: new Set(), dirty: new Set() },
-        _interpolating: new Set(),
+        interpolating: new Set(),
         regions: { toRoots: new Map(), ofRoot: new Map(), changes: [] },
         context: undefined,
     };
@@ -363,10 +364,10 @@ export function createSceneTree(): SceneTree {
     // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
-    root.id = sceneTree._ids.nextServer++;
+    root.id = sceneTree.ids.nextServer++;
     root.scene = sceneTree;
     sceneTree.nodes.add(root);
-    sceneTree._ids.byId.set(root.id, root);
+    sceneTree.ids.toNode.set(root.id, root);
     sceneTree.root = root;
 
     return sceneTree;
@@ -407,7 +408,7 @@ export function createNode(options?: CreateNodeOptions): Node {
  * look up a node by its runtime ID. returns undefined if not found.
  */
 export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
-    return sceneTree._ids.byId.get(id);
+    return sceneTree.ids.toNode.get(id);
 }
 
 /**
@@ -618,7 +619,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // detach from scene tree
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree._ids.byId.delete(node.id);
+    sceneTree.ids.toNode.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.
@@ -1208,12 +1209,12 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         // assign runtime ID if needed (node entering scene tree from detached state).
         // client picks from the negative id space, server from the positive id space.
         if (n.id === 0) {
-            n.id = env.client ? sceneTree._ids.nextClient-- : sceneTree._ids.nextServer++;
-        } else if (n.id >= sceneTree._ids.nextServer) {
+            n.id = env.client ? sceneTree.ids.nextClient-- : sceneTree.ids.nextServer++;
+        } else if (n.id >= sceneTree.ids.nextServer) {
             // pre-assigned id (e.g. from network unpack), bump counter past it
-            sceneTree._ids.nextServer = n.id + 1;
+            sceneTree.ids.nextServer = n.id + 1;
         }
-        sceneTree._ids.byId.set(n.id, n);
+        sceneTree.ids.toNode.set(n.id, n);
 
         const candidateCount = collectQueries(sceneTree, n, candidates);
         for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
@@ -1282,7 +1283,7 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Q
 
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree._ids.byId.delete(node.id);
+    sceneTree.ids.toNode.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.

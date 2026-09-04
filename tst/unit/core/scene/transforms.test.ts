@@ -1471,7 +1471,7 @@ describe('interpolate', () => {
         expectVec3Near(t.prevPosition!, vec3.fromValues(7, 8, 9));
         expectQuatNear(t.prevQuaternion!, rotY90());
         expect(t.interpolate).toBe(1);
-        expect(sceneTree._interpolating.has(t)).toBe(true);
+        expect(sceneTree.interpolating.has(t)).toBe(true);
     });
 
     it('setInterpolation(false) clears _interpolated and removes from set', () => {
@@ -1484,13 +1484,13 @@ describe('interpolate', () => {
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(1);
-        expect(sceneTree._interpolating.has(t)).toBe(true);
+        expect(sceneTree.interpolating.has(t)).toBe(true);
 
         setInterpolation(node, false);
 
         expect(t.interpolate).toBe(0);
         expect(t._interpolated).toBe(0);
-        expect(sceneTree._interpolating.has(t)).toBe(false);
+        expect(sceneTree.interpolating.has(t)).toBe(false);
     });
 
     it('setInterpolation is idempotent on repeated calls', () => {

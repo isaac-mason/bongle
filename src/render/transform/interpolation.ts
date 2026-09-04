@@ -84,7 +84,7 @@ const _authWorldScale: Vec3 = vec3.create();
  * the dirty bits but never sets `_movedSinceSnapshot`.
  */
 export function snapshot(sceneTree: SceneTree): void {
-    for (const t of sceneTree._interpolating) {
+    for (const t of sceneTree.interpolating) {
         if (!t._movedSinceSnapshot) continue;
         t._movedSinceSnapshot = 0;
         const prevPosition = t.prevPosition!;
@@ -104,7 +104,7 @@ export function snapshot(sceneTree: SceneTree): void {
 /**
  * produce per-frame world-space interpolated values for smooth rendering.
  *
- * iterates `_interpolating` (populated by `setInterpolation`). writes into
+ * iterates `interpolating` (populated by `setInterpolation`). writes into
  * `interpolatedWorld*` fields, the rendering chain that descendants
  * compose against. each written node also marks its descendants'
  * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
@@ -121,7 +121,7 @@ export function snapshot(sceneTree: SceneTree): void {
  *     teleport edge snaps the translator to the current pose
  */
 export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: number, delta: number): void {
-    for (const transform of sceneTree._interpolating) {
+    for (const transform of sceneTree.interpolating) {
         const node = transform._node!;
 
         transform._version++;
