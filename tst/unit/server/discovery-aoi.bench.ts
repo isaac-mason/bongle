@@ -60,8 +60,8 @@ describe('reconcileRootRegions', () => {
         // a genuinely fresh spawn adds one getWorldChunk matrix decompose per root.)
         const { sceneTree, roots } = world();
         bench(`cold-index: re-file all ${N} roots into a fresh index`, () => {
-            sceneTree.regions.toRoots.clear();
-            sceneTree.regions.ofRoot.clear();
+            sceneTree.regions.roots.clear();
+            sceneTree.regions.filedAs.clear();
             for (const r of roots) sceneTree.replication.dirty.add(r.node);
             reconcileRootRegions(sceneTree);
             sceneTree.replication.dirty.clear();

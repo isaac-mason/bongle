@@ -237,16 +237,13 @@ export type SceneTree = {
     /** all nodes in this scene tree (including root) */
     nodes: Set<Node>;
 
-    /**
-     * @internal the node id space. Server ids count up from 1, client-created ones down
-     * from -1, so the two never collide on the wire.
-     */
-    ids: {
-        /** node id -> the node. */
-        toNode: Map<number, Node>;
-        nextServer: number;
-        nextClient: number;
-    };
+    /** @internal node id -> the node. */
+    idToNode: Map<number, Node>;
+
+    /** @internal server ids count up from 1, client-created ones down from -1, so the two
+     *  never collide on the wire. */
+    nextServerId: number;
+    nextClientId: number;
 
     /**
      * @internal what the server fan-out needs. `dirty` is a marked list rather than a Set:
@@ -322,9 +319,9 @@ export type SceneTree = {
      */
     regions: {
         /** region key -> the transform roots filed under it. */
-        toRoots: Map<string, Set<Node>>;
-        /** transform root -> the region key it is filed under. */
-        ofRoot: Map<Node, string>;
+        roots: Map<string, Set<Node>>;
+        /** transform root -> the region key `fileRoot` filed it under. */
+        filedAs: Map<Node, string>;
         changes: RootRegionChange[];
     };
 
@@ -343,7 +340,9 @@ export function createSceneTree(): SceneTree {
     const sceneTree: SceneTree = {
         root: null!,
         nodes: new Set(),
-        ids: { toNode: new Map(), nextServer: 1, nextClient: -1 },
+        idToNode: new Map(),
+        nextServerId: 1,
+        nextClientId: -1,
         replication: { dirty: [], versionCounter: 0, owners: new Map() },
         queries: {
             hashToQuery: new Map(),
@@ -357,17 +356,17 @@ export function createSceneTree(): SceneTree {
 
         prefabs: { nodes: new Set(), dirty: new Set() },
         interpolating: new Set(),
-        regions: { toRoots: new Map(), ofRoot: new Map(), changes: [] },
+        regions: { roots: new Map(), filedAs: new Map(), changes: [] },
         context: undefined,
     };
 
     // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
-    root.id = sceneTree.ids.nextServer++;
+    root.id = sceneTree.nextServerId++;
     root.scene = sceneTree;
     sceneTree.nodes.add(root);
-    sceneTree.ids.toNode.set(root.id, root);
+    sceneTree.idToNode.set(root.id, root);
     sceneTree.root = root;
 
     return sceneTree;
@@ -408,7 +407,7 @@ export function createNode(options?: CreateNodeOptions): Node {
  * look up a node by its runtime ID. returns undefined if not found.
  */
 export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
-    return sceneTree.ids.toNode.get(id);
+    return sceneTree.idToNode.get(id);
 }
 
 /**
@@ -514,29 +513,29 @@ export function isTransformRoot(node: Node): boolean {
 export type RootRegionChange = { root: Node; from: string | null; to: string | null };
 
 function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    let set = sceneTree.regions.toRoots.get(key);
+    let set = sceneTree.regions.roots.get(key);
     if (!set) {
         set = new Set();
-        sceneTree.regions.toRoots.set(key, set);
+        sceneTree.regions.roots.set(key, set);
     }
     set.add(node);
-    sceneTree.regions.ofRoot.set(node, key);
+    sceneTree.regions.filedAs.set(node, key);
 }
 
 function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    const set = sceneTree.regions.toRoots.get(key);
+    const set = sceneTree.regions.roots.get(key);
     if (set) {
         set.delete(node);
         // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
-        if (set.size === 0) sceneTree.regions.toRoots.delete(key);
+        if (set.size === 0) sceneTree.regions.roots.delete(key);
     }
-    sceneTree.regions.ofRoot.delete(node);
+    sceneTree.regions.filedAs.delete(node);
 }
 
 /** the transform roots currently filed in a region, or undefined if none. read by
  *  the per-player AOI discovery to turn a region transition into node create/destroy. */
 export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | undefined {
-    return sceneTree.regions.toRoots.get(key);
+    return sceneTree.regions.roots.get(key);
 }
 
 /**
@@ -554,7 +553,7 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
     // what iterating the set used to do.
     for (let i = 0; i < sceneTree.replication.dirty.length; i++) {
         const node = sceneTree.replication.dirty[i]!;
-        const filed = sceneTree.regions.ofRoot.get(node);
+        const filed = sceneTree.regions.filedAs.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
             const c = getWorldChunk(t);
@@ -619,7 +618,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // detach from scene tree
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree.ids.toNode.delete(node.id);
+    sceneTree.idToNode.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.
@@ -1209,12 +1208,12 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         // assign runtime ID if needed (node entering scene tree from detached state).
         // client picks from the negative id space, server from the positive id space.
         if (n.id === 0) {
-            n.id = env.client ? sceneTree.ids.nextClient-- : sceneTree.ids.nextServer++;
-        } else if (n.id >= sceneTree.ids.nextServer) {
+            n.id = env.client ? sceneTree.nextClientId-- : sceneTree.nextServerId++;
+        } else if (n.id >= sceneTree.nextServerId) {
             // pre-assigned id (e.g. from network unpack), bump counter past it
-            sceneTree.ids.nextServer = n.id + 1;
+            sceneTree.nextServerId = n.id + 1;
         }
-        sceneTree.ids.toNode.set(n.id, n);
+        sceneTree.idToNode.set(n.id, n);
 
         const candidateCount = collectQueries(sceneTree, n, candidates);
         for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
@@ -1283,7 +1282,7 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Q
 
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree.ids.toNode.delete(node.id);
+    sceneTree.idToNode.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.

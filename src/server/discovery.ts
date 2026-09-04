@@ -998,7 +998,7 @@ function buildSceneSyncUpdates(
         for (const root of candidates) {
             // the own-player subtree is the always-visible anchor, never region-gated.
             if (root.id === ownRootId || root.scene === null) continue;
-            const filed = sceneTree.regions.ofRoot.get(root); // current region, O(1); undefined if unfiled
+            const filed = sceneTree.regions.filedAs.get(root); // current region, O(1); undefined if unfiled
             const want = filed !== undefined && presence.knownRegions.has(filed);
             const have = nodeKnowledge.has(root.id);
             if (want && !have) createSubtree(root);
@@ -1061,7 +1061,7 @@ function buildSceneSyncUpdates(
         // subtree): create from its root iff that root is in region — createSubtree walks
         // only the not-yet-known nodes, so an incremental add under a present root emits
         // just the new nodes, and a spawn out of region waits for the AOI pass.
-        const filed = sceneTree.regions.ofRoot.get(root);
+        const filed = sceneTree.regions.filedAs.get(root);
         if (root.id === ownRootId || (filed !== undefined && presence!.knownRegions.has(filed))) createSubtree(root);
     }
 

@@ -288,7 +288,7 @@ function applyChildren(
 
     // Re-attach in the new order, reparenting as needed
     for (const flatItem of orderedChildren) {
-        const node = sceneTree.ids.toNode.get(flatItem.nodeId);
+        const node = sceneTree.idToNode.get(flatItem.nodeId);
         if (!node) continue;
 
         // If node's current parent is different, reparent
@@ -364,7 +364,7 @@ function collectReorderOps(
 
     for (let i = 0; i < orderedChildren.length; i++) {
         const flatItem = orderedChildren[i];
-        const node = sceneTree.ids.toNode.get(flatItem.nodeId);
+        const node = sceneTree.idToNode.get(flatItem.nodeId);
         if (!node) continue;
 
         const currentParent = node.parent;

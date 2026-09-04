@@ -1500,7 +1500,7 @@ export function commitPlacement(state: TransformToolState, sceneTree: SceneTree,
     const createdIds: number[] = [];
     const wrapperEntryCount = sourcePrefab ? 1 : nodePasteEntries.length;
     for (let i = 0; i < wrapperEntryCount; i++) {
-        createdIds.push(sceneTree.ids.nextServer++);
+        createdIds.push(sceneTree.nextServerId++);
     }
 
     state.store.getState().action({

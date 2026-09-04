@@ -62,7 +62,7 @@ export function ViewportContextMenu() {
     // single-node selection unlocks node-specific ops (duplicate, bake).
     // for multi-select, only `node` is null and the shared entries hide them.
     const singleNodeId = nodeCount === 1 ? (selectedNodeIds.values().next().value as number) : null;
-    const singleNode = singleNodeId !== null && sceneGraph ? (sceneGraph.ids.toNode.get(singleNodeId) ?? null) : null;
+    const singleNode = singleNodeId !== null && sceneGraph ? (sceneGraph.idToNode.get(singleNodeId) ?? null) : null;
 
     const nodeEntries = hasNodes
         ? nodeMenuEntries({
