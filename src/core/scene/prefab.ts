@@ -33,6 +33,25 @@ import {
     setPrefab,
 } from './scene-tree';
 import { logScriptError } from './script-errors';
+
+/* ── reconciliation output (runtime-only, not serialized, not replicated) ── */
+
+export type PrefabState = {
+    /**
+     * post-apply voxels from the last reconciliation. cached so prefab-visuals
+     * can render the ghost without re-running def.apply. populated in edit mode
+     * for voxel-bearing prefabs; null in play mode (voxels stamped into world)
+     * and for non-voxel prefabs.
+     */
+    voxels: Voxels | null;
+    /**
+     * monotonic counter bumped every time this prefab is (re)instantiated.
+     * downstream consumers (editor ghost cache, future things) use it as a
+     * "did the prefab content actually change" key. dirty-set membership is
+     * the staleness signal; this just lets ghost caches notice they're out of date.
+     */
+    generation: number;
+};
 import type { SceneTreeContext } from './scripts';
 
 /**

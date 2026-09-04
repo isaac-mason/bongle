@@ -13,7 +13,6 @@ import { registry } from '../registry';
 import type { Bitset } from '../utils/bitset';
 import * as bitset from '../utils/bitset';
 import { type Listener, type Topic, topic, type Unsubscribe } from '../utils/topic';
-import type { Voxels } from '../voxels/voxels';
 import { chunkToRegionCoord, regionKey } from '../voxels/voxels';
 import {
     type Condition,
@@ -26,6 +25,7 @@ import {
     Src,
 } from './conditions';
 import { getControlCodecs } from './packcat-bridge';
+import type { PrefabState } from './prefab';
 import { formatIssuePath, type Issue, validate } from './prop';
 import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
@@ -2625,25 +2625,6 @@ export function findAncestor<const Args extends TraitHandle[]>(
 export type PrefabConfig = {
     prefabId: string;
     args: unknown;
-};
-
-/* ── prefab state (runtime-only, not serialized, not replicated) ── */
-
-export type PrefabState = {
-    /**
-     * post-apply voxels from the last reconciliation. cached so prefab-visuals
-     * can render the ghost without re-running def.apply. populated in edit mode
-     * for voxel-bearing prefabs; null in play mode (voxels stamped into world)
-     * and for non-voxel prefabs.
-     */
-    voxels: Voxels | null;
-    /**
-     * monotonic counter bumped every time this prefab is (re)instantiated.
-     * downstream consumers (editor ghost cache, future things) use it as a
-     * "did the prefab content actually change" key. dirty-set membership is
-     * the staleness signal; this just lets ghost caches notice they're out of date.
-     */
-    generation: number;
 };
 
 /* ── prefab helpers ── */
