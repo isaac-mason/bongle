@@ -1509,41 +1509,30 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
  * - if a trait id is not registered, it is stashed as unresolved (preserving json data).
  */
 export function deserializeNode(data: SerializedNode): Node {
-    const node = createNodeObject(data.name, 0, data.persist !== false);
+    const node = createNodeObject(data.name, 0, data.persist !== false, data.realm);
+    const label = `node "${data.name ?? '(unnamed)'}"`;
 
-    // clone, node.prefab.args is mutable and the source data is often a cached
-    // resource (prefab scene cache, scene file cache) shared across instantiations.
-    node.prefab = data.prefab ? structuredClone(data.prefab) : null;
-
-    node.realm = data.realm;
+    // detached, so this only records the config; the anchor is reconciled once it attaches.
+    if (data.prefab) setPrefab(node, structuredClone(data.prefab));
 
     for (const st of data.traits) {
+        // cloned either way: the caller keeps `data`, and neither an instance nor the
+        // unresolved round-trip copy may alias it.
+        const controls = st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined;
+
         const def = registry.traits.byId.get(st.id);
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
-            // clone, _unresolvedTraits is read back on re-serialization;
-            // mutations to control values elsewhere shouldn't corrupt the round-trip.
+            console.warn(`[bongle] unresolved trait "${st.id}" on ${label} — preserving raw data`);
             if (node.unresolved === null) node.unresolved = new Map();
-            node.unresolved.set(st.id, st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined);
+            node.unresolved.set(st.id, controls);
             continue;
         }
 
-        // clone control values, trait fields like TransformTrait.position get
-        // mutated in place (vec3.copy etc.). without this, mutations leak back
-        // into the source data, contaminating future deserializations from the
-        // same cached resource.
-        const controls = st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined;
-        const instance = buildTraitInstance(def, controls);
-        instance._node = node;
-        node.traits[def.slot] = instance;
-        bitset.add(node.bitset, def.slot);
-        refreshTraitIssues(def, instance, `node "${data.name ?? '(unnamed)'}"`);
+        const instance = addTraitBySlot(node, def.slot, controls);
+        if (instance !== null) refreshTraitIssues(def, instance, label);
     }
 
-    for (let i = 0; i < data.children.length; i++) {
-        const child = deserializeNode(data.children[i]);
-        addChild(node, child);
-    }
+    for (const child of data.children) addChild(node, deserializeNode(child));
 
     return node;
 }
@@ -1704,7 +1693,9 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
                 if (root.unresolved === null) root.unresolved = new Map();
-                root.unresolved.set(st.id, st.controls as Record<string, unknown> | undefined);
+                // cloned like the `deserializeNode` path: the caller keeps `rootData`, and the
+                // round-trip copy must not alias it.
+                root.unresolved.set(st.id, st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined);
                 continue;
             }
 
