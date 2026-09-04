@@ -1430,7 +1430,6 @@ function serializeTrait(traitSlot: number, instance: TraitBase, options?: Serial
     if (!def) return null;
     if (options?.persistOnly && !def.persist) return null;
 
-    // tag trait: no controls
     if (def.controls.length === 0) {
         return { id: def.id, controls: undefined };
     }

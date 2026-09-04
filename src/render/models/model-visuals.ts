@@ -171,17 +171,7 @@ export function init(batch: ModelBatch, scene: Scene, sceneTree: SceneTree): Mod
 
 // ── update ──────────────────────────────────────────────────────────
 
-/**
- * per-frame update.
- *
- *   1. ensure every (MeshTrait, TransformTrait) has an allocated state.
- *   2. cleanup stale states.
- *   3. walk aliveStates: for each visible state, gate-update transforms +
- *      params (versioned) and push its stable slot into a bucket keyed by
- *      `meshSlot`. then walk buckets, writing each bucket's slots
- *      contiguously into slotMap and emitting one MeshDraw per bucket into
- *      `mesh.draws`.
- */
+/** per-frame update, in four phases. */
 export function update(
     visuals: ModelVisuals,
     batch: ModelBatch,
@@ -190,14 +180,24 @@ export function update(
     visibility: Visibility.Visibility,
     voxels: Voxels,
 ): void {
-    const q = visuals._query;
-
     const frameId = ++visuals.frameId;
-    let instArr = batch.instanceDataBuf.array as Float32Array;
+    refreshStates(visuals, batch, modelResources, resources, visibility, frameId);
+    destroyStaleStates(visuals, batch, visibility, frameId);
+    const instanceDataDirty = writeInstances(visuals, batch, modelResources, voxels, frameId);
+    packDraws(batch, modelResources, instanceDataDirty);
+}
 
-    let instanceDataDirty = false;
-
-    // ── phase 1: allocate / refresh states ──────────────────────────
+/** phase 1: give every matched mesh a live MeshVisualState, allocating or rebinding as
+ *  needed, and stamp it so phase 2 can tell which states no longer have a match. */
+function refreshStates(
+    visuals: ModelVisuals,
+    batch: ModelBatch,
+    modelResources: ModelResources,
+    resources: Resources.Resources,
+    visibility: Visibility.Visibility,
+    frameId: number,
+): void {
+    const q = visuals._query;
     for (const [meshTrait, , model] of q.matches) {
         let state = meshTrait._state as MeshVisualState | null;
         const meshId = meshTrait.meshId;
@@ -237,7 +237,6 @@ export function update(
         const slot = allocateSlot(batch.instanceAllocator);
         if (slot >= batch.instanceCapacity) {
             growModelBatch(batch, batch.instanceAllocator.capacity);
-            instArr = batch.instanceDataBuf.array as Float32Array;
         }
 
         const transform = getTrait(meshTrait._node, TransformTrait)!;
@@ -273,16 +272,32 @@ export function update(
         meshTrait._state = state;
         visuals.aliveStates.push(state);
     }
+}
 
-    // ── phase 2: cleanup stale states ───────────────────────────────
+/** phase 2: drop states whose mesh left the query this frame. */
+function destroyStaleStates(visuals: ModelVisuals, batch: ModelBatch, visibility: Visibility.Visibility, frameId: number): void {
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
         if (state.lastSeenFrame !== frameId) destroyInstance(visuals, batch, state.trait, visibility);
     }
+}
 
-    // ── phase 3: per-instance writes + per-mesh bucket sort ─────────
+/** phase 3: per-instance writes into the merged instance buffer, plus bucketing by mesh for
+ *  the draw pack below. Returns whether anything was written. */
+function writeInstances(
+    visuals: ModelVisuals,
+    batch: ModelBatch,
+    modelResources: ModelResources,
+    voxels: Voxels,
+    frameId: number,
+): boolean {
+    const aliveStates = visuals.aliveStates;
+    // re-read here rather than in `update`: growing the batch in refreshStates
+    // reallocates the buffer, so a reference taken earlier can be stale.
+    const instArr = batch.instanceDataBuf.array as Float32Array;
     const meshInfoEntries = modelResources.meshInfo.entries;
+    let instanceDataDirty = false;
 
     // reset buckets, empty arrays in-place and pool any orphaned ones.
     const buckets = batch._bucketScratch;
@@ -437,7 +452,15 @@ export function update(
         bucket.push(slot);
     }
 
-    // ── phase 4: pack slotMap + mesh.draws ──────────────────────────
+    return instanceDataDirty;
+}
+
+/** phase 4: walk the buckets phase 3 filled, writing slots contiguously into slotMap and
+ *  emitting one MeshDraw per non-empty bucket. */
+function packDraws(batch: ModelBatch, modelResources: ModelResources, instanceDataDirty: boolean): void {
+    const meshInfoEntries = modelResources.meshInfo.entries;
+    const buckets = batch._bucketScratch;
+    const freeBuckets = batch._freeBuckets;
     // walk buckets; for each non-empty, write slots contiguously into slotMap
     // and emit one MeshDraw covering that range. orphan buckets (no slots this
     // frame) get popped into the free list to keep the working set tight.
@@ -483,6 +506,7 @@ export function update(
     if (writtenDraws > 0) batch.slotMapBuf.needsUpdate = true;
     if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
 }
+
 
 /** how often an unmoved, ungrouped mesh re-samples voxel light, in frames.
  *  phased by instance slot so the cost spreads instead of spiking. */
