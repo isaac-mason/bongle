@@ -41,7 +41,7 @@ import {
     ensureInterpolatedPose,
     ensureRemoteInterpolation,
     getWorldMatrix,
-    markInterpolatedDescendantsDirty,
+    sweepInterpolatedDescendants,
     parentTransform,
     type RemoteInterpolation,
     TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
@@ -106,9 +106,8 @@ export function snapshot(sceneTree: SceneTree): void {
  *
  * iterates `interpolating` (populated by `setInterpolation`). writes into
  * `interpolatedWorld*` fields, the rendering chain that descendants
- * compose against. each written node also marks its descendants'
- * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
- * ancestor on next read.
+ * compose against. each written node then sweeps its descendants, composing
+ * them top-down against the freshly-written ancestor.
  *
  * `delta` is the real render-frame delta (seconds), the timestep the remote
  * chase-latest translator eases over.
@@ -139,7 +138,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
             sampleRemotePose(transform, delta);
         }
 
-        if (transform._children.length > 0) markInterpolatedDescendantsDirty(transform);
+        if (transform._children.length > 0) sweepInterpolatedDescendants(transform);
     }
 }
 

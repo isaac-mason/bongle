@@ -3,7 +3,7 @@
 
 import {
     getVisualWorldPosition,
-    markInterpolatedDescendantsDirty,
+    sweepInterpolatedDescendants,
     setInterpolation,
     setPosition,
     TransformTrait,
@@ -51,6 +51,6 @@ function report(label: string, t: TransformTrait) {
     addChild(parent, child);
     const ct = addTrait(child, TransformTrait);
     setPosition(ct, [1, 2, 3]);
-    markInterpolatedDescendantsDirty(pt);
+    sweepInterpolatedDescendants(pt);
     report('descendant of an interpolating node', ct);
 }

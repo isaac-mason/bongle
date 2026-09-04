@@ -137,7 +137,7 @@ export const TransformTrait = trait('transform', {
     // interpolation pass (directly, or as a descendant of an Interp node).
     // mirrors godot's `fti_global_xform_interp_set`. when 0, visual
     // getters short-circuit to the world chain. set inside `interpolate()`
-    // and during `markInterpolatedDescendantsDirty`'s walk; cleared by
+    // and during `sweepInterpolatedDescendants`'s walk; cleared by
     // `setInterpolation(node, false)`.
     _interpolated: 0 as 0 | 1,
 
@@ -948,30 +948,37 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
 }
 
 /**
- * mark `node`'s descendant TransformTraits visual-dirty and flag them as
- * participating in interpolation. used by `interpolate()`: when an Interp
- * ancestor's interpolatedWorldMatrix is written, descendants need to recompose
- * visually on next read AND need their `_interpolated` bit set so reader
- * short-circuits flip to the visual chain.
+ * compose the interpolated world matrix for every descendant of an interp root, top-down.
  *
- * does NOT touch the world dirty bits, sim-side worldMatrix chain is
- * independent and stays valid.
+ * called by `interpolate()` once it has written the root's own visual pose, so every
+ * parent is composed before its children and no node ever walks up to find a fresh
+ * ancestor. `composeInterpolatedWorldMatrix` clears INTERPOLATED_MATRIX and defers
+ * INTERPOLATED_TRS, so the getters read straight out of the cache; the visual TRS still
+ * decomposes lazily for the readers that ask for it.
  *
- * unlike `markDescendants`, this walk has no "already dirty" early-out:
- * newly-attached subtrees may already be dirty (from creation) but their
- * `_interpolated` bit hasn't been set yet, so we must keep recursing.
- * descendant counts under Interp roots are small (player rigs, attached
- * props), the unconditional walk is fine.
+ * this is a sweep rather than the dirty-marking the sim chain uses because the two have
+ * different odds: a node is under an interp root precisely because it is being rendered,
+ * so marking it dirty only to have the renderer read it back the same frame pays for the
+ * bookkeeping twice, once to set the bit and once for the read's walk up to the nearest
+ * clean ancestor. Sweeping costs one compose per node and nothing else. The sim chain
+ * keeps marking, where a moved subtree genuinely may go unread.
+ *
+ * a local TRS change after this runs re-dirties that node to TRANSFORM_DIRTY_ALL, so a
+ * bone posed later in the frame still recomposes lazily on read.
+ *
+ * does NOT touch the world dirty bits; the sim-side worldMatrix chain is independent.
  */
-export function markInterpolatedDescendantsDirty(transform: TransformTrait): void {
-    const children = transform._children;
+export function sweepInterpolatedDescendants(parent: TransformTrait): void {
+    const children = parent._children;
     for (let i = 0; i < children.length; i++) {
         const child = children[i]!;
-        child._dirty |= TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        // `_interpolated` flips the getters over to the visual chain, and must be set
+        // before composing the child's own children, which source from it.
         ensureInterpolatedPose(child);
         child._interpolated = 1;
         child._version++;
-        markInterpolatedDescendantsDirty(child);
+        composeInterpolatedWorldMatrix(child, parent);
+        sweepInterpolatedDescendants(child);
     }
 }
 
