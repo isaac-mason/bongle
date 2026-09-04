@@ -28,7 +28,7 @@ import * as Light from '../core/voxels/light';
 import * as Voxels from '../core/voxels/voxels';
 import type { Renderer } from '../render/backend';
 import { loadRenderBackend } from '../render/load';
-import * as ModelLighting from '../render/models/model-lighting';
+import * as ModelLighting from '../render/model-lighting';
 import * as Particles from '../render/particles/particles';
 import * as Interpolation from '../render/transform/interpolation';
 import * as Visibility from '../render/visibility/visibility';

@@ -1,4 +1,9 @@
-// model visuals, per-room HW-instanced rendering for MeshTrait instances.
+// mesh visuals, per-room HW-instanced rendering for MeshTrait instances.
+//
+// Renders MeshTrait, one instance per (MeshTrait, TransformTrait), grouped for
+// lighting and inherited visibility by an optional `Up(ModelTrait)` ancestor. The
+// model-shaped names next door are the asset side: `ModelResources` and `ModelAtlas`
+// are the GPU pools for loaded model assets, which this renderer draws from.
 //
 // architecture:
 //   - shared geometry / atlas / meshInfo / material owned by client-global
@@ -41,14 +46,14 @@ import * as Visibility from '../visibility/visibility';
 import {
     allocateSlot,
     freeSlot,
-    growModelBatch,
+    growMeshBatch,
     type MeshInfoEntry,
     MODEL_INSTANCE_PARAMS_OFFSET_F32,
     MODEL_INSTANCE_STRIDE_F32,
-    type ModelBatch,
+    type MeshBatch,
     type ModelResources,
     meshInfoIndexOf,
-    resetModelBatch,
+    resetMeshBatch,
 } from './model-resources';
 
 type MeshQuery = ReturnType<
@@ -137,7 +142,7 @@ export type MeshVisualState = {
     lastLightA: number;
 };
 
-export type ModelVisuals = {
+export type MeshVisuals = {
     /** this room's live meshes (+ their cull registrations). Each state's `slot`
      *  indexes the client-global `batch.instanceDataBuf`; freed on `dispose`. */
     aliveStates: MeshVisualState[];
@@ -158,8 +163,8 @@ export type ModelVisuals = {
  * swaps; only this room's use of it (alive-states, cull entries, scene-tree
  * query) lives here.
  */
-export function init(batch: ModelBatch, scene: Scene, sceneTree: SceneTree): ModelVisuals {
-    resetModelBatch(batch);
+export function init(batch: MeshBatch, scene: Scene, sceneTree: SceneTree): MeshVisuals {
+    resetMeshBatch(batch);
     scene.add(batch.mesh);
     return {
         aliveStates: [],
@@ -173,8 +178,8 @@ export function init(batch: ModelBatch, scene: Scene, sceneTree: SceneTree): Mod
 
 /** per-frame update, in four phases. */
 export function update(
-    visuals: ModelVisuals,
-    batch: ModelBatch,
+    visuals: MeshVisuals,
+    batch: MeshBatch,
     modelResources: ModelResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
@@ -190,8 +195,8 @@ export function update(
 /** phase 1: give every matched mesh a live MeshVisualState, allocating or rebinding as
  *  needed, and stamp it so phase 2 can tell which states no longer have a match. */
 function refreshStates(
-    visuals: ModelVisuals,
-    batch: ModelBatch,
+    visuals: MeshVisuals,
+    batch: MeshBatch,
     modelResources: ModelResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
@@ -236,7 +241,7 @@ function refreshStates(
 
         const slot = allocateSlot(batch.instanceAllocator);
         if (slot >= batch.instanceCapacity) {
-            growModelBatch(batch, batch.instanceAllocator.capacity);
+            growMeshBatch(batch, batch.instanceAllocator.capacity);
         }
 
         const transform = getTrait(meshTrait._node, TransformTrait)!;
@@ -275,7 +280,7 @@ function refreshStates(
 }
 
 /** phase 2: drop states whose mesh left the query this frame. */
-function destroyStaleStates(visuals: ModelVisuals, batch: ModelBatch, visibility: Visibility.Visibility, frameId: number): void {
+function destroyStaleStates(visuals: MeshVisuals, batch: MeshBatch, visibility: Visibility.Visibility, frameId: number): void {
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
@@ -286,8 +291,8 @@ function destroyStaleStates(visuals: ModelVisuals, batch: ModelBatch, visibility
 /** phase 3: per-instance writes into the merged instance buffer, plus bucketing by mesh for
  *  the draw pack below. Returns whether anything was written. */
 function writeInstances(
-    visuals: ModelVisuals,
-    batch: ModelBatch,
+    visuals: MeshVisuals,
+    batch: MeshBatch,
     modelResources: ModelResources,
     voxels: Voxels,
     frameId: number,
@@ -457,7 +462,7 @@ function writeInstances(
 
 /** phase 4: walk the buckets phase 3 filled, writing slots contiguously into slotMap and
  *  emitting one MeshDraw per non-empty bucket. */
-function packDraws(batch: ModelBatch, modelResources: ModelResources, instanceDataDirty: boolean): void {
+function packDraws(batch: MeshBatch, modelResources: ModelResources, instanceDataDirty: boolean): void {
     const meshInfoEntries = modelResources.meshInfo.entries;
     const buckets = batch._bucketScratch;
     const freeBuckets = batch._freeBuckets;
@@ -545,7 +550,7 @@ function shouldResampleLight(state: MeshVisualState, transform: TransformTrait, 
  * `trait._state`) and detach the batch Mesh from this room's scene. The batch's
  * GPU buffers are NOT freed — they survive for the next room's `init`.
  */
-export function dispose(visuals: ModelVisuals, batch: ModelBatch, visibility: Visibility.Visibility): void {
+export function dispose(visuals: MeshVisuals, batch: MeshBatch, visibility: Visibility.Visibility): void {
     // walk backward, destroyInstance does swap-pop from aliveStates.
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
@@ -554,7 +559,7 @@ export function dispose(visuals: ModelVisuals, batch: ModelBatch, visibility: Vi
 
 // ── internal ────────────────────────────────────────────────────────
 
-function destroyInstance(visuals: ModelVisuals, batch: ModelBatch, trait: MeshTrait, visibility: Visibility.Visibility): void {
+function destroyInstance(visuals: MeshVisuals, batch: MeshBatch, trait: MeshTrait, visibility: Visibility.Visibility): void {
     const state = trait._state as MeshVisualState | null;
     if (state === null) return;
     Visibility.remove(visibility, state.cull);

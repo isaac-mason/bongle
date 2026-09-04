@@ -23,7 +23,7 @@ import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import * as ModelResources from '../render/models/model-resources';
 import { meshInfoIndexOf } from '../render/models/model-resources';
-import * as ModelVisuals from '../render/models/model-visuals';
+import * as MeshVisuals from '../render/models/mesh-visuals';
 import * as Interpolation from '../render/transform/interpolation';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import { applyConfig as applyEnvConfig } from './environment';
@@ -142,7 +142,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // model + voxel-mesh visuals (register cull entries; offline pass draws all).
-        ModelVisuals.update(
+        MeshVisuals.update(
             room.modelVisuals,
             deps.modelResources.batch,
             deps.modelResources,

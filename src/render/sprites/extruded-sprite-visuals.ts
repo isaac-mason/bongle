@@ -11,7 +11,7 @@
 // WebGPU, auto-lowered to buffer-texture reads on WebGL2). Env is the
 // shared uniform captured by the material, not a per-room binding.
 //
-// Architecture mirrors model-visuals.ts:
+// Architecture mirrors mesh-visuals.ts:
 //   - engine-global geometry pool (in ExtrudedSpriteResources): interleaved
 //     ExtrudedVertex (vertex usage) + u32 index (index usage). Lazily
 //     baked, refcounted, shared across rooms.

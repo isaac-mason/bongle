@@ -1,6 +1,6 @@
 // MeshTrait, single-mesh visual, primitive for model rendering.
 //
-// Sits on a node with a TransformTrait. The renderer (model-visuals, W3.2)
+// Sits on a node with a TransformTrait. The renderer (mesh-visuals, W3.2)
 // allocates an instance slot per (MeshTrait, TransformTrait) pair, then
 // streams worldMatrix + atlas region into the GPU instance buffer.
 //
@@ -13,7 +13,7 @@ import type { MeshId } from '../core/models/handle';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
-import type { MeshVisualState } from '../render/models/model-visuals';
+import type { MeshVisualState } from '../render/models/mesh-visuals';
 
 export const MeshTrait = trait('mesh', {
     /**

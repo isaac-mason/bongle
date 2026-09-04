@@ -14,7 +14,7 @@
 //   scene load       one attach of a whole populated container
 //
 // Resolution count is 2 throughout, matching what the engine registers today:
-// both `model-visuals` and `voxel-mesh-visuals` query `Optional(Up(ModelTrait))`,
+// both `mesh-visuals` and `voxel-mesh-visuals` query `Optional(Up(ModelTrait))`,
 // so every room has two resolving the same trait.
 
 import { bench, group } from '@pmndrs/labs';

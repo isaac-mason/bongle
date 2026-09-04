@@ -35,7 +35,7 @@ import * as RenderCamera from './camera';
 import * as CloudResources from './environment/clouds/cloud-resources';
 import * as Environment from './environment/environment';
 import * as ModelResources from './models/model-resources';
-import * as ModelVisuals from './models/model-visuals';
+import * as MeshVisuals from './models/mesh-visuals';
 import type { OfflineRenderer, TileTarget } from './offline';
 import * as ParticleResources from './particles/particle-resources';
 import * as ParticleVisuals from './particles/particle-visuals';
@@ -607,7 +607,7 @@ export function disposeResources(renderer: WebGpuState): void {
 export type RoomVisuals = {
     voxel: VoxelVisuals.VoxelVisuals;
     voxelMesh: VoxelMeshVisuals.VoxelMeshVisuals;
-    model: ModelVisuals.ModelVisuals;
+    model: MeshVisuals.MeshVisuals;
     domUi: DomUi.DomUi;
     sprite: SpriteVisuals.SpriteVisuals;
     extrudedSprite: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals;
@@ -654,7 +654,7 @@ function build(state: WebGpuState, room: ClientRoom): RoomActive {
 
     const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel.geometries, res.voxel.quadMaterials);
     const voxelMesh = VoxelMeshVisuals.init(res.voxelMesh.batch, scene, nodes);
-    const model = ModelVisuals.init(res.model.batch, scene, nodes);
+    const model = MeshVisuals.init(res.model.batch, scene, nodes);
     // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
     // panels are DOM. the scene depth node lets canvas materials discard fragments
     // occluded by world geometry.
@@ -691,7 +691,7 @@ export function teardown(state: WebGpuState): void {
     // release the active world's chunks from the arena + mesh worker cache.
     VoxelResources.unmountRoom(state.resources.voxel, state.resources.voxel.meshDispatcher);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, visibility);
-    ModelVisuals.dispose(rv.model, state.resources.model.batch, visibility);
+    MeshVisuals.dispose(rv.model, state.resources.model.batch, visibility);
     DomUi.dispose(rv.domUi);
     SpriteVisuals.dispose(rv.sprite, state.resources.sprite.batch, visibility);
     ExtrudedSpriteVisuals.dispose(
@@ -755,7 +755,7 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     Debug.end(room.clientMetrics, 'voxel-mesh');
 
     Debug.begin(room.clientMetrics, 'model');
-    ModelVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility, room.voxels);
+    MeshVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility, room.voxels);
     Debug.end(room.clientMetrics, 'model');
 
     Debug.begin(room.clientMetrics, 'dom-ui');

@@ -1,5 +1,5 @@
 // voxel mesh visuals, per-room HW-instanced rendering for VoxelMeshTrait
-// instances. mirrors model-visuals.ts: one non-indexed instanced draw
+// instances. mirrors mesh-visuals.ts: one non-indexed instanced draw
 // (`mesh.draws`) per (model × source-chunk) bucket, with instanceCount =
 // number of currently-visible traits referencing that model.
 //
@@ -83,7 +83,7 @@ export type VoxelMeshState = {
      *  The culler writes `cull.visible`. */
     cull: Visibility.CullState;
     /** optional ModelTrait ancestor used as a shared-light home. mirrors
-     *  model-visuals: present ⇒ read model.light, absent ⇒ sample voxel
+     *  mesh-visuals: present ⇒ read model.light, absent ⇒ sample voxel
      *  light at the instance origin. fed into the shader as a floor on the
      *  per-corner `meshLight` buffer. */
     model: ModelTrait | null;

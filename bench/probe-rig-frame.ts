@@ -7,7 +7,7 @@
 //   move each rig root (`setPosition`, which dirties the subtree via `markDescendants`),
 //   read every bone's world matrix (the lazy walk-up-then-compose-down),
 //   iterate `[MeshTrait, TransformTrait, Optional(Up(ModelTrait))]` exactly as
-//   `model-visuals` phase 1 does, tuple destructure and `_state`/`meshId` check included.
+//   `mesh-visuals` phase 1 does, tuple destructure and `_state`/`meshId` check included.
 //
 // Deliberately NOT reported per phase. `markDescendants` prunes any subtree already at
 // TRANSFORM_DIRTY_ALL, so timing `move` on its own leaves everything permanently dirty and
@@ -104,7 +104,7 @@ for (const rigCount of [64, 256, 1024, 2048, MAX].filter((n, i, a) => n <= MAX &
             for (let b = 0; b < bones.length; b++) getWorldMatrix(bones[b]);
         }
     };
-    // model-visuals phase 1, minus the GPU write
+    // mesh-visuals phase 1, minus the GPU write
     let frameId = 0;
     let seen = 0;
     const iterate = () => {

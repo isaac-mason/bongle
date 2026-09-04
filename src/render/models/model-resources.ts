@@ -3,7 +3,7 @@
 // Owns the texture atlas, the CPU-side mesh-info catalog (firstIndex,
 // indexCount, uv, AABB per mesh), pooled vertex/index buffers, and the
 // engine-global model material. One instance per `EngineClient`; shared
-// across all rooms and all `ModelVisuals` consumers.
+// across all rooms and all `MeshVisuals` consumers.
 //
 // Lifetime is tied to model load/unload, NOT to instance count. Polling-
 // driven: each tick `update(modelResources, resources)` walks
@@ -12,7 +12,7 @@
 // vanished payloads (releases their pool slots).
 //
 // ── render pipeline ────────────────────────────────────────────────
-// CPU (model-visuals.ts) per frame:
+// CPU (mesh-visuals.ts) per frame:
 //   - walks visible MeshVisualStates, buckets each into the slot-list for
 //     its mesh, then per-bucket writes slots contiguously into `slotMap`
 //     and appends one `MeshDraw` covering that range to `mesh.draws`.
@@ -97,7 +97,7 @@ const InstanceParams = struct('ModelInstanceParams', {
     dither: d.f32,
     // atlas uv rect for this instance's mesh. lives per-slot rather than
     // per-frame because it only changes when the source image lands in
-    // the atlas, re-uploaded on entry-ref mismatch in model-visuals.
+    // the atlas, re-uploaded on entry-ref mismatch in mesh-visuals.
     uvOffset: d.vec2f,
     uvScale: d.vec2f,
 });
@@ -132,7 +132,7 @@ export const MODEL_INSTANCE_STRIDE = layoutStrideOf(ModelInstance);
 /** byte offset of the `params` member inside `ModelInstance` (after the mat4x4f). */
 export const MODEL_INSTANCE_PARAMS_OFFSET = 64;
 /** f32-index offset of the `params` member inside `ModelInstance`. Used by
- *  the inlined params writer in model-visuals, keep in sync with
+ *  the inlined params writer in mesh-visuals, keep in sync with
  *  `MODEL_INSTANCE_PARAMS_OFFSET` (64 bytes = 16 f32). */
 export const MODEL_INSTANCE_PARAMS_OFFSET_F32 = 16;
 /** f32 count per `ModelInstance` slot (144B / 4 = 36). */
@@ -240,7 +240,7 @@ function createGeometryPool(
     initialIndexCapacity = INITIAL_INDEX_CAPACITY,
 ): ModelGeometryPool {
     // MANUAL lifecycle: this pool owns the buffers across script-reload, many
-    // ModelVisuals geometries bind to and dispose them per reload, but the pool
+    // MeshVisuals geometries bind to and dispose them per reload, but the pool
     // itself outlives them. REF_COUNTED would let the last `geometry.dispose()`
     // destroy the GPU buffer while the pool still hands the JS object out.
     const vertices = new GpuBuffer(ModelVertex, {
@@ -375,7 +375,7 @@ function growIndex(pool: ModelGeometryPool, newCapacity: number): void {
 // CPU-only per-mesh metadata. Was a GPU storage buffer back when the
 // material chased meshSlot per fragment; now CPU hoists everything into
 // the compacted entry, so this is pure bookkeeping (slot index, UV,
-// firstIndex/indexCount, local AABB) read by model-visuals each frame
+// firstIndex/indexCount, local AABB) read by mesh-visuals each frame
 // and by offline tasks for camera fitting.
 
 export type MeshInfoEntry = {
@@ -424,13 +424,13 @@ function releaseMeshInfo(cat: MeshInfoCatalog, meshKey: string): void {
 
 // ── instance batch (client-global, persistent GPU allocation) ───────
 // The per-slot instance buffers + slotMap + draw list + their Mesh/Geometry
-// live here, NOT on per-room ModelVisuals: exactly one room renders at a time,
+// live here, NOT on per-room MeshVisuals: exactly one room renders at a time,
 // so a room swap REUSES this allocation (reset counts + re-add the Mesh) instead
-// of freeing + reallocating it. `ModelVisuals` keeps only this-room's use — the
+// of freeing + reallocating it. `MeshVisuals` keeps only this-room's use — the
 // alive-state list, cull registrations, and scene-tree query.
 
 /** single-slot free-list allocator over the instance buffers. Slots index
- *  `instanceDataBuf`; the free-list + head reset per room via `resetModelBatch`. */
+ *  `instanceDataBuf`; the free-list + head reset per room via `resetMeshBatch`. */
 export type Allocator = { capacity: number; head: number; freeList: number[] };
 
 function createAllocator(capacity: number): Allocator {
@@ -449,7 +449,7 @@ export function freeSlot(a: Allocator, slot: number): void {
 
 type GpuBufferType = GpuBuffer<any>;
 
-export type ModelBatch = {
+export type MeshBatch = {
     /** one Mesh(geometry, material); added to the active room's scene on `enter`,
      *  removed on `exit`. Never disposed on a room swap. */
     mesh: Mesh;
@@ -476,7 +476,7 @@ export type ModelBatch = {
 /** Build the client-global instance batch: its Geometry binds the pool vertex/
  *  index buffers + fresh instanceData/slotMap storage, and the Mesh wraps it with
  *  the engine-global material. Not added to any scene until a room `enter`s. */
-function createModelBatch(pool: ModelGeometryPool, material: Material): ModelBatch {
+function createMeshBatch(pool: ModelGeometryPool, material: Material): MeshBatch {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
     const geometry = new Geometry();
@@ -499,7 +499,7 @@ function createModelBatch(pool: ModelGeometryPool, material: Material): ModelBat
     const draws: IndexedMeshDraw[] = [];
 
     const mesh = new Mesh(geometry, material);
-    mesh.name = 'model-visuals';
+    mesh.name = 'mesh-visuals';
     mesh.frustumCulled = false; // per-mesh CPU cull via Visibility
     mesh.draws = draws;
 
@@ -519,7 +519,7 @@ function createModelBatch(pool: ModelGeometryPool, material: Material): ModelBat
 /** Ready the batch for a fresh room: empty the allocator + scratch + draw list.
  *  Buffers are NOT touched — reused slots re-upload on version mismatch, and a
  *  cleared allocator means the next refill writes from slot 0. */
-export function resetModelBatch(batch: ModelBatch): void {
+export function resetMeshBatch(batch: MeshBatch): void {
     batch.instanceAllocator.head = 0;
     batch.instanceAllocator.freeList.length = 0;
     batch._bucketScratch.clear();
@@ -531,7 +531,7 @@ export function resetModelBatch(batch: ModelBatch): void {
 // fresh GpuBuffer, copying, and destroying the old one. gpucat tracks buffer
 // swaps by GpuBuffer identity; `geometry.setBuffer(name, newBuf)` re-binds the
 // material to the new buffer and bumps geometry.version automatically.
-export function growModelBatch(batch: ModelBatch, newCapacity: number): void {
+export function growMeshBatch(batch: MeshBatch, newCapacity: number): void {
     const geometry = batch.geometry;
 
     // instance data, preserve per-slot bytes (transforms + params are both
@@ -558,7 +558,7 @@ export function growModelBatch(batch: ModelBatch, newCapacity: number): void {
     batch.instanceCapacity = newCapacity;
 }
 
-function disposeModelBatch(batch: ModelBatch): void {
+function disposeMeshBatch(batch: MeshBatch): void {
     // pool vertex/index buffers are MANUAL (owned by the pool), so
     // geometry.dispose()'s decreaseUsages() is a no-op on them; the instance +
     // slotMap buffers we own here. Called once at client shutdown, never on swap.
@@ -596,8 +596,8 @@ export type ModelResources = {
      *  pool binds as a vertex buffer named `vertex`, the index pool as the index. */
     material: Material;
     /** client-global instance batch (Mesh/Geometry + per-slot buffers + allocator).
-     *  Reused across room swaps; per-room `ModelVisuals` drive it via `enter`/`exit`. */
-    batch: ModelBatch;
+     *  Reused across room swaps; per-room `MeshVisuals` drive it via `enter`/`exit`. */
+    batch: MeshBatch;
 };
 
 const WHITE_PIXEL_KEY = '__white__';
@@ -622,7 +622,7 @@ export function init(env: EnvironmentResources): ModelResources {
     const geometry = createGeometryPool();
 
     const material = createModelMaterial(atlas, env);
-    const batch = createModelBatch(geometry, material);
+    const batch = createMeshBatch(geometry, material);
 
     return {
         atlas,
@@ -668,7 +668,7 @@ export function modelTexturesReady(modelResources: ModelResources, modelId: stri
 }
 
 export function dispose(modelResources: ModelResources): void {
-    disposeModelBatch(modelResources.batch);
+    disposeMeshBatch(modelResources.batch);
     ModelAtlas.dispose(modelResources.atlas);
     disposeGeometryPool(modelResources.geometry);
     modelResources.material.dispose();
@@ -874,7 +874,7 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas, env: EnvironmentResou
     // slotMap[instanceIndex] resolves to the stable per-slot index in
     // instanceData. WebGPU adds firstInstance to instanceIndex before the
     // VS sees it, so each draw indexes into its own [firstInstance ..]
-    // range that model-visuals wrote contiguously.
+    // range that mesh-visuals wrote contiguously.
     const slotMap = storage('slotMap', d.array(d.u32), 'read');
     const realSlot = slotMap.element(instanceIndex).toVar('mvSlot');
 

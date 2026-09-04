@@ -27,9 +27,9 @@ import { useEditor } from '../editor/editor-store';
 import * as RenderCamera from '../render/camera';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
-import * as ModelLighting from '../render/models/model-lighting';
+import * as ModelLighting from '../render/model-lighting';
 import type * as ModelResourcesNs from '../render/models/model-resources';
-import * as ModelVisuals from '../render/models/model-visuals';
+import * as MeshVisuals from '../render/models/mesh-visuals';
 import type { OfflineRenderer } from '../render/offline';
 import * as Particles from '../render/particles/particles';
 import * as Visibility from '../render/visibility/visibility';
@@ -179,7 +179,7 @@ export type ClientRoom = {
      *  simulation that must stay deterministic. */
     particles: Particles.ParticlePool;
 
-    /** per-room visibility (DBVT + frustum cull). model-visuals + voxel-visuals
+    /** per-room visibility (DBVT + frustum cull). mesh-visuals + voxel-visuals
      *  register leaves and read the per-frame visible set. */
     visibility: Visibility.Visibility;
 
@@ -275,7 +275,7 @@ export type RenderRoom = {
     render: { scene: Scene };
     voxelVisuals: VoxelVisuals.VoxelVisuals;
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
-    modelVisuals: ModelVisuals.ModelVisuals;
+    modelVisuals: MeshVisuals.MeshVisuals;
     visibility: Visibility.Visibility;
     /** client-side env config (CPU). */
     environment: ClientEnv.Environment;
@@ -319,7 +319,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const envResources = deps.environmentResources;
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources.geometries, deps.voxelResources.quadMaterials);
     const voxelMeshVisuals = VoxelMeshVisuals.init(deps.voxelMeshResources.batch, scene, nodes);
-    const modelVisuals = ModelVisuals.init(deps.modelResources.batch, scene, nodes);
+    const modelVisuals = MeshVisuals.init(deps.modelResources.batch, scene, nodes);
     const visibility = Visibility.init();
     const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
     const envVisuals = Environment.initEnvVisuals(scene, envResources, deps.cloudResources);
@@ -348,7 +348,7 @@ export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void 
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.render.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
-    ModelVisuals.dispose(room.modelVisuals, deps.modelResources.batch, room.visibility);
+    MeshVisuals.dispose(room.modelVisuals, deps.modelResources.batch, room.visibility);
     Environment.disposeEnvVisuals(room.envVisuals);
 }
 

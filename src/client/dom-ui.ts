@@ -16,7 +16,7 @@
 //   the canvas. See plan-ui-traits.md appendix.
 //
 // Canvas uses one Mesh per instance for v1, readable and shippable.
-// GPU-batched instancing (à la model-visuals) is a later optimisation
+// GPU-batched instancing (à la mesh-visuals) is a later optimisation
 // if perf bites.
 
 import {

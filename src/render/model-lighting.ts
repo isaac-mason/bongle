@@ -4,18 +4,23 @@
 // a bone whose own world position clips into a solid voxel mid-animation
 // doesn't pop dark.
 //
+// Lives at `render/` rather than under `render/models/` because it belongs to no one
+// renderer: it queries `[ModelTrait, TransformTrait]` and writes a value that both
+// `mesh-visuals` and `voxels/voxel-mesh-visuals` read through their `Up(ModelTrait)`
+// term. `render/models/` is the mesh renderer plus the model-asset GPU pools.
+//
 // Sampling is unconditional (every model, every frame), `sampleVoxelLight`
 // is a handful of voxel-grid lookups, far cheaper than walking each model's
 // mesh subtree to decide visibility + a centroid. Off-screen models pay the
 // sample; the meshes themselves are still frustum-culled downstream.
 
-import { getVisualWorldMatrix } from '../../api/transforms';
-import { ModelTrait } from '../../builtins/model';
-import { TransformTrait } from '../../builtins/transform';
-import type { SceneTree } from '../../core/scene/scene-tree';
-import { query } from '../../core/scene/scene-tree';
-import { sampleVoxelLight } from '../../core/voxels/light';
-import type { Voxels } from '../../core/voxels/voxels';
+import { getVisualWorldMatrix } from '../api/transforms';
+import { ModelTrait } from '../builtins/model';
+import { TransformTrait } from '../builtins/transform';
+import type { SceneTree } from '../core/scene/scene-tree';
+import { query } from '../core/scene/scene-tree';
+import { sampleVoxelLight } from '../core/voxels/light';
+import type { Voxels } from '../core/voxels/voxels';
 
 // A ModelTrait node always carries a TransformTrait (cloneModel and the
 // animator both guarantee it), so this query binds both with no per-frame
