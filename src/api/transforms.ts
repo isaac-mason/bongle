@@ -8,6 +8,9 @@
  * use getters (getWorldPosition, getWorldQuaternion, getWorldScale,
  * getWorldMatrix) to read world-space values, they trigger lazy recompute
  * if the node or any ancestor is dirty.
+ *
+ * `worldToLocalPosition`/`worldToLocalQuaternion` are the inverse direction,
+ * expressing a world-space value in a node's local frame.
  */
 
 export {
@@ -19,7 +22,6 @@ export {
     getWorldPosition,
     getWorldQuaternion,
     getWorldScale,
-    markTransformDirty as markDirty,
     resetInterpolation,
     setInterpolation,
     setPosition,
@@ -28,4 +30,6 @@ export {
     setTransform,
     setWorldPosition,
     setWorldQuaternion,
+    worldToLocalPosition,
+    worldToLocalQuaternion,
 } from '../builtins/transform';
