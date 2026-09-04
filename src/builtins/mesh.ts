@@ -13,7 +13,7 @@ import type { MeshId } from '../core/models/handle';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
-import type { MeshVisualState } from '../render/models/mesh-visuals';
+import type { MeshVisualState } from '../render/mesh/mesh-visuals';
 
 export const MeshTrait = trait('mesh', {
     /**

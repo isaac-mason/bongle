@@ -4,10 +4,10 @@
 // a bone whose own world position clips into a solid voxel mid-animation
 // doesn't pop dark.
 //
-// Lives at `render/` rather than under `render/models/` because it belongs to no one
-// renderer: it queries `[ModelTrait, TransformTrait]` and writes a value that both
-// `mesh-visuals` and `voxels/voxel-mesh-visuals` read through their `Up(ModelTrait)`
-// term. `render/models/` is the mesh renderer plus the model-asset GPU pools.
+// Named and filed for `ModelTrait`, not for a renderer: it queries
+// `[ModelTrait, TransformTrait]` and writes a value that both `mesh/mesh-visuals` and
+// `voxels/voxel-mesh-visuals` read through their `Up(ModelTrait)` term. That is why it
+// sits at `render/` rather than inside either renderer's folder.
 //
 // Sampling is unconditional (every model, every frame), `sampleVoxelLight`
 // is a handful of voxel-grid lookups, far cheaper than walking each model's

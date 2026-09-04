@@ -34,8 +34,8 @@ import type { FrameContext, RenderDeviceCaps, Renderer } from './backend';
 import * as RenderCamera from './camera';
 import * as CloudResources from './environment/clouds/cloud-resources';
 import * as Environment from './environment/environment';
-import * as ModelResources from './models/model-resources';
-import * as MeshVisuals from './models/mesh-visuals';
+import * as MeshResources from './mesh/mesh-resources';
+import * as MeshVisuals from './mesh/mesh-visuals';
 import type { OfflineRenderer, TileTarget } from './offline';
 import * as ParticleResources from './particles/particle-resources';
 import * as ParticleVisuals from './particles/particle-visuals';
@@ -141,7 +141,7 @@ export function setInspectorVisible(state: WebGpuState, visible: boolean): void 
 export function updateFrame(state: WebGpuState, activeRoom: ClientRoom | null, ctx: FrameContext): void {
     reconcile(state, activeRoom);
     if (!state.active) return;
-    ModelResources.update(state.resources.model, ctx.resources);
+    MeshResources.update(state.resources.model, ctx.resources);
     updateActiveRoom(state, ctx);
 }
 
@@ -387,7 +387,7 @@ async function buildOfflineDeps(
     const rpc = Rpc.init({ send() {}, broadcast() {} });
 
     const cloudResources = CloudResources.init(state.environmentResources);
-    const modelResources = ModelResources.init(state.environmentResources);
+    const modelResources = MeshResources.init(state.environmentResources);
     const voxelResources = VoxelResources.init(registry.blockRegistry, state.environmentResources, budget, state.timeResources);
     const voxelMeshResources = VoxelMeshResources.init(
         voxelResources.textures.atlas,
@@ -416,7 +416,7 @@ async function buildOfflineDeps(
     const disposeDeps = (): void => {
         VoxelResources.dispose(voxelResources);
         VoxelMeshResources.dispose(voxelMeshResources);
-        ModelResources.dispose(modelResources);
+        MeshResources.dispose(modelResources);
         CloudResources.dispose(cloudResources);
     };
     return { deps, dispose: disposeDeps };
@@ -465,7 +465,7 @@ export type BackendResources = {
     extrudedSprite: ExtrudedSpriteResources.ExtrudedSpriteResources;
     particle: ParticleResources.ParticleResources;
     cloud: CloudResources.CloudResources;
-    model: ModelResources.ModelResources;
+    model: MeshResources.MeshResources;
     shadow: ShadowResources.ShadowResources;
     voxel: VoxelResources.VoxelResources;
     voxelMesh: VoxelMeshResources.VoxelMeshResources;
@@ -485,7 +485,7 @@ export function initResources(
     const extrudedSprite = ExtrudedSpriteResources.init(sprite, renderer.environmentResources);
     const particle = ParticleResources.init(sprite.atlas, renderer.environmentResources);
     const cloud = CloudResources.init(renderer.environmentResources);
-    const model = ModelResources.init(renderer.environmentResources);
+    const model = MeshResources.init(renderer.environmentResources);
     const shadow = ShadowResources.init();
     const voxel = VoxelResources.init(
         opts.blockRegistry,

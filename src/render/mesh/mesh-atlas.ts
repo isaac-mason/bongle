@@ -1,6 +1,6 @@
-// ModelAtlas, single 2D RGBA8 texture with skyline-packed regions.
+// MeshAtlas, single 2D RGBA8 texture with skyline-packed regions.
 //
-// One client-global atlas (owned by `ModelResources`). Skyline allocator caches
+// One client-global atlas (owned by `MeshResources`). Skyline allocator caches
 // free-edges; `allocate(w, h, ownerKey)` returns a region or null on
 // overflow. Caller writes pixels into `pixels` at the returned region
 // then calls `markDirty(atlas)` to flag the texture for re-upload on
@@ -21,7 +21,7 @@ import { addSkylineLevel, emptySkyline, findBestFit, type Region, type SkylineNo
 
 export type { Region, SkylineNode };
 
-export type ModelAtlas = {
+export type MeshAtlas = {
     /** square atlas; grows from 1024 toward 8192. */
     size: number;
     /** allocated regions, keyed by caller-supplied ownerKey. */
@@ -40,7 +40,7 @@ export type ModelAtlas = {
 /**
  * Construct an empty atlas. `initialSize` defaults to 1024 (1 MiB pixels).
  */
-export function create(initialSize = 1024): ModelAtlas {
+export function create(initialSize = 1024): MeshAtlas {
     const pixels = new Uint8Array(initialSize * initialSize * 4);
     const texture = new Texture(
         { data: pixels, width: initialSize, height: initialSize },
@@ -73,7 +73,7 @@ export function create(initialSize = 1024): ModelAtlas {
  * Returns `null` on overflow, caller decides whether to defrag, grow,
  * or evict.
  */
-export function allocate(atlas: ModelAtlas, w: number, h: number, ownerKey: string): Region | null {
+export function allocate(atlas: MeshAtlas, w: number, h: number, ownerKey: string): Region | null {
     const existing = atlas.regions.get(ownerKey);
     if (existing) return existing;
 
@@ -93,12 +93,12 @@ export function allocate(atlas: ModelAtlas, w: number, h: number, ownerKey: stri
  * allocators are append-only); reclaim happens via `defrag`. Pixels stay
  * in `pixels` until overwritten.
  */
-export function release(atlas: ModelAtlas, ownerKey: string): void {
+export function release(atlas: MeshAtlas, ownerKey: string): void {
     atlas.regions.delete(ownerKey);
 }
 
 /** Flag the texture for full re-upload on next render. */
-export function markDirty(atlas: ModelAtlas): void {
+export function markDirty(atlas: MeshAtlas): void {
     atlas.texture.needsUpdate = true;
 }
 
@@ -116,7 +116,7 @@ export type DefragMove = {
  * Throws if a region no longer fits after compaction (would need a grow,
  * out of scope here).
  */
-export function defrag(atlas: ModelAtlas): { moved: DefragMove[] } {
+export function defrag(atlas: MeshAtlas): { moved: DefragMove[] } {
     const old = Array.from(atlas.regions.entries()).sort(([, a], [, b]) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
     const oldPixels = new Uint8Array(atlas.pixels); // snapshot for blit source
 
@@ -128,7 +128,7 @@ export function defrag(atlas: ModelAtlas): { moved: DefragMove[] } {
     for (const [key, oldRegion] of old) {
         const fit = findBestFit(atlas.skyline, atlas.size, oldRegion.w, oldRegion.h);
         if (!fit) {
-            throw new Error(`ModelAtlas.defrag: "${key}" no longer fits after compaction`);
+            throw new Error(`MeshAtlas.defrag: "${key}" no longer fits after compaction`);
         }
         const newRegion: Region = { x: fit.x, y: fit.y, w: oldRegion.w, h: oldRegion.h };
         atlas.regions.set(key, newRegion);
@@ -145,7 +145,7 @@ export function defrag(atlas: ModelAtlas): { moved: DefragMove[] } {
 }
 
 /** Free GPU resources. After this the atlas is unusable. */
-export function dispose(atlas: ModelAtlas): void {
+export function dispose(atlas: MeshAtlas): void {
     atlas.texture.dispose();
     atlas.regions.clear();
     atlas.skyline.length = 0;

@@ -251,7 +251,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
  */
 /** (re)seed Resources.models from the unified registry's bundled models. drops
  *  old entries first so vanished payloads release their pool slots on the next
- *  ModelResources.update. lazy systems ensureModel on first reference. */
+ *  MeshResources.update. lazy systems ensureModel on first reference. */
 export function seedModels(state: EngineClient): void {
     state.resources.modelPayloads.clear();
     state.resources.models.clear();

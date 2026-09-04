@@ -21,9 +21,9 @@ import { AIR, MISSING } from '../core/voxels/block-registry';
 import { createMeshOutput } from '../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
-import * as ModelResources from '../render/models/model-resources';
-import { meshInfoIndexOf } from '../render/models/model-resources';
-import * as MeshVisuals from '../render/models/mesh-visuals';
+import * as MeshResources from '../render/mesh/mesh-resources';
+import { meshInfoIndexOf } from '../render/mesh/mesh-resources';
+import * as MeshVisuals from '../render/mesh/mesh-visuals';
 import * as Interpolation from '../render/transform/interpolation';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import { applyConfig as applyEnvConfig } from './environment';
@@ -108,7 +108,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
                 for (const id of modelIds) if (!Resources.hasModel(deps.resources, id)) return false;
                 return true;
             });
-            ModelResources.update(deps.modelResources, deps.resources);
+            MeshResources.update(deps.modelResources, deps.resources);
             await waitFor(() => {
                 for (const k of meshKeys) if (meshInfoIndexOf(deps.modelResources.meshInfo, k) === null) return false;
                 return true;
@@ -116,7 +116,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
             // wait for each model's textures to actually land in the atlas (decode
             // + blit + UV patch) before rendering, or the icon captures the
             // placeholder full-UV that `update` wrote synchronously.
-            await Promise.all([...modelIds].map((id) => ModelResources.modelTexturesReady(deps.modelResources, id)));
+            await Promise.all([...modelIds].map((id) => MeshResources.modelTexturesReady(deps.modelResources, id)));
         }
 
         // ── world transforms (via interpolation, held at alpha=1) ──

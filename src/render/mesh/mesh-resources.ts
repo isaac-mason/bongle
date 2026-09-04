@@ -1,4 +1,4 @@
-// ModelResources, client-global GPU pools backing all model rendering.
+// MeshResources, client-global GPU pools backing all model rendering.
 //
 // Owns the texture atlas, the CPU-side mesh-info catalog (firstIndex,
 // indexCount, uv, AABB per mesh), pooled vertex/index buffers, and the
@@ -73,7 +73,7 @@ import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
-import * as ModelAtlas from './model-atlas';
+import * as MeshAtlas from './mesh-atlas';
 
 // ── gpu structs ─────────────────────────────────────────────────────
 
@@ -581,8 +581,8 @@ type UploadRecord = {
     texturesReady: Promise<void>;
 };
 
-export type ModelResources = {
-    atlas: ModelAtlas.ModelAtlas;
+export type MeshResources = {
+    atlas: MeshAtlas.MeshAtlas;
     meshInfo: MeshInfoCatalog;
     geometry: ModelGeometryPool;
     /** modelId → upload record. presence = "uploaded"; drives release-on-removal. */
@@ -602,20 +602,20 @@ export type ModelResources = {
 
 const WHITE_PIXEL_KEY = '__white__';
 
-export function init(env: EnvironmentResources): ModelResources {
-    const atlas = ModelAtlas.create();
+export function init(env: EnvironmentResources): MeshResources {
+    const atlas = MeshAtlas.create();
 
     // reserve a 1×1 white pixel so untextured meshes can sample white
     // (multiplied by tint) instead of zero-init black.
-    const whiteRegion = ModelAtlas.allocate(atlas, 1, 1, WHITE_PIXEL_KEY);
-    if (!whiteRegion) throw new Error('ModelResources.init: atlas overflow on white-pixel reserve');
+    const whiteRegion = MeshAtlas.allocate(atlas, 1, 1, WHITE_PIXEL_KEY);
+    if (!whiteRegion) throw new Error('MeshResources.init: atlas overflow on white-pixel reserve');
     const stride = atlas.size * 4;
     const off = whiteRegion.y * stride + whiteRegion.x * 4;
     atlas.pixels[off + 0] = 255;
     atlas.pixels[off + 1] = 255;
     atlas.pixels[off + 2] = 255;
     atlas.pixels[off + 3] = 255;
-    ModelAtlas.markDirty(atlas);
+    MeshAtlas.markDirty(atlas);
     const whiteUv: [number, number] = [(whiteRegion.x + 0.5) / atlas.size, (whiteRegion.y + 0.5) / atlas.size];
 
     const meshInfo = createMeshCatalog();
@@ -641,7 +641,7 @@ export function init(env: EnvironmentResources): ModelResources {
  * tracked modelId whose payload has been removed from
  * `resources.modelPayloads`.
  */
-export function update(modelResources: ModelResources, resources: Resources): void {
+export function update(modelResources: MeshResources, resources: Resources): void {
     // upload newly-ready payloads
     for (const [modelId, payload] of resources.modelPayloads) {
         if (payload.state !== 'ready') continue;
@@ -663,13 +663,13 @@ export function update(modelResources: ModelResources, resources: Resources): vo
  *  if the model is untextured / not yet uploaded). One-shot offscreen renders
  *  await this after `update` so they don't capture placeholder UVs; the live
  *  loop ignores it (textures pop in within a frame or two, invisibly). */
-export function modelTexturesReady(modelResources: ModelResources, modelId: string): Promise<void> {
+export function modelTexturesReady(modelResources: MeshResources, modelId: string): Promise<void> {
     return modelResources.uploaded.get(modelId)?.texturesReady ?? Promise.resolve();
 }
 
-export function dispose(modelResources: ModelResources): void {
+export function dispose(modelResources: MeshResources): void {
     disposeMeshBatch(modelResources.batch);
-    ModelAtlas.dispose(modelResources.atlas);
+    MeshAtlas.dispose(modelResources.atlas);
     disposeGeometryPool(modelResources.geometry);
     modelResources.material.dispose();
     modelResources.uploaded.clear();
@@ -687,7 +687,7 @@ export function dispose(modelResources: ModelResources): void {
  * Untextured meshes (no `image`) are pinned to the reserved white pixel
  * so tint + lighting still apply.
  */
-function upload(resources: ModelResources, loader: ResourceLoader, modelId: string, model: Model, _payload: ModelPayload): void {
+function upload(resources: MeshResources, loader: ResourceLoader, modelId: string, model: Model, _payload: ModelPayload): void {
     const meshNames: string[] = [];
     const meshes = Array.from(model.meshesByName.values());
 
@@ -730,13 +730,13 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
         height: number,
         blit: (region: { x: number; y: number; w: number; h: number }) => void,
     ): void => {
-        const region = ModelAtlas.allocate(resources.atlas, width, height, atlasKey);
+        const region = MeshAtlas.allocate(resources.atlas, width, height, atlasKey);
         if (!region) {
-            console.warn(`[ModelResources] atlas overflow uploading "${modelId}" image`);
+            console.warn(`[MeshResources] atlas overflow uploading "${modelId}" image`);
             return;
         }
         blit(region);
-        ModelAtlas.markDirty(resources.atlas);
+        MeshAtlas.markDirty(resources.atlas);
 
         const size = resources.atlas.size;
         const uvOffset: [number, number] = [region.x / size, region.y / size];
@@ -768,7 +768,7 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
                         place(img, atlasKey, width, height, (region) => blitRgbaToAtlas(resources.atlas, region, rgba));
                     })
                     .catch((err) => {
-                        console.error(`[ModelResources] decodeImage failed for "${modelId}" image ${i}:`, err);
+                        console.error(`[MeshResources] decodeImage failed for "${modelId}" image ${i}:`, err);
                     }),
             );
         } else {
@@ -782,7 +782,7 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
                         bitmap.close();
                     })
                     .catch((err) => {
-                        console.error(`[ModelResources] image decode failed for "${modelId}" image ${i}:`, err);
+                        console.error(`[MeshResources] image decode failed for "${modelId}" image ${i}:`, err);
                     }),
             );
         }
@@ -795,7 +795,7 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
     });
 }
 
-function release(resources: ModelResources, modelId: string): void {
+function release(resources: MeshResources, modelId: string): void {
     const record = resources.uploaded.get(modelId);
     if (!record) return;
     for (const meshName of record.meshNames) {
@@ -804,7 +804,7 @@ function release(resources: ModelResources, modelId: string): void {
         releaseMeshInfo(resources.meshInfo, meshKey);
     }
     for (let i = 0; i < record.imageCount; i++) {
-        ModelAtlas.release(resources.atlas, `${modelId}/img/${i}`);
+        MeshAtlas.release(resources.atlas, `${modelId}/img/${i}`);
     }
     resources.uploaded.delete(modelId);
 }
@@ -815,7 +815,7 @@ function release(resources: ModelResources, modelId: string): void {
  * Uint8Array path in the web platform.
  */
 function blitBitmapToAtlas(
-    atlas: ModelAtlas.ModelAtlas,
+    atlas: MeshAtlas.MeshAtlas,
     region: { x: number; y: number; w: number; h: number },
     bitmap: ImageBitmap,
 ): void {
@@ -838,7 +838,7 @@ function blitBitmapToAtlas(
  * the injected decoder already returns raw bytes, so no canvas readback.
  */
 function blitRgbaToAtlas(
-    atlas: ModelAtlas.ModelAtlas,
+    atlas: MeshAtlas.MeshAtlas,
     region: { x: number; y: number; w: number; h: number },
     data: Uint8Array,
 ): void {
@@ -860,7 +860,7 @@ function blitRgbaToAtlas(
 // `vertex` and the index pool as the geometry index. Env is the shared uniform;
 // the atlas texture is engine-global, so both are bound by value here.
 
-function createModelMaterial(atlas: ModelAtlas.ModelAtlas, env: EnvironmentResources): Material {
+function createModelMaterial(atlas: MeshAtlas.MeshAtlas, env: EnvironmentResources): Material {
     // HW vertex fetch from the interleaved pool, posU.xyz = pos,
     // posU.w = u; normalV.xyz = normal, normalV.w = v. Stride 32B.
     // Both attributes share the same vertex buffer; gpucat groups

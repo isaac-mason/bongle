@@ -101,7 +101,7 @@ export type ModelPayload = {
      *  via Resources.modelClipChannels(s, clip). */
     clips: Map<string, ClipChannels>;
     /** parsed runtime model, populated when state becomes 'ready'.
-     *  Consumers (ModelResources on the client) null this after consuming
+     *  Consumers (MeshResources on the client) null this after consuming
      *  to free memory. Server has no consumer; the field remains until
      *  release. Same shape regardless of source format (.bin or .glb). */
     model: Model | null;
@@ -329,7 +329,7 @@ export function ensureModel(resources: Resources, modelId: string): void {
 
 /**
  * hydrate parsed model into the payload + sidecar clip refs. Side-agnostic:
- * stashes the model on the payload for downstream consumers (ModelResources
+ * stashes the model on the payload for downstream consumers (MeshResources
  * on client polls + nulls it). Server has no consumer.
  *
  * For runtime (`.glb`) models, also populates the empty `ModelHandle`
@@ -395,7 +395,7 @@ function _settleWaiter(resources: Resources, modelId: string): void {
 
 /**
  * release a payload. drops CPU geometry + bin. Client-side gpu pools
- * (ModelResources) detect the removal on next update tick and free their
+ * (MeshResources) detect the removal on next update tick and free their
  * own state.
  */
 export function releaseModel(resources: Resources, modelId: string): void {

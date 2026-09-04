@@ -15,7 +15,7 @@
 //   - `chunkInfoTable[bucketId]` carries the source-chunk's `subOrigin` and
 //     `quadStart`.
 //   - `instanceData[realSlot]` carries the world matrix + InstanceParams
-//     (merged into one binding, same shape as model-resources).
+//     (merged into one binding, same shape as mesh-resources).
 //
 // CPU frustum cull: voxel-mesh-visuals reads each instance's own
 // `cull.visible` (written by the room culler). per-corner
@@ -91,7 +91,7 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
 });
 
 // Per-slot stable instance record. Merges world matrix + InstanceParams
-// into one binding, same shape as model-resources.ModelInstance. Layout:
+// into one binding, same shape as mesh-resources.ModelInstance. Layout:
 // mat4x4f (64B, align 16) then InstanceParams (64B, align 16, no pad)
 // → 128B per slot, struct align 16.
 export const ModelInstance = struct('VoxelMeshModelInstance', {

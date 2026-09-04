@@ -1,13 +1,14 @@
 // mesh visuals, per-room HW-instanced rendering for MeshTrait instances.
 //
 // Renders MeshTrait, one instance per (MeshTrait, TransformTrait), grouped for
-// lighting and inherited visibility by an optional `Up(ModelTrait)` ancestor. The
-// model-shaped names next door are the asset side: `ModelResources` and `ModelAtlas`
-// are the GPU pools for loaded model assets, which this renderer draws from.
+// lighting and inherited visibility by an optional `Up(ModelTrait)` ancestor.
+// `MeshResources` and `MeshAtlas` alongside are the client-global GPU pools it
+// draws from. "model" survives here only where it means the loaded asset a mesh
+// comes from (`modelId`, `core/models`) or the `ModelTrait` grouping node.
 //
 // architecture:
 //   - shared geometry / atlas / meshInfo / material owned by client-global
-//     ModelResources. The pool's interleaved vertex buffer binds as a real
+//     MeshResources. The pool's interleaved vertex buffer binds as a real
 //     vertex buffer named `vertex`; the index pool binds as the geometry
 //     index. HW vertex fetch + HW indexing.
 //   - per-room: stable per-slot `instanceData` ({worldMatrix, params},
@@ -51,17 +52,17 @@ import {
     MODEL_INSTANCE_PARAMS_OFFSET_F32,
     MODEL_INSTANCE_STRIDE_F32,
     type MeshBatch,
-    type ModelResources,
+    type MeshResources,
     meshInfoIndexOf,
     resetMeshBatch,
-} from './model-resources';
+} from './mesh-resources';
 
 type MeshQuery = ReturnType<
     typeof query<[typeof MeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
 >;
 
 // InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
-// model-resources.ts, must stay in sync, no compiler will catch drift):
+// mesh-resources.ts, must stay in sync, no compiler will catch drift):
 //   [ 0..3 ]  tint     vec4f  (rgb = target, a = intensity)
 //   [ 4..7 ]  flash    vec4f  (rgb = colour, a = strength)
 //   [ 8..11]  light    vec4f
@@ -159,7 +160,7 @@ export type MeshVisuals = {
  * Create per-room model visuals: ready the client-global instance batch for a
  * fresh set of instances (reset its allocator + scratch + draws, buffers
  * untouched) and mount its Mesh into this room's scene. The batch itself — Mesh,
- * Geometry, per-slot buffers — is owned by `ModelResources` and survives room
+ * Geometry, per-slot buffers — is owned by `MeshResources` and survives room
  * swaps; only this room's use of it (alive-states, cull entries, scene-tree
  * query) lives here.
  */
@@ -180,7 +181,7 @@ export function init(batch: MeshBatch, scene: Scene, sceneTree: SceneTree): Mesh
 export function update(
     visuals: MeshVisuals,
     batch: MeshBatch,
-    modelResources: ModelResources,
+    modelResources: MeshResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
     voxels: Voxels,
@@ -197,7 +198,7 @@ export function update(
 function refreshStates(
     visuals: MeshVisuals,
     batch: MeshBatch,
-    modelResources: ModelResources,
+    modelResources: MeshResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
     frameId: number,
@@ -293,7 +294,7 @@ function destroyStaleStates(visuals: MeshVisuals, batch: MeshBatch, visibility: 
 function writeInstances(
     visuals: MeshVisuals,
     batch: MeshBatch,
-    modelResources: ModelResources,
+    modelResources: MeshResources,
     voxels: Voxels,
     frameId: number,
 ): boolean {
@@ -462,7 +463,7 @@ function writeInstances(
 
 /** phase 4: walk the buckets phase 3 filled, writing slots contiguously into slotMap and
  *  emitting one MeshDraw per non-empty bucket. */
-function packDraws(batch: MeshBatch, modelResources: ModelResources, instanceDataDirty: boolean): void {
+function packDraws(batch: MeshBatch, modelResources: MeshResources, instanceDataDirty: boolean): void {
     const meshInfoEntries = modelResources.meshInfo.entries;
     const buckets = batch._bucketScratch;
     const freeBuckets = batch._freeBuckets;

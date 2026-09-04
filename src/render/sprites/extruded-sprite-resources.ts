@@ -366,7 +366,7 @@ function growIndex(pool: GeometryPool, newCapacity: number): void {
 }
 
 // ── instance batch (client-global, persistent GPU allocation) ───────
-// Mirrors `MeshBatch` (see model-resources.ts): the per-slot instance buffer +
+// Mirrors `MeshBatch` (see mesh-resources.ts): the per-slot instance buffer +
 // slotMap + draw list + their Mesh/Geometry live here, NOT on per-room visuals.
 // One room renders at a time, so a room swap REUSES this allocation (reset counts
 // + re-add the Mesh) instead of freeing + reallocating it. Per-room

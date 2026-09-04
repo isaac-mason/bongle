@@ -16,7 +16,7 @@
 // world. For a per-phase breakdown use `profile-rig-world.ts`, which samples it.
 //
 // Stops short of the GPU instance-buffer writes: `ModelVisuals.update` needs a ModelBatch,
-// ModelResources, Resources, Visibility and Voxels, which is the reason no bench for this
+// MeshResources, Resources, Visibility and Voxels, which is the reason no bench for this
 // existed. Everything upstream of that write is here and is real.
 //
 // Rig shape is the engine's canonical 6-bone parenting (see character.ts):

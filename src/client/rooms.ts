@@ -28,8 +28,8 @@ import * as RenderCamera from '../render/camera';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
 import * as ModelLighting from '../render/model-lighting';
-import type * as ModelResourcesNs from '../render/models/model-resources';
-import * as MeshVisuals from '../render/models/mesh-visuals';
+import type * as MeshResourcesNs from '../render/mesh/mesh-resources';
+import * as MeshVisuals from '../render/mesh/mesh-visuals';
 import type { OfflineRenderer } from '../render/offline';
 import * as Particles from '../render/particles/particles';
 import * as Visibility from '../render/visibility/visibility';
@@ -300,7 +300,7 @@ export type RenderRoomDeps = {
      *  surface (textures / arenas); each backend narrows in renderToTarget. */
     voxelResources: VoxelResourcesNs.VoxelResources | VoxelResourcesCpuNs.VoxelResources;
     voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
-    modelResources: ModelResourcesNs.ModelResources;
+    modelResources: MeshResourcesNs.MeshResources;
     cloudResources: CloudResourcesNs.CloudResources;
 };
 
