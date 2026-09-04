@@ -106,8 +106,8 @@ export function snapshot(sceneTree: SceneTree): void {
  *
  * iterates `interpolating` (populated by `setInterpolation`). writes into
  * `interpolatedWorld*` fields, the rendering chain that descendants
- * compose against. each written node then sweeps its descendants, composing
- * them top-down against the freshly-written ancestor.
+ * compose against. Roots only: `concatenate()` walks the subtrees, and runs at the
+ * far end of the frame once every writer of a bone local has had its turn.
  *
  * `delta` is the real render-frame delta (seconds), the timestep the remote
  * chase-latest translator eases over.
@@ -137,7 +137,26 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
         } else {
             sampleRemotePose(transform, delta);
         }
+    }
+}
 
+/**
+ * concatenate each interp root's subtree, composing every descendant's visual matrix
+ * against the root pose `interpolate()` wrote.
+ *
+ * Split from `interpolate()` because the two belong at opposite ends of the frame.
+ * Root poses are wanted early: frame scripts read them (character head-look reads the
+ * rig root's visual quaternion). Descendant poses are wanted late, because three later
+ * phases rewrite bone locals - frame scripts, the animator, and post-animate hooks - and
+ * anything composed before them is recomposed after them.
+ *
+ * Mirrors godot's two `SceneTreeFTI::frame_update` passes (`scene/main/scene_tree.cpp`):
+ * one at the top of `SceneTree::process`, one at the end just before
+ * `RenderingServer::pre_draw`. Ours is the second, and must run after the last writer
+ * and before the first reader of a descendant's visual transform.
+ */
+export function concatenate(sceneTree: SceneTree): void {
+    for (const transform of sceneTree.interpolating) {
         if (transform._children.length > 0) sweepInterpolatedDescendants(transform);
     }
 }

@@ -41,7 +41,7 @@ import {
     reparent,
     serializeNode,
 } from '../../../../src/core/scene/scene-tree';
-import { interpolate, snapshot } from '../../../../src/render/transform/interpolation';
+import { concatenate, interpolate, snapshot } from '../../../../src/render/transform/interpolation';
 
 /* ── helpers ── */
 
@@ -1304,6 +1304,7 @@ describe('interpolate', () => {
         pt.position[0] = 10;
         markTransformDirty(pt);
         interpolate(sceneTree, 1, 0.5, 1);
+        concatenate(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(ct), vec3.fromValues(6, 0, 0));
@@ -1388,7 +1389,7 @@ describe('interpolate', () => {
         expect(t._interpolated).toBe(1);
     });
 
-    it('descendants of interpolated node get _interpolated set by descendant-mark walk', () => {
+    it('descendants of interpolated node get _interpolated set by the concatenate pass', () => {
         const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
@@ -1409,8 +1410,11 @@ describe('interpolate', () => {
         expect(ct._interpolated).toBe(0);
         expect(gct._interpolated).toBe(0);
 
+        // interpolate() writes root poses only; descendants join on concatenate()
         interpolate(sceneTree, 1, 0.5, 0);
+        expect(ct._interpolated).toBe(0);
 
+        concatenate(sceneTree);
         expect(ct._interpolated).toBe(1);
         expect(gct._interpolated).toBe(1);
     });

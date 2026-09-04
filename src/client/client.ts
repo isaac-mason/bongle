@@ -597,17 +597,11 @@ export function update(state: EngineClient, delta: number) {
         const povCamera = Rooms.resolveRoomCamera(state.renderer.camera, room);
         if (!povCamera) continue;
 
-        // frustum cull writes cull.visible, read by animation, model lighting, and the
-        // renderers. same view radius as the chunk mesher so rigs fade with their chunks.
-        Debug.begin(room.clientMetrics, 'visibility');
-        Visibility.update(room.visibility, povCamera, settings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
-        Debug.end(room.clientMetrics, 'visibility');
-
-        Debug.begin(room.clientMetrics, 'modelLighting');
-        ModelLighting.update(room.modelLighting, room.voxels);
-        Debug.end(room.clientMetrics, 'modelLighting');
-
-        // sample animations at render rate; gated per-rig on the fresh visibility above.
+        // sample animations at render rate; gated per-rig on `cull.visible`, which still
+        // holds last frame's result here because `Visibility.update` clears and rewrites
+        // it below. One frame of latency on the gate, on a hysteresis-fattened AABB, and
+        // the animator forces a sample on its own false->true edge so a rig entering view
+        // never renders a stale pose.
         Debug.begin(room.clientMetrics, 'animation');
         Animation.tick(room.animations, state.resources, delta);
         Debug.end(room.clientMetrics, 'animation');
@@ -616,6 +610,24 @@ export function update(state: EngineClient, delta: number) {
         Debug.begin(room.clientMetrics, 'on-post-animate');
         SceneTree.runOnPostAnimate(room.scene, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
+
+        // last writer of a bone local has now had its turn, so concatenate each interp
+        // root's subtree once. Everything below this line reads visual transforms; nothing
+        // below it writes a local. Godot's second `SceneTreeFTI::frame_update`, in the same
+        // slot: after process, before the renderer is handed transforms.
+        Debug.begin(room.clientMetrics, 'concatenate');
+        Interpolation.concatenate(room.scene);
+        Debug.end(room.clientMetrics, 'concatenate');
+
+        // frustum cull writes cull.visible, read by the renderers and by next frame's
+        // animation gate. same view radius as the chunk mesher so rigs fade with chunks.
+        Debug.begin(room.clientMetrics, 'visibility');
+        Visibility.update(room.visibility, povCamera, settings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
+        Debug.end(room.clientMetrics, 'visibility');
+
+        Debug.begin(room.clientMetrics, 'modelLighting');
+        ModelLighting.update(room.modelLighting, room.voxels);
+        Debug.end(room.clientMetrics, 'modelLighting');
 
         Debug.begin(room.clientMetrics, 'audio');
         Audio.updateForFrame(room.audio, room);
