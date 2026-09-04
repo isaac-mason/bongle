@@ -30,6 +30,16 @@ import { type TraitType, trait } from '../core/scene/traits';
 
 export const ModelTrait = trait('model', {
     /**
+     * Visibility for every mesh under this model, the inherited half of the pair whose local
+     * half is `MeshTrait.visible`. A renderer skips a mesh when either is false, so hiding a
+     * character is one write here rather than a walk that stomps each mesh's own flag (and
+     * forgets what it was). Mirrors Godot's `Node3D.visible` / `is_visible_in_tree()` split,
+     * except the ancestor is already resolved into the render query's tuple, so nothing has
+     * to walk.
+     */
+    visible: true,
+
+    /**
      * Voxel light contribution [sky, r, g, b] sampled by `ModelLighting.update`
      * once per frame at the model's sample point (origin + `lightOffset`).
      * Meshes under this ModelTrait read this directly instead of sampling

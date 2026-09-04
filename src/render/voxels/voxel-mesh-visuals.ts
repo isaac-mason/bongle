@@ -214,7 +214,8 @@ export function update(
         const entry = state.modelEntry;
         if (entry === null) continue;
 
-        const visible = state.cull.visible && state.trait.visible;
+        // `state.model` is Optional: a mesh under no ModelTrait has no inherited visibility.
+        const visible = state.cull.visible && state.trait.visible && (state.model === null || state.model.visible);
         if (!visible) continue;
 
         const trait = state.trait;

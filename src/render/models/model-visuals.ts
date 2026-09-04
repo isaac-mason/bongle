@@ -293,7 +293,9 @@ export function update(
         const state = aliveStates[i]!;
         const model = state.model;
 
+        // `model` is Optional: a mesh under no ModelTrait has no inherited visibility.
         if (!state.cull.visible || !state.trait.visible) continue;
+        if (model !== null && !model.visible) continue;
 
         const meshTrait = state.trait;
         const transformTrait = state.transform;

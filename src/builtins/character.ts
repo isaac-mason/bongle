@@ -88,10 +88,6 @@ type CharacterState = {
      *  freshly added meshes carry the trait default rather than the applied value. */
     appliedDither: number | null;
 
-    /** last visibility applied via setCharacterSubtreeVisible, same contract as
-     *  `appliedDither`. Without it the rig was walked unconditionally every frame for every
-     *  character, to write a value that had almost always not changed. */
-    appliedVisible: boolean | null;
     /** extra screen-door dither a game script can drive (e.g. fading out a
      *  dead body). `max()`'d with the proximity + loading dither in the
      *  presentation step, so the engine stays the single writer of mesh
@@ -311,7 +307,6 @@ export const CharacterTrait = trait(
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: null,
-            appliedVisible: null,
             externalDither: 0,
             modelNodes: new Set(),
         }),
@@ -477,10 +472,12 @@ script(
                     }
                     finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
                 }
-                if (t.state.appliedVisible !== visible) {
-                    setCharacterSubtreeVisible(node, visible);
-                    t.state.appliedVisible = visible;
-                }
+                // inherited visibility: one write on the rig root, which every mesh under it
+                // reads through the renderer's already-resolved `Up(ModelTrait)`. Leaves each
+                // mesh's own `visible` alone, so a script hiding one mesh survives a
+                // first-person toggle.
+                const characterModel = getTrait(node, ModelTrait);
+                if (characterModel) characterModel.visible = visible;
                 if (t.state.appliedDither !== finalDither) {
                     setCharacterSubtreeDither(node, finalDither);
                     t.state.appliedDither = finalDither;
@@ -915,13 +912,13 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     const model = getTrait(playerNode, ModelTrait) ?? addTrait(playerNode, ModelTrait);
     vec3.set(model.lightOffset, 0, LIGHT_SAMPLE_HEIGHT, 0);
 
-    // the meshes just added carry the MeshTrait defaults, not whatever dither/visibility
-    // this character currently resolves to. Drop both caches so the next presentation pass
-    // re-walks and brings them in line.
+    // the meshes just added carry the MeshTrait dither default, not whatever this character
+    // currently resolves to. Drop the cache so the next presentation pass re-walks and
+    // brings them in line. Visibility needs no equivalent: it is inherited from the model
+    // root, so a new mesh picks up the current value with nothing to re-apply.
     const character = getTrait(playerNode, CharacterTrait);
     if (character) {
         character.state.appliedDither = null;
-        character.state.appliedVisible = null;
     }
 }
 
@@ -1159,18 +1156,6 @@ function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, p
             lifetime: 0.4 + Math.random() * 0.2,
             size: 0.05 + Math.random() * 0.1,
         });
-    }
-}
-
-/** Walk the playerNode subtree and toggle `.visible` on every MeshTrait.
- *  Avatars render as meshes only (sprites / voxel-meshes never appear
- *  under a rig), so MeshTrait alone covers the visual surface.
- *  Idempotent, safe to call every frame. */
-function setCharacterSubtreeVisible(root: Node, visible: boolean): void {
-    const mesh = getTrait(root, MeshTrait);
-    if (mesh) mesh.visible = visible;
-    for (const child of root.children) {
-        setCharacterSubtreeVisible(child, visible);
     }
 }
 
