@@ -1515,16 +1515,14 @@ export function deserializeNode(data: SerializedNode): Node {
     // detached, so this only records the config; the anchor is reconciled once it attaches.
     if (data.prefab) setPrefab(node, structuredClone(data.prefab));
 
-    for (const st of data.traits) {
-        // cloned either way: the caller keeps `data`, and neither an instance nor the
-        // unresolved round-trip copy may alias it.
-        const controls = st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined;
+    for (const traitData of data.traits) {
+        const controls = traitData.controls ? cloneTraitValue(traitData.controls) : undefined;
 
-        const def = registry.traits.byId.get(st.id);
+        const def = registry.traits.byId.get(traitData.id);
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${st.id}" on ${label} — preserving raw data`);
+            console.warn(`[bongle] unresolved trait "${traitData.id}" on ${label} — preserving raw data`);
             if (node.unresolved === null) node.unresolved = new Map();
-            node.unresolved.set(st.id, controls);
+            node.unresolved.set(traitData.id, controls);
             continue;
         }
 
@@ -1695,11 +1693,11 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
                 if (root.unresolved === null) root.unresolved = new Map();
                 // cloned like the `deserializeNode` path: the caller keeps `rootData`, and the
                 // round-trip copy must not alias it.
-                root.unresolved.set(st.id, st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined);
+                root.unresolved.set(st.id, st.controls ? cloneTraitValue(st.controls) : undefined);
                 continue;
             }
 
-            const controls = st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined;
+            const controls = st.controls ? cloneTraitValue(st.controls) : undefined;
             const instance = buildTraitInstance(def, controls);
             instance._node = root;
             root.traits[def.slot] = instance;

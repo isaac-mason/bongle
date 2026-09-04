@@ -456,22 +456,29 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
 
 /**
  * Deep-copy a trait value. Walks plain arrays and objects directly and slices typed arrays,
- * falling back to `structuredClone` only for anything else (class instances, Map, Set,
- * Date). Hand-rolled rather than `structuredClone` throughout because this runs per field
- * per instance on the trait-construction path.
+ * falling back to `structuredClone` for anything else. Hand-rolled rather than
+ * `structuredClone` throughout because it runs per field per instance; note that
+ * `compileConstructor` already inlines the common defaults (vec3, quat, mat4) as array
+ * literals, so on the construction path this only sees the shapes it could not inline.
+ *
+ * The return is typed as the input. That holds for every shape a prop schema can describe,
+ * and for Map/Set/Date via `structuredClone`. It does NOT hold for a class instance in a
+ * trait body literal: `structuredClone` copies own properties and drops the prototype. Use a
+ * factory (`() => new Thing()`) for those, which is the right thing anyway since a body
+ * literal would otherwise be cloned per instance.
  */
-export function cloneTraitValue(value: object): unknown {
+export function cloneTraitValue<T extends object>(value: T): T {
     if (Array.isArray(value)) {
         const length = value.length;
         const out = new Array(length);
         for (let i = 0; i < length; i++) {
-            const item = value[i];
-            out[i] = item !== null && typeof item === 'object' ? cloneTraitValue(item) : item;
+            const item = (value as unknown[])[i];
+            out[i] = item !== null && typeof item === 'object' ? cloneTraitValue(item as object) : item;
         }
-        return out;
+        return out as T;
     }
     if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
-        return (value as Uint8Array).slice();
+        return (value as unknown as Uint8Array).slice() as unknown as T;
     }
     const proto = Object.getPrototypeOf(value);
     if (proto === Object.prototype || proto === null) {
@@ -479,9 +486,9 @@ export function cloneTraitValue(value: object): unknown {
         const out: Record<string, unknown> = {};
         for (const key of Object.keys(source)) {
             const item = source[key];
-            out[key] = item !== null && typeof item === 'object' ? cloneTraitValue(item) : item;
+            out[key] = item !== null && typeof item === 'object' ? cloneTraitValue(item as object) : item;
         }
-        return out;
+        return out as T;
     }
     return structuredClone(value);
 }
