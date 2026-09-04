@@ -283,7 +283,7 @@ describe('Up / Ancestor — query identity', () => {
     });
 
     const termCount = (sceneTree: ReturnType<typeof createSceneTree>) =>
-        sceneTree._queryResolutionGroups.reduce((n: number, group) => n + group.length, 0);
+        sceneTree.queries.traversals.reduce((n: number, group) => n + group.length, 0);
 
     it('only traversal terms register a query resolution', () => {
         const sceneTree = createSceneTree();
@@ -304,12 +304,12 @@ describe('Up / Ancestor — query identity', () => {
         // two distinct queries, same traversal target: one bucket, two terms.
         query(sceneTree, [Mesh, Optional(Up(Group))]);
         query(sceneTree, [Other, Optional(Up(Group))]);
-        expect(sceneTree._queryResolutionGroups.length, 'one bucket for one target').toBe(1);
+        expect(sceneTree.queries.traversals.length, 'one bucket for one target').toBe(1);
         expect(termCount(sceneTree)).toBe(2);
 
         // a different target opens a second bucket.
         query(sceneTree, [Mesh, Optional(Up(Other))]);
-        expect(sceneTree._queryResolutionGroups.length).toBe(2);
+        expect(sceneTree.queries.traversals.length).toBe(2);
         expect(termCount(sceneTree)).toBe(3);
     });
 });
