@@ -123,6 +123,9 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         Interpolation.snapshot(room.scene);
         computeWorldTransforms(room.scene);
         Interpolation.interpolate(room.scene, RENDER_ROOM_PLAYER_ID, 1.0, 0);
+        // roots only above; this composes the subtrees the mesh renderer reads. Nothing
+        // writes a bone local in between here, so both passes sit together.
+        Interpolation.concatenate(room.scene);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
         const meshOutput = createMeshOutput();

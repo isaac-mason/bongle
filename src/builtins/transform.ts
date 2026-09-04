@@ -950,7 +950,8 @@ export function updateInterpolatedWorldTransform(transform: TransformTrait): voi
 /**
  * compose the interpolated world matrix for every descendant of an interp root, top-down.
  *
- * called by `interpolate()` once it has written the root's own visual pose, so every
+ * called by `concatenate()` once `interpolate()` has written the root's own visual pose,
+ * and once every writer of a descendant local has run, so every
  * parent is composed before its children and no node ever walks up to find a fresh
  * ancestor. `composeInterpolatedWorldMatrix` clears INTERPOLATED_MATRIX and defers
  * INTERPOLATED_TRS, so the getters read straight out of the cache; the visual TRS still

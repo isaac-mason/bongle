@@ -27,7 +27,7 @@ import {
 } from '../src/builtins/transform';
 import { Optional, Up } from '../src/core/scene/conditions';
 import { addChild, addTrait, createNode, createSceneTree, type Node, query } from '../src/core/scene/scene-tree';
-import { interpolate, snapshot } from '../src/render/transform/interpolation';
+import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
 
 const MAX = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
@@ -101,6 +101,7 @@ for (const count of [125, 250, 500, MAX].filter((n, i, a) => n <= MAX && a.index
     const interp = () => {
         snapshot(sceneTree);
         interpolate(sceneTree, 'nobody' as any, 0.5, 1 / 60);
+        concatenate(sceneTree);
     };
     // ModelLighting.update's per-model work, minus sampleVoxelLight (needs a Voxels)
     let lightAcc = 0;

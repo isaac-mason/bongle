@@ -18,7 +18,7 @@ import { ModelTrait } from '../src/builtins/model';
 import { getWorldMatrix, setInterpolation, setPosition, TransformTrait } from '../src/builtins/transform';
 import { getVisualWorldMatrix } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
-import { interpolate, snapshot } from '../src/render/transform/interpolation';
+import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
 
 const MAX = Number(process.argv[2] ?? 1024);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
@@ -78,6 +78,7 @@ for (const rigCount of [64, 128, 256, 512, MAX].filter((n, i, a) => n <= MAX && 
         for (let i = 0; i < rigs.length; i++) setPosition(rigs[i]!.root, [i * 0.01, tick * 0.001, 0]);
         snapshot(sceneTree);
         interpolate(sceneTree, 'nobody' as any, 0.5, 1 / 60);
+        concatenate(sceneTree);
         for (let i = 0; i < rigs.length; i++) {
             const bones = rigs[i]!.bones;
             for (let b = 0; b < bones.length; b++) getVisualWorldMatrix(bones[b]);
