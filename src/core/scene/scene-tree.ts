@@ -191,25 +191,25 @@ export type NodeSyncState = {
 export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
     if (env.client || node._dirtyIn === sceneTree) return;
     node._dirtyIn = sceneTree;
-    sceneTree.dirtyNodes.push(node);
+    sceneTree.replication.dirty.push(node);
 }
 
 /** drop everything filed this tick. Pairs with `markNodeDirty`; nothing else clears the marks. */
 export function clearDirtyNodes(sceneTree: SceneTree): void {
-    const dirty = sceneTree.dirtyNodes;
+    const dirty = sceneTree.replication.dirty;
     for (let i = 0; i < dirty.length; i++) dirty[i]!._dirtyIn = null;
     dirty.length = 0;
 }
 
 /** bump a node's structural version */
 export function bumpNodeVersion(sceneTree: SceneTree, node: Node): void {
-    node._sync.version = ++sceneTree._versionCounter;
+    node._sync.version = ++sceneTree.replication.versionCounter;
     markNodeDirty(sceneTree, node);
 }
 
 /** bump a specific trait's version on a node (+ the node version). */
 export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: number): void {
-    const v = ++sceneTree._versionCounter;
+    const v = ++sceneTree.replication.versionCounter;
     const inst = node._traits[traitSlot];
     if (inst?._sync) inst._sync.traitVersion = v;
     node._sync.version = v;
@@ -219,7 +219,7 @@ export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: nu
 /** bump a single field's version (+ the trait + node versions). takes the
  *  instance + slice index directly, the diff already has both in hand. */
 export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: TraitBase, i: number): void {
-    const v = ++sceneTree._versionCounter;
+    const v = ++sceneTree.replication.versionCounter;
     if (instance._sync) {
         instance._sync.versions[i] = v;
         instance._sync.traitVersion = v;
@@ -237,26 +237,31 @@ export type SceneTree = {
     /** all nodes in this scene tree (including root) */
     nodes: Set<Node>;
 
-    /** monotonically incrementing counter for runtime node IDs (server / shared) */
-    _nextNodeId: number;
-
-    /** monotonically decrementing counter for client-only node IDs (negative) */
-    _nextClientNodeId: number;
-
-    /** node ID → node */
-    _idToNode: Map<number, Node>;
+    /**
+     * @internal node identity: the id space and the reverse lookup. Server ids count up
+     * from 1, client-created ones down from -1, so the two never collide on the wire.
+     */
+    _ids: {
+        byId: Map<number, Node>;
+        nextServer: number;
+        nextClient: number;
+    };
 
     /**
-     * playerId → live nodes whose `owner === playerId`. maintained by
-     * `setOwner` plus the detach paths (`destroyNode` / `unregisterSubtree`).
-     * lets the client's per-tick owner-sync replication walk only the local
-     * player's nodes instead of every node in the graph. server uses the
-     * same bookkeeping so the invariant is unconditional.
+     * @internal what the server fan-out needs. `dirty` is a marked list rather than a Set:
+     * `Node._dirtyIn` dedups, so enrolling is a flag check plus a push, and the drain
+     * clears both. `owners` backs authority checks.
      */
-    playerIdToOwnedNodes: Map<PlayerId, Set<Node>>;
+    replication: {
+        dirty: Node[];
+        versionCounter: number;
+        owners: Map<PlayerId, Set<Node>>;
+    };
 
-    /** @internal monotonic source for node and trait sync versions. */
-    _versionCounter: number;
+
+
+
+
 
 
 
@@ -322,17 +327,6 @@ export type SceneTree = {
         changes: RootRegionChange[];
     };
 
-    /**
-     * @internal server-side discovery driver. nodes touched this tick (created,
-     * structural change, trait add/remove, field change, or destroyed), the set
-     * the per-client scene-sync fan-out iterates instead of walking the whole tree.
-     * a destroyed node is parked here too; the fan-out recognises it by
-     * `node.scene === null` and emits `node_destroyed`. populated by the
-     * `bump*Version` helpers + `registerSubtree` + `destroyNode` (gated on
-     * `!env.client`, so it stays empty in the client bundle), drained + cleared each
-     * tick by `Discovery.flush`.
-     */
-    dirtyNodes: Node[];
 
 
 
@@ -348,6 +342,8 @@ export function createSceneTree(): SceneTree {
     const sceneTree: SceneTree = {
         root: null!,
         nodes: new Set(),
+        _ids: { byId: new Map(), nextServer: 1, nextClient: -1 },
+        replication: { dirty: [], versionCounter: 0, owners: new Map() },
         queries: {
             hashToQuery: new Map(),
             traitToQuery: [],
@@ -358,25 +354,19 @@ export function createSceneTree(): SceneTree {
             flushingEvents: false,
         },
 
-        _nextNodeId: 1,
-        _nextClientNodeId: -1,
-        _idToNode: new Map(),
-        playerIdToOwnedNodes: new Map(),
-        _versionCounter: 0,
         prefabs: { nodes: new Set(), dirty: new Set() },
         _interpolating: new Set(),
         regions: { toRoots: new Map(), ofRoot: new Map(), changes: [] },
-        dirtyNodes: [],
         context: undefined,
     };
 
     // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
-    root.id = sceneTree._nextNodeId++;
+    root.id = sceneTree._ids.nextServer++;
     root.scene = sceneTree;
     sceneTree.nodes.add(root);
-    sceneTree._idToNode.set(root.id, root);
+    sceneTree._ids.byId.set(root.id, root);
     sceneTree.root = root;
 
     return sceneTree;
@@ -417,11 +407,11 @@ export function createNode(options?: CreateNodeOptions): Node {
  * look up a node by its runtime ID. returns undefined if not found.
  */
 export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
-    return sceneTree._idToNode.get(id);
+    return sceneTree._ids.byId.get(id);
 }
 
 /**
- * set a node's owner, keeping `sceneTree.playerIdToOwnedNodes` in sync. all owner
+ * set a node's owner, keeping `sceneTree.replication.owners` in sync. all owner
  * writes outside tests should route through here, the index drives the
  * client's per-tick owner-sync replication loop, so silent direct assignment
  * to `node.owner` will desync that walk.
@@ -430,18 +420,18 @@ export function setOwner(sceneTree: SceneTree, node: Node, owner: PlayerId | nul
     const prev = node.owner;
     if (prev === owner) return;
     if (prev !== null) {
-        const prevSet = sceneTree.playerIdToOwnedNodes.get(prev);
+        const prevSet = sceneTree.replication.owners.get(prev);
         if (prevSet) {
             prevSet.delete(node);
-            if (prevSet.size === 0) sceneTree.playerIdToOwnedNodes.delete(prev);
+            if (prevSet.size === 0) sceneTree.replication.owners.delete(prev);
         }
     }
     node.owner = owner;
     if (owner !== null) {
-        let set = sceneTree.playerIdToOwnedNodes.get(owner);
+        let set = sceneTree.replication.owners.get(owner);
         if (!set) {
             set = new Set();
-            sceneTree.playerIdToOwnedNodes.set(owner, set);
+            sceneTree.replication.owners.set(owner, set);
         }
         set.add(node);
     }
@@ -561,8 +551,8 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
     sceneTree.regions.changes.length = 0;
     // length re-read each step: a node filed during the pass is still picked up, matching
     // what iterating the set used to do.
-    for (let i = 0; i < sceneTree.dirtyNodes.length; i++) {
-        const node = sceneTree.dirtyNodes[i]!;
+    for (let i = 0; i < sceneTree.replication.dirty.length; i++) {
+        const node = sceneTree.replication.dirty[i]!;
         const filed = sceneTree.regions.ofRoot.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
@@ -628,7 +618,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     // detach from scene tree
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree._idToNode.delete(node.id);
+    sceneTree._ids.byId.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.
@@ -1218,12 +1208,12 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         // assign runtime ID if needed (node entering scene tree from detached state).
         // client picks from the negative id space, server from the positive id space.
         if (n.id === 0) {
-            n.id = env.client ? sceneTree._nextClientNodeId-- : sceneTree._nextNodeId++;
-        } else if (n.id >= sceneTree._nextNodeId) {
+            n.id = env.client ? sceneTree._ids.nextClient-- : sceneTree._ids.nextServer++;
+        } else if (n.id >= sceneTree._ids.nextServer) {
             // pre-assigned id (e.g. from network unpack), bump counter past it
-            sceneTree._nextNodeId = n.id + 1;
+            sceneTree._ids.nextServer = n.id + 1;
         }
-        sceneTree._idToNode.set(n.id, n);
+        sceneTree._ids.byId.set(n.id, n);
 
         const candidateCount = collectQueries(sceneTree, n, candidates);
         for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
@@ -1292,7 +1282,7 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Q
 
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
-    sceneTree._idToNode.delete(node.id);
+    sceneTree._ids.byId.delete(node.id);
     // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
     // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
     // node never needs the two deletes.

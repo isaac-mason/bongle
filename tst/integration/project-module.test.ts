@@ -129,7 +129,7 @@ describe('project-module — deterministic wire indices', () => {
 
         unpackSceneTree(receiver.room.scene, receiver.context, snapshot);
 
-        const decodedNode = receiver.room.scene._idToNode.get(7777);
+        const decodedNode = receiver.room.scene._ids.byId.get(7777);
         expect(decodedNode).toBeDefined();
 
         const misroutedId = registry.protocol.traits.indexToId[indexAtPack!];

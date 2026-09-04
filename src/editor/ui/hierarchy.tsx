@@ -85,7 +85,7 @@ export function HierarchyPanel() {
     // node id targeted by the next context menu open. set in onContextMenu of
     // the scroll container before radix opens the shared menu.
     const [contextNodeId, setContextNodeId] = useState<number | null>(null);
-    const contextNode = contextNodeId !== null && sceneTree ? sceneTree._idToNode.get(contextNodeId) : null;
+    const contextNode = contextNodeId !== null && sceneTree ? sceneTree._ids.byId.get(contextNodeId) : null;
 
     // anchor for shift+click range select, set by plain click and cmd/ctrl+click,
     // unchanged by shift+click so a user can extend the range from a fixed anchor.
@@ -129,7 +129,7 @@ export function HierarchyPanel() {
         // node we remember it in autoCollapsedSeenIds and never re-collapse.
         const rootId = sceneTree.root.id;
         const newlySeen: number[] = [];
-        for (const node of sceneTree._idToNode.values()) {
+        for (const node of sceneTree._ids.byId.values()) {
             if (autoCollapsedSeenIds.current.has(node.id)) continue;
             if (node.id === rootId) continue;
             if (node.children.length === 0) continue;
@@ -285,7 +285,7 @@ export function HierarchyPanel() {
     const handleRemove = useCallback(
         (nodeId: number) => {
             if (!sceneTree) return;
-            const node = sceneTree._idToNode.get(nodeId);
+            const node = sceneTree._ids.byId.get(nodeId);
             if (!node || node === sceneTree.root) return;
             destroyNode(nodeId);
             // read selection from store at call-time to avoid stale closure
@@ -303,7 +303,7 @@ export function HierarchyPanel() {
             setRenamingNodeId(null);
             const trimmed = newName.trim();
             if (!sceneTree) return;
-            const node = sceneTree._idToNode.get(nodeId);
+            const node = sceneTree._ids.byId.get(nodeId);
             if (!node) return;
             if (trimmed && trimmed !== node.name) {
                 setName(nodeId, trimmed);
@@ -348,7 +348,7 @@ export function HierarchyPanel() {
 
     const handleMenuCreateChild = useCallback(() => {
         if (contextNodeId === null || !sceneTree) return;
-        const node = sceneTree._idToNode.get(contextNodeId);
+        const node = sceneTree._ids.byId.get(contextNodeId);
         if (!node) return;
         createNode(contextNodeId, node.children.length, 'New Node');
     }, [contextNodeId, sceneTree, createNode]);
@@ -375,7 +375,7 @@ export function HierarchyPanel() {
                       copy: copyToClipboard,
                       duplicate: () => {
                           if (contextNodeId === null || !sceneTree) return;
-                          const node = sceneTree._idToNode.get(contextNodeId);
+                          const node = sceneTree._ids.byId.get(contextNodeId);
                           if (!node) return;
                           createNode(node.parent?.id ?? 0, node.parent?.children.length ?? 0, `${node.name} (copy)`);
                       },
@@ -587,7 +587,7 @@ export function HierarchyPanel() {
                 <Button
                     onClick={() => {
                         const first = selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value : null;
-                        const selectedNode = first ? sceneTree._idToNode.get(first) : null;
+                        const selectedNode = first ? sceneTree._ids.byId.get(first) : null;
                         const parent = selectedNode ?? sceneTree.root;
                         createNode(parent.id, parent.children.length, 'New Node');
                     }}

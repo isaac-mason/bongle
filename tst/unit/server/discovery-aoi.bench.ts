@@ -32,10 +32,10 @@ function world() {
         const t = addTrait(node, TransformTrait);
         setPosition(t, [i * REGION_SIZE, 0, 0]); // 1 region apart, all distinct
         roots.push({ node, t });
-        sceneTree.dirtyNodes.add(node);
+        sceneTree.replication.dirty.add(node);
     }
     reconcileRootRegions(sceneTree); // seed: files all N
-    sceneTree.dirtyNodes.clear();
+    sceneTree.replication.dirty.clear();
     return { sceneTree, roots };
 }
 
@@ -49,7 +49,7 @@ describe('reconcileRootRegions', () => {
             const node = createNode();
             addChild(sceneTree.root, node);
             setPosition(addTrait(node, TransformTrait), [i * REGION_SIZE, 0, 0]);
-            sceneTree.dirtyNodes.add(node);
+            sceneTree.replication.dirty.add(node);
         }
         reconcileRootRegions(sceneTree);
     });
@@ -62,9 +62,9 @@ describe('reconcileRootRegions', () => {
         bench(`cold-index: re-file all ${N} roots into a fresh index`, () => {
             sceneTree.regions.toRoots.clear();
             sceneTree.regions.ofRoot.clear();
-            for (const r of roots) sceneTree.dirtyNodes.add(r.node);
+            for (const r of roots) sceneTree.replication.dirty.add(r.node);
             reconcileRootRegions(sceneTree);
-            sceneTree.dirtyNodes.clear();
+            sceneTree.replication.dirty.clear();
         });
     }
     {
@@ -77,10 +77,10 @@ describe('reconcileRootRegions', () => {
             for (let i = 0; i < MOVERS; i++) {
                 const r = roots[i]!;
                 setPosition(r.t, [i * REGION_SIZE + tick * REGION_SIZE, 0, 0]); // +1 region each tick
-                sceneTree.dirtyNodes.add(r.node);
+                sceneTree.replication.dirty.add(r.node);
             }
             reconcileRootRegions(sceneTree);
-            sceneTree.dirtyNodes.clear();
+            sceneTree.replication.dirty.clear();
         });
     }
     {
@@ -93,10 +93,10 @@ describe('reconcileRootRegions', () => {
             for (let i = 0; i < MOVERS; i++) {
                 const r = roots[i]!;
                 setPosition(r.t, [i * REGION_SIZE + (tick % 8), 0, 0]); // stays inside the region
-                sceneTree.dirtyNodes.add(r.node);
+                sceneTree.replication.dirty.add(r.node);
             }
             reconcileRootRegions(sceneTree);
-            sceneTree.dirtyNodes.clear();
+            sceneTree.replication.dirty.clear();
         });
     }
 });

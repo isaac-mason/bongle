@@ -38,7 +38,7 @@ export function sendOwnerSyncUpdates(
     playerId: PlayerId,
     tracked: Set<Node>,
 ): void {
-    const owned = sg.playerIdToOwnedNodes.get(playerId);
+    const owned = sg.replication.owners.get(playerId);
 
     // reset + untrack nodes we no longer own (destroyed, or owner handed off) so
     // a future re-own re-uploads from scratch rather than diffing against a stale

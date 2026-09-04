@@ -148,11 +148,11 @@ export function unpackSceneTree(
     if (!rootPacked) return;
 
     // restore root id to match the server's
-    sceneTree._idToNode.delete(root.id);
+    sceneTree._ids.byId.delete(root.id);
     root.id = rootPacked.id;
-    sceneTree._idToNode.set(root.id, root);
-    if (root.id >= sceneTree._nextNodeId) {
-        sceneTree._nextNodeId = root.id + 1;
+    sceneTree._ids.byId.set(root.id, root);
+    if (root.id >= sceneTree._ids.nextServer) {
+        sceneTree._ids.nextServer = root.id + 1;
     }
 
     // restore root name
