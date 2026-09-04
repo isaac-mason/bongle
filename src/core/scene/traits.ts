@@ -455,17 +455,22 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
 /* ── instance construction ── */
 
 /**
- * Deep-copy a trait value. Walks plain arrays and objects directly and slices typed arrays,
- * falling back to `structuredClone` for anything else. Hand-rolled rather than
- * `structuredClone` throughout because it runs per field per instance; note that
- * `compileConstructor` already inlines the common defaults (vec3, quat, mat4) as array
- * literals, so on the construction path this only sees the shapes it could not inline.
+ * Deep-copy a trait value.
  *
- * The return is typed as the input. That holds for every shape a prop schema can describe,
- * and for Map/Set/Date via `structuredClone`. It does NOT hold for a class instance in a
- * trait body literal: `structuredClone` copies own properties and drops the prototype. Use a
- * factory (`() => new Thing()`) for those, which is the right thing anyway since a body
- * literal would otherwise be cloned per instance.
+ * In practice this only ever sees JSON: control values on the way out to a scene file, and
+ * authored controls on the way back in. Prop schemas cannot describe anything richer, so the
+ * array and plain-object branches carry every real call.
+ *
+ * The typed-array and `structuredClone` branches are a safety net, not a second use case.
+ * The construction path cannot reach them today: a mutable default must be a factory (which
+ * is called, not cloned) and everything else in a body is a primitive or an array of
+ * primitives, which `compileConstructor` inlines as source. Measured at 0 of 107 body fields
+ * across the builtin traits (`bench/probe-clone-branches.ts`). They exist because game code
+ * defines its own traits and nothing enforces that convention.
+ *
+ * The return is typed as the input, which holds for JSON, typed arrays, and Map/Set/Date.
+ * It does NOT hold for a class instance written as a body literal: `structuredClone` copies
+ * own properties and drops the prototype. Use a factory for those.
  */
 export function cloneTraitValue<T extends object>(value: T): T {
     if (Array.isArray(value)) {
