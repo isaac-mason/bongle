@@ -49,10 +49,18 @@ function build() {
             addChild(PARENT_OF[name] === null ? rootNode : byName.get(PARENT_OF[name]!)!, n);
             byName.set(name, n);
             addTrait(n, TransformTrait);
-            (addTrait(n, MeshTrait) as any).meshId = { modelId: 'probe', meshName: name };
             const t = n.traits[(TransformTrait as any)._slot];
             bones.push(t);
             if ((DRIVEN as readonly string[]).includes(name)) driven.push(t);
+            // real avatars carry the mesh on a child node offset from the bone, and those
+            // nodes are never rotated: 14-19 nodes per rig of which only 31-43% are
+            // animation targets (`probe-identity-fraction.mjs`). Modelling only the bones
+            // would make the rig 86% rotated and understate the translation-only path.
+            const part = createNode({ name: `${name}_mesh` });
+            addChild(n, part);
+            addTrait(part, TransformTrait, { position: [0, 0.1, 0] } as any);
+            (addTrait(part, MeshTrait) as any).meshId = { modelId: 'probe', meshName: name };
+            bones.push(part.traits[(TransformTrait as any)._slot]);
         }
         setInterpolation(rootNode, true);
         roots.push(rootNode.traits[(TransformTrait as any)._slot]);
@@ -90,8 +98,11 @@ function best(fn: () => void, reps: number): number {
     return b;
 }
 
-const nodes = CHARS * (BONES.length + 1);
-console.log(`\n${CHARS} characters, ${BONES.length} bones + root each (${nodes} nodes). ${DRIVEN.length} bones rewritten per frame.\n`);
+const nodes = CHARS * (BONES.length * 2 + 1);
+console.log(
+    `\n${CHARS} characters: ${BONES.length} bones + ${BONES.length} mesh nodes + root (${nodes} nodes). ` +
+        `${DRIVEN.length} rotated per frame (${((DRIVEN.length / (BONES.length * 2)) * 100).toFixed(0)}%).\n`,
+);
 console.log(`${'arm'.padEnd(7)} ${'ms/frame'.padStart(9)} ${'us/char'.padStart(9)}`);
 
 const results: Record<string, number> = {};

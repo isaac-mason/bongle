@@ -794,10 +794,55 @@ function updateWorldTransform(transform: TransformTrait): void {
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
 export function composeInterpolatedWorldMatrix(transform: TransformTrait, parent: TransformTrait | null): void {
-
     const q = transform.quaternion;
     const p = transform.position;
     const s = transform.scale;
+
+    // Translation-only local (identity rotation, unit scale): the parent's 3x3 passes
+    // through untouched and only the translation column composes. Skips both the
+    // quaternion-to-basis derivation below and the 3x3 concatenation, 54 multiplies down
+    // to 9. Every shipped avatar is 100% translation-only at rest and ~65% of its
+    // transforms stay that way while running (`probe-identity-fraction.mjs`), because
+    // only the bones an animation or `applyLimb` rotates leave the case.
+    //
+    // Read inline rather than cached on a flag: the animator writes `t.quaternion` in
+    // place through `AnimatorTrait.boneQuat`, so a flag would have to be maintained at
+    // every publish point and would be silently wrong the day one is missed. These six
+    // comparisons read the exact values the compose is about to use.
+    if (parent !== null && q[0] === 0 && q[1] === 0 && q[2] === 0 && s[0] === 1 && s[1] === 1 && s[2] === 1) {
+        const pm = parent._interpolated ? parent.interpolatedWorldMatrix! : parent.worldMatrix;
+        const out = transform.interpolatedWorldMatrix!;
+        const lx = p[0];
+        const ly = p[1];
+        const lz = p[2];
+        const p00 = pm[0]!;
+        const p01 = pm[1]!;
+        const p02 = pm[2]!;
+        const p10 = pm[4]!;
+        const p11 = pm[5]!;
+        const p12 = pm[6]!;
+        const p20 = pm[8]!;
+        const p21 = pm[9]!;
+        const p22 = pm[10]!;
+        out[0] = p00;
+        out[1] = p01;
+        out[2] = p02;
+        out[3] = 0;
+        out[4] = p10;
+        out[5] = p11;
+        out[6] = p12;
+        out[7] = 0;
+        out[8] = p20;
+        out[9] = p21;
+        out[10] = p22;
+        out[11] = 0;
+        out[12] = p00 * lx + p10 * ly + p20 * lz + pm[12]!;
+        out[13] = p01 * lx + p11 * ly + p21 * lz + pm[13]!;
+        out[14] = p02 * lx + p12 * ly + p22 * lz + pm[14]!;
+        out[15] = 1;
+        transform._dirty = (transform._dirty & ~TRANSFORM_DIRTY_INTERPOLATED_MATRIX) | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        return;
+    }
     const qx = q[0];
     const qy = q[1];
     const qz = q[2];
