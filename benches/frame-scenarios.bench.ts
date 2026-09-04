@@ -207,6 +207,39 @@ group('frame: interpolating rigs, full render pass @frame @interp', () => {
     }).gc(true);
 });
 
+// The animator's end-of-tick reconcile composes the WORLD chain for every dirty bone
+// (`composeWorldMatrix`), and `concatenate` then composes the VISUAL chain for the same
+// bones. Both derive the local basis from the same quaternion, so an animated interpolated
+// bone expands its quaternion twice per frame. This is the only scenario here that puts
+// both chains on one bone, and so the only one where a cached local basis can pay.
+group('frame: both chains on one bone @frame @interp @twochain', () => {
+    for (const count of [1000]) {
+        bench(`${count} rigs: world chain (animator) + visual chain (concatenate)`, function* () {
+            const sceneTree = createSceneTree();
+            const rigs: Rig[] = [];
+            for (let i = 0; i < count; i++) rigs.push(makecatRig(sceneTree, i, true));
+            let tick = 0;
+            yield () => {
+                tick++;
+                for (let i = 0; i < rigs.length; i++) setPosition(rigs[i]!.root, [i * 0.5, tick * 0.01, 0]);
+                snapshot(sceneTree);
+                interpolate(sceneTree, 'nobody' as never, 0.5, 1 / 60);
+                poseRigs(rigs, tick);
+                // the animator's reconcile: world matrices for every posed bone
+                for (let i = 0; i < rigs.length; i++) {
+                    const all = rigs[i]!.all;
+                    for (let b = 0; b < all.length; b++) getWorldMatrix(all[b]!);
+                }
+                concatenate(sceneTree);
+                for (let i = 0; i < rigs.length; i++) {
+                    const all = rigs[i]!.all;
+                    for (let b = 0; b < all.length; b++) getVisualWorldMatrix(all[b]!);
+                }
+            };
+        }).gc(true);
+    }
+});
+
 group('frame: mixed world @frame @mixed', () => {
     bench('2000 static props + 500 shallow movers + 250 interpolating rigs', function* () {
         const sceneTree = createSceneTree();
