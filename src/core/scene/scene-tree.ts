@@ -317,12 +317,10 @@ export type SceneTree = {
      * this tick's transitions so the per-player pass can re-evaluate moved roots without
      * climbing the tree.
      */
-    regions: {
-        /** region key -> the transform roots filed under it. */
-        roots: Map<string, Set<Node>>;
-        /** transform root -> the region key `fileRoot` filed it under. */
-        filedAs: Map<Node, string>;
-        changes: RootRegionChange[];
+    aoi: {
+        regionToRoots: Map<string, Set<Node>>;
+        rootToRegion: Map<Node, string>;
+        rootRegionChanges: RootRegionChange[];
     };
 
 
@@ -356,7 +354,7 @@ export function createSceneTree(): SceneTree {
 
         prefabs: { nodes: new Set(), dirty: new Set() },
         interpolating: new Set(),
-        regions: { roots: new Map(), filedAs: new Map(), changes: [] },
+        aoi: { regionToRoots: new Map(), rootToRegion: new Map(), rootRegionChanges: [] },
         context: undefined,
     };
 
@@ -513,29 +511,29 @@ export function isTransformRoot(node: Node): boolean {
 export type RootRegionChange = { root: Node; from: string | null; to: string | null };
 
 function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    let set = sceneTree.regions.roots.get(key);
+    let set = sceneTree.aoi.regionToRoots.get(key);
     if (!set) {
         set = new Set();
-        sceneTree.regions.roots.set(key, set);
+        sceneTree.aoi.regionToRoots.set(key, set);
     }
     set.add(node);
-    sceneTree.regions.filedAs.set(node, key);
+    sceneTree.aoi.rootToRegion.set(node, key);
 }
 
 function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    const set = sceneTree.regions.roots.get(key);
+    const set = sceneTree.aoi.regionToRoots.get(key);
     if (set) {
         set.delete(node);
         // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
-        if (set.size === 0) sceneTree.regions.roots.delete(key);
+        if (set.size === 0) sceneTree.aoi.regionToRoots.delete(key);
     }
-    sceneTree.regions.filedAs.delete(node);
+    sceneTree.aoi.rootToRegion.delete(node);
 }
 
 /** the transform roots currently filed in a region, or undefined if none. read by
  *  the per-player AOI discovery to turn a region transition into node create/destroy. */
 export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | undefined {
-    return sceneTree.regions.roots.get(key);
+    return sceneTree.aoi.regionToRoots.get(key);
 }
 
 /**
@@ -548,12 +546,12 @@ export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | un
  * per-player AOI discovery reads the index.
  */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
-    sceneTree.regions.changes.length = 0;
+    sceneTree.aoi.rootRegionChanges.length = 0;
     // length re-read each step: a node filed during the pass is still picked up, matching
     // what iterating the set used to do.
     for (let i = 0; i < sceneTree.replication.dirty.length; i++) {
         const node = sceneTree.replication.dirty[i]!;
-        const filed = sceneTree.regions.filedAs.get(node);
+        const filed = sceneTree.aoi.rootToRegion.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
             const c = getWorldChunk(t);
@@ -561,10 +559,10 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
             if (filed === key) continue; // already filed here, nothing moved
             if (filed !== undefined) unfileRoot(sceneTree, node, filed);
             fileRoot(sceneTree, node, key);
-            sceneTree.regions.changes.push({ root: node, from: filed ?? null, to: key });
+            sceneTree.aoi.rootRegionChanges.push({ root: node, from: filed ?? null, to: key });
         } else if (filed !== undefined) {
             unfileRoot(sceneTree, node, filed);
-            sceneTree.regions.changes.push({ root: node, from: filed, to: null });
+            sceneTree.aoi.rootRegionChanges.push({ root: node, from: filed, to: null });
         }
     }
 }
