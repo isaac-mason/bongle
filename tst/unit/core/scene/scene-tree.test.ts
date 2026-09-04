@@ -899,34 +899,34 @@ describe('realm', () => {
 describe('query — acquireQuery / releaseQuery', () => {
     it('engine-only queries (no acquire) stay in sceneTree.queries forever', () => {
         const sceneTree = setup();
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
         query(sceneTree, [RigidBody]);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
         // a second engine-only get of the same query just dedups, no acquire.
         query(sceneTree, [RigidBody]);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
     });
 
     it('acquire + release evicts the query', () => {
         const sceneTree = setup();
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
         const q = query(sceneTree, [RigidBody]);
         acquireQuery(sceneTree, q);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
         releaseQuery(sceneTree, q);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
     });
 
     it('refcount: two acquires require two releases before eviction', () => {
         const sceneTree = setup();
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
         const q = query(sceneTree, [RigidBody]);
         acquireQuery(sceneTree, q);
         acquireQuery(sceneTree, q);
         releaseQuery(sceneTree, q);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
         releaseQuery(sceneTree, q);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
     });
 });
 
@@ -1068,35 +1068,35 @@ describe('query — script-owned membership hooks', () => {
 describe('query — script-instance lifecycle', () => {
     it('attaching a script-bearing trait registers the query; removing it evicts', () => {
         const sceneTree = server.room.scene;
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
 
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
         addTrait(node, Tracked);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         removeTrait(node, Tracked);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
 
         destroyNode(sceneTree, node);
     });
 
     it('destroying the node evicts the query', () => {
         const sceneTree = server.room.scene;
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
 
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
         addTrait(node, Tracked);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         destroyNode(sceneTree, node);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
     });
 
     it('two script instances sharing one query evict only on the second dispose', () => {
         const sceneTree = server.room.scene;
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
 
         const a = createNode({ name: 'A' });
         addChild(sceneTree.root, a);
@@ -1107,35 +1107,35 @@ describe('query — script-instance lifecycle', () => {
         addTrait(b, Tracked);
 
         // both instances dedup to the same Query → only one entry in sceneTree.queries.
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         destroyNode(sceneTree, a);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         destroyNode(sceneTree, b);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
     });
 
     it('per-instance dedup: two query() calls in one factory still release cleanly', () => {
         const sceneTree = server.room.scene;
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
 
         const node = createNode({ name: 'A' });
         addChild(sceneTree.root, node);
         addTrait(node, TrackedTwice);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         destroyNode(sceneTree, node);
-        expect(sceneTree.queries.size).toBe(before);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before);
     });
 
     it('engine-side query persists across a script-side release', () => {
         const sceneTree = server.room.scene;
-        const before = sceneTree.queries.size;
+        const before = sceneTree.queries.hashToQuery.size;
 
         // engine-side caller, no acquire, persistent.
         const engineQ = query(sceneTree, [Transform]);
-        expect(sceneTree.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.hashToQuery.size).toBe(before + 1);
 
         // script-side caller picks up the same query, then disposes.
         const node = createNode({ name: 'A' });
@@ -1143,10 +1143,10 @@ describe('query — script-instance lifecycle', () => {
         addTrait(node, Tracked);
         // Tracked queries [RigidBody], not [Transform], so engine query is independent.
         // sanity: engineQ entry still present.
-        expect(sceneTree.queries.has(engineQ.hash)).toBe(true);
+        expect(sceneTree.queries.hashToQuery.has(engineQ.hash)).toBe(true);
 
         destroyNode(sceneTree, node);
         // engine-only query untouched.
-        expect(sceneTree.queries.has(engineQ.hash)).toBe(true);
+        expect(sceneTree.queries.hashToQuery.has(engineQ.hash)).toBe(true);
     });
 });

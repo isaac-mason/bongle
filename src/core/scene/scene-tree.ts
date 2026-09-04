@@ -292,25 +292,23 @@ export type SceneTree = {
      */
     _interpolating: Set<TransformTrait>;
 
-    /** query hash -> query */
-    queries: Map<string, Query<any>>;
+    /**
+     * @internal every query on this tree, in the shapes the hot paths need. One group
+     * rather than four fields: they are created, indexed and reaped together, and nothing
+     * outside this module touches any of them.
+     */
+    queries: {
+        /** dedup by condition hash, so `query()` hands back the existing one for the same terms. */
+        hashToQuery: Map<string, Query<any>>;
+        /** trait slot -> the queries referencing it. The candidate index `collectQueries` walks. */
+        traitToQuery: Array<Array<Query<any>> | undefined>;
+        /** queries with no positive self-trait, which no bitset can rule out for a node. */
+        always: Array<Query<any>>;
+        /** queries holding staged enter/exit tuples, drained by `flushQueryEvents`. */
+        events: Array<Query<any>>;
+    };
 
 
-    /**
-     * @internal trait slot → queries that mention that slot in ANY term. A node
-     * can only match, or stop matching, a query that references one of its
-     * traits, so membership work consults these rather than every query in the
-     * tree. Indexed by every mentioned slot, not just positive ones: removing
-     * `T` can make a node newly satisfy a `Not(T)`, and adding the target of an
-     * `Up` term changes that node's own resolution.
-     */
-    _queriesByTrait: Array<Array<Query<any>> | undefined>;
-    /**
-     * @internal queries with no positive self-trait requirement (`[Not(Tag)]`,
-     * or a lone `Up` term). These can match a node bearing nothing the index
-     * would find, so they are always consulted.
-     */
-    _queriesAlways: Array<Query<any>>;
     _visitGeneration: number;
 
     /** @internal this tree's live query `Up`/`Ancestor` terms, bucketed by the trait slot
@@ -318,10 +316,6 @@ export type SceneTree = {
      *  released, so there is nothing to invalidate and nothing to rebuild. */
     _queryResolutionGroups: TraversalTerm[][];
 
-    /** @internal queries holding staged enter/exit tuples, drained by `flushQueryEvents`
-     *  once the tree is consistent again. Per tree, so a mutation on one scene never
-     *  drains another's. */
-    _queriesWithEvents: Array<Query<any>>;
     /** @internal guards re-entry: a handler that mutates the tree stages more events and
      *  is drained by the outer loop rather than starting a nested flush. */
     _flushingQueryEvents: boolean;
@@ -377,12 +371,9 @@ export function createSceneTree(): SceneTree {
     const sceneTree: SceneTree = {
         root: null!,
         nodes: new Set(),
-        queries: new Map(),
-        _queriesByTrait: [],
-        _queriesAlways: [],
+        queries: { hashToQuery: new Map(), traitToQuery: [], always: [], events: [] },
         _visitGeneration: 0,
         _queryResolutionGroups: [],
-        _queriesWithEvents: [],
         _flushingQueryEvents: false,
 
         _nextNodeId: 1,
@@ -1840,7 +1831,7 @@ function swapRemove<T>(arr: T[], value: T): void {
 }
 
 function pushCandidates(sceneTree: SceneTree, slot: number, gen: number, out: Array<Query<any>>, n: number): number {
-    const list = sceneTree._queriesByTrait[slot];
+    const list = sceneTree.queries.traitToQuery[slot];
     if (list === undefined) return n;
     for (let i = 0; i < list.length; i++) {
         const q = list[i]!;
@@ -1864,7 +1855,7 @@ function collectQueries(sceneTree: SceneTree, node: Node, out: Array<Query<any>>
     const gen = ++sceneTree._visitGeneration;
     let n = 0;
 
-    const always = sceneTree._queriesAlways;
+    const always = sceneTree.queries.always;
     for (let i = 0; i < always.length; i++) {
         const q = always[i]!;
         q._visitGeneration = gen;
@@ -2086,7 +2077,7 @@ export function query<const Args extends ConditionArgs[]>(
     const hash = hashParts.join(',');
 
     // return existing query if already registered
-    const existing = sceneTree.queries.get(hash);
+    const existing = sceneTree.queries.hashToQuery.get(hash);
     if (existing) {
         return existing as Query<ConditionArgsToConditions<Args>>;
     }
@@ -2123,15 +2114,15 @@ export function query<const Args extends ConditionArgs[]>(
     for (const spec of traversalSpecs) traversals.push({ ...spec, query: q });
 
     // register query
-    sceneTree.queries.set(hash, q);
+    sceneTree.queries.hashToQuery.set(hash, q);
     if (withTraits.length === 0) {
-        sceneTree._queriesAlways.push(q);
+        sceneTree.queries.always.push(q);
     } else {
         for (const c of parsedConditions) {
             const slot = c.trait._slot;
             if (slot === undefined) continue;
-            const list = sceneTree._queriesByTrait[slot];
-            if (list === undefined) sceneTree._queriesByTrait[slot] = [q];
+            const list = sceneTree.queries.traitToQuery[slot];
+            if (list === undefined) sceneTree.queries.traitToQuery[slot] = [q];
             else list.push(q);
         }
     }
@@ -2165,12 +2156,12 @@ export function acquireQuery(_sceneTree: SceneTree, q: Query<any>): void {
 export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     q.refcount--;
     if (q.refcount <= 0 && q.acquired) {
-        sceneTree.queries.delete(q.hash);
-        swapRemove(sceneTree._queriesAlways, q);
+        sceneTree.queries.hashToQuery.delete(q.hash);
+        swapRemove(sceneTree.queries.always, q);
         for (const c of q.conditions) {
             const slot = (c as Condition<any, any, any>).trait._slot;
             if (slot === undefined) continue;
-            const list = sceneTree._queriesByTrait[slot];
+            const list = sceneTree.queries.traitToQuery[slot];
             if (list !== undefined) swapRemove(list, q);
         }
         for (const term of q.traversals) {
@@ -2214,7 +2205,7 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
 /** stage `tuple` on one of the query's pending lists, enrolling the query for the drain. */
 function stageQueryEvent(q: Query<any>, list: any[][], tuple: any[]): void {
     if (q._pendingExits.length === 0 && q._pendingEnters.length === 0) {
-        q.scene._queriesWithEvents.push(q);
+        q.scene.queries.events.push(q);
     }
     list.push(tuple);
 }
@@ -2245,7 +2236,7 @@ function emitQueryEvents(t: Topic<any>, tuples: any[][]): void {
 export function flushQueryEvents(sceneTree: SceneTree | null): void {
     // a detached tree has no queries, so nothing can have been staged.
     if (sceneTree === null || sceneTree._flushingQueryEvents) return;
-    const queued = sceneTree._queriesWithEvents;
+    const queued = sceneTree.queries.events;
     sceneTree._flushingQueryEvents = true;
     // length is read every iteration on purpose: a handler that mutates the tree stages
     // more events, re-enrolling its query, and this loop picks it up.
