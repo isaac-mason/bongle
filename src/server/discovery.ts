@@ -324,10 +324,10 @@ type ClientState = {
      * what's pending; this indexes it by node, since the node is the unit the fan-out
      * revisits.) it carries no new truth, the field-level "behind" already lives in
      * `nodeKnowledge` as `TraitKnowledge.behind`. it exists only so the fan-out can
-     * revisit those nodes without scanning every known node: `dirtyNodes` carries what
+     * revisit those nodes without scanning every known node: `replication.dirty` carries what
      * CHANGED this tick, not what a node that has since SETTLED still owes. mirrors the
      * voxel `pendingLight`/`pendingFull` sets. holds nodes rather than ids so the
-     * fan-out can test `dirtyNodes` membership before paying for a knowledge lookup,
+     * fan-out can test `replication.dirty` membership before paying for a knowledge lookup,
      * which is the outcome for nearly every entry while a source keeps moving. */
     nodeSyncKnowledge: Map<PlayerId, Set<Node>>;
 
@@ -752,9 +752,9 @@ export function flush(
     // gates node presence via `rootRegionChanges`.
     Debug.begin(metrics, 'discovery/voxels');
     for (const room of rooms.rooms.values()) {
-        // reconcile the transform-root region index off this tick's dirtyNodes so
+        // reconcile the transform-root region index off this tick's replication.dirty so
         // rootsInRegion is current for the scene phase. runs for every room (even
-        // ones without voxel authority); it's O(dirtyNodes) and touches nothing else.
+        // ones without voxel authority); it's O(replication.dirty) and touches nothing else.
         reconcileRootRegions(room.scene);
         const auth = room.voxels.authority;
         if (!auth) continue;
@@ -869,7 +869,7 @@ export function flush(
     // clear the per-room dirty set now that every client has diffed against it AND
     // this tick's reconcileRootRegions consumed it. cleared here (end of the scene
     // phase, which now runs LAST): the voxel phase's reconcile + the scene fan-out
-    // both read dirtyNodes, so clearing any earlier would strand one of them. nodes
+    // both read replication.dirty, so clearing any earlier would strand one of them. nodes
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
     for (const room of rooms.rooms.values()) {
         if (room.scene.replication.dirty.length > 0) clearDirtyNodes(room.scene);
@@ -944,20 +944,20 @@ function buildSceneSyncUpdates(
     let creates: Set<Node> | null = null;
     let destroys: SceneSyncUpdate[] | null = null;
     /** node ids whose presence the AOI pass already settled (created or destroyed) this
-     *  tick, so the dirtyNodes loop skips them (it owns field updates, not presence). Eager
+     *  tick, so the replication.dirty loop skips them (it owns field updates, not presence). Eager
      *  where the others are lazy: it is written from inside `createSubtree`/`destroySubtree`,
      *  and TS does not widen a narrowed `let` back out across a closure assignment. */
     const presenceSettled = new Set<number>();
 
     // subtree-coherent create/destroy for a transform root: a bulk-in static subtree
-    // has descendants that aren't individually in dirtyNodes, so we expand the whole
+    // has descendants that aren't individually in replication.dirty, so we expand the whole
     // subtree at the root. walkReplicable prunes non-shared subtrees in play mode
     // (matching what was/would be created); the root's ancestry is all shared
     // (isTransformRoot ⇒ isReplicable), so 'shared' is the right inherited realm.
     const createSubtree = (root: Node): void => {
         walkReplicable(root, mode, 'shared', (n) => {
             // only settle nodes we actually create. an already-known node in this subtree
-            // may carry a pending field update in dirtyNodes — leave it for the diff path.
+            // may carry a pending field update in replication.dirty — leave it for the diff path.
             if (!nodeKnowledge.has(n.id)) {
                 (creates ??= new Set()).add(n);
                 presenceSettled.add(n.id);
@@ -982,8 +982,8 @@ function buildSceneSyncUpdates(
     // those candidate roots and, for each, compare want (current filed region ∈
     // knownRegions) vs have (known) — iterating ROOTS, so we never climb the tree.
     // destruction of an actually-destroyed root (scene === null) is left to the
-    // dirtyNodes loop; here we handle live AOI in/out.
-    if (presence && (presence.left.size > 0 || presence.entered.size > 0 || sceneTree.aoi.rootRegionChanges.length > 0)) {
+    // replication.dirty loop; here we handle live AOI in/out.
+    if (presence && (presence.left.size > 0 || presence.entered.size > 0 || sceneTree.regions.rootRegionChanges.length > 0)) {
         const candidates = new Set<Node>();
         for (const key of presence.left) {
             const roots = rootsInRegion(sceneTree, key);
@@ -993,21 +993,21 @@ function buildSceneSyncUpdates(
             const roots = rootsInRegion(sceneTree, key);
             if (roots) for (const r of roots) candidates.add(r);
         }
-        for (const ch of sceneTree.aoi.rootRegionChanges) candidates.add(ch.root);
+        for (const ch of sceneTree.regions.rootRegionChanges) candidates.add(ch.root);
 
         for (const root of candidates) {
             // the own-player subtree is the always-visible anchor, never region-gated.
             if (root.id === ownRootId || root.scene === null) continue;
-            const filed = sceneTree.aoi.rootToRegion.get(root); // current region, O(1); undefined if unfiled
+            const filed = sceneTree.regions.rootToRegion.get(root); // current region, O(1); undefined if unfiled
             const want = filed !== undefined && presence.knownRegions.has(filed);
             const have = nodeKnowledge.has(root.id);
             if (want && !have) createSubtree(root);
             else if (!want && have) destroySubtree(root);
-            // want === have: no presence change; field updates flow through dirtyNodes.
+            // want === have: no presence change; field updates flow through replication.dirty.
         }
     }
 
-    // --- dirtyNodes: field updates for present nodes, incremental adds, destruction,
+    // --- replication.dirty: field updates for present nodes, incremental adds, destruction,
     //     and (non-voxel / non-transform) realm-gated create/destroy ---
     // length re-read each step so a node filed during the pass is still seen, matching the
     // set iteration this replaced.
@@ -1061,12 +1061,12 @@ function buildSceneSyncUpdates(
         // subtree): create from its root iff that root is in region — createSubtree walks
         // only the not-yet-known nodes, so an incremental add under a present root emits
         // just the new nodes, and a spawn out of region waits for the AOI pass.
-        const filed = sceneTree.aoi.rootToRegion.get(root);
+        const filed = sceneTree.regions.rootToRegion.get(root);
         if (root.id === ownRootId || (filed !== undefined && presence!.knownRegions.has(filed))) createSubtree(root);
     }
 
     // carry-over: nodes that still owe this client a rate-throttled sync() field but are
-    // NOT in dirtyNodes because their source settled. retry the throttled field once its
+    // NOT in replication.dirty because their source settled. retry the throttled field once its
     // cadence allows; `setPending` drops the node once the client catches up. these are
     // already-known nodes, so region membership is current (eviction and exit already
     // removed them here). snapshot first, the retry mutates the set as it drains.
@@ -1085,7 +1085,7 @@ function buildSceneSyncUpdates(
             nodeSyncKnowledge.delete(node);
             continue;
         }
-        // not in `dirtyNodes`, so nothing structural can have moved — only the rate gate's
+        // not in `replication.dirty`, so nothing structural can have moved — only the rate gate's
         // timing did. Fields only.
         retryPendingFields(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
     }
@@ -1300,7 +1300,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
  * add/remove and prefab.
  *
  * Only meaningful for a node whose version changed — every mutation this looks for calls
- * `bumpNodeVersion`, so a node absent from `dirtyNodes` can produce nothing here.
+ * `bumpNodeVersion`, so a node absent from `replication.dirty` can produce nothing here.
  */
 function diffNodeStructure(node: Node, known: ClientNodeKnowledge, updates: SceneSyncUpdate[], mode: RoomMode): void {
     // structural change (parent or index)
@@ -1460,7 +1460,7 @@ function retryPendingFields(
 
 /**
  * park the node while a field is still rate-throttled, drop it once current. The fan-out
- * revisits pending nodes even when they aren't in `dirtyNodes` — otherwise a source that
+ * revisits pending nodes even when they aren't in `replication.dirty` — otherwise a source that
  * settled would strand its last throttled update and the client would hold a stale value.
  */
 function setPending(node: Node, nodeSyncKnowledge: Set<Node>, behind: boolean): void {

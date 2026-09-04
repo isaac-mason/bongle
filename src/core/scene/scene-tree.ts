@@ -67,8 +67,15 @@ export type Node = {
 
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
-    /** @internal the tree whose `dirtyNodes` list currently holds this node, or null. Holds
-     *  the tree rather than a bool so a node that moves between trees is filed in each. */
+
+    /**
+     * @internal the tree whose `replication.dirty` list already holds this node, or null.
+     *
+     * A tree rather than a bool because `unregisterSubtree` files a node dirty and *then*
+     * clears `scene`, so a detached node stays filed in the tree it left. Attaching it into
+     * a different tree must file it there too, and a bool would read "already dirty" and
+     * skip. Comparing trees files it in each.
+     */
     _dirtyIn: SceneTree | null;
 
     /**
@@ -183,11 +190,14 @@ export type NodeSyncState = {
     version: number;
 };
 
-/** mark a node into its scene tree's per-tick discovery dirty set. server-side
- *  only (gated on `!env.client`), a no-op in the client bundle, where nothing
- *  drains the set. every version bump funnels through here, so structural, trait,
- *  and field changes all land in `dirtyNodes` for the per-client fan-out. room
- *  scene trees are drained + cleared each tick by `Discovery.flush`. */
+/** File a node into its scene tree's per-tick discovery list. Server-side only (gated on
+ *  `!env.client`), a no-op in the client bundle, where nothing drains it. Every version bump
+ *  funnels through here, so structural, trait and field changes all land in
+ *  `replication.dirty` for the per-client fan-out. Room scene trees are drained and cleared
+ *  each tick by `Discovery.flush`.
+ *
+ *  A marked list, not a Set: `Node._dirtyIn` does the dedup, so filing is a comparison and a
+ *  push rather than a hash insert. */
 export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
     if (env.client || node._dirtyIn === sceneTree) return;
     node._dirtyIn = sceneTree;
@@ -256,14 +266,6 @@ export type SceneTree = {
         owners: Map<PlayerId, Set<Node>>;
     };
 
-
-
-
-
-
-
-
-
     /**
      * @internal prefab anchors. `nodes` is every anchor in the tree; `dirty` is the subset
      * awaiting reconcile, and membership in it IS the work list (no version compare). An
@@ -308,23 +310,17 @@ export type SceneTree = {
         flushingEvents: boolean;
     };
 
-
-
-
     /**
      * @internal the transform-root region index, the server-side AOI granularity. A root's
      * world chunk gates the presence of its whole subtree on a client; `changes` records
      * this tick's transitions so the per-player pass can re-evaluate moved roots without
      * climbing the tree.
      */
-    aoi: {
+    regions: {
         regionToRoots: Map<string, Set<Node>>;
         rootToRegion: Map<Node, string>;
         rootRegionChanges: RootRegionChange[];
     };
-
-
-
 
     /**
      * optional runtime reference. when set, registerSubtree creates script instances,
@@ -354,7 +350,7 @@ export function createSceneTree(): SceneTree {
 
         prefabs: { nodes: new Set(), dirty: new Set() },
         interpolating: new Set(),
-        aoi: { regionToRoots: new Map(), rootToRegion: new Map(), rootRegionChanges: [] },
+        regions: { regionToRoots: new Map(), rootToRegion: new Map(), rootRegionChanges: [] },
         context: undefined,
     };
 
@@ -494,7 +490,7 @@ export function isLocalNode(node: Node): boolean {
  * chain (has a transform, no ancestor has one), and is live + replicable. Transform
  * roots are the unit of chunk-tied AOI: a root's world chunk gates the
  * presence of its whole subtree on a client, and nested transforms ride their root.
- * Derived on demand (no maintained set), reconciled per tick off `dirtyNodes`.
+ * Derived on demand (no maintained set), reconciled per tick off `replication.dirty`.
  */
 export function isTransformRoot(node: Node): boolean {
     const transform = getTrait(node, TransformTrait);
@@ -511,47 +507,47 @@ export function isTransformRoot(node: Node): boolean {
 export type RootRegionChange = { root: Node; from: string | null; to: string | null };
 
 function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    let set = sceneTree.aoi.regionToRoots.get(key);
+    let set = sceneTree.regions.regionToRoots.get(key);
     if (!set) {
         set = new Set();
-        sceneTree.aoi.regionToRoots.set(key, set);
+        sceneTree.regions.regionToRoots.set(key, set);
     }
     set.add(node);
-    sceneTree.aoi.rootToRegion.set(node, key);
+    sceneTree.regions.rootToRegion.set(node, key);
 }
 
 function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
-    const set = sceneTree.aoi.regionToRoots.get(key);
+    const set = sceneTree.regions.regionToRoots.get(key);
     if (set) {
         set.delete(node);
         // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
-        if (set.size === 0) sceneTree.aoi.regionToRoots.delete(key);
+        if (set.size === 0) sceneTree.regions.regionToRoots.delete(key);
     }
-    sceneTree.aoi.rootToRegion.delete(node);
+    sceneTree.regions.rootToRegion.delete(node);
 }
 
 /** the transform roots currently filed in a region, or undefined if none. read by
  *  the per-player AOI discovery to turn a region transition into node create/destroy. */
 export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | undefined {
-    return sceneTree.aoi.regionToRoots.get(key);
+    return sceneTree.regions.regionToRoots.get(key);
 }
 
 /**
- * reconcile the region index against this tick's `dirtyNodes`: file newly-eligible
+ * reconcile the region index against this tick's `replication.dirty`: file newly-eligible
  * transform roots, unfile ones that stopped being roots (lost the trait, got shadowed
  * by an ancestor transform, or were destroyed → `scene === null`), and re-bucket movers
  * whose world region changed. Records every transition in `rootRegionChanges` so the
  * per-player presence pass can re-evaluate moved roots without climbing the tree.
- * O(`dirtyNodes`). Call once per room per tick, after scripts + physics and before the
+ * O(`replication.dirty`). Call once per room per tick, after scripts + physics and before the
  * per-player AOI discovery reads the index.
  */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
-    sceneTree.aoi.rootRegionChanges.length = 0;
+    sceneTree.regions.rootRegionChanges.length = 0;
     // length re-read each step: a node filed during the pass is still picked up, matching
     // what iterating the set used to do.
     for (let i = 0; i < sceneTree.replication.dirty.length; i++) {
         const node = sceneTree.replication.dirty[i]!;
-        const filed = sceneTree.aoi.rootToRegion.get(node);
+        const filed = sceneTree.regions.rootToRegion.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
             const c = getWorldChunk(t);
@@ -559,10 +555,10 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
             if (filed === key) continue; // already filed here, nothing moved
             if (filed !== undefined) unfileRoot(sceneTree, node, filed);
             fileRoot(sceneTree, node, key);
-            sceneTree.aoi.rootRegionChanges.push({ root: node, from: filed ?? null, to: key });
+            sceneTree.regions.rootRegionChanges.push({ root: node, from: filed ?? null, to: key });
         } else if (filed !== undefined) {
             unfileRoot(sceneTree, node, filed);
-            sceneTree.aoi.rootRegionChanges.push({ root: node, from: filed, to: null });
+            sceneTree.regions.rootRegionChanges.push({ root: node, from: filed, to: null });
         }
     }
 }
