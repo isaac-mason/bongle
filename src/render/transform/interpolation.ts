@@ -80,14 +80,13 @@ const _authWorldScale: Vec3 = vec3.create();
  * snapshot current local transform values into TransformTrait's prev
  * fields. call at the top of each fixed tick so the owner-driven
  * (prev→cur) path has a stable "from" state. remote-driven transforms
- * don't read prev, so they're left out of the drain even when present
- * in `_transformDirty`, their `markWorldDirty` lights up the dirty
- * bits but doesn't enroll them in the snapshot set.
+ * don't read prev, so they're left out of the drain: their `markWorldDirty` lights up
+ * the dirty bits but never sets `_movedSinceSnapshot`.
  */
 export function snapshot(sceneTree: SceneTree): void {
-    const dirty = sceneTree._transformDirty;
-    for (const t of dirty) {
-        if (!t.interpolate) continue;
+    for (const t of sceneTree._interpolating) {
+        if (!t._movedSinceSnapshot) continue;
+        t._movedSinceSnapshot = 0;
         const prevPosition = t.prevPosition!;
         const prevQuaternion = t.prevQuaternion!;
         prevPosition[0] = t.position[0];
@@ -98,7 +97,6 @@ export function snapshot(sceneTree: SceneTree): void {
         prevQuaternion[2] = t.quaternion[2];
         prevQuaternion[3] = t.quaternion[3];
     }
-    dirty.clear();
 }
 
 /* ── interpolate ── */

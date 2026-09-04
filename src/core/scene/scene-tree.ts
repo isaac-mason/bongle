@@ -283,14 +283,6 @@ export type SceneTree = {
      */
     _prefabsDirty: Set<Node>;
 
-    /**
-     * @internal transforms whose local TRS changed since the last
-     * `Interpolation.snapshot` drain. populated by `markTransformDirty`
-     * (writes via setPosition/setQuaternion/setScale/sync unpack).
-     * drained by `snapshot()` to refresh prev pose for interpolated nodes,
-     * scales per-frame snapshot cost with motion, not scene size.
-     */
-    _transformDirty: Set<TransformTrait>;
 
     /**
      * @internal transforms whose owner called `setInterpolation(node, true)`.
@@ -303,12 +295,6 @@ export type SceneTree = {
     /** query hash -> query */
     queries: Map<string, Query<any>>;
 
-    /**
-     * @internal the same queries as a dense array. Membership sites iterate
-     * this per node, and `Map.values()` allocates a fresh iterator on every
-     * call — once per node per site during a subtree attach.
-     */
-    _queryList: Array<Query<any>>;
 
     /**
      * @internal trait slot → queries that mention that slot in ANY term. A node
@@ -392,7 +378,6 @@ export function createSceneTree(): SceneTree {
         root: null!,
         nodes: new Set(),
         queries: new Map(),
-        _queryList: [],
         _queriesByTrait: [],
         _queriesAlways: [],
         _visitGeneration: 0,
@@ -407,7 +392,6 @@ export function createSceneTree(): SceneTree {
         _versions: { counter: 0 },
         _prefabNodes: new Set(),
         _prefabsDirty: new Set(),
-        _transformDirty: new Set(),
         _interpolating: new Set(),
         dirtyNodes: [],
         regionToRoots: new Map(),
@@ -2140,7 +2124,6 @@ export function query<const Args extends ConditionArgs[]>(
 
     // register query
     sceneTree.queries.set(hash, q);
-    sceneTree._queryList.push(q);
     if (withTraits.length === 0) {
         sceneTree._queriesAlways.push(q);
     } else {
@@ -2183,7 +2166,6 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     q.refcount--;
     if (q.refcount <= 0 && q.acquired) {
         sceneTree.queries.delete(q.hash);
-        swapRemove(sceneTree._queryList, q);
         swapRemove(sceneTree._queriesAlways, q);
         for (const c of q.conditions) {
             const slot = (c as Condition<any, any, any>).trait._slot;

@@ -169,6 +169,12 @@ export const TransformTrait = trait('transform', {
     /** monotonic counter bumped on world-changing transitions */
     _version: 0,
 
+    /** local TRS moved since the last `Interpolation.snapshot` drain, so `prev` still needs
+     *  refreshing. Only meaningful while `interpolate` is set: `snapshot` walks
+     *  `_interpolating`, which `interpolate()` already walks every frame anyway, so the
+     *  moved subset needs a flag rather than a second set on the scene tree. */
+    _movedSinceSnapshot: 0 as 0 | 1,
+
     /** nearest transform-bearing ancestor, or null at a transform root. Maintained by
      *  `resolveTransformSubtree` / `resolveTransformChildren`, not derived: the read path
      *  hits it once per compose and `probe-parent-chase.ts` prices the walk at 1.20x by
@@ -478,8 +484,7 @@ function markTransformChanged(transform: TransformTrait): void {
     // hash insert per moved transform per frame for something immediately discarded. A
     // transform that starts interpolating later seeds its own prev in `setInterpolation`,
     // so nothing depends on having been enqueued beforehand.
-    const node = transform._node;
-    if (transform.interpolate && node?.scene) node.scene._transformDirty.add(transform);
+    if (transform.interpolate) transform._movedSinceSnapshot = 1;
     if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
     transform._dirty = TRANSFORM_DIRTY_ALL;
     transform._version++;
@@ -503,7 +508,7 @@ export function markTransformDirty(transform: TransformTrait): void {
  * driven) pose unpack: `position`/`quaternion` changed so any consumer
  * of world values (physics queries, audio, GPU upload, descendant
  * compose) needs the same invalidation `markTransformDirty` does, but
- * NOT the `_transformDirty` enqueue (which would copy position→prev on
+ * NOT the `_movedSinceSnapshot` flag (which would copy position→prev on
  * the next snapshot and stomp the buffered path's irrelevant prev) and
  * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
  */
@@ -533,7 +538,6 @@ export function releaseTransform(sceneTree: SceneTree | null, transform: Transfo
     if (transform._parent !== null) removeTransformChild(transform._parent, transform);
     transform._parent = null;
     if (sceneTree !== null) {
-        sceneTree._transformDirty.delete(transform);
         sceneTree._interpolating.delete(transform);
     }
 }
