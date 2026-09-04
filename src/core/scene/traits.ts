@@ -455,15 +455,11 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
 /* ── instance construction ── */
 
 /**
- * build a trait instance from a TraitDef and optional override props
- * (from scene-pack deserialization). overrides keyed by control id,
- * fields without a matching control just take the body default.
- *
- * override values are taken by reference, callers that pass cached/
- * shared source data are responsible for cloning so runtime mutations
- * don't bleed back.
+ * Deep-copy a trait value. Walks plain arrays and objects directly and slices typed arrays,
+ * falling back to `structuredClone` only for anything else (class instances, Map, Set,
+ * Date). Hand-rolled rather than `structuredClone` throughout because this runs per field
+ * per instance on the trait-construction path.
  */
-/** deep-copy a trait value; plain arrays/objects directly, anything else via structuredClone. */
 export function cloneTraitValue(value: object): unknown {
     if (Array.isArray(value)) {
         const length = value.length;
@@ -571,6 +567,15 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
     return build(def, cloneTraitValue, captured);
 }
 
+/**
+ * Build a trait instance from a TraitDef and optional override props (from scene-pack
+ * deserialization). Overrides are keyed by control id; fields without a matching control
+ * take the body default.
+ *
+ * Override values are taken BY REFERENCE. A caller passing cached or shared source data is
+ * responsible for cloning it (see `cloneTraitValue`) so runtime mutations don't bleed back
+ * into the source.
+ */
 export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
     const instance = def.construct() as TraitBase & Record<string, unknown>;
 
