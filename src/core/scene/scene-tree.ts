@@ -111,13 +111,17 @@ export type Node = {
      * path knows a node carries some trait it cannot resolve, but carries no payload for it.
      * Null until one appears, which is the normal case.
      */
-    _unresolvedTraits: Map<string, Record<string, unknown> | undefined> | null;
-
-    /** @internal node-level replication version (send-path early-out gate). */
-    _sync: NodeSyncState;
+    _traitsUnresolved: Map<string, Record<string, unknown> | undefined> | null;
 
     /** @internal bitset for fast trait query matching */
     _bitset: Bitset;
+
+    /**
+     * @internal bumped on ANY replicable change to this node: structure, traits, or fields.
+     * Trait- and field-level versions live on each trait instance's own `_sync`, which is a
+     * real struct; the node only ever needs this one counter.
+     */
+    _syncVersion: number;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -165,10 +169,10 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         realm: realm ?? 'inherit',
         _traits: [],
         _bitset: bitset.init(),
-        _unresolvedTraits: null,
+        _traitsUnresolved: null,
         prefab: null,
         _prefabState: null,
-        _sync: { version: 0 },
+        _syncVersion: 0,
     };
 }
 
@@ -177,11 +181,6 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
 /** per-node replication version, the send path's node-level early-out gate.
  *  the trait/field versions live on each trait instance's `_sync`; only this
  *  node-level rollup lives here, since it spans all of a node's traits. */
-export type NodeSyncState = {
-    /** bumped on ANY replicable change to the node (structure, traits, fields). */
-    version: number;
-};
-
 /**
  * File a node into its scene tree's per-tick discovery set. Server-side only (gated on
  * `!env.client`), a no-op in the client bundle, where nothing drains it. Every version bump
@@ -203,7 +202,7 @@ export function clearDirtyNodes(sceneTree: SceneTree): void {
 
 /** bump a node's structural version */
 export function bumpNodeVersion(sceneTree: SceneTree, node: Node): void {
-    node._sync.version = ++sceneTree.replication.versionCounter;
+    node._syncVersion = ++sceneTree.replication.versionCounter;
     markNodeDirty(sceneTree, node);
 }
 
@@ -212,7 +211,7 @@ export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: nu
     const v = ++sceneTree.replication.versionCounter;
     const inst = node._traits[traitSlot];
     if (inst?._sync) inst._sync.traitVersion = v;
-    node._sync.version = v;
+    node._syncVersion = v;
     markNodeDirty(sceneTree, node);
 }
 
@@ -224,7 +223,7 @@ export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: Tra
         instance._sync.versions[i] = v;
         instance._sync.traitVersion = v;
     }
-    node._sync.version = v;
+    node._syncVersion = v;
     markNodeDirty(sceneTree, node);
 }
 
@@ -584,7 +583,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
             sceneTree.context.instances.delete(node.id);
         }
     }
-    node._unresolvedTraits = null;
+    node._traitsUnresolved = null;
 
     // remove from all queries
     // a node can only be a member of a query that references one of its traits
@@ -1488,7 +1487,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
     }
 
     // include unresolved traits
-    for (const [id, controls] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
+    for (const [id, controls] of node._traitsUnresolved ?? EMPTY_UNRESOLVED) {
         serializedTraits.push({ id, controls });
     }
 
@@ -1541,7 +1540,7 @@ export function deserializeNode(data: SerializedNode): Node {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone, _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
-            (node._unresolvedTraits ??= new Map()).set(
+            (node._traitsUnresolved ??= new Map()).set(
                 st.id,
                 st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined,
             );
@@ -1608,8 +1607,8 @@ export function cloneNode(source: Node): Node {
     }
 
     // round-trip preserve traits whose defs aren't in the registry
-    for (const [id, controls] of source._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        (clone._unresolvedTraits ??= new Map()).set(id, controls);
+    for (const [id, controls] of source._traitsUnresolved ?? EMPTY_UNRESOLVED) {
+        (clone._traitsUnresolved ??= new Map()).set(id, controls);
     }
 
     // scripts ride on traits, clone needs no script copy; registerSubtree
@@ -1711,7 +1710,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     }
     root._traits.length = 0;
     root._bitset = bitset.init();
-    root._unresolvedTraits = null;
+    root._traitsUnresolved = null;
 
     // restore root name
     root.name = rootData.name;
@@ -1722,7 +1721,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
-                (root._unresolvedTraits ??= new Map()).set(st.id, st.controls as Record<string, unknown> | undefined);
+                (root._traitsUnresolved ??= new Map()).set(st.id, st.controls as Record<string, unknown> | undefined);
                 continue;
             }
 

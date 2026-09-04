@@ -79,12 +79,12 @@ describe('diff detection', () => {
         runDiffDetection(sg);
 
         // first run initializes snapshots, version stays where addTrait left it
-        const versionAfterAdd = node._sync.version;
+        const versionAfterAdd = node._syncVersion;
 
         runDiffDetection(sg);
 
         // second run with no changes, version unchanged
-        expect(node._sync.version).toBe(versionAfterAdd);
+        expect(node._syncVersion).toBe(versionAfterAdd);
     });
 
     it('bumps versions when synced field changes', () => {
@@ -94,13 +94,13 @@ describe('diff detection', () => {
         addTrait(node, Health);
 
         runDiffDetection(sg);
-        const versionAfterInit = node._sync.version;
+        const versionAfterInit = node._syncVersion;
 
         // mutate a synced field
         getTrait(node, Health)!.current = 50;
 
         runDiffDetection(sg);
-        expect(node._sync.version).toBeGreaterThan(versionAfterInit);
+        expect(node._syncVersion).toBeGreaterThan(versionAfterInit);
     });
 
     it('bumps versions when sync field changes', () => {
@@ -110,12 +110,12 @@ describe('diff detection', () => {
         addTrait(node, Position);
 
         runDiffDetection(sg);
-        const versionAfterInit = node._sync.version;
+        const versionAfterInit = node._syncVersion;
 
         getTrait(node, Position)!.x = 42;
 
         runDiffDetection(sg);
-        expect(node._sync.version).toBeGreaterThan(versionAfterInit);
+        expect(node._syncVersion).toBeGreaterThan(versionAfterInit);
     });
 
     it('does not bump versions when nothing changed', () => {
@@ -125,13 +125,13 @@ describe('diff detection', () => {
         addTrait(node, Health);
 
         runDiffDetection(sg);
-        const v1 = node._sync.version;
+        const v1 = node._syncVersion;
 
         runDiffDetection(sg);
-        const v2 = node._sync.version;
+        const v2 = node._syncVersion;
 
         runDiffDetection(sg);
-        const v3 = node._sync.version;
+        const v3 = node._syncVersion;
 
         expect(v1).toBe(v2);
         expect(v2).toBe(v3);
@@ -157,12 +157,12 @@ describe('diff detection', () => {
         addTrait(node, Position); // @sync only, no @property
 
         runDiffDetection(sg);
-        const v1 = node._sync.version;
+        const v1 = node._syncVersion;
 
         getTrait(node, Position)!.x = 999;
 
         runDiffDetection(sg);
-        const v2 = node._sync.version;
+        const v2 = node._syncVersion;
 
         // should detect the change via sync serdes
         expect(v2).toBeGreaterThan(v1);
@@ -175,13 +175,13 @@ describe('diff detection', () => {
         addTrait(node, Health);
 
         runDiffDetection(sg);
-        const v1 = node._sync.version;
+        const v1 = node._syncVersion;
 
         // mutate control-only field (max has a control but no sync)
         getTrait(node, Health)!.max = 999;
 
         runDiffDetection(sg);
-        const v2 = node._sync.version;
+        const v2 = node._syncVersion;
 
         // control-only changes are not part of replication diff
         expect(v2).toBe(v1);
@@ -236,15 +236,15 @@ describe('diff detection', () => {
 
         runDiffDetection(sg);
 
-        const va1 = a._sync.version;
-        const vb1 = b._sync.version;
+        const va1 = a._syncVersion;
+        const vb1 = b._syncVersion;
 
         // only mutate node a
         getTrait(a, Health)!.current = 1;
 
         runDiffDetection(sg);
 
-        expect(a._sync.version).toBeGreaterThan(va1);
-        expect(b._sync.version).toBe(vb1);
+        expect(a._syncVersion).toBeGreaterThan(va1);
+        expect(b._syncVersion).toBe(vb1);
     });
 });
