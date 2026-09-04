@@ -74,9 +74,9 @@ export function populateScene(
     handle.node.children.length = 0;
 
     // clear current root traits before re-applying.
-    handle.node._traits.length = 0;
-    handle.node._bitset = bitset.init();
-    handle.node._unresolvedTraits = null;
+    handle.node.traits.length = 0;
+    handle.node.bitset = bitset.init();
+    handle.node.unresolved = null;
 
     // apply root-level traits. handle.node is free-floating (no sceneTree, no
     // runtime), so no reindex / script instantiation, closures over
@@ -86,7 +86,7 @@ export function populateScene(
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
-                (handle.node._unresolvedTraits ??= new Map()).set(
+                (handle.node.unresolved ??= new Map()).set(
                     st.id,
                     structuredClone(st.controls) as Record<string, unknown> | undefined,
                 );
@@ -95,8 +95,8 @@ export function populateScene(
             const controls = structuredClone(st.controls);
             const instance = buildTraitInstance(def, controls);
             instance._node = handle.node;
-            handle.node._traits[def.slot] = instance;
-            bitset.add(handle.node._bitset, def.slot);
+            handle.node.traits[def.slot] = instance;
+            bitset.add(handle.node.bitset, def.slot);
             refreshTraitIssues(def, instance, `root of scene "${id}"`);
         }
     }

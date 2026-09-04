@@ -1037,7 +1037,7 @@ function rebuildActionBoneIndices(action: AnimationAction, channels: ClipChannel
 
 function walkBones(state: AnimatorState, node: Node, subtreeEndList: number[]): void {
     let myIdx = -1;
-    const t = node._traits[TransformTrait._slot] as TransformTrait | undefined;
+    const t = node.traits[TransformTrait._slot] as TransformTrait | undefined;
     if (t && node.name && !state.boneIndex.has(node.name)) {
         myIdx = state.boneOrder.length;
         state.boneIndex.set(node.name, myIdx);

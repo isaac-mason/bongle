@@ -781,7 +781,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
-            else n._unresolvedTraits?.delete(traitId);
+            else n.unresolved?.delete(traitId);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
             state.markDirty();
         },
@@ -832,10 +832,10 @@ function captureNode(node: Node, out: CreateArgs[]): void {
 function captureTraitProps(node: Node, traitId: string): Record<string, unknown> | null {
     const def = registry.traits.byId.get(traitId);
     if (!def) {
-        const controls = node._unresolvedTraits?.get(traitId);
+        const controls = node.unresolved?.get(traitId);
         return controls ? structuredClone(controls) : null;
     }
-    const instance = node._traits[def.slot];
+    const instance = node.traits[def.slot];
     if (!instance) return null;
     // clone, captured props are retained on the action's closure for undo;
     // sharing references with the live trait would let runtime mutations
@@ -853,12 +853,12 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
     if (!def) {
         // the map entry IS the controls, so merging means replacing it. `has` rather than a
         // truthy `get`: an entry can legitimately be `undefined` (id known, payload not).
-        const unresolved = node._unresolvedTraits;
+        const unresolved = node.unresolved;
         if (unresolved?.has(traitId)) unresolved.set(traitId, { ...unresolved.get(traitId), ...props });
         bumpNodeVersion(sceneTree, node);
         return;
     }
-    const instance = node._traits[def.slot];
+    const instance = node.traits[def.slot];
     if (!instance) return;
     for (const key of Object.keys(props)) {
         const ci = def.controlsById.get(key);
@@ -943,7 +943,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
     // the play-mode reconciler does (rotateVoxelsByQuat + round position).
     const forwardOps: VoxelOp[] = [];
     const reverseOps: VoxelOp[] = [];
-    const preparedVoxels = node._prefabState?.voxels;
+    const preparedVoxels = node.scene?.prefabs.state.get(node)?.voxels;
     if (preparedVoxels) {
         const t = getTrait(node, TransformTrait);
         const ox = t ? Math.round(t.position[0]) : 0;

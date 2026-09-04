@@ -138,7 +138,7 @@ export function buildPrefabApplyContext(scene: Node, voxels: Voxels | null): Pre
  * the post-apply voxels for voxel-bearing prefabs (for the world stamp +
  * editor ghost cache), or null otherwise.
  *
- * does NOT touch existing children, persist flags, _prefabState, or world
+ * does NOT touch existing children, persist flags, cached instantiation state, or world
  * voxels, those are reconciliation concerns layered on top by
  * `reconcilePrefabNode`. callers that just need the content (the editor's
  * blueprint bake) call this directly.
@@ -252,13 +252,13 @@ export function reconcilePrefabNode(
         }
     }
 
-    const prevGeneration = node._prefabState?.generation ?? 0;
-    node._prefabState = {
+    const prevGeneration = sceneTree.prefabs.state.get(node)?.generation ?? 0;
+    sceneTree.prefabs.state.set(node, {
         // edit mode: cache for prefab-visuals ghost rendering. play mode:
         // already stamped into worldVoxels above, no need to retain.
         voxels: runtime.roomMode === 'edit' ? preparedVoxels : null,
         generation: prevGeneration + 1,
-    };
+    });
 
     bumpNodeVersion(sceneTree, node);
 }

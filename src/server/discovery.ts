@@ -74,8 +74,8 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
     // GLOBAL trait slot, so its length is the highest slot on this node and a node
     // carrying one game trait registered after the engine builtins walks hundreds of
     // holes to find it. Same extraction `collectQueries` uses.
-    const nodeTraits = node._traits;
-    const bits = node._bitset;
+    const nodeTraits = node.traits;
+    const bits = node.bitset;
     for (let w = 0; w < bits.length; w++) {
         let word = bits[w]!;
         while (word !== 0) {
@@ -1260,7 +1260,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const index = childIndexOf(node);
 
     const traits: BinaryTrait[] = [];
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
@@ -1274,7 +1274,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
         });
     }
     // include unresolved traits (no wire-index entry, fall back to string id)
-    for (const [id] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
+    for (const [id] of node.unresolved ?? EMPTY_UNRESOLVED) {
         traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
     }
 
@@ -1333,7 +1333,7 @@ function diffNodeStructure(node: Node, known: ClientNodeKnowledge, updates: Scen
         known.owner = node.owner;
     }
 
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
 
     // removed traits, wire-compressed to the net index; the id is only put on the wire for
     // a trait that left the registry between snapshot and now (rare HMR edge), which is why
@@ -1352,7 +1352,7 @@ function diffNodeStructure(node: Node, known: ClientNodeKnowledge, updates: Scen
     }
     if (known.unresolvedTraits !== null) {
         for (const [traitId, traitKnowledge] of known.unresolvedTraits) {
-            if (node._unresolvedTraits?.has(traitId) === true) continue;
+            if (node.unresolved?.has(traitId) === true) continue;
             const netIndex = registry.protocol.traits.idToIndex.get(traitId);
             updates.push({
                 type: 'node_trait_removed',
@@ -1391,7 +1391,7 @@ function diffNodeTraits(
     nodeSyncKnowledge: Set<Node>,
 ): void {
     let behind = false;
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
@@ -1441,7 +1441,7 @@ function retryPendingFields(
     nodeSyncKnowledge: Set<Node>,
 ): void {
     let behind = false;
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
     for (let traitSlot = 0; traitSlot < known.traits.length; traitSlot++) {
         const traitKnowledge = known.traits[traitSlot];
         if (traitKnowledge === undefined || !traitKnowledge.behind) continue;
@@ -1473,7 +1473,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
 
     const traits: Array<TraitKnowledge | undefined> = [];
     let unresolvedTraits: Map<string, TraitKnowledge> | null = null;
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
@@ -1494,7 +1494,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
     }
     // include unresolved traits so the diff system knows we already sent them
-    for (const id of node._unresolvedTraits?.keys() ?? []) {
+    for (const id of node.unresolved?.keys() ?? []) {
         (unresolvedTraits ??= new Map()).set(id, { id, behind: false, versions: [], lastSentTicks: [] });
     }
 

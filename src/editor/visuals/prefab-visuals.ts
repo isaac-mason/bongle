@@ -64,7 +64,8 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         const def = kindRegistry.prefabs.byId.get(config.prefabId);
         if (!def || !prefabHasVoxels(def)) continue;
 
-        const generation = node._prefabState?.generation ?? 0;
+        const prefabState = node.scene?.prefabs.state.get(node);
+        const generation = prefabState?.generation ?? 0;
         const parentTransform = getTrait(node, TransformTrait);
         const q: Quat = parentTransform ? ([...parentTransform.quaternion] as Quat) : [0, 0, 0, 1];
         const builtKey = `${generation}|${q[0]},${q[1]},${q[2]},${q[3]}`;
@@ -89,7 +90,7 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         const vmt = getTrait(ghost, VoxelMeshTrait);
         if (!vmt) continue;
 
-        const prepared = node._prefabState?.voxels ?? null;
+        const prepared = prefabState?.voxels ?? null;
 
         if (!prepared) {
             vmt.model = null;

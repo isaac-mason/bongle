@@ -703,7 +703,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const def = traitsBySlot[traitSlot];
     if (!def) return null;
 
-    const instance = node._traits[traitSlot];
+    const instance = node.traits[traitSlot];
 
     // collect controls for display
     const propertyEntries: Array<{ key: string; reg: ControlDef; value: unknown }> = [];
@@ -802,7 +802,7 @@ function AddTraitAction({ node }: { node: Node }) {
     if (!room) return null;
 
     const items: SearchableSelectItem<string>[] = traits
-        .filter((def) => !node._traits[def.slot] !== undefined)
+        .filter((def) => !node.traits[def.slot] !== undefined)
         .map((def) => ({ id: def.id, label: def.name, sublabel: def.name === def.id ? undefined : def.id }));
 
     if (items.length === 0) return <SectionAddButton disabled />;
@@ -1134,8 +1134,8 @@ export function InspectorPanel() {
     }
 
     const traitSlots: number[] = [];
-    for (let slot = 0; slot < node._traits.length; slot++) {
-        if (node._traits[slot] !== undefined) traitSlots.push(slot);
+    for (let slot = 0; slot < node.traits.length; slot++) {
+        if (node.traits[slot] !== undefined) traitSlots.push(slot);
     }
 
     return (
@@ -1167,14 +1167,14 @@ export function InspectorPanel() {
                 {/* ── traits ────────────────────────────────────────── */}
                 <div className="space-y-1.5">
                     <SectionDivider label="traits" action={<AddTraitAction node={node} />} />
-                    {traitSlots.length === 0 && (node._unresolvedTraits?.size ?? 0) === 0 ? (
+                    {traitSlots.length === 0 && (node.unresolved?.size ?? 0) === 0 ? (
                         <div className="text-[10px] font-mono text-fg-muted italic">no traits</div>
                     ) : (
                         <>
                             {traitSlots.map((index) => (
                                 <TraitSection key={index} node={node} traitSlot={index} />
                             ))}
-                            {Array.from(node._unresolvedTraits ?? []).map(([id, controls]) => (
+                            {Array.from(node.unresolved ?? []).map(([id, controls]) => (
                                 <UnresolvedTraitSection key={`unresolved-${id}`} node={node} traitId={id} controls={controls} />
                             ))}
                         </>

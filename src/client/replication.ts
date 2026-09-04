@@ -58,7 +58,7 @@ export function sendOwnerSyncUpdates(
     for (const node of owned) {
         let ownsAnySync = false;
 
-        const nodeTraits = node._traits;
+        const nodeTraits = node.traits;
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const instance = nodeTraits[traitSlot];
             if (instance === undefined) continue;
@@ -112,7 +112,7 @@ export function sendOwnerSyncUpdates(
 /** clear the per-instance owner-upload snapshots for every trait on a node, so a
  *  future re-own re-uploads from first-seen. */
 function resetOwnerSnapshot(node: Node): void {
-    const nodeTraits = node._traits;
+    const nodeTraits = node.traits;
     for (let slot = 0; slot < nodeTraits.length; slot++) {
         const instance = nodeTraits[slot];
         if (instance === undefined) continue;
