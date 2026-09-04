@@ -17,6 +17,12 @@
 // rewrite each frame are the ones that get a rotation.
 
 import { bench, group } from '@pmndrs/labs';
+
+/** Sink for read results. Every yielded fn returns this so the reads cannot be eliminated:
+ *  labs detects DCE by comparing against an empty call, and a discarded `getWorldMatrix`
+ *  is exactly the shape V8 folds away. Reading `m[12]` also forces the matrix to be
+ *  materialised rather than just its reference produced. */
+let sink = 0;
 import { MeshTrait } from '../src/builtins/mesh';
 import { ModelTrait } from '../src/builtins/model';
 import {
@@ -104,7 +110,8 @@ group('frame: static scene, nothing moves @frame @static', () => {
             for (let i = 0; i < count; i++) props.push(prop(sceneTree, i));
             for (let i = 0; i < props.length; i++) getWorldMatrix(props[i]!);
             yield () => {
-                for (let i = 0; i < props.length; i++) getWorldMatrix(props[i]!);
+                for (let i = 0; i < props.length; i++) sink += getWorldMatrix(props[i]!)[12]!;
+                return sink;
             };
         }).gc(true);
     }
@@ -117,8 +124,9 @@ group('frame: static scene, nothing moves @frame @static', () => {
         yield () => {
             for (let i = 0; i < rigs.length; i++) {
                 const all = rigs[i]!.all;
-                for (let b = 0; b < all.length; b++) getWorldMatrix(all[b]!);
+                for (let b = 0; b < all.length; b++) sink += getWorldMatrix(all[b]!)[12]!;
             }
+            return sink;
         };
     }).gc(true);
 });
@@ -133,7 +141,8 @@ group('frame: shallow movers, no hierarchy @frame @shallow', () => {
             yield () => {
                 tick++;
                 for (let i = 0; i < props.length; i++) setPosition(props[i]!, [i * 0.5, tick * 0.01, 0]);
-                for (let i = 0; i < props.length; i++) getWorldMatrix(props[i]!);
+                for (let i = 0; i < props.length; i++) sink += getWorldMatrix(props[i]!)[12]!;
+                return sink;
             };
         }).gc(true);
     }
@@ -152,8 +161,9 @@ group('frame: makecat rigs, animated, no interpolation @frame @rig', () => {
                 poseRigs(rigs, tick);
                 for (let i = 0; i < rigs.length; i++) {
                     const all = rigs[i]!.all;
-                    for (let b = 0; b < all.length; b++) getWorldMatrix(all[b]!);
+                    for (let b = 0; b < all.length; b++) sink += getWorldMatrix(all[b]!)[12]!;
                 }
+                return sink;
             };
         }).gc(true);
     }
@@ -176,8 +186,9 @@ group('frame: interpolating rigs, full render pass @frame @interp', () => {
                 concatenate(sceneTree);
                 for (let i = 0; i < rigs.length; i++) {
                     const all = rigs[i]!.all;
-                    for (let b = 0; b < all.length; b++) getVisualWorldMatrix(all[b]!);
+                    for (let b = 0; b < all.length; b++) sink += getVisualWorldMatrix(all[b]!)[12]!;
                 }
+                return sink;
             };
         }).gc(true);
     }
@@ -233,8 +244,9 @@ group('frame: both chains on one bone @frame @interp @twochain', () => {
                 concatenate(sceneTree);
                 for (let i = 0; i < rigs.length; i++) {
                     const all = rigs[i]!.all;
-                    for (let b = 0; b < all.length; b++) getVisualWorldMatrix(all[b]!);
+                    for (let b = 0; b < all.length; b++) sink += getVisualWorldMatrix(all[b]!)[12]!;
                 }
+                return sink;
             };
         }).gc(true);
     }
@@ -259,12 +271,13 @@ group('frame: mixed world @frame @mixed', () => {
             interpolate(sceneTree, 'nobody' as never, 0.5, 1 / 60);
             poseRigs(rigs, tick);
             concatenate(sceneTree);
-            for (let i = 0; i < statics.length; i++) getWorldMatrix(statics[i]!);
-            for (let i = 0; i < movers.length; i++) getWorldMatrix(movers[i]!);
+            for (let i = 0; i < statics.length; i++) sink += getWorldMatrix(statics[i]!)[12]!;
+            for (let i = 0; i < movers.length; i++) sink += getWorldMatrix(movers[i]!)[12]!;
             for (let i = 0; i < rigs.length; i++) {
                 const all = rigs[i]!.all;
-                for (let b = 0; b < all.length; b++) getVisualWorldMatrix(all[b]!);
+                for (let b = 0; b < all.length; b++) sink += getVisualWorldMatrix(all[b]!)[12]!;
             }
+            return sink;
         };
     }).gc(true);
 });
