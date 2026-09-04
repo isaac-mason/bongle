@@ -832,8 +832,8 @@ function captureNode(node: Node, out: CreateArgs[]): void {
 function captureTraitProps(node: Node, traitId: string): Record<string, unknown> | null {
     const def = registry.traits.byId.get(traitId);
     if (!def) {
-        const json = node._unresolvedTraits?.get(traitId)?.json;
-        return json ? structuredClone(json) : null;
+        const controls = node._unresolvedTraits?.get(traitId);
+        return controls ? structuredClone(controls) : null;
     }
     const instance = node._traits[def.slot];
     if (!instance) return null;
@@ -851,8 +851,10 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
 export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string, props: Record<string, unknown>): void {
     const def = registry.traits.byId.get(traitId);
     if (!def) {
-        const unresolved = node._unresolvedTraits?.get(traitId);
-        if (unresolved) unresolved.json = { ...unresolved.json, ...props };
+        // the map entry IS the controls, so merging means replacing it. `has` rather than a
+        // truthy `get`: an entry can legitimately be `undefined` (id known, payload not).
+        const unresolved = node._unresolvedTraits;
+        if (unresolved?.has(traitId)) unresolved.set(traitId, { ...unresolved.get(traitId), ...props });
         bumpNodeVersion(sceneTree, node);
         return;
     }

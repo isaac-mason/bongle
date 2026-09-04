@@ -170,8 +170,8 @@ export function unpackSceneTree(
         if (traitId === undefined) continue;
         const def = registry.traits.byId.get(traitId);
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${traitId}" on root node (binary) — preserving raw data`);
-            (root._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
+            console.warn(`[bongle] unresolved trait "${traitId}" on root node — recording the id, the wire carries no payload for it`);
+            (root._unresolvedTraits ??= new Map()).set(traitId, undefined);
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));
@@ -266,8 +266,8 @@ export function applySceneSyncUpdate(
             if (traitId === undefined) break;
             const def = registry.traits.byId.get(traitId);
             if (!def) {
-                console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — preserving`);
-                (node._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
+                console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — recording the id only`);
+                (node._unresolvedTraits ??= new Map()).set(traitId, undefined);
                 bumpNodeVersion(sceneTree, node);
                 break;
             }
@@ -376,8 +376,8 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
         if (traitId === undefined) continue;
         const def = registry.traits.byId.get(traitId);
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" (binary) — preserving raw data`);
-            (node._unresolvedTraits ??= new Map()).set(traitId, { binary: new Uint8Array(0) });
+            console.warn(`[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" — recording the id, the wire carries no payload for it`);
+            (node._unresolvedTraits ??= new Map()).set(traitId, undefined);
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));

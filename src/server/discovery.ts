@@ -871,9 +871,7 @@ export function flush(
     // phase, which now runs LAST): the voxel phase's reconcile + the scene fan-out
     // both read replication.dirty, so clearing any earlier would strand one of them. nodes
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
-    for (const room of rooms.rooms.values()) {
-        if (room.scene.replication.dirty.length > 0) clearDirtyNodes(room.scene);
-    }
+    for (const room of rooms.rooms.values()) clearDirtyNodes(room.scene);
 
     Debug.end(metrics, 'discovery/scene');
 
@@ -1009,10 +1007,8 @@ function buildSceneSyncUpdates(
 
     // --- replication.dirty: field updates for present nodes, incremental adds, destruction,
     //     and (non-voxel / non-transform) realm-gated create/destroy ---
-    // length re-read each step so a node filed during the pass is still seen, matching the
-    // set iteration this replaced.
-    for (let di = 0; di < sceneTree.replication.dirty.length; di++) {
-        const node = sceneTree.replication.dirty[di]!;
+    // a node filed during the pass is still seen: Set iteration sees later additions.
+    for (const node of sceneTree.replication.dirty) {
         if (presenceSettled.has(node.id)) continue; // AOI pass already created/destroyed it
         const known = nodeKnowledge.get(node.id);
 
@@ -1075,7 +1071,7 @@ function buildSceneSyncUpdates(
     for (const node of _pendingSyncScratch) {
         // a still-moving source is dirty again this tick and was handled above, which is
         // the overwhelmingly common case; test that before any lookup.
-        if (node._dirtyIn === sceneTree) continue;
+        if (sceneTree.replication.dirty.has(node)) continue;
         if (node.scene === null) {
             nodeSyncKnowledge.delete(node);
             continue;

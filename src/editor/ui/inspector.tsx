@@ -761,11 +761,12 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
 function UnresolvedTraitSection({
     node,
     traitId,
-    data,
+    controls,
 }: {
     node: Node;
     traitId: string;
-    data: { binary?: Uint8Array; json?: Record<string, unknown> };
+    /** the authored controls, or undefined when only the trait id survived. */
+    controls: Record<string, unknown> | undefined;
 }) {
     const removeTrait = useEditRoom((s) => s.removeTrait);
     return (
@@ -781,10 +782,8 @@ function UnresolvedTraitSection({
                 )}
             </div>
             <div className="px-2 py-1 text-[10px] font-mono text-warn">
-                {data.json ? (
-                    <pre className="whitespace-pre-wrap break-all">{JSON.stringify(data.json, null, 2)}</pre>
-                ) : data.binary ? (
-                    <span>{data.binary.byteLength} bytes (binary)</span>
+                {controls ? (
+                    <pre className="whitespace-pre-wrap break-all">{JSON.stringify(controls, null, 2)}</pre>
                 ) : (
                     <span>no data</span>
                 )}
@@ -1175,8 +1174,8 @@ export function InspectorPanel() {
                             {traitSlots.map((index) => (
                                 <TraitSection key={index} node={node} traitSlot={index} />
                             ))}
-                            {Array.from(node._unresolvedTraits ?? []).map(([id, data]) => (
-                                <UnresolvedTraitSection key={`unresolved-${id}`} node={node} traitId={id} data={data} />
+                            {Array.from(node._unresolvedTraits ?? []).map(([id, controls]) => (
+                                <UnresolvedTraitSection key={`unresolved-${id}`} node={node} traitId={id} controls={controls} />
                             ))}
                         </>
                     )}

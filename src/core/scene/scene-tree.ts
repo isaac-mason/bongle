@@ -69,16 +69,6 @@ export type Node = {
     scene: SceneTree | null;
 
     /**
-     * @internal the tree whose `replication.dirty` list already holds this node, or null.
-     *
-     * A tree rather than a bool because `unregisterSubtree` files a node dirty and *then*
-     * clears `scene`, so a detached node stays filed in the tree it left. Attaching it into
-     * a different tree must file it there too, and a bool would read "already dirty" and
-     * skip. Comparing trees files it in each.
-     */
-    _dirtyIn: SceneTree | null;
-
-    /**
      * which Player owns this node. null = server-owned (default).
      * Ownership is keyed per-Player (not per-Client) so parallel
      * memberships, same client with multiple Players in a room, don't
@@ -111,20 +101,23 @@ export type Node = {
     /** @internal trait instances indexed by trait slot; holes for slots the node doesn't carry. */
     _traits: Array<TraitBase | undefined>;
 
+    /**
+     * @internal traits whose def isn't in the registry, keyed by trait id, so they survive a
+     * load/save round-trip instead of being silently dropped. Separate from `_traits`
+     * because that is slot-indexed and an unresolved trait has no slot — having no slot is
+     * what "unresolved" means.
+     *
+     * The value is the authored controls, or `undefined` when only the id survived: the wire
+     * path knows a node carries some trait it cannot resolve, but carries no payload for it.
+     * Null until one appears, which is the normal case.
+     */
+    _unresolvedTraits: Map<string, Record<string, unknown> | undefined> | null;
+
     /** @internal node-level replication version (send-path early-out gate). */
     _sync: NodeSyncState;
 
     /** @internal bitset for fast trait query matching */
     _bitset: Bitset;
-
-    /**
-     * @internal traits whose definitions weren't in the registry at load time.
-     * keyed by trait string id. preserves raw data so it round-trips through
-     * pack/unpack and save/load without silent data loss.
-     * hot-reload's serialize→deserialize cycle naturally reconciles these
-     * when the def becomes available again.
-     */
-    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -143,7 +136,7 @@ export type Node = {
 /* uuid, retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
 
 /** shared empty map, so read paths can iterate a node with no unresolved traits without a branch. */
-export const EMPTY_UNRESOLVED: ReadonlyMap<string, { binary?: Uint8Array; json?: Record<string, unknown> }> = new Map();
+export const EMPTY_UNRESOLVED: ReadonlyMap<string, Record<string, unknown> | undefined> = new Map();
 
 export function generateUuid(): string {
     // use crypto.randomUUID if available (modern browsers + Node 19+),
@@ -167,7 +160,6 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
         children: [],
         _childIndex: 0,
         scene: null,
-        _dirtyIn: null,
         owner: null,
         persist: persist ?? true,
         realm: realm ?? 'inherit',
@@ -190,25 +182,23 @@ export type NodeSyncState = {
     version: number;
 };
 
-/** File a node into its scene tree's per-tick discovery list. Server-side only (gated on
- *  `!env.client`), a no-op in the client bundle, where nothing drains it. Every version bump
- *  funnels through here, so structural, trait and field changes all land in
- *  `replication.dirty` for the per-client fan-out. Room scene trees are drained and cleared
- *  each tick by `Discovery.flush`.
+/**
+ * File a node into its scene tree's per-tick discovery set. Server-side only (gated on
+ * `!env.client`), a no-op in the client bundle, where nothing drains it. Every version bump
+ * funnels through here, so structural, trait and field changes all land in
+ * `replication.dirty` for the per-client fan-out.
  *
- *  A marked list, not a Set: `Node._dirtyIn` does the dedup, so filing is a comparison and a
- *  push rather than a hash insert. */
+ * Membership lives in the set rather than in a flag on the node, so a node detached from one
+ * tree and attached to another is simply filed in each, with nothing to keep in step.
+ */
 export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
-    if (env.client || node._dirtyIn === sceneTree) return;
-    node._dirtyIn = sceneTree;
-    sceneTree.replication.dirty.push(node);
+    if (env.client) return;
+    sceneTree.replication.dirty.add(node);
 }
 
-/** drop everything filed this tick. Pairs with `markNodeDirty`; nothing else clears the marks. */
+/** Drop everything filed this tick. Pairs with `markNodeDirty`; nothing else empties it. */
 export function clearDirtyNodes(sceneTree: SceneTree): void {
-    const dirty = sceneTree.replication.dirty;
-    for (let i = 0; i < dirty.length; i++) dirty[i]!._dirtyIn = null;
-    dirty.length = 0;
+    sceneTree.replication.dirty.clear();
 }
 
 /** bump a node's structural version */
@@ -256,12 +246,12 @@ export type SceneTree = {
     nextClientId: number;
 
     /**
-     * @internal what the server fan-out needs. `dirty` is a marked list rather than a Set:
-     * `Node._dirtyIn` dedups, so enrolling is a flag check plus a push, and the drain
-     * clears both. `owners` backs authority checks.
+     * @internal what the server fan-out needs each tick. `dirty` is what changed, drained
+     * and cleared per tick by `Discovery.flush`; `versionCounter` is the monotonic source
+     * for node and trait sync versions; `owners` backs authority checks.
      */
     replication: {
-        dirty: Node[];
+        dirty: Set<Node>;
         versionCounter: number;
         owners: Map<PlayerId, Set<Node>>;
     };
@@ -337,7 +327,7 @@ export function createSceneTree(): SceneTree {
         idToNode: new Map(),
         nextServerId: 1,
         nextClientId: -1,
-        replication: { dirty: [], versionCounter: 0, owners: new Map() },
+        replication: { dirty: new Set(), versionCounter: 0, owners: new Map() },
         queries: {
             hashToQuery: new Map(),
             traitToQuery: [],
@@ -543,10 +533,8 @@ export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | un
  */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
     sceneTree.regions.rootRegionChanges.length = 0;
-    // length re-read each step: a node filed during the pass is still picked up, matching
-    // what iterating the set used to do.
-    for (let i = 0; i < sceneTree.replication.dirty.length; i++) {
-        const node = sceneTree.replication.dirty[i]!;
+    // a node filed during the pass is still picked up: Set iteration sees later additions.
+    for (const node of sceneTree.replication.dirty) {
         const filed = sceneTree.regions.rootToRegion.get(node);
         if (isTransformRoot(node)) {
             const t = getTrait(node, TransformTrait)!;
@@ -1500,8 +1488,8 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
     }
 
     // include unresolved traits
-    for (const [id, data] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        serializedTraits.push({ id, controls: data.json });
+    for (const [id, controls] of node._unresolvedTraits ?? EMPTY_UNRESOLVED) {
+        serializedTraits.push({ id, controls });
     }
 
     // prefab nodes own no authored children, all children are derived
@@ -1553,9 +1541,10 @@ export function deserializeNode(data: SerializedNode): Node {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone, _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
-            (node._unresolvedTraits ??= new Map()).set(st.id, {
-                json: st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined,
-            });
+            (node._unresolvedTraits ??= new Map()).set(
+                st.id,
+                st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined,
+            );
             continue;
         }
 
@@ -1619,8 +1608,8 @@ export function cloneNode(source: Node): Node {
     }
 
     // round-trip preserve traits whose defs aren't in the registry
-    for (const [id, data] of source._unresolvedTraits ?? EMPTY_UNRESOLVED) {
-        (clone._unresolvedTraits ??= new Map()).set(id, { json: data.json });
+    for (const [id, controls] of source._unresolvedTraits ?? EMPTY_UNRESOLVED) {
+        (clone._unresolvedTraits ??= new Map()).set(id, controls);
     }
 
     // scripts ride on traits, clone needs no script copy; registerSubtree
@@ -1733,9 +1722,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
-                (root._unresolvedTraits ??= new Map()).set(st.id, {
-                    json: st.controls as Record<string, unknown> | undefined,
-                });
+                (root._unresolvedTraits ??= new Map()).set(st.id, st.controls as Record<string, unknown> | undefined);
                 continue;
             }
 
