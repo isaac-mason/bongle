@@ -171,7 +171,8 @@ export function unpackSceneTree(
         const def = registry.traits.byId.get(traitId);
         if (!def) {
             console.warn(`[bongle] unresolved trait "${traitId}" on root node — recording the id, the wire carries no payload for it`);
-            (root.unresolved ??= new Map()).set(traitId, undefined);
+            if (root.unresolved === null) root.unresolved = new Map();
+            root.unresolved.set(traitId, undefined);
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));
@@ -267,7 +268,8 @@ export function applySceneSyncUpdate(
             const def = registry.traits.byId.get(traitId);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — recording the id only`);
-                (node.unresolved ??= new Map()).set(traitId, undefined);
+                if (node.unresolved === null) node.unresolved = new Map();
+                node.unresolved.set(traitId, undefined);
                 bumpNodeVersion(sceneTree, node);
                 break;
             }
@@ -377,7 +379,8 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
         const def = registry.traits.byId.get(traitId);
         if (!def) {
             console.warn(`[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" — recording the id, the wire carries no payload for it`);
-            (node.unresolved ??= new Map()).set(traitId, undefined);
+            if (node.unresolved === null) node.unresolved = new Map();
+            node.unresolved.set(traitId, undefined);
             continue;
         }
         const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));

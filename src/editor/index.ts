@@ -261,7 +261,8 @@ script(
                 for (const st of traits) {
                     const def = registry.traits.byId.get(st.id);
                     if (!def) {
-                        (node.unresolved ??= new Map()).set(st.id, { json: st.controls });
+                        if (node.unresolved === null) node.unresolved = new Map();
+                        node.unresolved.set(st.id, st.controls);
                         continue;
                     }
                     addTraitBySlot(node, def.slot, st.controls);
@@ -372,9 +373,8 @@ script(
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId);
                 if (!def) {
-                    (node.unresolved ??= new Map()).set(args.traitId, {
-                        json: args.props ? JSON.parse(args.props) : undefined,
-                    });
+                    if (node.unresolved === null) node.unresolved = new Map();
+                    node.unresolved.set(args.traitId, args.props ? JSON.parse(args.props) : undefined);
                     bumpNodeVersion(sceneTree, node);
                 } else {
                     addTraitBySlot(node, def.slot, args.props ? JSON.parse(args.props) : undefined);

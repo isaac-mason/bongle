@@ -243,9 +243,6 @@ export type SceneTree = {
     prefabs: {
         nodes: Set<Node>;
         dirty: Set<Node>;
-        /** the last reconciliation's output per anchor. Not on the node: a node declares
-         *  which prefab it is (`node.prefab`), it does not declare what the last instantiation
-         *  produced. Written by the prefab tick, read by the editor's ghost renderer. */
         state: Map<Node, PrefabState>;
     };
 
@@ -1526,10 +1523,8 @@ export function deserializeNode(data: SerializedNode): Node {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone, _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
-            (node.unresolved ??= new Map()).set(
-                st.id,
-                st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined,
-            );
+            if (node.unresolved === null) node.unresolved = new Map();
+            node.unresolved.set(st.id, st.controls ? (cloneTraitValue(st.controls) as Record<string, unknown>) : undefined);
             continue;
         }
 
@@ -1594,7 +1589,8 @@ export function cloneNode(source: Node): Node {
 
     // round-trip preserve traits whose defs aren't in the registry
     for (const [id, controls] of source.unresolved ?? EMPTY_UNRESOLVED) {
-        (clone.unresolved ??= new Map()).set(id, controls);
+        if (clone.unresolved === null) clone.unresolved = new Map();
+        clone.unresolved.set(id, controls);
     }
 
     // scripts ride on traits, clone needs no script copy; registerSubtree
@@ -1707,7 +1703,8 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
-                (root.unresolved ??= new Map()).set(st.id, st.controls as Record<string, unknown> | undefined);
+                if (root.unresolved === null) root.unresolved = new Map();
+                root.unresolved.set(st.id, st.controls as Record<string, unknown> | undefined);
                 continue;
             }
 

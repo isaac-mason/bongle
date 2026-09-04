@@ -86,10 +86,8 @@ export function populateScene(
             const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
-                (handle.node.unresolved ??= new Map()).set(
-                    st.id,
-                    structuredClone(st.controls) as Record<string, unknown> | undefined,
-                );
+                if (handle.node.unresolved === null) handle.node.unresolved = new Map();
+                handle.node.unresolved.set(st.id, structuredClone(st.controls) as Record<string, unknown> | undefined);
                 continue;
             }
             const controls = structuredClone(st.controls);
