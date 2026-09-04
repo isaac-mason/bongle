@@ -81,11 +81,17 @@ type CharacterState = {
      *  so the swap eases instead of snapping. Combined with the proximity
      *  fade dither via max() in the presentation step. */
     loadingDither: number;
-    /** last dither value applied via setCharacterSubtreeDither. Used to
-     *  skip the subtree walk on frames where the resolved value didn't
-     *  change, steady-state characters (loaded, out of proximity range)
-     *  pay one numeric compare per frame instead of a full rig traversal. */
-    appliedDither: number;
+    /** last dither value applied via setCharacterSubtreeDither, or null when nothing has
+     *  been applied yet. Used to skip the subtree walk on frames where the resolved value
+     *  didn't change: steady-state characters (loaded, out of proximity range) pay one
+     *  compare per frame instead of a full rig traversal. `mountRig` nulls it, because
+     *  freshly added meshes carry the trait default rather than the applied value. */
+    appliedDither: number | null;
+
+    /** last visibility applied via setCharacterSubtreeVisible, same contract as
+     *  `appliedDither`. Without it the rig was walked unconditionally every frame for every
+     *  character, to write a value that had almost always not changed. */
+    appliedVisible: boolean | null;
     /** extra screen-door dither a game script can drive (e.g. fading out a
      *  dead body). `max()`'d with the proximity + loading dither in the
      *  presentation step, so the engine stays the single writer of mesh
@@ -304,7 +310,8 @@ export const CharacterTrait = trait(
             breathPhase: 0,
             landingCooldownRemaining: 0,
             loadingDither: 0,
-            appliedDither: 0,
+            appliedDither: null,
+            appliedVisible: null,
             externalDither: 0,
             modelNodes: new Set(),
         }),
@@ -441,20 +448,21 @@ script(
                 // Steady-state characters (loaded, out of fade range) write
                 // zero, compare-equals the cache, and skip the walk.
                 let finalDither: number;
+                let visible: boolean;
                 if (subjectNode === node) {
                     const pc = getTrait(node, PlayerControllerTrait);
                     const hide =
                         (pc && pc.config.perspective === 'first') ||
                         !!getTrait(node, OrbitControllerTrait) ||
                         !!getTrait(node, FlyControllerTrait);
-                    setCharacterSubtreeVisible(node, !hide);
+                    visible = !hide;
                     // POV character can still be loading (own avatar streaming
                     // in), apply the load dither alone; proximity fade never
                     // applies to own body. a script-driven dither (e.g. own death
                     // fade) still composes in.
                     finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
                 } else {
-                    setCharacterSubtreeVisible(node, true);
+                    visible = true;
                     const range = t.config.proximityFadeRange;
                     let proxDither = 0;
                     if (range > 0 && cameraPos) {
@@ -468,6 +476,10 @@ script(
                         proxDither = dist >= range ? 0 : 1 - dist / range;
                     }
                     finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
+                }
+                if (t.state.appliedVisible !== visible) {
+                    setCharacterSubtreeVisible(node, visible);
+                    t.state.appliedVisible = visible;
                 }
                 if (t.state.appliedDither !== finalDither) {
                     setCharacterSubtreeDither(node, finalDither);
@@ -902,6 +914,15 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     // (server has no animator) and point its sample at half standing height.
     const model = getTrait(playerNode, ModelTrait) ?? addTrait(playerNode, ModelTrait);
     vec3.set(model.lightOffset, 0, LIGHT_SAMPLE_HEIGHT, 0);
+
+    // the meshes just added carry the MeshTrait defaults, not whatever dither/visibility
+    // this character currently resolves to. Drop both caches so the next presentation pass
+    // re-walks and brings them in line.
+    const character = getTrait(playerNode, CharacterTrait);
+    if (character) {
+        character.state.appliedDither = null;
+        character.state.appliedVisible = null;
+    }
 }
 
 /**
