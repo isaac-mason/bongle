@@ -100,7 +100,27 @@ type CharacterState = {
      *  a swap and leaves runtime attachments (gear) alone, ownership by node
      *  identity, not name. Per-side, runtime-only; fresh per instance. */
     modelNodes: Set<Node>;
+    /** this character's live canonical rig nodes, by name. The runtime counterpart to
+     *  `ModelHandle.nodes` (which is the shared asset's template): these are the nodes
+     *  actually under this character.
+     *
+     *  Rebuilt by `ensureCanonicalBones` on every mount, which is every path that could
+     *  invalidate it (placeholder mount, real-model mount, re-mount after a payload wipe).
+     *  Safe to hold across model swaps because `unmountRig` only resets a canonical bone's
+     *  TRS, never destroys it, so node identity survives.
+     *
+     *  Its validity condition is the invariant `unmountRig` already relies on: canonical
+     *  bones stay in their canonical parent positions. Attach gear TO these nodes freely;
+     *  do not reparent the nodes themselves. */
+    nodes: RigNodes;
 };
+
+/** the enforced skeleton's node names; see `RIG_6BONE_PERSISTENT_NODES`. */
+type RigNodeName = (typeof RIG_6BONE_PERSISTENT_NODES)[number];
+/** fixed-shape name -> node map for the enforced skeleton. Fixed keys rather than a loose
+ *  record so the per-frame reads are monomorphic. A slot is null until the first mount, and
+ *  stays null for a rig that genuinely lacks that node. */
+type RigNodes = Record<RigNodeName, Node | null>;
 
 import type { Quat, Vec3 } from 'math';
 import { degreesToRadians, quat, vec3 } from 'math';
@@ -309,6 +329,7 @@ export const CharacterTrait = trait(
             appliedDither: null,
             externalDither: 0,
             modelNodes: new Set(),
+            nodes: emptyRigNodes(),
         }),
     },
     { persist: false },
@@ -393,8 +414,8 @@ script(
                 // payload is ready *right now*, so a play/stop payload wipe (which
                 // clears Resources) self-heals on the next frame instead of getting
                 // stuck on a stale "already mounted" flag. Runs on every side; both
-                // server and client need bones for `findByName(node, 'head')` and for
-                // animator ticks.
+                // server and client need the skeleton: locomotion reads it through
+                // `state.nodes`, and animator ticks walk it.
                 const handle = getModel(ctx, t.modelId);
                 if (handle) {
                     // target ready → mount it unless it's already the mounted handle.
@@ -499,10 +520,10 @@ script(
                 // from the synced `cc.input.look` + the synced player
                 // transform yaw. independent of `t.config.animation`; head
                 // tracking is a controller affordance, not a swing clip.
-                updateHeadOrientation(node, cc, transform);
+                updateHeadOrientation(t.state.nodes, cc, transform);
 
                 // arm/leg swing. per-character opt-out via `t.config.animation`.
-                if (t.config.animation) driveProceduralLocomotion(node, t, cc, delta);
+                if (t.config.animation) driveProceduralLocomotion(t, cc, delta);
 
                 // ── footstep sfx + dust vfx ────────────────────────────
                 if (t.state.landingCooldownRemaining > 0) {
@@ -588,8 +609,8 @@ script(
  *  pitch so the face still aims at the world look direction. Small-angle
  *  approximation, pitch and head yaw don't commute, but at ±28°/±60° the
  *  visual error is below the threshold of notice. */
-function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, transform: TransformTrait): void {
-    const headBone = findByName(playerNode, 'head');
+function updateHeadOrientation(nodes: RigNodes, cc: CharacterControllerTrait, transform: TransformTrait): void {
+    const headBone = nodes.head;
     if (!headBone) return;
     const headTransform = getTrait(headBone, TransformTrait);
     if (!headTransform) return;
@@ -725,6 +746,13 @@ const HAND_GRIP_ROTATION = quat.setAxisAngle(quat.create(), [1, 0, 0], degreesTo
  * bone walker discovers it on first tick; `mountRig` overwrites that TRS
  * with the loaded value if/when the target rig lands.
  */
+/** all slots null: the shape every `state.nodes` starts and stays in, so V8 sees one map. */
+function emptyRigNodes(): RigNodes {
+    const nodes = {} as RigNodes;
+    for (const name of RIG_6BONE_PERSISTENT_NODES) nodes[name] = null;
+    return nodes;
+}
+
 function ensureCanonicalBones(playerNode: Node): void {
     if (!hasTrait(playerNode, AnimatorTrait)) addTrait(playerNode, AnimatorTrait);
     const byName = new Map<string, Node>();
@@ -747,6 +775,16 @@ function ensureCanonicalBones(playerNode: Node): void {
         const parentName = RIG_6BONE_PARENT_OF[name];
         const parent = parentName === null ? playerNode : byName.get(parentName)!;
         addChild(parent, node);
+    }
+
+    // publish the resolved skeleton. Done here rather than lazily at first use because this
+    // runs on every mount, so the cache cannot outlive the rig it describes. Before this,
+    // the per-frame locomotion resolved each bone with a `findByName` DFS that allocated a
+    // stack per call, seven times per character per frame.
+    const character = getTrait(playerNode, CharacterTrait);
+    if (character) {
+        const nodes = character.state.nodes;
+        for (const name of RIG_6BONE_PERSISTENT_NODES) nodes[name] = byName.get(name) ?? null;
     }
 }
 
@@ -998,7 +1036,8 @@ function unmountRig(playerNode: Node): void {
  * (hanging at rest). If a future avatar bakes a non-identity rest into
  * its limbs, add a rest-quaternion compose step here.
  */
-function driveProceduralLocomotion(playerNode: Node, t: CharacterTrait, cc: CharacterControllerTrait, delta: number): void {
+function driveProceduralLocomotion(t: CharacterTrait, cc: CharacterControllerTrait, delta: number): void {
+    const nodes = t.state.nodes;
     const vx = cc.state.velocity[0];
     const vz = cc.state.velocity[2];
     const horizSpeed = Math.sqrt(vx * vx + vz * vz);
@@ -1009,23 +1048,22 @@ function driveProceduralLocomotion(playerNode: Node, t: CharacterTrait, cc: Char
     // crouch lean rides `waist`, it carries body + head + arms in the flat rig,
     // so one tilt leans the whole upper body while the legs (separate roots) stay
     // planted. head-look cancels this same pitch so the face keeps aiming true.
-    applyLimb(playerNode, 'waist', cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
-    applyWaistCrouchDrop(playerNode, t, cc.state.crouchAmount);
+    applyLimb(nodes.waist, cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
+    applyWaistCrouchDrop(t, cc.state.crouchAmount);
 
     t.state.breathPhase = (t.state.breathPhase + delta * ARM_BREATH_RATE) % TAU;
     const baselineTilt = ARM_IDLE_TILT_RAD + (ARM_RUN_TILT_RAD - ARM_IDLE_TILT_RAD) * amp;
     const breathAmp = ARM_IDLE_BREATH_RAD + (ARM_RUN_BREATH_RAD - ARM_IDLE_BREATH_RAD) * amp;
     const tiltOut = baselineTilt + Math.sin(t.state.breathPhase) * breathAmp;
 
-    applyLimb(playerNode, 'leg_left', swing * LEG_SWING_MAX_RAD, 0);
-    applyLimb(playerNode, 'leg_right', -swing * LEG_SWING_MAX_RAD, 0);
+    applyLimb(nodes.leg_left, swing * LEG_SWING_MAX_RAD, 0);
+    applyLimb(nodes.leg_right, -swing * LEG_SWING_MAX_RAD, 0);
     // arms counter-swing fore/aft; tilt outward, opposite Z sign per side.
-    applyLimb(playerNode, 'arm_left', -swing * ARM_SWING_MAX_RAD, -tiltOut);
-    applyLimb(playerNode, 'arm_right', swing * ARM_SWING_MAX_RAD, tiltOut);
+    applyLimb(nodes.arm_left, -swing * ARM_SWING_MAX_RAD, -tiltOut);
+    applyLimb(nodes.arm_right, swing * ARM_SWING_MAX_RAD, tiltOut);
 }
 
-function applyLimb(playerNode: Node, boneName: string, xAngle: number, zAngle: number): void {
-    const bone = findByName(playerNode, boneName);
+function applyLimb(bone: Node | null, xAngle: number, zAngle: number): void {
     if (!bone) return;
     const transform = getTrait(bone, TransformTrait);
     if (!transform) return;
@@ -1037,19 +1075,19 @@ function applyLimb(playerNode: Node, boneName: string, xAngle: number, zAngle: n
 
 /** Sink + shift-back the `waist` bone by `crouchAmount · CROUCH_WAIST_DROP`
  *  in Y and `crouchAmount · CROUCH_WAIST_BACK` in +Z (avatars face -Z),
- *  relative to its rest position. Rest comes from `t.state.modelHandle.nodes.waist`,
- * the reconciler writes that handle whenever it mounts a rig, so this
- *  is one indexed lookup with no `findByName` walk on the rest pose.
+ *  relative to its rest position. Both halves are indexed lookups off the two parallel
+ *  maps: rest from `modelHandle.nodes` (the shared asset's template) and the live bone
+ *  from `state.nodes` (this character's own), neither of which searches the tree.
  *  Caller guarantees `state.modelId !== null` (skipped at the iteration
  *  guard), but the handle can still be null transiently, bail. */
-function applyWaistCrouchDrop(playerNode: Node, t: CharacterTrait, crouchAmount: number): void {
+function applyWaistCrouchDrop(t: CharacterTrait, crouchAmount: number): void {
     if (!t.state.modelHandle) return;
     const restWaist = t.state.modelHandle.nodes.waist;
     if (!restWaist) return;
     const restTransform = getTrait(restWaist, TransformTrait);
     if (!restTransform) return;
 
-    const waistBone = findByName(playerNode, 'waist');
+    const waistBone = t.state.nodes.waist;
     if (!waistBone) return;
     const waistTransform = getTrait(waistBone, TransformTrait);
     if (!waistTransform) return;
