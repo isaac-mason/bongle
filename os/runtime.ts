@@ -7,6 +7,7 @@ import type { App, Channel, ConnMeta, Env, Filesystem, Link, Process, Runner, Se
 // log stream for that service instead of only the worker/frame devtools console
 // nobody has open. A TEE: the original console still fires, so devtools is unchanged.
 const TEED: unique symbol = Symbol.for('bongle.os.console-teed');
+const TRAPPED: unique symbol = Symbol.for('bongle.os.errors-trapped');
 
 function teeConsole(env: Env): void {
     const c = globalThis.console as (Console & { [TEED]?: true }) | undefined;
@@ -40,6 +41,25 @@ function teeConsole(env: Env): void {
             sink(text(parts));
         };
     }
+}
+
+// An exception that escapes a callback — a RAF frame, a listener, a floating
+// promise — never reaches console.error, so the tee above misses it entirely: the
+// realm just stops (a dead frame loop) with nothing in the host's log. Route both
+// global channels onto stderr so a throw is attributed to the pid that made it.
+function trapUncaught(env: Env): void {
+    const g = globalThis as typeof globalThis & { [TRAPPED]?: true };
+    if (g[TRAPPED]) return;
+    if (typeof g.addEventListener !== 'function') return;
+    g[TRAPPED] = true;
+    g.addEventListener('error', (e) => {
+        const ev = e as ErrorEvent;
+        env.err(String(ev.error?.stack ?? ev.message ?? ev));
+    });
+    g.addEventListener('unhandledrejection', (e) => {
+        const reason = (e as PromiseRejectionEvent).reason;
+        env.err(`unhandled rejection: ${String((reason as Error)?.stack ?? reason)}`);
+    });
 }
 
 // The app-side runtime: builds the Env over a control Link and runs the app. `fs`
@@ -193,6 +213,7 @@ export async function runApp(
     };
 
     teeConsole(env);
+    trapUncaught(env);
 
     try {
         await app(env);

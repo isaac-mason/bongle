@@ -1,8 +1,8 @@
 import {
     getWorldChunk,
-    parentTransform,
     invalidateTransformAncestry,
     invalidateTransformChildren,
+    parentTransform,
     releaseTransform,
     TransformTrait,
 } from '../../builtins/transform';
@@ -115,7 +115,6 @@ export type Node = {
      * is persisted, children have persist: false.
      */
     prefab: PrefabConfig | null;
-
 };
 
 /* uuid, retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
@@ -464,9 +463,7 @@ export function isLocalNode(node: Node): boolean {
  */
 export function isTransformRoot(node: Node): boolean {
     const transform = getTrait(node, TransformTrait);
-    return (
-        node.scene !== null && transform !== undefined && isReplicable(node) && parentTransform(transform) === null
-    );
+    return node.scene !== null && transform !== undefined && isReplicable(node) && parentTransform(transform) === null;
 }
 
 /* ── transform-root region index (server-side AOI) ─────────────────────── */
@@ -620,7 +617,7 @@ export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | 
  * created per script and onInit/onEnter fire immediately.
  */
 export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>, props?: TraitProps<T>): T {
-    const traitSlot = handle._slot;
+    const traitSlot = handle.slot;
 
     // Re-adding a trait that's already present is a REPLACE: tear the old
     // instance down first (dispose its scripts → onExit fires — e.g. a
@@ -632,7 +629,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     }
 
     // build plain instance from field defs, apply prop overrides
-    const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
+    const instance = buildTraitInstance(handle, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
     const scene = node.scene;
@@ -644,7 +641,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
         bumpNodeVersion(scene, node);
         reindex(scene, node, traitSlot);
         if (scene.context) {
-            const created = instantiateTraitScripts(scene.context, node, instance, handle._def);
+            const created = instantiateTraitScripts(scene.context, node, instance, handle.def);
             for (const i of created) initScriptInstance(i);
             if (node.parent) {
                 for (const i of created) {
@@ -730,15 +727,15 @@ function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase)
 
 export function removeTrait(node: Node, handle: TraitHandle): void {
     const scene = node.scene;
-    const traitSlot = handle._slot;
+    const traitSlot = handle.slot;
     if (traitSlot === undefined) return;
 
     if (bitset.has(node.bitset, traitSlot)) {
         // dispose scripts before clearing trait state, onExit fires while
         // the trait value is still resolvable.
-        if (scene?.context) disposeTraitScripts(scene.context, node, handle._def);
+        if (scene?.context) disposeTraitScripts(scene.context, node, handle.def);
 
-        if (traitSlot === TransformTrait._slot) {
+        if (traitSlot === TransformTrait.slot) {
             releaseTransform(scene, getTrait(node, TransformTrait)!);
         }
 
@@ -759,13 +756,13 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
 }
 
 export function getTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>): T | undefined {
-    const traitSlot = handle._slot;
+    const traitSlot = handle.slot;
     if (traitSlot === undefined) return undefined;
     return node.traits[traitSlot] as T | undefined;
 }
 
 export function hasTrait(node: Node, handle: TraitHandle): boolean {
-    const traitSlot = handle._slot;
+    const traitSlot = handle.slot;
     if (traitSlot === undefined) return false;
     return bitset.has(node.bitset, traitSlot);
 }
@@ -779,11 +776,11 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 
     if (bitset.has(node.bitset, traitSlot)) {
         if (scene?.context) {
-            const def = registry.slotToTrait[traitSlot];
-            if (def) disposeTraitScripts(scene.context, node, def);
+            const handle = registry.slotToTrait[traitSlot];
+            if (handle) disposeTraitScripts(scene.context, node, handle.def);
         }
 
-        if (traitSlot === TransformTrait._slot) {
+        if (traitSlot === TransformTrait.slot) {
             releaseTransform(scene, getTrait(node, TransformTrait)!);
         }
 
@@ -805,15 +802,14 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<string, unknown>): TraitBase | null {
     const scene = node.scene;
 
-    const def = registry.slotToTrait[traitSlot];
-    if (!def) return null;
+    const handle = registry.slotToTrait[traitSlot];
+    if (!handle) return null;
 
-    const instance = buildTraitInstance(def, props);
+    const instance = buildTraitInstance(handle, props);
     instance._node = node;
 
     node.traits[traitSlot] = instance;
     bitset.add(node.bitset, traitSlot);
-
 
     // descendants resolving this trait from the hierarchy now resolve to it.
     // outside the `scene` guard: this path hydrates detached trees (scene-pack).
@@ -825,7 +821,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     }
 
     if (scene?.context) {
-        const created = instantiateTraitScripts(scene.context, node, instance, def);
+        const created = instantiateTraitScripts(scene.context, node, instance, handle.def);
         for (const i of created) initScriptInstance(i);
         if (node.parent) {
             for (const i of created) {
@@ -910,9 +906,9 @@ export function initSceneTree(sceneTree: SceneTree): void {
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const trait = nodeTraits[traitSlot];
             if (trait === undefined) continue;
-            const def = registry.slotToTrait[traitSlot];
-            if (!def || def.scripts.length === 0) continue;
-            instantiateTraitScripts(sceneTree.context, node, trait, def);
+            const handle = registry.slotToTrait[traitSlot];
+            if (!handle || handle.def.scripts.length === 0) continue;
+            instantiateTraitScripts(sceneTree.context, node, trait, handle.def);
         }
     }
 
@@ -1187,9 +1183,9 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
             for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
                 const trait = nodeTraits[traitSlot];
                 if (trait === undefined) continue;
-                const def = registry.slotToTrait[traitSlot];
-                if (!def || def.scripts.length === 0) continue;
-                const created = instantiateTraitScripts(sceneTree.context, n, trait, def);
+                const handle = registry.slotToTrait[traitSlot];
+                if (!handle || handle.def.scripts.length === 0) continue;
+                const created = instantiateTraitScripts(sceneTree.context, n, trait, handle.def);
                 for (const i of created) newScriptInstances.push(i);
             }
         }
@@ -1426,12 +1422,12 @@ export type SerializedNode = {
  * only `control()`-decorated fields are serialized. tag traits get `controls: undefined`.
  */
 function serializeTrait(traitSlot: number, instance: TraitBase, options?: SerializeOptions): SerializedTrait | null {
-    const def = registry.slotToTrait[traitSlot];
-    if (!def) return null;
-    if (options?.persistOnly && !def.persist) return null;
+    const handle = registry.slotToTrait[traitSlot];
+    if (!handle) return null;
+    if (options?.persistOnly && !handle.def.persist) return null;
 
-    if (def.controls.length === 0) {
-        return { id: def.id, controls: undefined };
+    if (handle.def.controls.length === 0) {
+        return { id: handle.id, controls: undefined };
     }
 
     // extract control values from the instance. clone, callers (scene save,
@@ -1439,11 +1435,11 @@ function serializeTrait(traitSlot: number, instance: TraitBase, options?: Serial
     // sharing references with the live instance would let runtime mutations
     // (vec3.copy on transform.position etc.) corrupt the snapshot.
     const controls: Record<string, unknown> = {};
-    for (const reg of def.controls) {
+    for (const reg of handle.def.controls) {
         const value = reg.get(instance);
         controls[reg.controlId] = value !== null && typeof value === 'object' ? cloneTraitValue(value) : value;
     }
-    return { id: def.id, controls };
+    return { id: handle.id, controls };
 }
 
 /**
@@ -1517,16 +1513,16 @@ export function deserializeNode(data: SerializedNode): Node {
     for (const traitData of data.traits) {
         const controls = traitData.controls ? cloneTraitValue(traitData.controls) : undefined;
 
-        const def = registry.traits.byId.get(traitData.id);
-        if (!def) {
+        const handle = registry.traits.handles.get(traitData.id);
+        if (!handle) {
             console.warn(`[bongle] unresolved trait "${traitData.id}" on ${label} — preserving raw data`);
             if (node.unresolved === null) node.unresolved = new Map();
             node.unresolved.set(traitData.id, controls);
             continue;
         }
 
-        const instance = addTraitBySlot(node, def.slot, controls);
-        if (instance !== null) refreshTraitIssues(def, instance, label);
+        const instance = addTraitBySlot(node, handle.slot, controls);
+        if (instance !== null) refreshTraitIssues(handle.def, instance, label);
     }
 
     for (const child of data.children) addChild(node, deserializeNode(child));
@@ -1559,14 +1555,15 @@ export function cloneNode(source: Node): Node {
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const sourceInstance = nodeTraits[traitSlot];
         if (sourceInstance === undefined) continue;
-        const def = sourceInstance._def;
-        const cloneInstance = buildTraitInstance(def);
-        const codecs = getControlCodecs(def);
+        const traitHandle = registry.traits.handles.get(sourceInstance._def.id);
+        if (!traitHandle) continue;
+        const cloneInstance = buildTraitInstance(traitHandle);
+        const codecs = getControlCodecs(traitHandle);
         if (codecs) {
             for (let i = 0; i < codecs.length; i++) {
                 const codec = codecs[i];
                 const bytes = codec.pack(sourceInstance, source);
-                const reg = def.controls[i];
+                const reg = traitHandle.def.controls[i];
                 reg.set(cloneInstance, codec.unpack(bytes));
             }
         }
@@ -1686,8 +1683,8 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     // restore root traits
     if (rootData.traits) {
         for (const st of rootData.traits) {
-            const def = registry.traits.byId.get(st.id);
-            if (!def) {
+            const handle = registry.traits.handles.get(st.id);
+            if (!handle) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
                 if (root.unresolved === null) root.unresolved = new Map();
                 // cloned like the `deserializeNode` path: the caller keeps `rootData`, and the
@@ -1697,11 +1694,11 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
             }
 
             const controls = st.controls ? cloneTraitValue(st.controls) : undefined;
-            const instance = buildTraitInstance(def, controls);
+            const instance = buildTraitInstance(handle, controls);
             instance._node = root;
-            root.traits[def.slot] = instance;
-            bitset.add(root.bitset, def.slot);
-            refreshTraitIssues(def, instance, 'root node');
+            root.traits[handle.slot] = instance;
+            bitset.add(root.bitset, handle.slot);
+            refreshTraitIssues(handle.def, instance, 'root node');
         }
         reindex(sceneTree, root);
     }
@@ -1712,9 +1709,9 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const trait = nodeTraits[traitSlot];
             if (trait === undefined) continue;
-            const def = registry.slotToTrait[traitSlot];
-            if (!def || def.scripts.length === 0) continue;
-            const created = instantiateTraitScripts(sceneTree.context, root, trait, def);
+            const handle = registry.slotToTrait[traitSlot];
+            if (!handle || handle.def.scripts.length === 0) continue;
+            const created = instantiateTraitScripts(sceneTree.context, root, trait, handle.def);
             for (const i of created) initScriptInstance(i);
         }
     }
@@ -1795,7 +1792,6 @@ function collectQueries(sceneTree: SceneTree, node: Node, out: Array<Query<any>>
     }
     return n;
 }
-
 
 /** position of `node` in `q.matches`, or -1. */
 function queryIndexOf(q: Query<any>, node: Node): number {
@@ -1914,7 +1910,7 @@ function nearestTrait(node: Node | null, traitSlot: number, inclusive: boolean):
 
 /** resolve one term's value for `node`, honouring its source. */
 function resolveTerm(node: Node, condition: Condition<any, any, any>): TraitBase | undefined {
-    const traitSlot = condition.trait._slot;
+    const traitSlot = condition.trait.slot;
     if (traitSlot === undefined) return undefined;
     // the bitset is the truth, not `_traits`: `removeTraitBySlot` clears the bit before
     // reindexing but keeps the instance until after, so the two disagree mid-removal.
@@ -1932,7 +1928,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     traversalSpecs: Array<Omit<TraversalTerm, 'query'>>;
 } {
     const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
-        if (typeof cond === 'object' && cond !== null && '_slot' in cond) {
+        if (typeof cond === 'object' && cond !== null && 'slot' in cond) {
             // bare trait handle → implicit With
             return { trait: cond, oper: Oper.And, src: Src.Self };
         }
@@ -1947,7 +1943,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     // tuple index advances for every value-carrying term, i.e. everything but Not.
     let tupleIndex = 0;
     for (const condition of parsedConditions) {
-        const traitSlot = condition.trait._slot;
+        const traitSlot = condition.trait.slot;
         if (condition.oper === Oper.Not) {
             if (traitSlot !== undefined) withoutBitset = bitset.add(withoutBitset, traitSlot);
             continue;
@@ -1986,14 +1982,13 @@ export function query<const Args extends ConditionArgs[]>(
     sceneTree: SceneTree,
     conditions: Args,
 ): Query<ConditionArgsToConditions<Args>> {
-    const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs } =
-        buildConditionBitsets(conditions);
+    const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs } = buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort). oper and src both belong in
     // the key: `[Mesh, Up(Model)]` and `[Mesh, Model]` are different queries.
     const hashParts: string[] = [];
     for (const c of parsedConditions) {
-        hashParts.push(`${OPER_TAG[c.oper]}${SRC_TAG[c.src]}${c.trait._slot}`);
+        hashParts.push(`${OPER_TAG[c.oper]}${SRC_TAG[c.src]}${c.trait.slot}`);
     }
     const hash = hashParts.join(',');
 
@@ -2040,7 +2035,7 @@ export function query<const Args extends ConditionArgs[]>(
         sceneTree.queries.always.push(q);
     } else {
         for (const c of parsedConditions) {
-            const slot = c.trait._slot;
+            const slot = c.trait.slot;
             if (slot === undefined) continue;
             const list = sceneTree.queries.traitToQuery[slot];
             if (list === undefined) sceneTree.queries.traitToQuery[slot] = [q];
@@ -2080,7 +2075,7 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
         sceneTree.queries.hashToQuery.delete(q.hash);
         swapRemove(sceneTree.queries.always, q);
         for (const c of q.conditions) {
-            const slot = (c as Condition<any, any, any>).trait._slot;
+            const slot = (c as Condition<any, any, any>).trait.slot;
             if (slot === undefined) continue;
             const list = sceneTree.queries.traitToQuery[slot];
             if (list !== undefined) swapRemove(list, q);
@@ -2120,8 +2115,6 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
  * handler drain: `_flushingQueryEvents` makes a nested flush a no-op and the
  * outer loop picks up whatever was appended.
  */
-
-
 
 /** stage `tuple` on one of the query's pending lists, enrolling the query for the drain. */
 function stageQueryEvent(q: Query<any>, list: any[][], tuple: any[]): void {
@@ -2434,7 +2427,7 @@ function resolveSubtreeFor(groups: TraversalTerm[][], node: Node, movedFrom?: No
  * prune at the node that changed.
  */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    if (traitSlot === TransformTrait._slot) invalidateTransformChildren(node);
+    if (traitSlot === TransformTrait.slot) invalidateTransformChildren(node);
     if (sceneTree !== null) resolveChildrenFor(sceneTree.queries.traversals, node, traitSlot);
 }
 
@@ -2509,9 +2502,9 @@ function reconcile(
         // a slot walk only re-resolves its own slot; nothing it did can have moved a term
         // sourced from the node's own traits or from a different ancestry slot, each of
         // which gets its own walk.
-        if (knownSlot >= 0 && term.trait._slot !== knownSlot) continue;
+        if (knownSlot >= 0 && term.trait.slot !== knownSlot) continue;
         const value =
-            term.trait._slot === knownSlot && term.src !== Src.Self
+            term.trait.slot === knownSlot && term.src !== Src.Self
                 ? term.src === Src.Up
                     ? (node.traits[knownSlot] ?? knownAbove)
                     : knownAbove
@@ -2584,7 +2577,7 @@ export function findAncestor<const Args extends TraitHandle[]>(
     while (current !== null) {
         let allMatch = true;
         for (let i = 0; i < traits.length; i++) {
-            const traitSlot = traits[i]._slot;
+            const traitSlot = traits[i].slot;
             if (traitSlot === undefined || !bitset.has(current.bitset, traitSlot)) {
                 allMatch = false;
                 break;
@@ -2593,7 +2586,7 @@ export function findAncestor<const Args extends TraitHandle[]>(
         if (allMatch) {
             const tuple: any[] = [];
             for (let i = 0; i < traits.length; i++) {
-                const traitSlot = traits[i]._slot;
+                const traitSlot = traits[i].slot;
                 if (traitSlot !== undefined) {
                     tuple.push(current.traits[traitSlot]);
                 }

@@ -7,7 +7,6 @@ import type { PlayerId } from '../client';
 import type * as Resources from '../resources';
 import type { Node, SceneTree } from '../scene/scene-tree';
 import { addTrait, getNodeById, getTrait, query, runOnPostPhysicsStep, runOnPrePhysicsStep } from '../scene/scene-tree';
-import type { Blocks } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';
 import * as AabbPhysics from './aabb';
@@ -151,8 +150,8 @@ export type VccVoxelContact = {
     solid: boolean;
 };
 
-export function init(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): Physics {
-    const rigid = RigidPhysics.create(sceneTree, voxels, registry);
+export function init(sceneTree: SceneTree, voxels: Voxels): Physics {
+    const rigid = RigidPhysics.create(sceneTree, voxels);
     const aabb = AabbPhysics.createWorld(voxels);
     AabbPhysics.bindNodeSync(aabb, sceneTree, AabbBodyTrait);
 

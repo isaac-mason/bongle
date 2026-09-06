@@ -107,39 +107,39 @@ sync(SyncOnly, 'linearVelocity', {
 
 describe('getSyncCodecs', () => {
     it('builds per-sync codecs', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!;
-        const codecs = getSyncCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/position')!;
+        const codecs = getSyncCodecs(handle);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(3);
 
-        const instance = buildTraitInstance(def) as Position;
+        const instance = buildTraitInstance(handle) as Position;
         instance.x = 1.5;
 
         const packed = codecs![0].pack(instance, TEST_NODE);
         expect(packed).toBeInstanceOf(Uint8Array);
         expect(packed.byteLength).toBeGreaterThan(0);
 
-        const target = buildTraitInstance(def) as Position;
+        const target = buildTraitInstance(handle) as Position;
         codecs![0].apply(packed, target);
         expect(target.x).toBeCloseTo(1.5, 2);
     });
 
     it('returns null for tag traits (no syncs)', () => {
-        const def = registry.traits.byId.get('bridge-test/tag')!;
-        expect(getSyncCodecs(def)).toBeNull();
+        const handle = registry.traits.handles.get('bridge-test/tag')!;
+        expect(getSyncCodecs(handle)).toBeNull();
     });
 
     it('handles sync-only fields (no control)', () => {
-        const def = registry.traits.byId.get('bridge-test/sync-only')!;
-        const codecs = getSyncCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/sync-only')!;
+        const codecs = getSyncCodecs(handle);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(1);
 
-        const instance = buildTraitInstance(def) as SyncOnly;
+        const instance = buildTraitInstance(handle) as SyncOnly;
         instance.linearVelocity = [1.0, 2.0, 3.0];
 
         const packed = codecs![0].pack(instance, TEST_NODE);
-        const target = buildTraitInstance(def) as SyncOnly;
+        const target = buildTraitInstance(handle) as SyncOnly;
         codecs![0].apply(packed, target);
         expect(target.linearVelocity[0]).toBeCloseTo(1.0, 5);
         expect(target.linearVelocity[1]).toBeCloseTo(2.0, 5);
@@ -147,9 +147,9 @@ describe('getSyncCodecs', () => {
     });
 
     it('uses the explicit sync schema (uint16) not control schema', () => {
-        const def = registry.traits.byId.get('bridge-test/health')!;
-        const codecs = getSyncCodecs(def)!;
-        const instance = buildTraitInstance(def) as Health;
+        const handle = registry.traits.handles.get('bridge-test/health')!;
+        const codecs = getSyncCodecs(handle)!;
+        const instance = buildTraitInstance(handle) as Health;
         instance.current = 42;
 
         const packed = codecs[0].pack(instance, TEST_NODE);
@@ -157,16 +157,16 @@ describe('getSyncCodecs', () => {
     });
 
     it('caches codecs across calls', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!;
-        const a = getSyncCodecs(def);
-        const b = getSyncCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/position')!;
+        const a = getSyncCodecs(handle);
+        const b = getSyncCodecs(handle);
         expect(a).toBe(b);
     });
 
     it('binary comparison detects changes', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!;
-        const codecs = getSyncCodecs(def)!;
-        const instance = buildTraitInstance(def) as Position;
+        const handle = registry.traits.handles.get('bridge-test/position')!;
+        const codecs = getSyncCodecs(handle)!;
+        const instance = buildTraitInstance(handle) as Position;
         instance.x = 5;
 
         const snap1 = codecs[0].pack(instance, TEST_NODE);
@@ -183,28 +183,28 @@ describe('getSyncCodecs', () => {
 
 describe('getControlCodecs', () => {
     it('builds per-control codecs', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!;
-        const codecs = getControlCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/position')!;
+        const codecs = getControlCodecs(handle);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(3);
     });
 
     it('returns null for tag traits (no controls)', () => {
-        const def = registry.traits.byId.get('bridge-test/tag')!;
-        expect(getControlCodecs(def)).toBeNull();
+        const handle = registry.traits.handles.get('bridge-test/tag')!;
+        expect(getControlCodecs(handle)).toBeNull();
     });
 
     it('handles vec3, boolean, string control schemas', () => {
-        const def = registry.traits.byId.get('bridge-test/vec-fields')!;
-        const codecs = getControlCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/vec-fields')!;
+        const codecs = getControlCodecs(handle);
         expect(codecs).not.toBeNull();
 
-        const instance = buildTraitInstance(def) as VecFields;
+        const instance = buildTraitInstance(handle) as VecFields;
         instance.position = [1, 2, 3];
         instance.active = false;
         instance.label = 'test';
 
-        const target = buildTraitInstance(def) as VecFields;
+        const target = buildTraitInstance(handle) as VecFields;
         codecs![0].apply(codecs![0].pack(instance, TEST_NODE), target);
         codecs![1].apply(codecs![1].pack(instance, TEST_NODE), target);
         codecs![2].apply(codecs![2].pack(instance, TEST_NODE), target);
@@ -215,9 +215,9 @@ describe('getControlCodecs', () => {
     });
 
     it('caches codecs across calls', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!;
-        const a = getControlCodecs(def);
-        const b = getControlCodecs(def);
+        const handle = registry.traits.handles.get('bridge-test/position')!;
+        const a = getControlCodecs(handle);
+        const b = getControlCodecs(handle);
         expect(a).toBe(b);
     });
 });

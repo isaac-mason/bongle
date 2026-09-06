@@ -1,5 +1,5 @@
 import { recordTrait } from '../capture/module-scope';
-import { registry, structuralHash, upsert } from '../registry';
+import { declare, registry, structuralHash } from '../registry';
 import type { pack } from './pack';
 import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
@@ -63,7 +63,7 @@ export type Self = TraitBase & { readonly [SELF_MARKER]: true };
  * e.g. `Ancestor(Self)` in a query owned by that trait. Resolved to the enclosing trait's
  * slot at registration; it is never a real trait and must not reach `addTrait`.
  */
-export const Self = { _id: 'bongle.self', _slot: SELF_SLOT } as unknown as TraitHandle<Self>;
+export const Self = { id: 'bongle.self', slot: SELF_SLOT } as unknown as TraitHandle<Self>;
 
 /** field names that cannot be used in trait definitions. */
 type ReservedTraitKey = '_node' | '_def' | '_sync';
@@ -223,18 +223,36 @@ export function clearSyncDirty(instance: TraitBase, idx: number): void {
  * inference; it does not exist at runtime.
  */
 export type TraitHandle<T extends TraitBase = TraitBase> = {
-    readonly _id: string;
+    /** the declared id (identity, never changes). */
+    readonly id: string;
     /**
      * runtime slot, stable integer identity assigned the first time `trait(id, ...)`
      * runs, cached in `traitSlots[id]` for the process lifetime. Used as the key
      * in `node._traits: Map<number, TraitBase>` and anywhere runtime code indexes
-     * a trait. Distinct from the *wire index* (sort-by-id position computed at flush,
-     * lives only on the rpc/replication layer).
+     * a trait. Distinct from the *wire index* (`netIndex`, recomputed per flush).
      */
-    readonly _slot: number;
-    readonly _def: TraitDef;
+    readonly slot: number;
     /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'traits'; id: string };
+    /** the authored data. re-pointed on every re-declaration. */
+    def: TraitDef;
+
+    // ── derived from `def`; rebuilt by `mintHandle` on every declaration ──
+
+    /** compiled instance constructor, built from `def.body`. */
+    construct: () => TraitBase;
+    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. */
+    netIndex: number | undefined;
+    /** `controlId` → its registration + slot index, over `def.controls`. */
+    controlsById: Map<string, { reg: ControlDef; index: number }>;
+    /** `syncId` → its registration + slot index, over `def.sync`. */
+    syncById: Map<string, { reg: SyncDef; index: number }>;
+    /** `scriptId` → its registration + slot index, over `def.scripts`. */
+    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
+    /** memoised packcat codecs; null until first built, dropped on re-declaration. */
+    syncCodecs: SyncCodec[] | null;
+    controlCodecs: ControlCodec[] | null;
+
     /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
 };
@@ -244,60 +262,24 @@ export type TraitType<H extends TraitHandle> = H['__type'];
 
 /* ── trait definition ── */
 
+/** The authored data for one trait. Everything DERIVED from it — the compiled
+ *  constructor, the codec memos, the by-id indexes, the wire index — lives on the
+ *  handle, so this stays pure data: hashable, serializable, no back-references. */
 export type TraitDef = {
     id: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
-    /**
-     * runtime slot, see `TraitHandle._slot`. Distinct from any wire index;
-     * `node._traits` is keyed by `slot`, while the wire encoding uses a
-     * sort-by-id position computed fresh per flush at the rpc/replication layer.
-     */
-    slot: number;
     /** raw body of the trait, literals + factories, indexed by field name. */
     body: Record<string, unknown>;
     /** whether instances of this trait are saved to scene files. default true. */
     persist: boolean;
-
-    /** control registrations in registration order. */
+    /** appended by this module's `control()` calls, right after `trait()` returns. */
     controls: ControlDef[];
-    /** lookup by control id. */
-    controlsById: Map<string, { reg: ControlDef; index: number }>;
-
-    /** sync registrations in registration order. position in this array is
-     *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
+    /** appended by this module's `sync()` calls. */
     sync: SyncDef[];
-    /** lookup by sync id. */
-    syncById: Map<string, { reg: SyncDef; index: number }>;
-    /** script registrations in registration order. one ScriptInstance per
-     *  script per attached trait, instantiated when the trait attaches to a
-     *  live node. */
+    /** appended by this module's `script()` calls. */
     scripts: ScriptDef[];
-    /** lookup by script id (user-supplied, within this trait). */
-    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
-
-    /** compiled instance constructor, built with the def. Lives here rather than in a side map so an
-     *  HMR re-eval, which mints a fresh def, gets a fresh one for free. */
-    construct: () => TraitBase;
-
-    /** this trait's sort-by-id position in the protocol table, stamped by `reindexRegistry`
-     *  whenever that table is rebuilt. `undefined` until the first reindex. */
-    netIndex: number | undefined;
-
-    /** @internal packcat codecs, built on first use. See `packcat-bridge`. */
-    _syncCodecs?: SyncCodec[] | null;
-    _controlCodecs?: ControlCodec[] | null;
-    /**
-     * canonical handle for this def. populated by `trait()` immediately
-     * after the def is constructed, so any registry lookup yields the
-     * same handle the original `trait()` call returned. Used for
-     * by-id attach paths (e.g. optional/conditionally-loaded traits like
-     * the editor trait) where the call site cannot import the handle
-     * directly. Forms a `def.handle._def === def` cycle, fine for GC,
-     * but means TraitDef must never be JSON.stringify'd.
-     */
-    handle: TraitHandle;
 };
 
 /* ── global trait registry ── */
@@ -351,45 +333,56 @@ export function trait<S extends TraitBody = Record<string, never>>(
         traitSlots[id] = slot;
     }
 
-    const def: TraitDef = {
+    const nextBody = body ?? ({} as S);
+    const name = options?.name ?? id;
+    const persist = options?.persist ?? true;
+
+    const handle = declare(
+        registry.traits,
         id,
-        name: options?.name ?? id,
-        slot,
-        body: body ?? ({} as S),
-        persist: options?.persist ?? true,
-        controls: [],
-        controlsById: new Map(),
-        sync: [],
-        syncById: new Map(),
-        scripts: [],
-        scriptsById: new Map(),
-        construct: null!,
-        netIndex: undefined,
-        handle: null!,
-    };
-    const handle: TraitHandle<TraitInstance<S>> = {
-        _id: id,
-        _slot: slot,
-        _def: def,
-        dependency: { registry: 'traits', id },
-        __type: null!,
-    };
-    def.handle = handle;
+        (): TraitDef => ({
+            id,
+            name,
+            body: nextBody,
+            persist,
+            // the module's control() / sync() / script() calls run again immediately
+            // after this and re-register into these. Each refuses to re-register an id
+            // it already holds (warns, keeps the old body), so starting empty is what
+            // lets an author's edit to a control/sync/script body actually land.
+            controls: [],
+            sync: [],
+            scripts: [],
+        }),
+        (def): TraitHandle<TraitInstance<S>> => ({
+            id,
+            slot,
+            dependency: { registry: 'traits', id },
+            def,
+            // Everything below is derived from `def` and is rebuilt here on every
+            // declaration — `declare` merges this onto the surviving handle, so an
+            // edited body cannot leave a stale constructor or codec behind.
+            // `compileConstructor` runs at import time (~27us for the widest trait)
+            // rather than in whichever frame first spawns an instance.
+            construct: compileConstructor(def),
+            netIndex: undefined,
+            controlsById: new Map(),
+            syncById: new Map(),
+            scriptsById: new Map(),
+            syncCodecs: null,
+            controlCodecs: null,
+            __type: null!,
+        }),
+    );
 
-    // compiled here rather than on first instantiation: ~27us for the widest trait, which belongs at
-    // import time and not in whichever frame first spawns one.
-    def.construct = compileConstructor(def);
-
-    upsert(registry.traits, id, def);
     // bodyHash = structural hash of the trait body (literals by value,
     // factories by toString). any body delta, added/removed key, default
     // tweak, factory swap, flips the hash and forces importer cascade.
     // a default change can silently be a type change (e.g. number → string,
     // vec3 factory → quat factory), so we treat any body delta as needing
     // fresh script closures rather than try to classify "safe" tweaks.
-    recordTrait(id, structuralHash(hashableBody(def.body)));
+    recordTrait(id, structuralHash(hashableBody(handle.def.body)));
 
-    return handle;
+    return handle as TraitHandle<TraitInstance<S>>;
 }
 
 /** the body IS the hashable shape now that it holds only literals, factories and arrays. */
@@ -406,18 +399,26 @@ function hashableBody(body: TraitBody): Record<string, unknown> {
  * the inspector lookup key.
  */
 export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void {
-    const target = handle._def;
-    if (target.controlsById.has(controlId)) {
+    const target = handle.def;
+    if (handle.controlsById.has(controlId)) {
         console.warn(`[bongle] trait '${target.id}' already has a control with id '${controlId}'; ignoring re-register`);
         return;
     }
-    const reg = { ...body, traitId: target.id, controlId } as unknown as ControlDef;
-    target.controlsById.set(controlId, { reg, index: target.controls.length });
+    // into the per-kind store so HMR detects individual control edits without
+    // flipping the parent trait hash. key matches the composed
+    // `${traitId}.${controlId}` shape used elsewhere. Nothing holds the minted
+    // handle today (`control()` returns void); it goes through `declare` so the
+    // kind has the same shape as every other, and so a future user-held ref would
+    // already be identity-stable.
+    const key = `${target.id}.${controlId}`;
+    const reg = declare(
+        registry.controls,
+        key,
+        () => ({ ...body, traitId: target.id, controlId }) as unknown as ControlDef,
+        (def) => ({ id: key, dependency: { registry: 'controls' as const, id: key }, def }),
+    ).def;
+    handle.controlsById.set(controlId, { reg, index: target.controls.length });
     target.controls.push(reg);
-    // upsert into the per-kind store so HMR detects individual control
-    // edits without flipping the parent trait hash. key matches the
-    // composed `${traitId}.${controlId}` shape used elsewhere.
-    upsert(registry.controls, `${target.id}.${controlId}`, reg);
 }
 
 /**
@@ -427,23 +428,28 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
  * keys by `SyncHandle.index` (the slot in def.sync).
  */
 export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: string, body: SyncBody<T, S>): SyncHandle<T> {
-    const target = handle._def;
-    if (target.syncById.has(syncId)) {
+    const target = handle.def;
+    if (handle.syncById.has(syncId)) {
         console.warn(`[bongle] trait '${target.id}' already has a sync with id '${syncId}'; ignoring re-register`);
         return {
-            index: target.syncById.get(syncId)!.index,
+            index: handle.syncById.get(syncId)!.index,
             dirty(instance: T) {
-                setSyncDirty(instance, target.syncById.get(syncId)!.index);
+                setSyncDirty(instance, handle.syncById.get(syncId)!.index);
             },
         };
     }
-    const reg = { ...body, traitId: target.id, syncId } as unknown as SyncDef;
+    // see `control()` for why this goes through `declare` despite nothing holding
+    // the minted handle.
+    const key = `${target.id}.${syncId}`;
+    const reg = declare(
+        registry.sync,
+        key,
+        () => ({ ...body, traitId: target.id, syncId }) as unknown as SyncDef,
+        (def) => ({ id: key, dependency: { registry: 'sync' as const, id: key }, def }),
+    ).def;
     const index = target.sync.length;
-    target.syncById.set(syncId, { reg, index });
+    handle.syncById.set(syncId, { reg, index });
     target.sync.push(reg);
-    // upsert into the per-kind store so HMR detects individual sync
-    // edits without flipping the parent trait hash.
-    upsert(registry.sync, `${target.id}.${syncId}`, reg);
     return {
         index,
         dirty(instance: T) {
@@ -588,15 +594,15 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
  * responsible for cloning it (see `cloneTraitValue`) so runtime mutations don't bleed back
  * into the source.
  */
-export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unknown>): TraitBase {
-    const instance = def.construct() as TraitBase & Record<string, unknown>;
+export function buildTraitInstance(handle: TraitHandle, overrides?: Record<string, unknown>): TraitBase {
+    const instance = handle.construct() as TraitBase & Record<string, unknown>;
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.
-            const ci = def.controlsById.get(key);
+            const ci = handle.controlsById.get(key);
             if (ci) {
                 ci.reg.set(instance as TraitBase, value);
             } else {
@@ -608,11 +614,11 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
     // per-instance sync working-state: one dirty bit per slice (Uint32 words,
     // realistic counts < 32 fit a single word) + the byte-diff snapshot array
     // (bytes), indexed by slice.
-    if (def.sync.length > 0) {
+    if (handle.def.sync.length > 0) {
         instance._sync = {
-            dirty: new Uint32Array(Math.ceil(def.sync.length / 32)),
-            bytes: new Array(def.sync.length),
-            versions: new Float64Array(def.sync.length),
+            dirty: new Uint32Array(Math.ceil(handle.def.sync.length / 32)),
+            bytes: new Array(handle.def.sync.length),
+            versions: new Float64Array(handle.def.sync.length),
             traitVersion: 0,
         };
     }

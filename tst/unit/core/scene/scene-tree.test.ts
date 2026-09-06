@@ -968,7 +968,7 @@ describe('script removal on reload', () => {
         addTrait(node, HmrTrait);
 
         expect(initCount).toBe(1);
-        expect(HmrTrait._def.scriptsById.has('sys')).toBe(true);
+        expect(HmrTrait.scriptsById.has('sys')).toBe(true);
         expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys')).toBe(true);
 
         // the add was already flushed in a real session; isolate the removal.
@@ -989,8 +989,8 @@ describe('script removal on reload', () => {
 
         // instance disposed (onDispose fired) and the def no longer lists it.
         expect(disposeCount).toBe(1);
-        expect(HmrTrait._def.scriptsById.has('sys')).toBe(false);
-        expect(HmrTrait._def.scripts.some((s) => s.scriptId === 'sys')).toBe(false);
+        expect(HmrTrait.scriptsById.has('sys')).toBe(false);
+        expect(HmrTrait.def.scripts.some((s) => s.scriptId === 'sys')).toBe(false);
         expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys') ?? false).toBe(false);
 
         // def-prune (not just instance disposal) means a fresh node carrying the

@@ -126,7 +126,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
                     clientUrl: change.payload.bin.client,
                     serverUrl: change.payload.bin.server,
                     source: 'bundled',
-                    handle: change.payload,
+                    def: change.payload,
                 });
             }
         }
@@ -260,7 +260,7 @@ export function seedModels(state: EngineClient): void {
             clientUrl: handle.bin.client,
             serverUrl: handle.bin.server,
             source: 'bundled',
-            handle,
+            def: handle,
         });
     }
 }

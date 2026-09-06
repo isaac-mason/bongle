@@ -16,21 +16,29 @@
  * two moments, so plain fields refreshed there need no getter or revision key.
  */
 
+import type * as pack from 'packcat';
 import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
 import { onModulePop, onModulePush, owningModule } from './capture/module-scope';
 import { CONFIG_ID, type Config, DEFAULT_CONFIG } from './config';
-import type { ModelHandle } from './models/handle';
-import type { ParticleHandle } from './particles/particles';
-import type { CommandDef } from './rpc';
+import type { ModelDef, ModelHandle } from './models/handle';
+import type { ParticleDef, ParticleHandle } from './particles/particles';
+import type { CommandDef, CommandHandle, RpcDirection } from './rpc';
 import type { Schema } from './scene/prop/prop';
-import type { SceneHandle } from './scene/scene-handle';
+import type { SceneDef, SceneHandle } from './scene/scene-handle';
 import type { Realm } from './scene/scene-tree';
 import type { ScriptDef } from './scene/scripts';
-import type { ControlDef, SyncDef, TraitDef } from './scene/traits';
-import type { SoundHandle } from './sounds/sounds';
-import type { SpriteHandle } from './sprites/sprites';
-import { type Blocks, buildBlockRegistry } from './voxels/block-registry';
-import { type BlockDef, type BlockHandle, type BlockModel, type BlockTextureDef, collectModelTextureIds } from './voxels/blocks';
+import type { ControlDef, SyncDef, TraitDef, TraitHandle } from './scene/traits';
+import type { SoundDef, SoundHandle } from './sounds/sounds';
+import type { SpriteDef, SpriteHandle } from './sprites/sprites';
+import { _resetBlockSlots, type Blocks, buildBlockRegistry, createBlockRegistry } from './voxels/block-registry';
+import {
+    type BlockDef,
+    type BlockHandle,
+    type BlockModel,
+    type BlockTextureDef,
+    type BlockTextureHandle,
+    collectModelTextureIds,
+} from './voxels/blocks';
 
 /* ── primitive types ────────────────────────────────────────────── */
 
@@ -53,9 +61,32 @@ export type Change<T> = { kind: 'added' | 'changed' | 'removed'; id: string; pay
  * bookkeeping, a pending-change queue, a monotonic revision counter, and the
  * kind-specific `hash` / `diff` / `extractDeps` functions.
  */
-export type RegistryStore<T> = {
+/** The stable, user-facing wrapper around a declared def. `def` is re-pointed on
+ *  every re-declaration, so an importer that captured the handle keeps seeing
+ *  current data — the contract `capture/module-scope.ts` relies on when it lets a
+ *  module self-accept. Kinds add their own members (blocks' state helpers, a
+ *  phantom type param) on top of these two. */
+export type HandleOf<T> = {
+    /** the declared id. Identity, not content: it can never change for a given
+     *  handle (a re-declaration of the same id is by definition the same id), so
+     *  unlike the def's mutable fields it is safe to carry here. */
+    readonly id: string;
+    readonly dependency: DepKey;
+    def: T;
+};
+
+export type RegistryStore<T, H extends HandleOf<T> = HandleOf<T>> = {
     name: string;
+    /** the DEF: pure declared data, swapped wholesale on re-declaration. Everything
+     *  engine-side (indexes, hashing, `pendingChanges`) reads this. */
     byId: Map<string, T>;
+    /**
+     * id → the one handle ever minted for that id. MONOTONIC: entries are never
+     * pruned, so a removed declaration leaves its handle pointing at the last def it
+     * had rather than dangling, and a later re-declaration of the same id re-points
+     * that same object. Same shape and lifetime as `traitSlots`.
+     */
+    handles: Map<string, H>;
     meta: Map<string, EntryMeta>;
     moduleToIds: Map<string, Set<string>>;
     seen: Map<string, Set<string>>;
@@ -165,10 +196,11 @@ function wholesaleDiff<T>(hash: (t: T) => string): (a: T, b: T) => boolean {
 
 /* ── kind store construction ────────────────────────────────────── */
 
-function createRegistryStore<T>(opts: KindStoreOptions<T>): RegistryStore<T> {
-    const store: RegistryStore<T> = {
+function createRegistryStore<T, H extends HandleOf<T> = HandleOf<T>>(opts: KindStoreOptions<T>): RegistryStore<T, H> {
+    const store: RegistryStore<T, H> = {
         name: opts.name,
         byId: new Map(),
+        handles: new Map(),
         meta: new Map(),
         moduleToIds: new Map(),
         seen: new Map(),
@@ -312,6 +344,60 @@ export function upsert<T>(store: RegistryStore<T>, id: string, payload: T): T {
  * No-op when the store has no entry for `id`. Caller's responsibility to
  * mutate the payload before calling.
  */
+/**
+ * Declare an entity from user module scope. The DEF is swapped wholesale (it is
+ * pure data); the HANDLE is minted once and re-pointed at the new def, so it keeps
+ * its identity for the life of the process.
+ *
+ * That identity is the contract `capture/module-scope.ts` relies on when it lets a
+ * module self-accept: a module whose exports are all handles is patched rather than
+ * invalidated, so its importers are deliberately NOT re-evaluated and keep the
+ * binding they already hold. Only sound if that binding is the one being updated.
+ *
+ * `mintDef` receives the def currently registered for this id, or undefined on a
+ * cold declaration. Most kinds ignore it and build fresh. The ones whose def is
+ * assembled from two sources — a codegen barrel plus the user's call, i.e. models
+ * and sounds — merge onto it, which is why this is a parameter rather than a
+ * wholesale replace.
+ *
+ * `touch` re-hashes afterwards and fires `changed` only if the content actually
+ * moved, so a no-op re-eval stays silent to dispatch.
+ */
+export function declare<T, H extends HandleOf<T>>(
+    store: RegistryStore<T, H>,
+    id: string,
+    mintDef: (previous: T | undefined) => T,
+    mintHandle: (def: T, previous: H | undefined) => H,
+): H {
+    const def = mintDef(store.byId.get(id));
+
+    // `mintHandle` runs on EVERY declaration, not only the first. A handle carries
+    // two sorts of member: identity (`id`, `dependency`, a trait's slot), which
+    // re-computes to the same value, and state DERIVED from the def (a trait's
+    // compiled constructor and codec memos, a block's state helpers), which has to
+    // be rebuilt whenever the def moves. Building the whole handle and merging it
+    // onto the surviving object gets both without a second per-kind hook: identity
+    // holds because the object is the same one, and no derived field can be
+    // forgotten because `mintHandle` returns a complete `H` by construction. Same
+    // refill-in-place move as `buildBlockRegistry`.
+    const existing = store.handles.get(id);
+    const fresh = mintHandle(def, existing);
+    const handle = existing === undefined ? fresh : Object.assign(existing, fresh);
+    if (existing === undefined) store.handles.set(id, handle);
+
+    // `byId` can already hold an entry with no handle yet: a codegen barrel seeds
+    // placeholders under PLACEHOLDER_OWNER before user code runs. That is a
+    // re-declaration as far as ownership goes, so it takes the claim path.
+    if (store.byId.has(id)) {
+        claimOwnership(store, id);
+        store.byId.set(id, def);
+        touch(store, id);
+        return handle;
+    }
+    upsert(store, id, def);
+    return handle;
+}
+
 export function touch<T>(store: RegistryStore<T>, id: string): void {
     const payload = store.byId.get(id);
     const meta = store.meta.get(id);
@@ -509,6 +595,19 @@ export type PrefabDef = {
     apply: (ctx: unknown, args: unknown) => void;
 };
 
+/** Stable wrapper around a `PrefabDef`. Carries identity plus the live def; the
+ *  data itself is read through `.def` rather than copied out (see `declare`). */
+export type PrefabHandle<Args = unknown> = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'prefabs'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: PrefabDef;
+    /** phantom, carries the args type for inference. not present at runtime. */
+    readonly __args: Args;
+};
+
 /**
  * Read the stable id off any handle in `PrefabDef.deps`. Uses the
  * DepGraph `dependency` stamp so every producer kind (scene, model,
@@ -604,15 +703,15 @@ export function buildInboundProtocol(manifest: ProtocolManifest, reg: Registry):
     const controlRemap = new Map<string, SlotRemap>();
     for (let i = 0; i < manifest.traits.length; i++) {
         const traitId = manifest.traits[i];
-        const def = reg.traits.byId.get(traitId);
-        if (!def) continue; // peer trait we lack; its refs drop at trait resolve, never remapped
+        const handle = reg.traits.handles.get(traitId);
+        if (!handle) continue; // peer trait we lack; its refs drop at trait resolve, never remapped
         syncRemap.set(
             traitId,
-            (manifest.syncs[i] ?? []).map((sid) => def.syncById.get(sid)?.index),
+            (manifest.syncs[i] ?? []).map((sid) => handle.syncById.get(sid)?.index),
         );
         controlRemap.set(
             traitId,
-            (manifest.controls[i] ?? []).map((cid) => def.controlsById.get(cid)?.index),
+            (manifest.controls[i] ?? []).map((cid) => handle.controlsById.get(cid)?.index),
         );
     }
     return {
@@ -648,29 +747,32 @@ export function resolveConfig(reg: Registry): Config {
 export function reindexRegistry(reg: Registry): void {
     // indexed by slot rather than keyed by it: slots come from one dense counter, and this
     // is read per trait per node per client in the replication fan-out.
-    const slotToTrait: Array<TraitDef | undefined> = [];
-    for (const [, def] of reg.traits.byId) slotToTrait[def.slot] = def;
+    const slotToTrait: Array<TraitHandle | undefined> = [];
+    for (const handle of reg.traits.handles.values()) slotToTrait[handle.slot] = handle;
     reg.slotToTrait = slotToTrait;
 
     const defs = new Map<string, BlockDef>();
     const handles = new Map<string, BlockHandle>();
-    for (const [id, h] of reg.blocks.byId) {
-        handles.set(id, h);
-        defs.set(id, h._def);
+    for (const [id, def] of reg.blocks.byId) {
+        defs.set(id, def);
+        const handle = reg.blocks.handles.get(id);
+        if (handle) handles.set(id, handle);
     }
     const textures = new Map<string, BlockTextureDef>();
     for (const [id, h] of reg.blockTextures.byId) textures.set(id, h);
-    reg.blockRegistry = buildBlockRegistry(defs, handles, textures);
+    // IN PLACE: `voxels.registry`, the per-room scene context, blueprint canvases
+    // and content-store scene voxels all hold this object. Rebinding the field
+    // would leave every one of them reading tables sized for the old state count.
+    buildBlockRegistry(reg.blockRegistry, defs, handles, textures);
 
     reg.protocol = {
         traits: buildProtocolTable(reg.traits.byId.keys()),
         commands: buildProtocolTable(reg.commands.byId.keys()),
     };
 
-
     // the wire index is sort-by-id and moves whenever the trait set does, so it is stamped
     // here rather than looked up by string id on every emitted trait.
-    for (const [, def] of reg.traits.byId) def.netIndex = reg.protocol.traits.idToIndex.get(def.id);
+    for (const handle of reg.traits.handles.values()) handle.netIndex = reg.protocol.traits.idToIndex.get(handle.id);
 }
 
 /* ── unified registry ───────────────────────────────────────────── */
@@ -679,10 +781,10 @@ export type Registry = {
     /** monotonic id bumped once per dispatch drain via `bumpVersion()`. */
     version: number;
 
-    blockTextures: RegistryStore<BlockTextureDef>;
-    blocks: RegistryStore<BlockHandle>;
-    models: RegistryStore<ModelHandle>;
-    traits: RegistryStore<TraitDef>;
+    blockTextures: RegistryStore<BlockTextureDef, BlockTextureHandle>;
+    blocks: RegistryStore<BlockDef, BlockHandle>;
+    models: RegistryStore<ModelDef, ModelHandle>;
+    traits: RegistryStore<TraitDef, TraitHandle>;
     /**
      * per-trait control registrations, keyed `${traitId}.${controlId}`. one
      * entry per `control()` call. lets HMR diff individual controls without
@@ -695,19 +797,21 @@ export type Registry = {
     sync: RegistryStore<SyncDef>;
     /** per-trait script registrations, keyed `${traitId}.${scriptId}` (same as `ScriptDef.key`). */
     scripts: RegistryStore<ScriptDef>;
-    commands: RegistryStore<CommandDef>;
-    scenes: RegistryStore<SceneHandle>;
-    prefabs: RegistryStore<PrefabDef>;
-    sounds: RegistryStore<SoundHandle>;
-    sprites: RegistryStore<SpriteHandle>;
-    particles: RegistryStore<ParticleHandle>;
+    commands: RegistryStore<CommandDef, CommandHandle<pack.Schema, RpcDirection>>;
+    scenes: RegistryStore<SceneDef, SceneHandle>;
+    prefabs: RegistryStore<PrefabDef, PrefabHandle>;
+    sounds: RegistryStore<SoundDef, SoundHandle>;
+    sprites: RegistryStore<SpriteDef, SpriteHandle>;
+    particles: RegistryStore<ParticleDef, ParticleHandle>;
     config: RegistryStore<Config>;
 
     /** runtime block lookup; derived from `blocks` + `blockTextures`.
      *  rebuilt by `reindexRegistry()` at boot + each dev flush — a plain field. */
     blockRegistry: Blocks;
-    /** slot → trait def for O(1) runtime lookup. rebuilt by `reindexRegistry()`. */
-    slotToTrait: Array<TraitDef | undefined>;
+    /** slot → trait HANDLE for O(1) runtime lookup — the handle, because callers
+     *  need its derived state (codecs, by-id maps) as well as `.def`. rebuilt by
+     *  `reindexRegistry()`. */
+    slotToTrait: Array<TraitHandle | undefined>;
     /** sort-by-id wire tables for the network protocol. rebuilt by `reindexRegistry()`. */
     protocol: { traits: ProtocolTable; commands: ProtocolTable };
 
@@ -718,8 +822,8 @@ export type Registry = {
 /* ── per-kind hash + extractDeps wiring ─────────────────────────── */
 
 const blockTextureHash = (t: BlockTextureDef) => structuralHash(t);
-const spriteHash = (s: SpriteHandle) => structuralHash(s);
-const particleHash = (p: ParticleHandle) => structuralHash(p);
+const spriteHash = (s: SpriteDef) => structuralHash(s);
+const particleHash = (p: ParticleDef) => structuralHash(p);
 
 /**
  * blocks store the handle (not just the def) so the consumer can patch
@@ -727,7 +831,7 @@ const particleHash = (p: ParticleHandle) => structuralHash(p);
  * the slot fields are populated by the consumer at build time and would
  * otherwise feed back as spurious change detection.
  */
-const blockHash = (h: BlockHandle) => structuralHash(h._def);
+const blockHash = (d: BlockDef) => structuralHash(d);
 
 /**
  * `extractDeps` resolves the model factory across every state and collects
@@ -737,8 +841,7 @@ const blockHash = (h: BlockHandle) => structuralHash(h._def);
  * DepGraph picks the swap up via the dep-set diff and elevates it to a
  * `changed` event, which the block-branch dispatch reacts to.
  */
-const extractBlockDeps = (h: BlockHandle): DepKey[] => {
-    const def = h._def;
+const extractBlockDeps = (def: BlockDef): DepKey[] => {
     if (!def.model) return [];
     const textureIds = new Set<string>();
     for (let i = 0; i < def.states.totalStates; i++) {
@@ -749,18 +852,19 @@ const extractBlockDeps = (h: BlockHandle): DepKey[] => {
         } catch {
             continue;
         }
-        collectModelTextureIds(model, textureIds);
+        if (model) collectModelTextureIds(model, textureIds);
     }
     const deps: DepKey[] = [];
     for (const id of textureIds) deps.push({ registry: 'blockTextures', id });
     return deps;
 };
 
-// ModelHandle carries a detached `scene: Node` tree (parent pointers form
-// cycles) plus per-side `.bin` URLs. The bin URLs already embed a content
-// hash codegen'd by buildModels, so they're a sufficient change-detection
-// key on their own, hashing the Node tree would just recurse the cycle.
-const modelHash = (h: ModelHandle) => structuralHash({ modelId: h.modelId, src: h.src, bin: h.bin });
+// NOT wholesale, and deliberately so: `ModelDef` carries a detached `scene: Node`
+// tree (parent pointers form cycles) plus per-side `.bin` URLs, and `version` is
+// bumped at runtime when the payload reloads. The bin URLs already embed a content
+// hash codegen'd by buildModels, so they are a sufficient change-detection key on
+// their own; hashing the Node tree would just recurse the cycle.
+const modelHash = (d: ModelDef) => structuralHash({ modelId: d.modelId, src: d.src, bin: d.bin });
 
 const prefabHash = (p: PrefabDef) => structuralHash({ id: p.id, type: p.type, args: p.args, node: p.node, apply: p.apply });
 
@@ -774,7 +878,7 @@ const extractPrefabDeps = (p: PrefabDef): DepKey[] => {
 // form cycles) which is runtime state, not authored content. The authored
 // payload (`_payload`) is the change driver, hashing that side-steps the
 // cycle and matches the actual edit surface.
-const sceneHash = (s: SceneHandle) => structuralHash({ id: s.id, client: s.client, server: s.server, payload: s._payload });
+const sceneHash = (s: SceneDef) => structuralHash(s);
 
 /**
  * trait body + meta only, controls / sync / scripts are diffed in their
@@ -783,7 +887,10 @@ const sceneHash = (s: SceneHandle) => structuralHash({ id: s.id, client: s.clien
  * trait would also fire a wholesale "trait changed" event, drowning the
  * granular per-kind dispatch and producing spurious editor toasts.
  */
-const traitHash = (t: TraitDef) => structuralHash({ id: t.id, name: t.name, slot: t.slot, persist: t.persist, body: t.body });
+// NOT wholesale, unlike the other kinds: `controls` / `sync` / `scripts` have their
+// own per-id stores precisely so a single control edit fires there rather than
+// forcing a wholesale trait swap. Hashing them here would collapse that.
+const traitHash = (t: TraitDef) => structuralHash({ id: t.id, name: t.name, persist: t.persist, body: t.body });
 const controlHash = (c: ControlDef) =>
     structuralHash({
         label: c.label,
@@ -803,7 +910,9 @@ const syncHash = (s: SyncDef) =>
         authority: s.authority,
     });
 const scriptHash = (s: ScriptDef) => structuralHash({ factory: s.factory, editor: s.editor });
-const commandHash = (c: CommandDef) => structuralHash(c);
+// `serdes` is derived from `schema` and `handle` is derived identity; hashing either
+// would make every re-declaration look like a content change.
+const commandHash = (c: CommandDef) => structuralHash({ id: c.id, direction: c.direction, schema: c.schema });
 const configHash = (c: Config) => structuralHash(c);
 
 // SoundHandle is inert authoring metadata (src + long flag + codegen'd
@@ -811,28 +920,30 @@ const configHash = (c: Config) => structuralHash(c);
 // client/audio/audio.ts keyed by id; the handle itself never carries it.
 // `duration` is in the hash because the codegen barrel's in-place mutation
 // needs to flow as a `changed` event.
-const soundHash = (s: SoundHandle) => structuralHash({ soundId: s.soundId, src: s.src, long: s.long, duration: s.duration });
+// `version` is bumped at runtime by the barrel, so it can't be hashed; `name` is
+// cosmetic and deliberately doesn't fire a change.
+const soundHash = (s: SoundDef) => structuralHash({ soundId: s.soundId, src: s.src, long: s.long, duration: s.duration });
 
 /* ── singleton ──────────────────────────────────────────────────── */
 
 export function init(): Registry {
-    const blockTextures = createRegistryStore<BlockTextureDef>({
+    const blockTextures = createRegistryStore<BlockTextureDef, BlockTextureHandle>({
         name: 'blockTextures',
         hash: blockTextureHash,
         diff: wholesaleDiff(blockTextureHash),
     });
-    const blocks = createRegistryStore<BlockHandle>({
+    const blocks = createRegistryStore<BlockDef, BlockHandle>({
         name: 'blocks',
         hash: blockHash,
         diff: wholesaleDiff(blockHash),
         extractDeps: extractBlockDeps,
     });
-    const models = createRegistryStore<ModelHandle>({
+    const models = createRegistryStore<ModelDef, ModelHandle>({
         name: 'models',
         hash: modelHash,
         diff: wholesaleDiff(modelHash),
     });
-    const traits = createRegistryStore<TraitDef>({
+    const traits = createRegistryStore<TraitDef, TraitHandle>({
         name: 'traits',
         hash: traitHash,
         diff: wholesaleDiff(traitHash),
@@ -854,33 +965,33 @@ export function init(): Registry {
         name: 'scripts',
         hash: scriptHash,
     });
-    const commands = createRegistryStore<CommandDef>({
+    const commands = createRegistryStore<CommandDef, CommandHandle<pack.Schema, RpcDirection>>({
         name: 'commands',
         hash: commandHash,
         diff: wholesaleDiff(commandHash),
     });
-    const scenes = createRegistryStore<SceneHandle>({
+    const scenes = createRegistryStore<SceneDef, SceneHandle>({
         name: 'scenes',
         hash: sceneHash,
         diff: wholesaleDiff(sceneHash),
     });
-    const prefabs = createRegistryStore<PrefabDef>({
+    const prefabs = createRegistryStore<PrefabDef, PrefabHandle>({
         name: 'prefabs',
         hash: prefabHash,
         diff: wholesaleDiff(prefabHash),
         extractDeps: extractPrefabDeps,
     });
-    const sounds = createRegistryStore<SoundHandle>({
+    const sounds = createRegistryStore<SoundDef, SoundHandle>({
         name: 'sounds',
         hash: soundHash,
         diff: wholesaleDiff(soundHash),
     });
-    const sprites = createRegistryStore<SpriteHandle>({
+    const sprites = createRegistryStore<SpriteDef, SpriteHandle>({
         name: 'sprites',
         hash: spriteHash,
         diff: wholesaleDiff(spriteHash),
     });
-    const particles = createRegistryStore<ParticleHandle>({
+    const particles = createRegistryStore<ParticleDef, ParticleHandle>({
         name: 'particles',
         hash: particleHash,
         diff: wholesaleDiff(particleHash),
@@ -908,11 +1019,12 @@ export function init(): Registry {
         particles,
         config,
         // derived index fields — start empty; `reindexRegistry()` fills them at engine
-        // boot (after user modules register) and at each dev flush. NOT built
-        // here: `buildBlockRegistry` reaches into sibling modules that may not
-        // have initialized yet at registry module-load (circular init / TDZ).
-        slotToTrait: [] as Array<TraitDef | undefined>,
-        blockRegistry: null! as Blocks,
+        // boot (after user modules register) and at each dev flush. `blockRegistry` is
+        // a real empty struct from the outset (never rebound after this), so holders
+        // can take the reference at any time; `createBlockRegistry` touches no sibling
+        // module, unlike `buildBlockRegistry`, which would trip circular init here.
+        slotToTrait: [] as Array<TraitHandle | undefined>,
+        blockRegistry: createBlockRegistry(),
         protocol: { traits: buildProtocolTable([]), commands: buildProtocolTable([]) },
     } as Registry;
 
@@ -945,6 +1057,10 @@ export function init(): Registry {
             s.revision = 0;
         }
         reg.version = 0;
+        // block state-id reservations are process-lifetime; a suite declaring a
+        // different block set per case would otherwise keep growing the high-water
+        // mark every table is sized from.
+        _resetBlockSlots();
         reindexRegistry(reg);
     };
 

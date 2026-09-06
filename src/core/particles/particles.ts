@@ -31,7 +31,7 @@
 // for auto-derived block-dust without inverting core → client).
 
 import { recordParticle } from '../capture/module-scope';
-import { registry, upsert } from '../registry';
+import { declare, registry } from '../registry';
 import type { SpriteHandle } from '../sprites/sprites';
 import type { Voxels } from '../voxels/voxels';
 
@@ -136,14 +136,15 @@ export type ParticleOptions = {
     tint?: [r: number, g: number, b: number, a: number];
 };
 
-export type ParticleHandle = {
+/** The declared data for one particle type. Pure: hashed wholesale, swapped
+ *  wholesale on re-declaration (see `declare`). */
+export type ParticleDef = {
     /** particle type string id (e.g. 'smoke', '_block-dust/grass'). */
     typeId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `typeId` when the author didn't supply one. */
     name: string;
     /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'particles'; id: string };
     /** sprite ref (frame timeline source). */
     sprite: SpriteHandle;
     /** playback mode. */
@@ -157,6 +158,16 @@ export type ParticleHandle = {
     glow: number;
     /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */
     tint: [r: number, g: number, b: number, a: number];
+};
+
+/** Stable wrapper around a `ParticleDef`; identity plus the live def. */
+export type ParticleHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'particles'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: ParticleDef;
 };
 
 /* ── registration ── */
@@ -178,18 +189,25 @@ export type ParticleHandle = {
  * ```
  */
 export function particle(id: string, options: ParticleOptions): ParticleHandle {
-    const handle: ParticleHandle = {
-        typeId: id,
-        name: options.name ?? id,
-        dependency: { registry: 'particles', id },
-        sprite: options.sprite,
-        playback: options.playback,
-        fps: options.fps ?? 0,
-        update: options.update,
-        glow: options.glow ?? 0,
-        tint: options.tint ?? [1, 1, 1, 1],
-    };
-    upsert(registry.particles, id, handle);
+    const name = options.name ?? id;
+    const fps = options.fps ?? 0;
+    const glow = options.glow ?? 0;
+    const tint = options.tint ?? ([1, 1, 1, 1] as [number, number, number, number]);
+    const handle = declare(
+        registry.particles,
+        id,
+        (): ParticleDef => ({
+            typeId: id,
+            name,
+            sprite: options.sprite,
+            playback: options.playback,
+            fps,
+            update: options.update,
+            glow,
+            tint,
+        }),
+        (def): ParticleHandle => ({ id, dependency: { registry: 'particles', id }, def }),
+    );
     recordParticle(id);
     return handle;
 }

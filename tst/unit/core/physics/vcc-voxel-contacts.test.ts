@@ -35,7 +35,7 @@ function setup() {
     // coordinator's query includes the node.
     addTrait(player, ContactsTrait);
 
-    const physics = Physics.init(sceneTree, voxels, registry);
+    const physics = Physics.init(sceneTree, voxels);
 
     // stands in for the VCC's kinematic inner body, registered so resolveSide
     // maps it back to `player`.

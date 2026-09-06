@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Blocks } from '../../../../src/core/voxels/block-registry';
-import { type buildBlockRegistry, resolveKey } from '../../../../src/core/voxels/block-registry';
+import { resolveKey } from '../../../../src/core/voxels/block-registry';
 import { CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import {
     buildMeshInput,
@@ -854,7 +854,7 @@ describe('propagateAllLight', () => {
 
 describe('updateLightOnBlockChange', () => {
     /** helper: get the global state id for a block key */
-    function stateIdForKey(key: string, registry: ReturnType<typeof buildBlockRegistry>): number {
+    function stateIdForKey(key: string, registry: Blocks): number {
         const stateId = registry.keyToState.get(key);
         if (stateId === undefined) throw new Error(`unknown key: ${key}`);
         return stateId;
@@ -1334,7 +1334,7 @@ describe('updateLightOnBlockChange', () => {
 
 describe('min_safe_light batch correctness', () => {
     /** helper: get the global state id for a block key */
-    function stateIdForKey(key: string, registry: ReturnType<typeof buildBlockRegistry>): number {
+    function stateIdForKey(key: string, registry: Blocks): number {
         const stateId = registry.keyToState.get(key);
         if (stateId === undefined) throw new Error(`unknown key: ${key}`);
         return stateId;
@@ -1486,12 +1486,15 @@ describe('min_safe_light batch correctness', () => {
 // ── perf measurement: 5x5 ceiling removal ───────────────────────────
 
 describe('perf: 5x5 ceiling removal', () => {
-    const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+    // built per-test, not at describe scope: `buildTestRegistry` fills the registry
+    // IN PLACE, so a value captured out here is the same object the `beforeEach`
+    // reset empties before the test body runs.
     // Setup propagateAllLight on a ~250-chunk world dominates wall-clock
     // (the actual updateLightBatch measurement is sub-millisecond). Bump
     // past vitest's 5s default so the perf assertion can be reached.
     it('measures BFS scope for ceiling removal', { timeout: 180000 }, () => {
         // setup: rocket-spleef style arena with larger surrounding world
+        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
         const voxels = createVoxels(registry);
         voxels.authority = createVoxelsAuthority();
 
@@ -1560,6 +1563,7 @@ describe('perf: 5x5 ceiling removal', () => {
 
     it('measures BFS scope for ceiling placement', { timeout: 60000 }, () => {
         // same setup but WITHOUT ceiling, then place it
+        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
         const voxels = createVoxels(registry);
         voxels.authority = createVoxelsAuthority();
 

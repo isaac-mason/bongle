@@ -159,7 +159,7 @@ export function update(
             continue;
         }
 
-        const entry = resources.frames.get(sprite.spriteId);
+        const entry = resources.frames.get(sprite.def.spriteId);
         // sprite known to the trait but not yet in the atlas (asset
         // pipeline hasn't emitted it / atlas refresh mid-flight). Skip
         // and install next frame once the lookup succeeds.
@@ -167,7 +167,7 @@ export function update(
 
         let state: SpriteVisualState;
         const existing = trait._state;
-        if (existing === null || existing.spriteIdAtInstall !== sprite.spriteId) {
+        if (existing === null || existing.spriteIdAtInstall !== sprite.def.spriteId) {
             if (existing !== null) destroyInstance(visuals, batch, trait, visibility);
             // own frustum-cull entry. The quad can rotate freely (billboard
             // modes) so the local box is a conservative diagonal that
@@ -181,7 +181,7 @@ export function update(
                 slot: -1,
                 trait,
                 cull,
-                spriteIdAtInstall: sprite.spriteId,
+                spriteIdAtInstall: sprite.def.spriteId,
                 entry,
                 installedAtMs: nowMs,
                 lastSeenFrame: frameId,

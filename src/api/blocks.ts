@@ -4,6 +4,7 @@ export type {
     ClipChannels,
     ClipDef,
     MeshId,
+    ModelDef,
     ModelHandle,
 } from '../core/models/handle';
 export type { ModelHandleMap, ModelOptions } from '../core/models/models';

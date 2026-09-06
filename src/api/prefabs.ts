@@ -35,7 +35,10 @@
 
 import { type DepHandle, setDeps } from '../core/capture/dep-graph';
 import { recordPrefab } from '../core/capture/module-scope';
-import { type PrefabDef as CapturedPrefabDef, registry, upsert } from '../core/registry';
+import { type PrefabDef as CapturedPrefabDef, declare, type PrefabHandle, registry } from '../core/registry';
+
+export type { PrefabHandle } from '../core/registry';
+
 import type { PrefabApplyContext } from '../core/scene/prefab';
 import type { Schema, SchemaType } from '../core/scene/prop/prop';
 import type { Node, Realm } from '../core/scene/scene-tree';
@@ -68,21 +71,6 @@ export type PrefabDef<Args = unknown> = {
     defaultArgs: Args;
     node?: { realm?: Realm };
     apply: (ctx: PrefabApplyContext, args: Args) => void;
-};
-
-export type PrefabHandle<Args = unknown> = {
-    readonly id: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `id` when the author didn't supply one. */
-    readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'prefabs'; id: string };
-    readonly type: PrefabType;
-    readonly argsSchema: Schema;
-    /** default args value, read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
-    readonly defaultArgs: Args;
-    readonly node: { realm?: Realm } | undefined;
-    readonly __args: Args;
 };
 
 export type PrefabOptions<T extends PrefabType, S extends Schema> = {
@@ -144,16 +132,15 @@ export function prefab<T extends PrefabType, S extends Schema>(
     const apply = options.fn ?? noopApply;
     const node = options.node;
 
-    const def: CapturedPrefabDef = {
+    const args = options.args ? { schema: argsSchema, default: defaultArgs } : undefined;
+    const applyFn = apply as (ctx: unknown, args: unknown) => void;
+
+    const handle = declare(
+        registry.prefabs,
         id,
-        name,
-        type,
-        deps,
-        args: options.args ? { schema: argsSchema, default: defaultArgs } : undefined,
-        node,
-        apply: apply as (ctx: unknown, args: unknown) => void,
-    };
-    upsert(registry.prefabs, id, def);
+        (): CapturedPrefabDef => ({ id, name, type, deps, args, node, apply: applyFn }),
+        (def): PrefabHandle => ({ id, dependency: { registry: 'prefabs', id }, def, __args: null! }),
+    );
     recordPrefab(id);
     // wire user-supplied deps into the DepGraph (replace semantics).
     // the AST wrap unions AST-detected deps on top via __addDeps/addDeps,
@@ -163,16 +150,7 @@ export function prefab<T extends PrefabType, S extends Schema>(
         { registry: 'prefabs', id },
         deps.map((d) => d.dependency),
     );
-    return {
-        id,
-        name,
-        dependency: { registry: 'prefabs', id },
-        type,
-        argsSchema,
-        defaultArgs,
-        node,
-        __args: null!,
-    };
+    return handle as PrefabHandle<SchemaType<S>>;
 }
 
 /* ── createPrefab ── */
@@ -194,14 +172,14 @@ export function createPrefab<Args = unknown>(
         realm?: Realm;
     },
 ): Node {
-    const realm = opts?.realm ?? handle.node?.realm ?? 'inherit';
+    const realm = opts?.realm ?? handle.def.node?.realm ?? 'inherit';
     const node = SceneTree.createNode({
         name: opts?.name,
         realm,
     });
     // caller's args win; otherwise use the def's default (deep-cloned so the
     // shared default object isn't mutated by per-instance edits).
-    const args = opts?.args !== undefined ? opts.args : structuredClone(handle.defaultArgs);
+    const args = opts?.args !== undefined ? opts.args : structuredClone(handle.def.args?.default as Args);
     node.prefab = createPrefabConfig(handle.id, { args });
     return node;
 }

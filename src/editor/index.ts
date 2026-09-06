@@ -259,13 +259,13 @@ script(
                 addChild(parent, node);
                 const traits: Array<{ id: string; controls?: Record<string, unknown> }> = JSON.parse(args.traits);
                 for (const st of traits) {
-                    const def = registry.traits.byId.get(st.id);
-                    if (!def) {
+                    const handle = registry.traits.handles.get(st.id);
+                    if (!handle) {
                         if (node.unresolved === null) node.unresolved = new Map();
                         node.unresolved.set(st.id, st.controls);
                         continue;
                     }
-                    addTraitBySlot(node, def.slot, st.controls);
+                    addTraitBySlot(node, handle.slot, st.controls);
                 }
                 if (args.children) {
                     const children: SerializedNode[] = JSON.parse(args.children);
@@ -371,13 +371,13 @@ script(
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
-                const def = registry.traits.byId.get(args.traitId);
-                if (!def) {
+                const handle = registry.traits.handles.get(args.traitId);
+                if (!handle) {
                     if (node.unresolved === null) node.unresolved = new Map();
                     node.unresolved.set(args.traitId, args.props ? JSON.parse(args.props) : undefined);
                     bumpNodeVersion(sceneTree, node);
                 } else {
-                    addTraitBySlot(node, def.slot, args.props ? JSON.parse(args.props) : undefined);
+                    addTraitBySlot(node, handle.slot, args.props ? JSON.parse(args.props) : undefined);
                 }
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
@@ -391,12 +391,12 @@ script(
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
-                const def = registry.traits.byId.get(args.traitId);
-                if (!def) {
+                const handle = registry.traits.handles.get(args.traitId);
+                if (!handle) {
                     node.unresolved?.delete(args.traitId);
                     bumpNodeVersion(sceneTree, node);
                 } else {
-                    removeTraitBySlot(node, def.slot);
+                    removeTraitBySlot(node, handle.slot);
                 }
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
@@ -1284,6 +1284,8 @@ export function getEditorClient(): EngineClient | null {
 
 let currentBlockIconUrl: string | null = null;
 let blockIconRenderInFlight = false;
+/** a reload requested while one was in flight, replayed when it finishes. */
+let blockIconReloadQueued = false;
 const prefabIconInFlight = new Set<string>();
 /** bumped by every prefab-icon invalidation; a load that resolves against a stale
  *  generation drops its result instead of publishing a url nothing revokes. */
@@ -1301,7 +1303,37 @@ function loadEditorAssets(): void {
 /** Re-read the pipeline-baked block-icon atlas. Called by the edit client when
  *  `voxels-icons.{png,json}` changes on the fs. */
 export function reloadBlockIconAtlas(): void {
-    void loadBakedBlockIcons();
+    void reloadBlockIconAtlasLoop();
+}
+
+/**
+ * The icon bake writes the atlas png and its coords sidecar as two separate
+ * `writeIfChanged` calls, and the fs emits one change per write — so this is
+ * called TWICE per bake, and the png notification arrives while the json is
+ * still being written. That first load can therefore publish a fresh atlas
+ * against the previous pass's coords, and the json notification (the one
+ * carrying the new block's tile) is the one that has to correct it. Dropping an
+ * overlapping request left exactly that state stuck: a block in the palette with
+ * no icon, unfixable short of a pipeline restart. So coalesce onto a trailing
+ * re-run instead — the replay reads both artifacts settled.
+ */
+async function reloadBlockIconAtlasLoop(): Promise<boolean> {
+    if (blockIconRenderInFlight) {
+        blockIconReloadQueued = true;
+        return false;
+    }
+    blockIconRenderInFlight = true;
+    try {
+        let loaded = false;
+        do {
+            blockIconReloadQueued = false;
+            loaded = await loadBakedBlockIcons();
+        } while (blockIconReloadQueued);
+        return loaded;
+    } finally {
+        blockIconRenderInFlight = false;
+        blockIconReloadQueued = false;
+    }
 }
 
 /** Wrap PNG bytes (a baked artifact) in a blob object URL for CSS/img use. */
@@ -1318,7 +1350,7 @@ function pngBytesToObjectUrl(bytes: Uint8Array): string {
  *  registry-change events drive later reloads. */
 async function loadBakedBlockIconsWhenReady(attempt = 0): Promise<void> {
     if (!editorClient) return;
-    const ok = await loadBakedBlockIcons();
+    const ok = await reloadBlockIconAtlasLoop();
     if (!ok && attempt < 600) requestAnimationFrame(() => void loadBakedBlockIconsWhenReady(attempt + 1));
 }
 
@@ -1326,12 +1358,11 @@ async function loadBakedBlockIconsWhenReady(attempt = 0): Promise<void> {
  * Load the pipeline-baked block-icon atlas (`resources/client/voxels-icons.{png,json}`)
  * through the engine resource loader and publish it to the editor store for the
  * inventory + inspector. Returns false (quietly) if the artifact isn't baked yet.
- * Coalesced by an in-flight guard.
+ * Serialized by `reloadBlockIconAtlasLoop`, the only caller.
  */
 async function loadBakedBlockIcons(): Promise<boolean> {
     const state = editorClient;
-    if (!state || blockIconRenderInFlight) return false;
-    blockIconRenderInFlight = true;
+    if (!state) return false;
     try {
         const loader = state.resources.loader;
         const [png, jsonBytes] = await Promise.all([loader.loadBytes('voxels-icons.png'), loader.loadBytes('voxels-icons.json')]);
@@ -1356,8 +1387,6 @@ async function loadBakedBlockIcons(): Promise<boolean> {
         // not baked yet (or fetch failed) — the caller retries / a later registry
         // change reloads.
         return false;
-    } finally {
-        blockIconRenderInFlight = false;
     }
 }
 

@@ -1,4 +1,4 @@
-// build-runtime-handle.ts, construct a `ModelHandle` from a parsed
+// build-runtime-handle.ts, construct a `ModelDef` from a parsed
 // `Model`. Used by `Resources.ensureModel` to hydrate the empty handle
 // that `setModel` created for runtime models (avatars, uploaded assets).
 // Structurally mirrors the bongle pipeline's codegen barrel
@@ -16,7 +16,7 @@ import type { Box3 } from 'math/shapes';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
 import { addChild, addTrait, createNode, type Node } from '../scene/scene-tree';
-import type { ClipDef, MeshId, ModelHandle } from './handle';
+import type { ClipDef, MeshId, ModelDef } from './handle';
 import type { Model, ModelNode } from './model';
 
 /** TRS within `TRS_EPS` of identity, gltf bake noise absorbs the slack. */
@@ -32,8 +32,8 @@ const TRS_EPS = 1e-6;
  * are created each call. Re-hydration isn't part of the normal flow
  * anyway: model swap goes via setModel + a fresh handle for a different id.
  */
-export function hydrateRuntimeHandle(handle: ModelHandle, model: Model): void {
-    const modelId = handle.modelId;
+export function hydrateRuntimeHandle(def: ModelDef, model: Model): void {
+    const modelId = def.modelId;
 
     // animated set: any ModelNode that's a target of at least one channel.
     // gates TransformTrait stamping on identity non-mesh nodes.
@@ -86,10 +86,10 @@ export function hydrateRuntimeHandle(handle: ModelHandle, model: Model): void {
         animations[c.name] = { name: c.name, modelId };
     }
 
-    // mutate the same handle object in place, user refs (and the
+    // mutate the same def object in place, user refs (and the
     // resources-side entry from setModel) stay valid.
-    const target = handle as {
-        -readonly [K in keyof ModelHandle]: ModelHandle[K];
+    const target = def as {
+        -readonly [K in keyof ModelDef]: ModelDef[K];
     };
     target.scene = scene;
     target.aabb = [model.aabb[0], model.aabb[1], model.aabb[2], model.aabb[3], model.aabb[4], model.aabb[5]];
@@ -118,16 +118,15 @@ function isIdentityTRS(mn: ModelNode): boolean {
 }
 
 /**
- * Construct an empty `ModelHandle` shell for `modelId`. Used by
+ * Construct an empty `ModelDef` shell for `modelId`. Used by
  * `Resources.setModel` when the caller doesn't pass a codegen-stamped
  * handle (i.e. for runtime-uploaded models like avatars). The hydrator
  * mutates this same object in place once the payload lands.
  */
-export function createEmptyHandle(modelId: string): ModelHandle {
+export function createEmptyDef(modelId: string): ModelDef {
     return {
         modelId,
         name: modelId,
-        dependency: { registry: 'models', id: modelId },
         src: '',
         bin: { client: '', server: '' },
         scene: createNode({ name: `__empty_${modelId}__` }),

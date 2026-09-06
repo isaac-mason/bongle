@@ -270,77 +270,78 @@ export function raycastVoxels(
                 return out;
             } else {
                 // custom collider shape, use crashcat castRayVsShape
-                const shape = colliderShapes[cid];
+                const shape = colliderShapes[cid]!;
 
-                // a stale state id, e.g. a chunk briefly resolved against a different
-                // registry mid-HMR (block add), can index past the rebuilt shape table.
-                // skip the cell rather than hand crashcat an undefined shape (it would
-                // deref `.type` on undefined and crash the caller, e.g. the editor cursor).
-                if (!shape) continue;
-
-                // compute tMin/tMax for the ray segment within this voxel cell
+                // ray segment within this voxel cell. A ray crossing a voxel edge ties
+                // two tMax values; the DDA steps one axis and leaves the other's tMax
+                // equal to `distance`, so the next cell's segment is zero-length.
+                // Skipping the shape test then has to fall THROUGH to the step at the
+                // bottom of the loop — a `continue` re-tests the same cell at the same
+                // distance forever, an unbreakable main-thread spin with no throw.
                 const tVoxelExit = Math.min(tMaxX, tMaxY, tMaxZ);
                 const segStart = Math.max(0, distance);
                 const segEnd = Math.min(tVoxelExit, maxDistance);
                 const segLen = segEnd - segStart;
-                if (segLen <= 0) continue;
 
-                // ray origin offset to start of segment, in voxel-local space
-                const localOx = ox + dx * segStart - x;
-                const localOy = oy + dy * segStart - y;
-                const localOz = oz + dz * segStart - z;
+                if (segLen > 0) {
+                    // ray origin offset to start of segment, in voxel-local space
+                    const localOx = ox + dx * segStart - x;
+                    const localOy = oy + dy * segStart - y;
+                    const localOz = oz + dz * segStart - z;
 
-                _rayCollector.earlyOutFraction = 1.0;
-                _rayCollector.hit.status = 0;
-                _rayCollector.hit.fraction = 1.0;
+                    _rayCollector.earlyOutFraction = 1.0;
+                    _rayCollector.hit.status = 0;
+                    _rayCollector.hit.fraction = 1.0;
 
-                castRayVsShape(
-                    _rayCollector,
-                    _raySettings,
-                    localOx,
-                    localOy,
-                    localOz,
-                    dx,
-                    dy,
-                    dz,
-                    segLen,
-                    shape,
-                    0,
-                    0, // subShapeId, subShapeIdBits
-                    0,
-                    0,
-                    0, // pos (shape at origin = voxel-local)
-                    0,
-                    0,
-                    0,
-                    1, // quat (identity)
-                    1,
-                    1,
-                    1, // scale
-                );
+                    castRayVsShape(
+                        _rayCollector,
+                        _raySettings,
+                        localOx,
+                        localOy,
+                        localOz,
+                        dx,
+                        dy,
+                        dz,
+                        segLen,
+                        shape,
+                        0,
+                        0, // subShapeId, subShapeIdBits
+                        0,
+                        0,
+                        0, // pos (shape at origin = voxel-local)
+                        0,
+                        0,
+                        0,
+                        1, // quat (identity)
+                        1,
+                        1,
+                        1, // scale
+                    );
 
-                if (_rayCollector.hit.status !== 0) {
-                    const hitT = segStart + _rayCollector.hit.fraction * segLen;
+                    if (_rayCollector.hit.status !== 0) {
+                        const hitT = segStart + _rayCollector.hit.fraction * segLen;
 
-                    out.hit = true;
-                    out.px = ox + dx * hitT;
-                    out.py = oy + dy * hitT;
-                    out.pz = oz + dz * hitT;
-                    // crashcat castRayVsShape doesn't give us the normal directly,
-                    // so we approximate from the DDA step (same as cube path)
-                    const faceIdx = hitT === 0 ? faceFromRayDirection(dx, dy, dz) : faceIndexFromStep(lastStepAxis, lastStepDir);
-                    out.nx = FACE_NX[faceIdx]!;
-                    out.ny = FACE_NY[faceIdx]!;
-                    out.nz = FACE_NZ[faceIdx]!;
-                    out.distance = hitT;
-                    out.voxelX = x;
-                    out.voxelY = y;
-                    out.voxelZ = z;
-                    out.stateId = stateId;
-                    out.hitIndex = -1; // no meaningful tri index from crashcat
-                    return out;
+                        out.hit = true;
+                        out.px = ox + dx * hitT;
+                        out.py = oy + dy * hitT;
+                        out.pz = oz + dz * hitT;
+                        // crashcat castRayVsShape doesn't give us the normal directly,
+                        // so we approximate from the DDA step (same as cube path)
+                        const faceIdx =
+                            hitT === 0 ? faceFromRayDirection(dx, dy, dz) : faceIndexFromStep(lastStepAxis, lastStepDir);
+                        out.nx = FACE_NX[faceIdx]!;
+                        out.ny = FACE_NY[faceIdx]!;
+                        out.nz = FACE_NZ[faceIdx]!;
+                        out.distance = hitT;
+                        out.voxelX = x;
+                        out.voxelY = y;
+                        out.voxelZ = z;
+                        out.stateId = stateId;
+                        out.hitIndex = -1; // no meaningful tri index from crashcat
+                        return out;
+                    }
+                    // ray passed through gaps in the shape, continue DDA
                 }
-                // ray passed through gaps in the shape, continue DDA
             }
         }
 

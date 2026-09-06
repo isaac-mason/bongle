@@ -12,8 +12,8 @@
 // physics) to poll.
 
 import type { Box3 } from 'math/shapes';
-import { createEmptyHandle, hydrateRuntimeHandle } from './models/build-runtime-handle';
-import type { ClipChannel, ClipChannels, ClipDef, MeshId, ModelHandle } from './models/handle';
+import { createEmptyDef, hydrateRuntimeHandle } from './models/build-runtime-handle';
+import type { ClipChannel, ClipChannels, ClipDef, MeshId, ModelDef } from './models/handle';
 import { type Model, type ModelMesh, toModel } from './models/model';
 import { unpack } from './models/model-bin';
 import { gltfUnpack } from './models/model-glb';
@@ -50,15 +50,15 @@ export type ResourceModel = {
     /**
      * codegen'd handle for bundled models, passed through by the
      * `_registerModelHandle` → registry-dispatch path so consumers like
-     * `Resources.modelHandle()` return the same handle object that user
+     * `Resources.modelDef()` return the same def object that user
      * code addresses via the codegen barrel (`wizard.nodes.Body`).
      *
      * Optional + omitted for runtime-source models. When omitted,
-     * `setModel` constructs an empty `ModelHandle` shell and stashes it
+     * `setModel` constructs an empty `ModelDef` shell and stashes it
      * here; `ensureModel` hydrates it in place on payload-ready (same
      * object identity across the swap).
      */
-    handle?: ModelHandle;
+    def?: ModelDef;
     /**
      * runtime-source refcount, managed by `acquireRuntimeModel` /
      * `releaseRuntimeModel`. Undefined for bundled entries (never
@@ -118,7 +118,7 @@ export type ModelPayload = {
      *  external pump", so `ensureModel` self-schedules its own retry while
      *  it's set, tick-driven consumers (where this stays null) keep
      *  driving retries by polling `ensureModel` themselves. */
-    _ready: PromiseWithResolvers<ModelHandle> | null;
+    _ready: PromiseWithResolvers<ModelDef> | null;
 };
 
 /** initial backoff after the first failure, in milliseconds. doubles per
@@ -164,19 +164,19 @@ export function init(loader: ResourceLoader, side: ResourcesSide): Resources {
 
 export function setModel(resources: Resources, id: string, model: ResourceModel): void {
     // runtime models pass no handle, construct an empty shell here so
-    // `Resources.modelHandle(id)` returns a stable, identity-preserving
+    // `Resources.modelDef(id)` returns the codegen'd def, refilled in place
     // object that the hydrator (called from `ensureModel`) can mutate in
     // place on payload-ready. re-registering the same id without a
     // handle preserves the existing shell so user/script-held refs stay
     // valid across `setModel(url1)` → `setModel(url2)` sequences.
-    if (!model.handle) {
+    if (!model.def) {
         const existing = resources.models.get(id);
-        model.handle = existing?.handle ?? createEmptyHandle(id);
+        model.def = existing?.def ?? createEmptyDef(id);
     }
     resources.models.set(id, model);
     // every payload swap counts as a content change for the handle,
     // bump so prefabs that have it in `deps` rebuild.
-    model.handle.version++;
+    model.def!.version++;
 }
 
 export function deleteModel(resources: Resources, id: string): void {
@@ -251,8 +251,8 @@ export function modelClipChannels(resources: Resources, clip: ClipDef): ClipChan
 }
 
 /** lookup the handle for a model. null if not in the url registry. */
-export function modelHandle(resources: Resources, modelId: string): ModelHandle | null {
-    return resources.models.get(modelId)?.handle ?? null;
+export function modelDef(resources: Resources, modelId: string): ModelDef | null {
+    return resources.models.get(modelId)?.def ?? null;
 }
 
 /* ── lazy load, fire-and-forget. transitions unloaded → loading ── */
@@ -332,7 +332,7 @@ export function ensureModel(resources: Resources, modelId: string): void {
  * stashes the model on the payload for downstream consumers (MeshResources
  * on client polls + nulls it). Server has no consumer.
  *
- * For runtime (`.glb`) models, also populates the empty `ModelHandle`
+ * For runtime (`.glb`) models, also populates the empty `ModelDef`
  * shell that `setModel` constructed, `scene`, `nodes`, `meshes`,
  * `animations`, `aabb` get stamped from the parsed model. Declared
  * (`.bin`) models pass through without handle mutation: the
@@ -366,8 +366,8 @@ function _onPayloadReady(resources: Resources, modelId: string, model: Model): v
     payload._nextRetryAt = 0;
 
     const entry = resources.models.get(modelId);
-    if (entry?.source === 'runtime' && entry.handle) {
-        hydrateRuntimeHandle(entry.handle, model);
+    if (entry?.source === 'runtime' && entry.def) {
+        hydrateRuntimeHandle(entry.def, model);
     }
 
     _settleWaiter(resources, modelId);
@@ -385,9 +385,9 @@ function _settleWaiter(resources: Resources, modelId: string): void {
     const deferred = payload?._ready;
     if (!deferred) return;
     if (payload.state === 'ready') {
-        const handle = modelHandle(resources, modelId);
-        if (handle) deferred.resolve(handle);
-        else deferred.reject(new Error(`[Resources] "${modelId}" ready but no handle`));
+        const def = modelDef(resources, modelId);
+        if (def) deferred.resolve(def);
+        else deferred.reject(new Error(`[Resources] "${modelId}" ready but no def`));
     } else if (payload.state === 'failed' && payload._failedAttempts >= BACKOFF_GIVE_UP_AFTER) {
         deferred.reject(new Error(`[Resources] "${modelId}" failed after ${payload._failedAttempts} attempts`));
     }
@@ -414,7 +414,7 @@ export function releaseModel(resources: Resources, modelId: string): void {
 /**
  * Promise that settles with the model's handle once its payload is ready,
  * or rejects if the load gives up after backoff (or the entry is released
- * mid-flight). The awaited sibling of the `hasModel`/`modelHandle` poll
+ * mid-flight). The awaited sibling of the `hasModel`/`modelDef` poll
  * pair: same payload state machine, surfaced as a promise off the actual
  * fetch chain rather than a poll over the state it sets.
  *
@@ -425,12 +425,12 @@ export function releaseModel(resources: Resources, modelId: string): void {
  * no such pump, so the failure path re-schedules itself while a waiter is
  * attached.
  */
-export function whenModelReady(resources: Resources, modelId: string): Promise<ModelHandle> {
+export function whenModelReady(resources: Resources, modelId: string): Promise<ModelDef> {
     const payload = resources.modelPayloads.get(modelId);
     if (!payload) {
         return Promise.reject(new Error(`[Resources] whenModelReady "${modelId}": no payload; call ensureModel first`));
     }
-    payload._ready ??= Promise.withResolvers<ModelHandle>();
+    payload._ready ??= Promise.withResolvers<ModelDef>();
     // Settle now if the payload already reached a terminal state before any
     // awaiter existed, the transition sites only fire on the edge, not
     // retroactively.

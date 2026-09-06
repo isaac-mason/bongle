@@ -8,17 +8,17 @@ import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/pro
 import type { Node, Realm } from '../../core/scene/scene-tree';
 import { createPrefabConfig, getNodeById } from '../../core/scene/scene-tree';
 import * as Selection from '../../core/scene/selection';
-import type { ControlDef, TraitDef } from '../../core/scene/traits';
+import type { ControlDef, TraitHandle } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { PrefabThumb } from './prefab-thumb';
 
-function useTraits(): TraitDef[] {
-    return [...registry.traits.byId.values()];
+function useTraits(): TraitHandle[] {
+    return [...registry.traits.handles.values()];
 }
 
-function useTraitsBySlot(): Array<TraitDef | undefined> {
+function useTraitsBySlot(): Array<TraitHandle | undefined> {
     return registry.slotToTrait;
 }
 
@@ -486,8 +486,8 @@ function MeshEditor({
     const meshes: Array<{ modelId: string; meshName: string }> = [];
     if (resources) {
         for (const [modelId, entry] of resources.models) {
-            if (!entry.handle) continue;
-            for (const meshName of Object.keys(entry.handle.meshes)) {
+            if (!entry.def) continue;
+            for (const meshName of Object.keys(entry.def.meshes)) {
                 meshes.push({ modelId, meshName });
             }
         }
@@ -700,14 +700,14 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const traitsBySlot = useTraitsBySlot();
     const removeTrait = useEditRoom((s) => s.removeTrait);
     const setTrait = useEditRoom((s) => s.setTrait);
-    const def = traitsBySlot[traitSlot];
-    if (!def) return null;
+    const handle = traitsBySlot[traitSlot];
+    if (!handle) return null;
 
     const instance = node.traits[traitSlot];
 
     // collect controls for display
     const propertyEntries: Array<{ key: string; reg: ControlDef; value: unknown }> = [];
-    for (const reg of def.controls) {
+    for (const reg of handle.def.controls) {
         if (reg.hidden) continue;
         propertyEntries.push({
             key: reg.controlId,
@@ -716,18 +716,18 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
         });
     }
 
-    const isEditorOwned = def.id === 'editor' || def.id.startsWith('editor.');
+    const isEditorOwned = handle.def.id === 'editor' || handle.def.id.startsWith('editor.');
 
     return (
         <div className="border border-border">
             <div className="flex items-center justify-between px-2 py-1 bg-surface-muted">
-                <span className="text-[11px] font-mono font-semibold text-fg">{def.id}</span>
+                <span className="text-[11px] font-mono font-semibold text-fg">{handle.def.id}</span>
                 {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-fg-muted" />}
                 {node.scene && !isEditorOwned && (
                     <IconButton
                         variant="danger"
                         onClick={() => {
-                            removeTrait(node.id, def.id);
+                            removeTrait(node.id, handle.def.id);
                         }}
                     >
                         <Icons.X size={12} />
@@ -745,7 +745,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
                                 schema={reg.schema}
                                 value={value}
                                 onChange={(newValue) => {
-                                    setTrait(node.id, def.id, { [key]: newValue });
+                                    setTrait(node.id, handle.def.id, { [key]: newValue });
                                 }}
                             />
                         </div>
@@ -802,8 +802,8 @@ function AddTraitAction({ node }: { node: Node }) {
     if (!room) return null;
 
     const items: SearchableSelectItem<string>[] = traits
-        .filter((def) => !node.traits[def.slot] !== undefined)
-        .map((def) => ({ id: def.id, label: def.name, sublabel: def.name === def.id ? undefined : def.id }));
+        .filter((h) => node.traits[h.slot] === undefined)
+        .map((h) => ({ id: h.id, label: h.def.name, sublabel: h.def.name === h.id ? undefined : h.id }));
 
     if (items.length === 0) return <SectionAddButton disabled />;
 

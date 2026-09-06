@@ -153,3 +153,34 @@ describe('block-registry per-shape data', () => {
         expect(reg.colliderId[sid]).toBe(0);
     });
 });
+
+// ── collider table invariant ────────────────────────────────────────
+//
+// `colliderShapes` is built dense over `colliderId` in the same pass that assigns
+// the ids, so every non-zero cid resolves to a real shape. Consumers rely on that
+// and index straight in — pinning it here is what lets `raycastVoxels` drop a
+// per-cell `if (!shape)` guard from its hot DDA loop.
+
+describe('collider table invariant', () => {
+    it('colliderShapes is dense over every non-zero colliderId', () => {
+        const registry = buildTestRegistry([
+            { id: 'stone', texId: 'stone' },
+            { id: 'slab', texId: 'slab', shape: aabbs([[0, 0, 0, 1, 0.5, 1]]) },
+            { id: 'post', texId: 'post', shape: aabbs([[0.375, 0, 0.375, 0.625, 1, 0.625]]) },
+            // explicit cube + a shape with no boxes both collapse to the cid=0 fast
+            // path, so neither may leave a hole behind in the shape table.
+            { id: 'cube', texId: 'cube', shape: { type: 'cube' } },
+            { id: 'empty', texId: 'empty', shape: aabbs([]) },
+        ]);
+
+        let sawCustom = false;
+        for (let stateId = 0; stateId < registry.totalStates; stateId++) {
+            const cid = registry.colliderId[stateId]!;
+            if (cid === 0) continue;
+            sawCustom = true;
+            expect(cid).toBeLessThan(registry.colliderShapes.length);
+            expect(registry.colliderShapes[cid], `no shape for cid ${cid} (state ${stateId})`).toBeDefined();
+        }
+        expect(sawCustom).toBe(true);
+    });
+});

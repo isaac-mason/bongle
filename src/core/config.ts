@@ -21,7 +21,7 @@
 
 import type { Config } from '../../os/interface';
 import { recordConfig } from './capture/module-scope';
-import { registry, upsert } from './registry';
+import { declare, registry } from './registry';
 
 export type { Config };
 
@@ -83,7 +83,16 @@ export function config(c: Config): Config {
             );
         }
     }
-    upsert(registry.config, CONFIG_ID, c);
+    // The payload is the CALLER'S OWN object, so unlike every other kind there is
+    // nothing for the engine to mint an identity for — `config()` hands `c` straight
+    // back. It still goes through `declare` so the singleton is stored, hashed and
+    // change-detected exactly like the rest; the handle is bookkeeping nobody reads.
+    declare(
+        registry.config,
+        CONFIG_ID,
+        () => c,
+        (def) => ({ id: CONFIG_ID, dependency: { registry: 'config' as const, id: CONFIG_ID }, def }),
+    );
     recordConfig(CONFIG_ID);
     return c;
 }

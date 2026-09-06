@@ -76,13 +76,21 @@ export type State = {
     unregisterFlush: () => void;
     /** forced render backend for icon baking (see `Opts.renderer`). */
     renderer: 'webgpu' | 'webgl' | undefined;
-    // guards: a bake / icon render in flight drops overlapping triggers (a later edit re-fires).
+    // guards: a bake / icon render in flight COALESCES an overlapping trigger onto a
+    // trailing re-run instead of dropping it. Dropping was the bug: the boot icon
+    // render holds the GPU for seconds (device handshake + pipeline compiles), and the
+    // first edit almost always lands inside that window — its blocks then had no icon
+    // until some unrelated later edit happened to arrive while the realm was idle.
     baking: boolean;
+    /** a `run` requested while one was in flight, replayed when it finishes. */
+    queuedBake: { forceAll: boolean } | null;
     // headless GPU render context, lazily created on first icon render (device handshake +
     // pipeline compiles are expensive + atlas-independent). null until then; a failed
     // handshake stays null + retries.
     renderCtx: Awaited<ReturnType<typeof Icons.createHeadlessRenderContext>> | null;
     renderingIcons: boolean;
+    /** an icon render requested while one was in flight, replayed when it finishes. */
+    queuedIcons: { atlasHash: string | null } | null;
 };
 
 export function init(driver: Driver, opts: Opts): State {
@@ -103,8 +111,10 @@ export function init(driver: Driver, opts: Opts): State {
         unregisterFlush: () => {},
         renderer: opts.renderer,
         baking: false,
+        queuedBake: null,
         renderCtx: null,
         renderingIcons: false,
+        queuedIcons: null,
     };
     // Re-bake when the user's declarations change (HMR re-eval → flush). This is the
     // definite "declarations settled" signal, fired at the tail of the re-eval; keeping
@@ -115,31 +125,47 @@ export function init(driver: Driver, opts: Opts): State {
 }
 
 /** One bake pass: the data bake (atlas / sprites / models / scenes / audio) plus the GPU
- *  icon render, reported via `onBaked`. Idempotent + guarded; coalescing / when-to-fire
- *  for asset edits is the caller's concern (the flush drives code edits).
+ *  icon render, reported via `onBaked`. Idempotent; a call landing mid-pass is coalesced
+ *  onto a trailing re-run rather than dropped, since the flush that arrives during a pass
+ *  is the one carrying the newest declarations and nothing else would re-fire it.
  *
  *  `forceAll` bypasses the pass's registry-revision gate: an asset-file edit moves no
  *  registry revision, so the caller (the pipeline realm's fs.watch) must force the pass
  *  for the builders' content-hash gates to see the new bytes. The flush path (code edits)
- *  leaves it off — a re-declare already bumps the revisions. */
+ *  leaves it off — a re-declare already bumps the revisions. A queued `forceAll` sticks:
+ *  the replay has to be at least as thorough as the request it stood in for. */
 export async function run(state: State, opts: { forceAll?: boolean } = {}): Promise<void> {
-    if (state.baking) return;
+    if (state.baking) {
+        state.queuedBake = { forceAll: (state.queuedBake?.forceAll ?? false) || (opts.forceAll ?? false) };
+        return;
+    }
     state.baking = true;
-    let atlasHash: string | null = null;
     try {
-        const t0 = performance.now();
-        const r = await AssetPipeline.run(state.pipeline, { forceAll: opts.forceAll });
-        atlasHash = r.atlasHash;
-        state.driver.log?.(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-        state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
-    } catch (err) {
-        state.driver.err?.(`bake error: ${(err as Error).message}`);
+        let next: { forceAll: boolean } | null = { forceAll: opts.forceAll ?? false };
+        while (next) {
+            const { forceAll } = next;
+            state.queuedBake = null;
+            let atlasHash: string | null = null;
+            try {
+                const t0 = performance.now();
+                const r = await AssetPipeline.run(state.pipeline, { forceAll });
+                atlasHash = r.atlasHash;
+                state.driver.log?.(
+                    `bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`,
+                );
+                state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
+            } catch (err) {
+                state.driver.err?.(`bake error: ${(err as Error).message}`);
+            }
+            // icons render after the bake — own error boundary, deliberately NOT awaited: a GPU
+            // handshake shouldn't gate the bake result or the caller's initial-bake promise.
+            void renderIcons(state, atlasHash);
+            next = state.queuedBake;
+        }
     } finally {
         state.baking = false;
+        state.queuedBake = null;
     }
-    // icons render after the bake — own error boundary, deliberately NOT awaited: a GPU
-    // handshake shouldn't gate the bake result or the caller's initial-bake promise.
-    void renderIcons(state, atlasHash);
 }
 
 export function dispose(state: State): void {
@@ -154,8 +180,27 @@ export function dispose(state: State): void {
 // from the same place. Fully isolated: an icon failure goes to stderr and never disturbs
 // the bake.
 async function renderIcons(state: State, atlasHash: string | null): Promise<void> {
-    if (state.renderingIcons) return;
+    if (state.renderingIcons) {
+        state.queuedIcons = { atlasHash };
+        return;
+    }
     state.renderingIcons = true;
+    try {
+        let next: { atlasHash: string | null } | null = { atlasHash };
+        while (next) {
+            state.queuedIcons = null;
+            await renderIconsPass(state, next.atlasHash);
+            next = state.queuedIcons;
+        }
+    } finally {
+        state.renderingIcons = false;
+        state.queuedIcons = null;
+    }
+}
+
+/** One icon-render pass: gate, then draw exactly what the gate found stale. Never
+ *  throws — an icon failure is reported and the next pass retries. */
+async function renderIconsPass(state: State, atlasHash: string | null): Promise<void> {
     const { fs, log, err: reportErr } = state.driver;
     try {
         // the gate reads the DERIVED block registry, and this worker never calls
@@ -165,7 +210,14 @@ async function renderIcons(state: State, atlasHash: string | null): Promise<void
         // gate BEFORE the device handshake + atlas upload: most passes change no
         // block and no prefab, and the artifacts on disk are already what we'd draw.
         const plan = await Icons.planIconBake(fs, { atlasHash, cache: state.cache });
-        if (Icons.iconBakeIsNoop(plan)) return;
+        if (Icons.iconBakeIsNoop(plan)) {
+            // the one outcome that used to be silent, and the one you need when an
+            // icon is missing: it says the gate looked and found the artifacts on
+            // disk already current, so a missing icon after THIS line is a consumer
+            // problem, not a bake that never ran.
+            log?.('icons: up to date');
+            return;
+        }
 
         if (!state.renderCtx) {
             log?.('icons: creating headless render context…');
@@ -186,8 +238,6 @@ async function renderIcons(state: State, atlasHash: string | null): Promise<void
         // handshake, a device-lost mid-render) while the data bake succeeded, so it
         // must be legible: without block icons the palette just renders empty.
         reportErr?.(`icons error: ${(err as Error).message}`);
-    } finally {
-        state.renderingIcons = false;
     }
 }
 

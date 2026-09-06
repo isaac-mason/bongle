@@ -29,7 +29,7 @@
 //     ownership via `claimOwnership`.
 
 import { recordSound } from '../capture/module-scope';
-import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../registry';
+import { declare, registry, touch, upsertPlaceholder } from '../registry';
 
 /* ── types ── */
 
@@ -75,14 +75,14 @@ export type SoundOptions = {
 // biome-ignore lint/suspicious/noEmptyInterface: augmented by codegen
 export interface SoundHandleMap {}
 
-export type SoundHandle = {
+/** The declared + codegen'd data for one sound. Pure data: hashed for change
+ *  detection, swapped wholesale when the barrel re-registers (see `declare`). */
+export type SoundDef = {
     readonly soundId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `soundId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'sounds'; id: string };
     readonly src: string;
     readonly long: boolean;
     /**
@@ -96,7 +96,15 @@ export type SoundHandle = {
     version: number;
 };
 
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+/** Stable wrapper around a `SoundDef`; identity plus the live def. */
+export type SoundHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'sounds'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SoundDef;
+};
 
 /* ── codegen-seeded registry ── */
 
@@ -115,18 +123,16 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
  * what bumps `revision` so the cli's flush handler picks up duration
  * changes for downstream consumers.
  */
-export function _registerSoundHandle(id: string, handle: SoundHandle): void {
-    const existing = get(registry.sounds, id);
-    if (existing) {
-        const target = existing as Mutable<SoundHandle>;
-        target.src = handle.src;
-        target.long = handle.long;
-        target.duration = handle.duration;
-        target.version = handle.version;
+export function _registerSoundDef(id: string, def: SoundDef): void {
+    const handle = registry.sounds.handles.get(id);
+    if (registry.sounds.byId.has(id)) {
+        registry.sounds.byId.set(id, def);
+        if (handle) handle.def = def;
         touch(registry.sounds, id);
-    } else {
-        upsertPlaceholder(registry.sounds, id, handle);
+        return;
     }
+    upsertPlaceholder(registry.sounds, id, def);
+    if (handle) handle.def = def;
 }
 
 /**
@@ -140,11 +146,10 @@ export function _registerSoundHandle(id: string, handle: SoundHandle): void {
  * `handle.duration` before the first pipeline pass sees zero, which is
  * also the correct value for an empty handle.
  */
-function createPlaceholderHandle(id: string, src: string, long: boolean, name: string): SoundHandle {
+function createPlaceholderDef(id: string, src: string, long: boolean, name: string): SoundDef {
     return {
         soundId: id,
         name,
-        dependency: { registry: 'sounds', id },
         src,
         long,
         duration: 0,
@@ -180,35 +185,18 @@ export function sound<const Id extends string>(
     const long = options.long ?? false;
     const src = options.src;
     const name = options.name ?? id;
-    const existing = get(registry.sounds, id);
-    if (existing) {
-        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
-        // boot) to this user module, adds id to module's pending set so
-        // endModuleRun doesn't fire removed on this run, throws on
-        // duplicate declaration from another file.
-        claimOwnership(registry.sounds, id);
-        // patch `src` / `long` / `name` when the user changed args so the
-        // cli pipeline picks up the new source on its next pass. `touch()`
-        // re-hashes and fires `changed`, bumping `revision`.
-        if (existing.src !== src || existing.long !== long || existing.name !== name) {
-            const target = existing as Mutable<SoundHandle>;
-            target.src = src;
-            target.long = long;
-            target.name = name;
-            touch(registry.sounds, id);
-        }
-        recordSound(id);
-        return existing as never;
-    }
-
-    // no warning here, placeholder is the normal cold-start state. the
+    // minting a placeholder is the normal cold-start path, not a warning case: the
     // user-entry shim wipes `src/generated/sounds.ts` on every dev start
-    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY
-    // declared sound hits this path before the pipeline's first flush
-    // populates the barrel. warning would fire on every cold boot for
-    // every sound declared in the project, which isn't actionable.
-    const placeholder = createPlaceholderHandle(id, src, long, name);
-    const handle = upsert(registry.sounds, id, placeholder);
+    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY declared sound
+    // hits it before the pipeline's first flush populates the barrel.
+    const handle = declare(
+        registry.sounds,
+        id,
+        // codegen owns `duration`; merge onto whatever the barrel registered rather
+        // than replacing it.
+        (previous): SoundDef => (previous ? { ...previous, src, long, name } : createPlaceholderDef(id, src, long, name)),
+        (def): SoundHandle => ({ id, dependency: { registry: 'sounds', id }, def }),
+    );
     recordSound(id);
     return handle as never;
 }

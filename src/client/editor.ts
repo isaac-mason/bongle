@@ -56,7 +56,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
             AddTraitCommand,
             {
                 id: room.playerNode.id,
-                traitId: EditorTrait._id,
+                traitId: EditorTrait.id,
                 props: undefined,
             },
             roomId,
@@ -68,7 +68,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
             RemoveTraitCommand,
             {
                 id: room.playerNode.id,
-                traitId: EditorTrait._id,
+                traitId: EditorTrait.id,
             },
             roomId,
         );

@@ -7,6 +7,7 @@ import type { App, Channel, Config, EditorSession, PipelineReport } from '../int
 const pipeline: App = async (env) => {
     const fs = env.fs;
     const runner = env.runner;
+    const editorSession = env.init as EditorSession | undefined;
 
     // NEUTRAL env: client/server/editor all stay false. The bake is its own entry
     // (EditPipeline), not a headless client or server, and nothing it touches reads
@@ -14,7 +15,10 @@ const pipeline: App = async (env) => {
     // env.editor branches are all runtime gameplay + UI. Leaving them false keeps a
     // user's `if (!env.server) return` gameplay guard from firing during the bake.
     try {
-        await runner.import('src/index.ts'); // user declarations register into this realm
+        // the SAME entry the client and server realms take: baking a different module
+        // graph than the game runs would leave this realm's registry — and so every
+        // artifact gated on it — describing a project nobody plays.
+        await runner.import(editorSession?.entry ?? 'src/index.ts'); // user declarations register into this realm
     } catch (err) {
         env.err('user code threw at eval — baking what registered:', String((err as Error).message));
     }
@@ -42,7 +46,7 @@ const pipeline: App = async (env) => {
         // a worker, so the icon bake can't read it off `self.location` the way a
         // windowed app does, and guessing could bake icons on a backend the client
         // isn't running.
-        { mode: 'edit', cache: true, renderer: (env.init as EditorSession | undefined)?.renderer },
+        { mode: 'edit', cache: true, renderer: editorSession?.renderer },
     );
 
     // asset-file edits re-bake (they bump no registry revision → forceAll).

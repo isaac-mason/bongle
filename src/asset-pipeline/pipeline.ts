@@ -13,7 +13,7 @@
 import type { Filesystem } from '../../os/interface';
 import type { Config } from '../core/config';
 import type { ResourceLoader } from '../core/resource-loader';
-import { buildBlockRegistry, registry } from '../internal';
+import { buildBlockRegistry, createBlockRegistry, registry } from '../internal';
 import { readArtifactHash } from './bake/cache';
 import type { DecodeAudio } from './bake/decode-audio';
 import {
@@ -77,7 +77,7 @@ export type State = {
 export function init(ctx: InitCtx): State {
     return {
         ctx,
-        internal: { registry, buildBlockRegistry },
+        internal: { registry, createBlockRegistry, buildBlockRegistry },
         bake: createPipelineState(),
     };
 }

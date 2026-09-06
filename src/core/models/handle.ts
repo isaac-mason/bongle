@@ -77,18 +77,14 @@ export type ClipDef = {
  *   - MeshNames: union of all mesh names
  *   - ClipNames: union of all animation clip names
  */
-export type ModelHandle<
-    NodeNames extends string = string,
-    MeshNames extends string = string,
-    ClipNames extends string = string,
-> = {
+/** The codegen'd data for one model. Pure data: hashed for change detection and
+ *  swapped wholesale when the barrel re-registers (see `declare`). */
+export type ModelDef<NodeNames extends string = string, MeshNames extends string = string, ClipNames extends string = string> = {
     /** User-chosen id from `model('wizard', { src })`. Stable handle. */
     readonly modelId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'models'; id: string };
     /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
     /**
@@ -141,4 +137,40 @@ export type ModelHandle<
      * user code treats it as read-only.
      */
     version: number;
+};
+
+/** Stable wrapper around a `ModelDef`; identity plus the live def. The barrel
+ *  re-points `def` on every codegen pass, so a user-held handle stays current. */
+export type ModelHandle<D extends ModelDef = ModelDef> = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'models'; id: string };
+    /** the codegen'd data. re-pointed on every re-registration. */
+    def: D;
+
+    // ── scripting-API convenience ────────────────────────────────────
+    //
+    // Forwarding accessors, not stored copies: the def is re-pointed whenever
+    // codegen re-registers, so a copy would go stale. These exist because the
+    // documented model API is field access — `wizard.nodes.Body`,
+    // `wizard.meshes.Head`, `wizard.animations.idle` — and game code reads it at
+    // spawn/setup. The ENGINE never comes through here: it takes a `ModelDef`
+    // from `Resources.modelDef()` or `CharacterTrait.state.modelDef`, so the
+    // per-frame paths are plain field loads and pay nothing for these.
+
+    /** @see ModelDef.name */
+    readonly name: string;
+    /** @see ModelDef.src */
+    readonly src: string;
+    /** @see ModelDef.scene */
+    readonly scene: D['scene'];
+    /** @see ModelDef.aabb */
+    readonly aabb: D['aabb'];
+    /** @see ModelDef.nodes */
+    readonly nodes: D['nodes'];
+    /** @see ModelDef.meshes */
+    readonly meshes: D['meshes'];
+    /** @see ModelDef.animations */
+    readonly animations: D['animations'];
 };

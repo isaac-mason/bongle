@@ -48,11 +48,11 @@ import {
     allocateSlot,
     freeSlot,
     growMeshBatch,
+    type MeshBatch,
     type MeshInfoEntry,
+    type MeshResources,
     MODEL_INSTANCE_PARAMS_OFFSET_F32,
     MODEL_INSTANCE_STRIDE_F32,
-    type MeshBatch,
-    type MeshResources,
     meshInfoIndexOf,
     resetMeshBatch,
 } from './mesh-resources';
@@ -251,7 +251,7 @@ function refreshStates(
         // bind-pose AABB. world AABB = that box × the mesh node's world matrix,
         // exact even mid-animation (TRS only, no skinning), so per-mesh
         // culling is correct.
-        const handle = resources.models.get(meshId.modelId)?.handle;
+        const handle = resources.models.get(meshId.modelId)?.def;
         const meshEntry = handle?.meshes[meshId.meshName];
         const cull = Visibility.add(visibility, meshEntry?.aabb ?? box3.create(), transform);
 
@@ -512,7 +512,6 @@ function packDraws(batch: MeshBatch, modelResources: MeshResources, instanceData
     if (writtenDraws > 0) batch.slotMapBuf.needsUpdate = true;
     if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
 }
-
 
 /** how often an unmoved, ungrouped mesh re-samples voxel light, in frames.
  *  phased by instance slot so the cost spreads instead of spiking. */

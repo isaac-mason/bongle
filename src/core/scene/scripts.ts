@@ -17,7 +17,7 @@ import type { ClientId } from '../client';
 import type { Clock } from '../clock';
 import type { Physics } from '../physics/physics';
 import type { PlayerMode, RoomMode } from '../protocol';
-import { registry, upsert } from '../registry';
+import { declare, registry } from '../registry';
 import type { Resources } from '../resources';
 import type { CommandHandle } from '../rpc';
 import * as Rpc from '../rpc';
@@ -250,11 +250,11 @@ export type SceneTreeContext = {
     /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry, flat lookup tables for block type/state info */
+    /** block registry */
     blocks: Blocks;
 
     /** live script instances, keyed by node id → script id → instance.
-     *  script id is `${trait._id}#${scriptIndex}` where scriptIndex is the
+     *  script id is `${trait.id}#${scriptIndex}` where scriptIndex is the
      *  script's position in its trait def's `scripts` array. */
     instances: Map<number, Map<string, ScriptInstance>>;
 };
@@ -300,7 +300,12 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry, flat lookup tables for block type/state info */
+    /** block registry, flat lookup tables for block type/state info.
+     *  DERIVED from `voxels.registry` (a getter at the construction site), never a
+     *  captured copy: `registry-dispatch.refreshBlockResources` repoints
+     *  `voxels.registry` and re-resolves every chunk palette to the new state ids on
+     *  an HMR block change. A second cached `Blocks` misses that swap and then indexes
+     *  new state ids into the old, shorter typed arrays. */
     blocks: Blocks;
 
     /** client information, safe to ! bang if env.client is true */
@@ -439,7 +444,7 @@ export type ScriptDef = ScriptBody & {
  * factory runs at attach time with `ctx.trait` typed for the handle.
  *
  * `id` is a stable user-supplied string (without trait prefix). the runtime
- * identifier becomes `${trait._id}.${id}`, used as the instance map key,
+ * identifier becomes `${trait.id}.${id}`, used as the instance map key,
  * DepGraph dependency key, and error message label.
  *
  * @example
@@ -456,10 +461,10 @@ export function script<T extends TraitBase>(
     factory: ScriptFactory<T>,
     opts?: ScriptOptions,
 ): ScriptDef {
-    const target = handle._def;
-    const key = `${handle._id}.${scriptId}`;
+    const target = handle.def;
+    const key = `${handle.id}.${scriptId}`;
     const def: ScriptDef = {
-        traitId: handle._id,
+        traitId: handle.id,
         scriptId,
         key,
         dependency: { registry: 'scripts', id: key },
@@ -471,14 +476,20 @@ export function script<T extends TraitBase>(
     // registration is normal under HMR, a built-in trait like WorldTrait keeps
     // its def (and `scriptsById`) across a user-file reload, so the same
     // `script()` call re-runs against a populated map; latest factory wins.
-    const existing = target.scriptsById.get(scriptId);
+    const existing = handle.scriptsById.get(scriptId);
     const index = existing ? existing.index : target.scripts.length;
     target.scripts[index] = def;
-    target.scriptsById.set(scriptId, { reg: def, index });
-    // upsert into the per-kind store so HMR detects individual script
-    // factory edits without flipping the parent trait hash. dispatch
-    // turns these pendingChanges into a targeted applyTraitSwap.
-    upsert(registry.scripts, key, def);
+    handle.scriptsById.set(scriptId, { reg: def, index });
+    // into the per-kind store so HMR detects individual script factory edits
+    // without flipping the parent trait hash; dispatch turns these pendingChanges
+    // into a targeted applyTraitSwap. Nothing holds the minted handle today — see
+    // `control()` for why it still goes through `declare`.
+    declare(
+        registry.scripts,
+        key,
+        () => def,
+        (d) => ({ id: key, dependency: { registry: 'scripts' as const, id: key }, def: d }),
+    );
     // record this script key into the owning module's snapshot so the
     // patch/invalidate diff sees which scripts the module declares this run.
     // the diff is set-based: an unchanged key set means only factory bodies
@@ -1348,12 +1359,12 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * positional, so rebuild + reindex from the surviving entries.
  */
 export function pruneRemovedScript(def: ScriptDef): void {
-    const traitDef = registry.traits.byId.get(def.traitId);
-    if (!traitDef?.scriptsById.delete(def.scriptId)) return;
-    const remaining = [...traitDef.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
-    traitDef.scripts = remaining;
+    const traitHandle = registry.traits.handles.get(def.traitId);
+    if (!traitHandle?.scriptsById.delete(def.scriptId)) return;
+    const remaining = [...traitHandle.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
+    traitHandle.def.scripts = remaining;
     remaining.forEach((reg, index) => {
-        traitDef.scriptsById.set(reg.scriptId, { reg, index });
+        traitHandle.scriptsById.set(reg.scriptId, { reg, index });
     });
 }
 
@@ -1363,8 +1374,8 @@ export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: Readon
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;
             const { traitId, scriptId } = oldInstance.def;
 
-            const newTraitDef = registry.traits.byId.get(traitId);
-            const newDef = newTraitDef?.scriptsById.get(scriptId)?.reg;
+            const newTraitHandle = registry.traits.handles.get(traitId);
+            const newDef = newTraitHandle?.scriptsById.get(scriptId)?.reg;
 
             if (!newDef) {
                 disposeScriptInstance(oldInstance);

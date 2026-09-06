@@ -158,16 +158,35 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         game = await caps.connectGame((bytes) => netSim.receive(bytes, performance.now()));
 
         // frame loop: advance, drain the outbox onto the game transport.
+        //
+        // The next frame is scheduled BEFORE the work and the work is bracketed, so a
+        // throw out of `update` (a bad block state, a script error) costs one frame
+        // instead of killing the loop forever — which is what a preview that stops dead
+        // with nothing in the log used to be. Repeats of the same message are counted,
+        // not reprinted: a per-frame throw would otherwise bury every other line.
         let last = performance.now();
+        let lastFrameError = '';
+        let repeatedFrameErrors = 0;
         const frame = (now: number) => {
+            requestAnimationFrame(frame);
             const dt = (now - last) / 1000;
             last = now;
-            netSim.pump(now);
-            EngineClient.update(state, dt);
-            for (const bytes of state.net.outbox) netSim.send(bytes, now);
-            state.net.outbox.length = 0;
-            netSim.pump(now);
-            requestAnimationFrame(frame);
+            try {
+                netSim.pump(now);
+                EngineClient.update(state, dt);
+                for (const bytes of state.net.outbox) netSim.send(bytes, now);
+                state.net.outbox.length = 0;
+                netSim.pump(now);
+            } catch (frameErr) {
+                const message = String((frameErr as Error)?.stack ?? frameErr);
+                if (message === lastFrameError) {
+                    repeatedFrameErrors++;
+                    return;
+                }
+                lastFrameError = message;
+                err(`frame error${repeatedFrameErrors > 0 ? ` (previous repeated ${repeatedFrameErrors}x)` : ''}:`, message);
+                repeatedFrameErrors = 0;
+            }
         };
         requestAnimationFrame(frame);
         progress('live');

@@ -532,7 +532,7 @@ describe('parent transform bookkeeping', () => {
         const ct = addTrait(child, TransformTrait);
         expect(parentTransform(ct)).toBeNull();
 
-        addTraitBySlot(parent, TransformTrait._slot!);
+        addTraitBySlot(parent, TransformTrait.slot!);
         expect(parentTransform(ct)).toBe(getTrait(parent, TransformTrait));
     });
 
@@ -601,7 +601,7 @@ describe('parent transform bookkeeping', () => {
 
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(111, 0, 0));
 
-        removeTraitBySlot(parent, TransformTrait._slot!);
+        removeTraitBySlot(parent, TransformTrait.slot!);
 
         expect(parentTransform(ct)).toBe(gpt);
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(101, 0, 0));

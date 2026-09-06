@@ -10,7 +10,7 @@
  * evaluate fully (push + body + pop) before the parent's body resumes.
  *
  * per-module snapshots: every declarative api (block, blockTexture, model,
- * modelHandle, prefab, scene, command, config, trait, script) records
+ * sound, sprite, particle, prefab, scene, command, config, trait, script) records
  * into the current module's snapshot during evaluation. on a second
  * evaluation, the previous snapshot is diffed against the new one to decide
  * patch vs invalidate.

@@ -129,7 +129,7 @@ export function allocateSlot(
     const i = pool.count++;
 
     pool.handle[i] = handle;
-    pool.updateFn[i] = handle.update;
+    pool.updateFn[i] = handle.def.update;
 
     pool.posX[i] = x;
     pool.posY[i] = y;
@@ -144,8 +144,8 @@ export function allocateSlot(
     pool.spawnTime[i] = opts?.spawnTime ?? now;
     pool.expiresAt[i] = opts?.lifetime !== undefined ? now + opts.lifetime : Number.POSITIVE_INFINITY;
     pool.size[i] = opts?.size ?? 1;
-    pool.glow[i] = opts?.glow ?? handle.glow;
-    const tint = opts?.tint ?? handle.tint;
+    pool.glow[i] = opts?.glow ?? handle.def.glow;
+    const tint = opts?.tint ?? handle.def.tint;
     pool.tintR[i] = tint[0];
     pool.tintG[i] = tint[1];
     pool.tintB[i] = tint[2];

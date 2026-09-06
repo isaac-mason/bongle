@@ -59,7 +59,7 @@ export function seedModels(state: EngineServer): void {
             clientUrl: handle.bin.client,
             serverUrl: handle.bin.server,
             source: 'bundled',
-            handle,
+            def: handle,
         });
     }
 }
@@ -137,7 +137,7 @@ export function applyRegistryChanges(state: EngineServer): void {
                     clientUrl: change.payload.bin.client,
                     serverUrl: change.payload.bin.server,
                     source: 'bundled',
-                    handle: change.payload,
+                    def: change.payload,
                 });
             }
         }

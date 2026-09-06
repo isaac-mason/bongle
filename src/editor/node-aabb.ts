@@ -25,7 +25,7 @@ const _scratchWorld: Box3 = box3.create();
 function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     const meshTrait = getTrait(node, MeshTrait);
     const meshId = meshTrait?.meshId;
-    const handle = meshId ? resources.models.get(meshId.modelId)?.handle : null;
+    const handle = meshId ? resources.models.get(meshId.modelId)?.def : null;
     const meshEntry = handle && meshId ? handle.meshes[meshId.meshName] : undefined;
     if (meshEntry) {
         box3.copy(out, meshEntry.aabb);

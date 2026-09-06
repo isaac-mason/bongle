@@ -59,7 +59,7 @@ export function spriteWorldSize(
     opts?: { pixelsPerUnit?: number },
 ): [number, number] | null {
     const meta = ctx.client?.state?.resources?.spriteAtlas ?? null;
-    const entry = meta?.sprites[sprite.spriteId];
+    const entry = meta?.sprites[sprite.def.spriteId];
     if (!entry) return null;
     const frame = entry.frames[0];
     if (!frame) return null;

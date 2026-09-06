@@ -162,7 +162,7 @@ const _resolved: ResolvedFrame = { u: 0, v: 0, w: 0, h: 0, frameW: 1, frameH: 1 
  *  / atlas swap mid-flight). Single-frame sprites degenerate to "frame 0"
  *  in all modes. */
 function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: number, lifetime: number): ResolvedFrame | null {
-    const entry = resources.frames.get(handle.sprite.spriteId);
+    const entry = resources.frames.get(handle.def.sprite.def.spriteId);
     if (!entry) return null;
 
     const frames = entry.frames;
@@ -172,7 +172,7 @@ function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: n
     if (n <= 1) {
         idx = 0;
     } else {
-        switch (handle.playback) {
+        switch (handle.def.playback) {
             case 'stretch': {
                 if (lifetime <= 0 || !Number.isFinite(lifetime)) {
                     idx = 0;
@@ -183,10 +183,10 @@ function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: n
                 break;
             }
             case 'loop':
-                idx = ((Math.floor(age * handle.fps) % n) + n) % n;
+                idx = ((Math.floor(age * handle.def.fps) % n) + n) % n;
                 break;
             case 'once':
-                idx = Math.min(n - 1, Math.max(0, Math.floor(age * handle.fps)));
+                idx = Math.min(n - 1, Math.max(0, Math.floor(age * handle.def.fps)));
                 break;
         }
     }

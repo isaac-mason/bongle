@@ -17,7 +17,7 @@ import { addSkylineLevel, emptySkyline, findBestFit, type Region } from '../../c
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SpriteAtlasEntry, SpriteAtlasMetadata, SpriteFrameRect } from '../../core/sprites/atlas';
-import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
+import type { DrawSource, NormalizedImageSource, SpriteDef } from '../../core/sprites/sprites';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import type { Raster, RasterCanvas, RasterImage } from './raster';
@@ -48,10 +48,7 @@ export type BuildSpriteAtlasOptions = {
  * Build the sprite atlas. Returns true if a rebuild happened, false if
  * skipped because nothing changed.
  */
-export async function buildSpriteAtlas(
-    spritesRegistry: KindStore<SpriteHandle>,
-    opts: BuildSpriteAtlasOptions,
-): Promise<boolean> {
+export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, opts: BuildSpriteAtlasOptions): Promise<boolean> {
     const { bakedDraws, cache, loader, fs, raster } = opts;
 
     const handles = [...spritesRegistry.byId.values()];
@@ -146,9 +143,9 @@ type LoadedFrame = FrameItem & {
 
 type PackedFrame = LoadedFrame & Region;
 
-function collectFrames(handle: SpriteHandle): FrameItem[] {
-    const srcs: NormalizedImageSource[] = Array.isArray(handle.src) ? handle.src : [handle.src];
-    return srcs.map((s, frameIdx) => ({ spriteId: handle.spriteId, frameIdx, padding: handle.padding, source: s }));
+function collectFrames(def: SpriteDef): FrameItem[] {
+    const srcs: NormalizedImageSource[] = Array.isArray(def.src) ? def.src : [def.src];
+    return srcs.map((s, frameIdx) => ({ spriteId: def.spriteId, frameIdx, padding: def.padding, source: s }));
 }
 
 async function loadFrame(item: FrameItem, bakedDraws: BakedDraws, loader: ResourceLoader, raster: Raster): Promise<LoadedFrame> {
@@ -200,9 +197,9 @@ function tryPack(frames: LoadedFrame[], atlasSize: number): PackedFrame[] | null
     return out;
 }
 
-async function computeBuildHash(handles: SpriteHandle[], frames: LoadedFrame[]): Promise<string> {
+async function computeBuildHash(defs: SpriteDef[], frames: LoadedFrame[]): Promise<string> {
     const parts: (string | Uint8Array | Uint8ClampedArray)[] = [];
-    for (const h of handles) parts.push(h.spriteId, String(h.padding), h.mipmap ? '1' : '0');
+    for (const h of defs) parts.push(h.spriteId, String(h.padding), h.mipmap ? '1' : '0');
     for (const f of frames) parts.push(f.spriteId, String(f.frameIdx), f.hashPart);
     return sha256HexParts(parts);
 }

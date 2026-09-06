@@ -62,10 +62,10 @@ export function sendOwnerSyncUpdates(
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
             const instance = nodeTraits[traitSlot];
             if (instance === undefined) continue;
-            const def = registry.slotToTrait[traitSlot];
-            if (!def) continue;
+            const handle = registry.slotToTrait[traitSlot];
+            if (!handle) continue;
 
-            const codecs = getSyncCodecs(def);
+            const codecs = getSyncCodecs(handle);
             if (!codecs) continue;
 
             const sync = instance._sync;
@@ -73,7 +73,7 @@ export function sendOwnerSyncUpdates(
 
             // skip traits with no owner-authority syncs
             let hasOwnerSync = false;
-            for (const sd of def.sync) {
+            for (const sd of handle.def.sync) {
                 if (sd.authority === 'owner') {
                     hasOwnerSync = true;
                     break;
@@ -85,7 +85,7 @@ export function sendOwnerSyncUpdates(
             const changedFields: BinaryField[] = [];
 
             for (let i = 0; i < codecs.length; i++) {
-                if (def.sync[i].authority !== 'owner') continue;
+                if (handle.def.sync[i].authority !== 'owner') continue;
 
                 // byte-diff. the client uploads a first-seen owned slice (the server
                 // needs the initial value), so emitOnFirstSeen = true.
@@ -100,7 +100,7 @@ export function sendOwnerSyncUpdates(
                 type: 'sync_update',
                 roomId,
                 nodeId: node.id,
-                traitNetIndex: wireIndex.idToIndex.get(def.id)!,
+                traitNetIndex: wireIndex.idToIndex.get(handle.id)!,
                 fields: changedFields,
             });
         }

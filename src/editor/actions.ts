@@ -199,8 +199,8 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
                         const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                         addChild(parent, n);
                         for (const st of args.traits) {
-                            const def = registry.traits.byId.get(st.id);
-                            if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
+                            const handle = registry.traits.handles.get(st.id);
+                            if (handle) addTraitBySlot(n, handle.slot, st.controls as Record<string, unknown>);
                         }
                         reorderChild(parent, n, args.index);
                         send(ctx, CreateNodeCommand, {
@@ -523,8 +523,8 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
                 const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                 addChild(parent, n);
                 for (const st of args.traits) {
-                    const def = registry.traits.byId.get(st.id);
-                    if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
+                    const handle = registry.traits.handles.get(st.id);
+                    if (handle) addTraitBySlot(n, handle.slot, st.controls as Record<string, unknown>);
                 }
                 reorderChild(parent, n, args.index);
                 send(ctx, CreateNodeCommand, {
@@ -573,8 +573,8 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                     const n = createNode({ id: a.id, name: a.name, persist: a.persist });
                     addChild(parent, n);
                     for (const st of a.traits) {
-                        const def = registry.traits.byId.get(st.id);
-                        if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
+                        const handle = registry.traits.handles.get(st.id);
+                        if (handle) addTraitBySlot(n, handle.slot, st.controls as Record<string, unknown>);
                     }
                     reorderChild(parent, n, a.index);
                     send(ctx, CreateNodeCommand, {
@@ -752,16 +752,16 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
         do() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId);
-            if (def) addTraitBySlot(n, def.slot);
+            const handle = registry.traits.handles.get(traitId);
+            if (handle) addTraitBySlot(n, handle.slot);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: undefined });
             state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId);
-            if (def) removeTraitBySlot(n, def.slot);
+            const handle = registry.traits.handles.get(traitId);
+            if (handle) removeTraitBySlot(n, handle.slot);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
             state.markDirty();
         },
@@ -779,8 +779,8 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
         do() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId);
-            if (def) removeTraitBySlot(n, def.slot);
+            const handle = registry.traits.handles.get(traitId);
+            if (handle) removeTraitBySlot(n, handle.slot);
             else n.unresolved?.delete(traitId);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
             state.markDirty();
@@ -788,8 +788,8 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId);
-            if (def) addTraitBySlot(n, def.slot, prevProps ?? undefined);
+            const handle = registry.traits.handles.get(traitId);
+            if (handle) addTraitBySlot(n, handle.slot, prevProps ?? undefined);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: prevProps ? JSON.stringify(prevProps) : undefined });
             state.markDirty();
         },
@@ -830,18 +830,18 @@ function captureNode(node: Node, out: CreateArgs[]): void {
 }
 
 function captureTraitProps(node: Node, traitId: string): Record<string, unknown> | null {
-    const def = registry.traits.byId.get(traitId);
-    if (!def) {
+    const handle = registry.traits.handles.get(traitId);
+    if (!handle) {
         const controls = node.unresolved?.get(traitId);
         return controls ? structuredClone(controls) : null;
     }
-    const instance = node.traits[def.slot];
+    const instance = node.traits[handle.slot];
     if (!instance) return null;
     // clone, captured props are retained on the action's closure for undo;
     // sharing references with the live trait would let runtime mutations
     // (or a subsequent re-add) corrupt the snapshot.
     const props: Record<string, unknown> = {};
-    for (const reg of def.controls) {
+    for (const reg of handle.def.controls) {
         const value = reg.get(instance);
         props[reg.controlId] = value !== null && typeof value === 'object' ? structuredClone(value) : value;
     }
@@ -849,8 +849,8 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
 }
 
 export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string, props: Record<string, unknown>): void {
-    const def = registry.traits.byId.get(traitId);
-    if (!def) {
+    const handle = registry.traits.handles.get(traitId);
+    if (!handle) {
         // the map entry IS the controls, so merging means replacing it. `has` rather than a
         // truthy `get`: an entry can legitimately be `undefined` (id known, payload not).
         const unresolved = node.unresolved;
@@ -858,14 +858,14 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
         bumpNodeVersion(sceneTree, node);
         return;
     }
-    const instance = node.traits[def.slot];
+    const instance = node.traits[handle.slot];
     if (!instance) return;
     for (const key of Object.keys(props)) {
-        const ci = def.controlsById.get(key);
+        const ci = handle.controlsById.get(key);
         if (!ci) continue;
         ci.reg.set(instance, props[key]);
     }
-    bumpTraitVersion(sceneTree, node, def.slot);
+    bumpTraitVersion(sceneTree, node, handle.slot);
     bumpNodeVersion(sceneTree, node);
 }
 

@@ -28,7 +28,7 @@ import {
 } from '../core/scene/scene-tree';
 import { diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
-import type { TraitBase, TraitDef } from '../core/scene/traits';
+import type { TraitBase, TraitDef, TraitHandle } from '../core/scene/traits';
 import { encodeChunk, encodeLight, type Zstd } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,
@@ -91,9 +91,9 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
 }
 
 function diffInstance(sceneTree: SceneTree, node: Node, instance: TraitBase): void {
-    // the instance carries its own def; no `registry.slotToTrait` hop needed.
-    const def = instance._def;
-    const codecs = getSyncCodecs(def);
+    const handle = registry.traits.handles.get(instance._def.id);
+    if (!handle) return;
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return;
 
     const sync = instance._sync;
@@ -113,7 +113,7 @@ function diffInstance(sceneTree: SceneTree, node: Node, instance: TraitBase): vo
             // setPosition / physics set the bit unconditionally every tick (even
             // when the packed value is byte-identical), so trusting it here would
             // re-emit a resting entity at the tick rate.
-            if (def.sync[i].dirty === 'explicit') {
+            if (handle.def.sync[i].dirty === 'explicit') {
                 writeSnapshot(codec, instance, node, i, sync);
                 bumpFieldVersion(sceneTree, node, instance, i);
                 continue;
@@ -122,7 +122,7 @@ function diffInstance(sceneTree: SceneTree, node: Node, instance: TraitBase): vo
 
         // 'explicit' dirtiness skips cold-path byte-diff entirely, only
         // SyncHandle.dirty() above can flag emission.
-        if (def.sync[i].dirty === 'explicit') continue;
+        if (handle.def.sync[i].dirty === 'explicit') continue;
 
         // shared cold path: byte-diff or threshold metric. the server seeds
         // a first-seen slice silently (its initial version already covers it),
@@ -660,7 +660,9 @@ export function acceptOwnerFields(
     // would silently never reach anyone, reject loudly instead.
     if (mode === 'play' && !isReplicable(node)) return;
 
-    const codecs = getSyncCodecs(def);
+    const handle = registry.traits.handles.get(instance._def.id);
+    if (!handle) return;
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return;
 
     const sync = instance._sync;
@@ -707,7 +709,7 @@ export function acceptOwnerFields(
             const nodeKnowledge = cs.nodeKnowledge.get(player.id);
             const known = nodeKnowledge?.get(node.id);
             if (!known) continue;
-            let traitKnowledge = known.traits[def.slot];
+            let traitKnowledge = known.traits[handle.slot];
             if (!traitKnowledge) {
                 traitKnowledge = {
                     id: def.id,
@@ -715,7 +717,7 @@ export function acceptOwnerFields(
                     versions: filled(def.sync.length, 0),
                     lastSentTicks: filled(def.sync.length, NEVER_SENT),
                 };
-                known.traits[def.slot] = traitKnowledge;
+                known.traits[handle.slot] = traitKnowledge;
             }
             // stamp the field version; lastSentTick stays as-is (NEVER_SENT if first seen).
             traitKnowledge.versions[i] = fieldVersion;
@@ -1142,10 +1144,10 @@ function walkReplicable(
  * packs fresh, controls aren't snapshotted on the instance.
  */
 function readAllFields(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.slotToTrait[traitSlot];
-    if (!def) return [];
+    const handle = registry.slotToTrait[traitSlot];
+    if (!handle) return [];
 
-    const codecs = getControlCodecs(def);
+    const codecs = getControlCodecs(handle);
     if (!codecs) return [];
 
     const entries: BinaryField[] = [];
@@ -1161,10 +1163,10 @@ function readAllFields(node: Node, traitSlot: number, instance: TraitBase): Bina
  * receiver, pairs with readAllFields (controls).
  */
 function readAllSyncs(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.slotToTrait[traitSlot];
-    if (!def) return [];
+    const handle = registry.slotToTrait[traitSlot];
+    if (!handle) return [];
 
-    const codecs = getSyncCodecs(def);
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return [];
 
     const entries: BinaryField[] = [];
@@ -1183,7 +1185,7 @@ function emitChangedFields(
     node: Node,
     instance: TraitBase,
     known: TraitKnowledge,
-    def: TraitDef,
+    handle: TraitHandle,
     updates: SceneSyncUpdate[],
     currentTick: number,
     playerId: PlayerId,
@@ -1192,7 +1194,7 @@ function emitChangedFields(
     // stale `true` would pin its node in `nodeSyncKnowledge` forever.
     known.behind = false;
 
-    const codecs = getSyncCodecs(def);
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return false;
 
     const sync = instance._sync;
@@ -1207,7 +1209,7 @@ function emitChangedFields(
 
         if (fieldVersion <= knownVersion) continue;
 
-        const syncDef = def.sync[i];
+        const syncDef = handle.def.sync[i];
         // rate is the send-path cadence gate, orthogonal to dirtiness: this field is
         // already known-dirty (fieldVersion > knownVersion, gated above by its
         // `dirty` policy), and { hz } throttles how often that dirty value ships. a
@@ -1246,7 +1248,7 @@ function emitChangedFields(
     }
 
     if (entries !== null) {
-        updates.push({ type: 'node_trait_fields', id: node.id, traitNetIndex: def.netIndex!, fields: entries });
+        updates.push({ type: 'node_trait_fields', id: node.id, traitNetIndex: handle.netIndex!, fields: entries });
     }
     return known.behind;
 }
@@ -1264,10 +1266,10 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
+        const handle = registry.slotToTrait[traitSlot];
+        if (!handle) continue;
         traits.push({
-            netIndex: def.netIndex,
+            netIndex: handle.netIndex,
             id: undefined,
             fields: readAllFields(node, traitSlot, instance),
             syncs: readAllSyncs(node, traitSlot, instance),
@@ -1395,8 +1397,8 @@ function diffNodeTraits(
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
+        const handle = registry.slotToTrait[traitSlot];
+        if (!handle) continue;
 
         const traitKnowledge = known.traits[traitSlot];
         if (traitKnowledge === undefined) {
@@ -1404,23 +1406,23 @@ function diffNodeTraits(
             updates.push({
                 type: 'node_trait_added',
                 id: node.id,
-                traitNetIndex: def.netIndex,
+                traitNetIndex: handle.netIndex,
                 traitId: undefined,
                 fields: readAllFields(node, traitSlot, instance),
                 syncs: readAllSyncs(node, traitSlot, instance),
             });
-            const len = def.sync.length;
+            const len = handle.def.sync.length;
             const versions: number[] = [];
             const lastSentTicks: number[] = [];
             for (let i = 0; i < len; i++) {
                 versions.push(instance._sync?.versions[i] ?? 0);
                 lastSentTicks.push(currentTick);
             }
-            known.traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
+            known.traits[traitSlot] = { id: handle.id, behind: false, versions, lastSentTicks };
             continue;
         }
 
-        if (emitChangedFields(node, instance, traitKnowledge, def, updates, currentTick, playerId)) behind = true;
+        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, playerId)) behind = true;
     }
     setPending(node, nodeSyncKnowledge, behind);
 }
@@ -1447,9 +1449,9 @@ function retryPendingFields(
         if (traitKnowledge === undefined || !traitKnowledge.behind) continue;
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
-        if (emitChangedFields(node, instance, traitKnowledge, def, updates, currentTick, playerId)) behind = true;
+        const handle = registry.slotToTrait[traitSlot];
+        if (!handle) continue;
+        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, playerId)) behind = true;
     }
     setPending(node, nodeSyncKnowledge, behind);
 }
@@ -1477,12 +1479,12 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
         const instance = nodeTraits[traitSlot];
         if (instance === undefined) continue;
-        const def = registry.slotToTrait[traitSlot];
-        if (!def) continue;
+        const handle = registry.slotToTrait[traitSlot];
+        if (!handle) continue;
 
         // snapshot per-sync versions for this trait, dense PACKED arrays by field index.
         // a field that never bumped wasn't in the create payload, so it hasn't shipped.
-        const len = def.sync.length;
+        const len = handle.def.sync.length;
         const versions: number[] = [];
         const lastSentTicks: number[] = [];
         for (let i = 0; i < len; i++) {
@@ -1491,7 +1493,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
             lastSentTicks.push(v ? currentTick : NEVER_SENT);
         }
 
-        traits[traitSlot] = { id: def.id, behind: false, versions, lastSentTicks };
+        traits[traitSlot] = { id: handle.id, behind: false, versions, lastSentTicks };
     }
     // include unresolved traits so the diff system knows we already sent them
     for (const id of node.unresolved?.keys() ?? []) {

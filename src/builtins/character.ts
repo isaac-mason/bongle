@@ -65,14 +65,14 @@ type CharacterState = {
      *  mounts (placeholder first, then the target once `getModel(ctx, id)`
      *  returns non-null) and writes the new value here. `null` means nothing is
      *  mounted yet, first reconciler tick after trait add will install
-     *  baseAvatar as a placeholder. */
+     *  baseAvatar.def as a placeholder. */
     modelId: string | null;
-    /** the resolved ModelHandle for `state.modelId`. The reconciler writes
+    /** the resolved ModelDef for `state.modelId`. The reconciler writes
      *  this on every mount so consumers (crouch drop, future rest-pose
-     *  lookups) can read `state.modelHandle.nodes.<bone>` directly without
+     *  lookups) can read `state.modelDef.nodes.<bone>` directly without
      *  re-resolving each frame. `null` mirrors `state.modelId === null`;
      *  consumers gate on `state.modelId` instead. */
-    modelHandle: ModelHandle | null;
+    modelDef: ModelDef | null;
     breathPhase: number;
     landingCooldownRemaining: number;
     /** screen-door dither contribution from the "loading" placeholder
@@ -101,7 +101,7 @@ type CharacterState = {
      *  identity, not name. Per-side, runtime-only; fresh per instance. */
     modelNodes: Set<Node>;
     /** this character's live canonical rig nodes, by name. The runtime counterpart to
-     *  `ModelHandle.nodes` (which is the shared asset's template): these are the nodes
+     *  `ModelDef.nodes` (which is the shared asset's template): these are the nodes
      *  actually under this character.
      *
      *  Rebuilt by `ensureCanonicalBones` on every mount, which is every path that could
@@ -146,7 +146,7 @@ import { getCamera, getSubject } from '../api/subject';
 import { dirty, sync, type TraitType, trait } from '../api/traits';
 import { getVisualWorldQuaternion, getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
-import type { ModelHandle } from '../core/models/handle';
+import type { ModelDef } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
 import { pack } from '../core/scene/pack';
 import type { TraitProps } from '../core/scene/scene-tree';
@@ -312,7 +312,7 @@ export const CharacterTrait = trait(
             proximityFadeRange: 1.5,
         }),
 
-        /** runtime bookkeeping. `modelId` + `modelHandle` are the reconciler's
+        /** runtime bookkeeping. `modelId` + `modelDef` are the reconciler's
          *  fact-state (see field doc-comments, start `null`, reconciler
          *  populates on first tick). `breathPhase` is the accumulated
          *  breath-sine phase (rad) used by the arm idle tilt, advances
@@ -322,7 +322,7 @@ export const CharacterTrait = trait(
          *  edges / voxel seams / low-arc hops). */
         state: (): CharacterState => ({
             modelId: null,
-            modelHandle: null,
+            modelDef: null,
             breathPhase: 0,
             landingCooldownRemaining: 0,
             loadingDither: 0,
@@ -359,7 +359,7 @@ export const modelIdSync = sync(CharacterTrait, 'model-id', {
 // Pass 1, [CharacterTrait, TransformTrait]:
 //   1. rig reconciler, converges `def.modelId` (intent) toward
 //      `state.modelId` (fact). Runs on BOTH sides. First pass per
-//      character mounts the baseAvatar placeholder so subsequent
+//      character mounts the baseAvatar.def placeholder so subsequent
 //      frames have bones to write to; once the target `def.modelId`
 //      is in Resources, unmounts and re-mounts the real rig. Loading
 //      state is `def.modelId !== state.modelId`.
@@ -419,11 +419,11 @@ script(
                 const handle = getModel(ctx, t.modelId);
                 if (handle) {
                     // target ready → mount it unless it's already the mounted handle.
-                    if (t.state.modelHandle !== handle) {
+                    if (t.state.modelDef !== handle) {
                         unmountRig(node);
                         mountRig(node, handle);
                         t.state.modelId = t.modelId;
-                        t.state.modelHandle = handle;
+                        t.state.modelDef = handle;
                     }
                 } else {
                     // target not ready (still loading, or its payload was wiped under
@@ -432,11 +432,11 @@ script(
                     // The player avatar pipeline also ensures on a player's behalf, but
                     // a game that sets `modelId` directly (NPCs) relies on this.
                     ensureModel(ctx, t.modelId);
-                    if (t.state.modelHandle !== baseAvatar) {
+                    if (t.state.modelDef !== baseAvatar.def) {
                         unmountRig(node);
-                        mountRig(node, baseAvatar);
+                        mountRig(node, baseAvatar.def);
                         t.state.modelId = BUILTIN_BASE_AVATAR_ID;
-                        t.state.modelHandle = baseAvatar;
+                        t.state.modelDef = baseAvatar.def;
                     }
                 }
 
@@ -633,7 +633,7 @@ function updateHeadOrientation(nodes: RigNodes, cc: CharacterControllerTrait, tr
 // ── skeleton + mount helpers ─────────────────────────────────────────
 
 /**
- * Synchronously mount the placeholder (baseAvatar) rig on `node` if it has no
+ * Synchronously mount the placeholder (baseAvatar.def) rig on `node` if it has no
  * rig yet, so code running before the reconciler's first frame sees the bones.
  *
  * The reconciler builds the rig in `onFrame`, which runs *after* the server's
@@ -650,9 +650,9 @@ function updateHeadOrientation(nodes: RigNodes, cc: CharacterControllerTrait, tr
 export function ensureCharacterRig(node: Node): void {
     const t = getTrait(node, CharacterTrait);
     if (!t || t.state.modelId !== null) return;
-    mountRig(node, baseAvatar);
+    mountRig(node, baseAvatar.def);
     t.state.modelId = BUILTIN_BASE_AVATAR_ID;
-    t.state.modelHandle = baseAvatar;
+    t.state.modelDef = baseAvatar.def;
 }
 
 // Per-node rig lifecycle: the rig's existence is bound to the trait's. `onInit`
@@ -812,8 +812,8 @@ function ensureCanonicalBones(playerNode: Node): void {
 // bone's mesh geometry. hands sit at the bottom-centre of the arm (the hand);
 // `back` at the centre of the torso's back (+Z) face, avatars face -Z. rest
 // pose is axis-aligned, so we compose local translate/scale only (no rotation).
-function deriveSocketPosition(boneNode: Node, handle: ModelHandle, socket: string): Vec3 | null {
-    const meshes = handle.meshes as Record<string, { aabb: ArrayLike<number> } | undefined>;
+function deriveSocketPosition(boneNode: Node, def: ModelDef, socket: string): Vec3 | null {
+    const meshes = def.meshes as Record<string, { aabb: ArrayLike<number> } | undefined>;
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;
@@ -855,8 +855,8 @@ function deriveSocketPosition(boneNode: Node, handle: ModelHandle, socket: strin
     return socket === RIG_6BONE_BACK ? [cx, cy, maxZ] : [cx, minY, cz];
 }
 
-function mountRig(playerNode: Node, handle: ModelHandle): void {
-    const loadedRoot = handle.scene;
+function mountRig(playerNode: Node, def: ModelDef): void {
+    const loadedRoot = def.scene;
     if (!loadedRoot) return;
 
     ensureCanonicalBones(playerNode);
@@ -925,7 +925,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     // drive any attach socket the model didn't author from its parent bone's
     // geometry, so gear has a usable mount point without the author placing one.
     // An authored socket was matched + TRS-copied by the visit above; skip it.
-    const handleNodes = handle.nodes as Record<string, Node | undefined>;
+    const handleNodes = def.nodes as Record<string, Node | undefined>;
     for (const socket of RIG_6BONE_ATTACH_NODES) {
         if (handleNodes[socket]) continue;
         const parentName = RIG_6BONE_PARENT_OF[socket];
@@ -933,7 +933,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
         const socketNode = findByName(playerNode, socket);
         const socketTransform = socketNode ? getTrait(socketNode, TransformTrait) : undefined;
         if (!boneNode || !socketTransform) continue;
-        const pos = deriveSocketPosition(boneNode, handle, socket);
+        const pos = deriveSocketPosition(boneNode, def, socket);
         if (!pos) continue;
         setPosition(socketTransform, pos);
         // hands get the grip rotation so a held item sits perpendicular to the arm
@@ -1076,13 +1076,13 @@ function applyLimb(bone: Node | null, xAngle: number, zAngle: number): void {
 /** Sink + shift-back the `waist` bone by `crouchAmount · CROUCH_WAIST_DROP`
  *  in Y and `crouchAmount · CROUCH_WAIST_BACK` in +Z (avatars face -Z),
  *  relative to its rest position. Both halves are indexed lookups off the two parallel
- *  maps: rest from `modelHandle.nodes` (the shared asset's template) and the live bone
+ *  maps: rest from `modelDef.nodes` (the shared asset's template) and the live bone
  *  from `state.nodes` (this character's own), neither of which searches the tree.
  *  Caller guarantees `state.modelId !== null` (skipped at the iteration
  *  guard), but the handle can still be null transiently, bail. */
 function applyWaistCrouchDrop(t: CharacterTrait, crouchAmount: number): void {
-    if (!t.state.modelHandle) return;
-    const restWaist = t.state.modelHandle.nodes.waist;
+    if (!t.state.modelDef) return;
+    const restWaist = t.state.modelDef.nodes.waist;
     if (!restWaist) return;
     const restTransform = getTrait(restWaist, TransformTrait);
     if (!restTransform) return;

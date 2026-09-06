@@ -115,7 +115,7 @@ function standingOn(): string {
     const room = activeRoom();
     const cc = footControlled();
     if (!room || !cc) return '—';
-    return stateToBlock(room.context.blocks, cc.state.groundBlockState).name;
+    return stateToBlock(room.context.blocks, cc.state.groundBlockState).def.name;
 }
 
 /** full state key of the block under the feet, e.g. 'oak_log[axis=y]' (copyable). */

@@ -20,7 +20,7 @@
 // `blockTexture()` consume them.
 
 import { recordSprite } from '../capture/module-scope';
-import { registry, upsert } from '../registry';
+import { declare, registry } from '../registry';
 import type { ImageSource, NormalizedImageSource } from './draw';
 
 /* ── source types re-exported for back-compat with existing import sites ── */
@@ -56,15 +56,15 @@ export type SpriteOptions = {
     mipmap?: boolean;
 };
 
-export type SpriteHandle = {
+/** The declared data for one sprite. Pure: hashed wholesale for change detection,
+ *  swapped wholesale on re-declaration (see `declare`). */
+export type SpriteDef = {
     /** sprite string id (e.g. 'sword'). */
     spriteId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `spriteId` when the author didn't supply one, so
-     *  readers can show `handle.name` unconditionally. */
+     *  readers can show `def.name` unconditionally. */
     name: string;
-    /** DepGraph dependency. */
-    dependency: { registry: 'sprites'; id: string };
     /** source declarations, post-URL-normalization. uv rects + sizes
      *  live in the atlas JSON sidecar, fetched at runtime. */
     src: NormalizedImageSource | NormalizedImageSource[];
@@ -72,6 +72,16 @@ export type SpriteHandle = {
     padding: number;
     /** mip generation flag. */
     mipmap: boolean;
+};
+
+/** Stable wrapper around a `SpriteDef`; identity plus the live def. */
+export type SpriteHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'sprites'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SpriteDef;
 };
 
 /* ── registration ── */
@@ -96,16 +106,16 @@ export type SpriteHandle = {
 export function sprite(id: string, options: SpriteOptions): SpriteHandle {
     const src: NormalizedImageSource | NormalizedImageSource[] = options.src;
 
-    const handle: SpriteHandle = {
-        spriteId: id,
-        name: options.name ?? id,
-        dependency: { registry: 'sprites', id },
-        src,
-        padding: options.padding ?? 1,
-        mipmap: options.mipmap ?? true,
-    };
+    const name = options.name ?? id;
+    const padding = options.padding ?? 1;
+    const mipmap = options.mipmap ?? true;
 
-    upsert(registry.sprites, id, handle);
+    const handle = declare(
+        registry.sprites,
+        id,
+        (): SpriteDef => ({ spriteId: id, name, src, padding, mipmap }),
+        (def): SpriteHandle => ({ id, dependency: { registry: 'sprites', id }, def }),
+    );
     recordSprite(id);
     return handle;
 }

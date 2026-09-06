@@ -310,7 +310,7 @@ export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
 /** nearest transform at or above `node`, or null when there is none. */
 function nearestTransformAt(node: Node | null): TransformTrait | null {
     for (let cur = node; cur !== null; cur = cur.parent) {
-        const t = cur.traits[TransformTrait._slot] as TransformTrait | undefined;
+        const t = cur.traits[TransformTrait.slot] as TransformTrait | undefined;
         if (t !== undefined) return t;
     }
     return null;
@@ -355,7 +355,7 @@ function setTransformParent(own: TransformTrait, next: TransformTrait | null): v
  * bearer: below one, transforms already point at it and nothing above changed that.
  */
 function retargetTransforms(node: Node, inherited: TransformTrait | null): void {
-    const own = node.traits[TransformTrait._slot] as TransformTrait | undefined;
+    const own = node.traits[TransformTrait.slot] as TransformTrait | undefined;
     if (own !== undefined) {
         setTransformParent(own, inherited);
         return;
@@ -561,7 +561,7 @@ export function releaseTransform(sceneTree: SceneTree | null, transform: Transfo
  * on, so they get a replication revisit as well.
  */
 function invalidateFrom(node: Node, scene: SceneTree | null, topmost: boolean): void {
-    const transform = node.traits[TransformTrait._slot] as TransformTrait | undefined;
+    const transform = node.traits[TransformTrait.slot] as TransformTrait | undefined;
     if (transform !== undefined) {
         transform._dirty = TRANSFORM_DIRTY_ALL;
         transform._version++;
@@ -587,7 +587,7 @@ export function invalidateTransformAncestry(node: Node, movedFrom?: Node | null)
 /** a transform was added to or removed from `node` itself, so its descendants compose anew. */
 export function invalidateTransformChildren(node: Node): void {
     const scene = node.scene;
-    const own = node.traits[TransformTrait._slot] as TransformTrait | undefined;
+    const own = node.traits[TransformTrait.slot] as TransformTrait | undefined;
     // `node`'s own transform-root status flips too: it just gained or lost the trait.
     if (scene !== null && own !== undefined) markNodeDirty(scene, node);
     if (own !== undefined) setTransformParent(own, nearestTransformAt(node.parent));
@@ -633,7 +633,6 @@ const _interpolatedWalkStack: TransformTrait[] = [];
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
 export function composeWorldMatrix(transform: TransformTrait, parent: TransformTrait | null): void {
-
     const q = transform.quaternion;
     const p = transform.position;
     const s = transform.scale;

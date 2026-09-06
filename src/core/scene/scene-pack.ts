@@ -33,7 +33,7 @@ import {
     setPrefab,
 } from './scene-tree';
 import { disposeScriptInstance, type SceneTreeContext } from './scripts';
-import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
+import { buildTraitInstance, type TraitBase, type TraitHandle } from './traits';
 
 /* ── pack ── */
 
@@ -69,13 +69,13 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
             for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
                 const instance = nodeTraits[traitSlot];
                 if (instance === undefined) continue;
-                const def = registry.slotToTrait[traitSlot];
-                if (!def) continue;
+                const handle = registry.slotToTrait[traitSlot];
+                if (!handle) continue;
                 traits.push({
-                    netIndex: wireIndex.idToIndex.get(def.id),
+                    netIndex: wireIndex.idToIndex.get(handle.id),
                     id: undefined,
-                    fields: packAllControls(def, instance, node),
-                    syncs: packAllSyncs(def, instance, node),
+                    fields: packAllControls(handle, instance, node),
+                    syncs: packAllSyncs(handle, instance, node),
                 });
             }
             // include unresolved traits (round-trip preservation, no field data).
@@ -168,18 +168,20 @@ export function unpackSceneTree(
     for (const bt of rootPacked.traits) {
         const traitId = resolveTraitWireRef(wireIndex, bt.netIndex, bt.id);
         if (traitId === undefined) continue;
-        const def = registry.traits.byId.get(traitId);
-        if (!def) {
-            console.warn(`[bongle] unresolved trait "${traitId}" on root node — recording the id, the wire carries no payload for it`);
+        const handle = registry.traits.handles.get(traitId);
+        if (!handle) {
+            console.warn(
+                `[bongle] unresolved trait "${traitId}" on root node — recording the id, the wire carries no payload for it`,
+            );
             if (root.unresolved === null) root.unresolved = new Map();
             root.unresolved.set(traitId, undefined);
             continue;
         }
-        const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));
-        const instance = buildTraitInstance(def, props ?? undefined);
-        applySyncFields(def, bt.syncs, instance, inbound?.syncRemap.get(traitId));
+        const props = unpackFields(handle, bt.fields, inbound?.controlRemap.get(traitId));
+        const instance = buildTraitInstance(handle, props ?? undefined);
+        applySyncFields(handle, bt.syncs, instance, inbound?.syncRemap.get(traitId));
         instance._node = root;
-        root.traits[def.slot] = instance;
+        root.traits[handle.slot] = instance;
     }
 
     // root script instances re-instantiate from the trait list at initSceneTree time
@@ -249,13 +251,13 @@ export function applySceneSyncUpdate(
             if (!node) break;
             const traitId = wireIndex.indexToId[update.traitNetIndex];
             if (traitId === undefined) break;
-            const def = registry.traits.byId.get(traitId);
-            if (!def) break;
+            const handle = registry.traits.handles.get(traitId);
+            if (!handle) break;
 
-            const instance = node.traits[def.slot];
+            const instance = node.traits[handle.slot];
             if (!instance) break;
 
-            applySyncFields(def, update.fields, instance, inbound?.syncRemap.get(traitId));
+            applySyncFields(handle, update.fields, instance, inbound?.syncRemap.get(traitId));
             bumpNodeVersion(sceneTree, node);
             break;
         }
@@ -265,8 +267,8 @@ export function applySceneSyncUpdate(
             if (!node) break;
             const traitId = resolveTraitWireRef(wireIndex, update.traitNetIndex, update.traitId);
             if (traitId === undefined) break;
-            const def = registry.traits.byId.get(traitId);
-            if (!def) {
+            const handle = registry.traits.handles.get(traitId);
+            if (!handle) {
                 console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — recording the id only`);
                 if (node.unresolved === null) node.unresolved = new Map();
                 node.unresolved.set(traitId, undefined);
@@ -277,14 +279,14 @@ export function applySceneSyncUpdate(
             // if already present, treat as update
             const syncRemap = inbound?.syncRemap.get(traitId);
             const controlRemap = inbound?.controlRemap.get(traitId);
-            const existing = node.traits[def.slot];
+            const existing = node.traits[handle.slot];
             if (existing) {
-                applyControlFields(def, update.fields, existing, controlRemap);
-                applySyncFields(def, update.syncs, existing, syncRemap);
+                applyControlFields(handle, update.fields, existing, controlRemap);
+                applySyncFields(handle, update.syncs, existing, syncRemap);
             } else {
-                const props = unpackFields(def, update.fields, controlRemap);
-                const instance = addTraitBySlot(node, def.slot, props ?? undefined);
-                if (instance) applySyncFields(def, update.syncs, instance, syncRemap);
+                const props = unpackFields(handle, update.fields, controlRemap);
+                const instance = addTraitBySlot(node, handle.slot, props ?? undefined);
+                if (instance) applySyncFields(handle, update.syncs, instance, syncRemap);
             }
             bumpNodeVersion(sceneTree, node);
             break;
@@ -295,14 +297,14 @@ export function applySceneSyncUpdate(
             if (!node) break;
             const traitId = resolveTraitWireRef(wireIndex, update.traitNetIndex, update.traitId);
             if (traitId === undefined) break;
-            const def = registry.traits.byId.get(traitId);
-            if (!def) {
+            const handle = registry.traits.handles.get(traitId);
+            if (!handle) {
                 // remove from unresolved if present
                 node.unresolved?.delete(traitId);
                 bumpNodeVersion(sceneTree, node);
                 break;
             }
-            removeTraitBySlot(node, def.slot);
+            removeTraitBySlot(node, handle.slot);
             break;
         }
 
@@ -376,16 +378,18 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
     for (const bt of pn.traits) {
         const traitId = resolveTraitWireRef(traitWireIndex, bt.netIndex, bt.id);
         if (traitId === undefined) continue;
-        const def = registry.traits.byId.get(traitId);
-        if (!def) {
-            console.warn(`[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" — recording the id, the wire carries no payload for it`);
+        const handle = registry.traits.handles.get(traitId);
+        if (!handle) {
+            console.warn(
+                `[bongle] unresolved trait "${traitId}" on node "${pn.name ?? pn.id}" — recording the id, the wire carries no payload for it`,
+            );
             if (node.unresolved === null) node.unresolved = new Map();
             node.unresolved.set(traitId, undefined);
             continue;
         }
-        const props = unpackFields(def, bt.fields, inbound?.controlRemap.get(traitId));
-        const instance = addTraitBySlot(node, def.slot, props ?? undefined);
-        if (instance) applySyncFields(def, bt.syncs, instance, inbound?.syncRemap.get(traitId));
+        const props = unpackFields(handle, bt.fields, inbound?.controlRemap.get(traitId));
+        const instance = addTraitBySlot(node, handle.slot, props ?? undefined);
+        if (instance) applySyncFields(handle, bt.syncs, instance, inbound?.syncRemap.get(traitId));
     }
 
     // scripts ride on traits, addTraitBySlot above creates instances in the live runtime
@@ -399,8 +403,8 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
  * the wire `index` is the control's position in `def.controls`). used by
  * packSceneTree for full scene serialization.
  */
-function packAllControls(def: TraitDef, instance: TraitBase, node: Node): BinaryField[] {
-    const codecs = getControlCodecs(def);
+function packAllControls(handle: TraitHandle, instance: TraitBase, node: Node): BinaryField[] {
+    const codecs = getControlCodecs(handle);
     if (!codecs) return [];
 
     const entries: BinaryField[] = [];
@@ -416,8 +420,8 @@ function packAllControls(def: TraitDef, instance: TraitBase, node: Node): Binary
  * replicated state on the receiver so 'dirty'-rate syncs reach the client at
  * join time and non-dirty syncs are aligned with the server's snapshot.
  */
-function packAllSyncs(def: TraitDef, instance: TraitBase, node: Node): BinaryField[] {
-    const codecs = getSyncCodecs(def);
+function packAllSyncs(handle: TraitHandle, instance: TraitBase, node: Node): BinaryField[] {
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return [];
 
     const entries: BinaryField[] = [];
@@ -431,10 +435,14 @@ function packAllSyncs(def: TraitDef, instance: TraitBase, node: Node): BinaryFie
  * unpack BinaryField entries into a props object keyed by control id.
  * returns null if there are no fields to unpack.
  */
-function unpackFields(def: TraitDef, fields: BinaryField[], remap?: (number | undefined)[]): Record<string, unknown> | null {
+function unpackFields(
+    handle: TraitHandle,
+    fields: BinaryField[],
+    remap?: (number | undefined)[],
+): Record<string, unknown> | null {
     if (fields.length === 0) return null;
 
-    const codecs = getControlCodecs(def);
+    const codecs = getControlCodecs(handle);
     if (!codecs) return null;
 
     const props: Record<string, unknown> = {};
@@ -443,12 +451,12 @@ function unpackFields(def: TraitDef, fields: BinaryField[], remap?: (number | un
         const i = remap ? remap[entry.index] : entry.index;
         if (i === undefined) continue;
         const codec = codecs[i];
-        const reg = def.controls[i];
+        const reg = handle.def.controls[i];
         if (!codec || !reg) continue;
         try {
             props[reg.controlId] = codec.unpack(entry.data);
         } catch (e) {
-            console.error(`[bongle] failed to unpack control '${def.id}.${reg.controlId}':`, e);
+            console.error(`[bongle] failed to unpack control '${handle.id}.${reg.controlId}':`, e);
         }
     }
     return Object.keys(props).length > 0 ? props : null;
@@ -459,8 +467,13 @@ function unpackFields(def: TraitDef, fields: BinaryField[], remap?: (number | un
  * used for full-state events (node_trait_added) where each entry is a
  * single control value indexed by control position.
  */
-function applyControlFields(def: TraitDef, fields: BinaryField[], instance: TraitBase, remap?: (number | undefined)[]): void {
-    const codecs = getControlCodecs(def);
+function applyControlFields(
+    handle: TraitHandle,
+    fields: BinaryField[],
+    instance: TraitBase,
+    remap?: (number | undefined)[],
+): void {
+    const codecs = getControlCodecs(handle);
     if (!codecs) return;
 
     for (const entry of fields) {
@@ -477,8 +490,8 @@ function applyControlFields(def: TraitDef, fields: BinaryField[], instance: Trai
  * used for incremental sync updates (node_trait_fields) where each entry
  * is a sync slice indexed by sync position.
  */
-function applySyncFields(def: TraitDef, fields: BinaryField[], instance: TraitBase, remap?: (number | undefined)[]): void {
-    const codecs = getSyncCodecs(def);
+function applySyncFields(handle: TraitHandle, fields: BinaryField[], instance: TraitBase, remap?: (number | undefined)[]): void {
+    const codecs = getSyncCodecs(handle);
     if (!codecs) return;
 
     for (const entry of fields) {

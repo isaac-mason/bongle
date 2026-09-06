@@ -27,9 +27,9 @@ import { useEditor } from '../editor/editor-store';
 import * as RenderCamera from '../render/camera';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
-import * as ModelLighting from '../render/model-lighting';
 import type * as MeshResourcesNs from '../render/mesh/mesh-resources';
 import * as MeshVisuals from '../render/mesh/mesh-visuals';
+import * as ModelLighting from '../render/model-lighting';
 import type { OfflineRenderer } from '../render/offline';
 import * as Particles from '../render/particles/particles';
 import * as Visibility from '../render/visibility/visibility';
@@ -566,7 +566,7 @@ function newRoomCore(opts: {
     // networked rooms receive baked light from the server, so they stay authority-less.
     if (opts.authority) voxels.authority = Voxels.createVoxelsAuthority();
     const nodes = SceneTree.createSceneTree();
-    const physics = Physics.init(nodes, voxels, blocks);
+    const physics = Physics.init(nodes, voxels);
     const clock = Clock.init(opts.clockSeed);
     const chat = Chat.init();
     const context: SceneTreeContext = {
@@ -581,7 +581,9 @@ function newRoomCore(opts: {
         voxels,
         physics,
         clock,
-        blocks,
+        get blocks() {
+            return voxels.registry;
+        },
         instances: new Map(),
     };
     return { nodes, voxels, physics, clock, chat, context };
@@ -906,11 +908,11 @@ export type StartLocalRoomOptions = {
  */
 export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     const { state, sceneId, playerMode, roomMode, clientId } = opts;
-    const handle = registry.scenes.byId.get(sceneId);
+    const handle = registry.scenes.handles.get(sceneId);
     if (!handle) {
         throw new Error(`[bongle] startLocalRoom: scene '${sceneId}' is not declared`);
     }
-    if (!handle.client) {
+    if (!handle.def.client) {
         throw new Error(`[bongle] startLocalRoom: scene '${sceneId}' is server-only (client: false)`);
     }
 

@@ -31,7 +31,7 @@ import {
     type VoxelPhysicsShape,
     voxelPhysicsShapeDef,
 } from '../../../../src/core/voxels/voxel-physics-shape';
-import { createChunk, createVoxels, setChunkBlock } from '../../../../src/core/voxels/voxels';
+import { createChunk, createVoxels, resolveAllChunks, setChunkBlock } from '../../../../src/core/voxels/voxels';
 
 // ── test helpers ────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ describe('voxelPhysicsShape castRay', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
@@ -121,7 +121,7 @@ describe('voxelPhysicsShape castRay', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
@@ -173,7 +173,7 @@ describe('voxelPhysicsShape castRay', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
@@ -227,7 +227,7 @@ describe('voxelPhysicsShape castRay', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
@@ -281,7 +281,7 @@ describe('voxelPhysicsShape castRay', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
@@ -329,7 +329,7 @@ describe('voxelPhysicsShape collision:false', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
 
@@ -369,7 +369,7 @@ describe('voxelPhysicsShape collision:false', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
 
@@ -405,7 +405,7 @@ describe('voxelPhysicsShape collision:false', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
         const collector = createAllCollideShapeCollector();
         const settings = createDefaultCollideShapeSettings();
 
@@ -457,7 +457,7 @@ describe('voxelPhysicsShape collision:false', () => {
         voxels.chunks.set('0,0,1', createChunk(0, 0, 1));
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
         const collector = createAllCastShapeCollector();
         const settings = createDefaultCastShapeSettings();
 
@@ -513,7 +513,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
@@ -550,7 +550,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
@@ -597,7 +597,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
@@ -645,7 +645,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const shape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const shape = createVoxelPhysicsShape(voxels, aabb);
 
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
@@ -688,7 +688,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // small box sitting on top of the stone block, slightly overlapping
         // block top face is at y=6, box center at y=6.4, half-extent 0.5 → box bottom at y=5.9
@@ -743,7 +743,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // box well above the stone block (block top at y=6, box bottom at y=9.5)
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.02 });
@@ -793,7 +793,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // sphere at y=6.4, radius 0.5 → bottom at 5.9, overlaps block top at y=6
         const testSphere = sphere.create({ radius: 0.5 });
@@ -843,7 +843,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.02 });
 
@@ -903,7 +903,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // slab top is at y=5.5. box center at y=5.3, half-extent 0.4 → extends y=[4.9, 5.7]
         // clearly overlaps with slab [y=5.0 to y=5.5]
@@ -964,7 +964,7 @@ describe('voxelPhysicsShape collideShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // slab top at y=5.5, box center at y=8, well above the slab
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.4, 0.4, 0.4), convexRadius: 0.02 });
@@ -1072,7 +1072,7 @@ describe('voxelPhysicsShape ghost-collision rejection', () => {
         setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // box penetrating the floor (bottom at y=5.7, floor top y=6 → 0.3 deep), at several
         // asymmetric straddle offsets — the configuration that makes per-cube EPA flip to a
@@ -1097,7 +1097,7 @@ describe('voxelPhysicsShape ghost-collision rejection', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // box level with the cube, overlapping only its -X face (box center x=4.75, half 0.4 →
         // +X face at 5.15 into cube [5,6] by 0.15; y/z overlap 0.8, so shortest exit is -X).
@@ -1119,7 +1119,7 @@ describe('voxelPhysicsShape castShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // box starts at y=8 (bottom at y=7.5), sweep -y by 5 units
         // should hit block top at y=6, travel = 7.5 - 6.0 = 1.5, fraction = 1.5/5 = 0.3
@@ -1177,7 +1177,7 @@ describe('voxelPhysicsShape castShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.02 });
 
@@ -1230,7 +1230,7 @@ describe('voxelPhysicsShape castShape', () => {
         setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.02 });
 
@@ -1295,7 +1295,7 @@ describe('voxelPhysicsShape merge-by-stateId', () => {
         setChunkBlock(voxels, chunk, 6, 5, 5, idB);
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // wide box (x∈[4,7]) resting on top of both cells, slightly overlapping
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(1.5, 0.5, 0.5), convexRadius: 0.02 });
@@ -1357,7 +1357,7 @@ describe('voxelPhysicsShape merge-by-stateId', () => {
         setChunkBlock(voxels, chunk, 6, 5, 6, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         // wide box (x,z ∈ [4.5,7.5]) resting on the whole patch top
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(1.5, 0.5, 1.5), convexRadius: 0.02 });
@@ -1405,7 +1405,7 @@ describe('voxelPhysicsShape merge-by-stateId', () => {
         voxels.chunks.set('0,0,0', createChunk(0, 0, 0));
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
-        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+        const voxelShape = createVoxelPhysicsShape(voxels, aabb);
 
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.02 });
 
@@ -1444,5 +1444,49 @@ describe('voxelPhysicsShape merge-by-stateId', () => {
         );
 
         expect(collector.hits.length).toBe(0);
+    });
+});
+
+// ── HMR registry swap ───────────────────────────────────────────────
+//
+// The HMR contract: blocks are redefined, `refreshBlockResources` rebuilds the
+// registry, repoints `voxels.registry` and re-resolves every chunk palette to the
+// NEW state ids, and only then does the engine read voxels again. Anything holding
+// its own `Blocks` reference misses that swap and then indexes new state ids into
+// old, shorter typed arrays — `colliderId[newStateId]` reads past the end of a
+// Uint16Array and yields `undefined`, which is not 0, so the cube fast path is
+// skipped and a shape lookup returns nothing. That was a hang in `raycastVoxels`.
+// The shape must therefore reach the registry through `voxels`, never cache it.
+
+describe('block registry swap (HMR)', () => {
+    it('reads the post-swap registry through voxels, not a cached copy', () => {
+        const before = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const voxels = createVoxels(before);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        setChunkBlock(voxels, chunk, 1, 1, 1, 'stone');
+
+        const shape = createVoxelPhysicsShape(voxels, [0, 0, 0, 16, 16, 16] as Box3);
+        expect(shape.voxels.registry).toBe(before);
+
+        // a block ADD: totalStates grows, so ids minted by the rebuild are past the
+        // end of every table the previous build sized. `buildBlockRegistry` refills
+        // in place, so the registry OBJECT is the same one every holder already has.
+        const totalBefore = before.totalStates;
+        const after = buildTestRegistry([{ id: 'dirt', texId: 'dirt' }]);
+        expect(after).toBe(before);
+        expect(after.totalStates).toBeGreaterThan(totalBefore);
+
+        // resolveAllChunks is still required: state ids are positional, so a block
+        // REMOVED or reordered shifts every later id and the palettes must renumber.
+        resolveAllChunks(voxels);
+        setChunkBlock(voxels, chunk, 2, 1, 1, 'dirt');
+
+        // no repointing anywhere, and every state id in the world still resolves.
+        expect(shape.voxels.registry).toBe(after);
+        for (const stateId of chunk.palette) {
+            expect(stateId).toBeLessThan(shape.voxels.registry.totalStates);
+            expect(shape.voxels.registry.colliderId[stateId]).toBeDefined();
+        }
     });
 });

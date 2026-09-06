@@ -46,17 +46,20 @@ import { CHUNK_BITS, CHUNK_SIZE, getChunk, getChunkAt, type Voxels, voxelIndex }
 export type VoxelPhysicsShape = {
     type: ShapeType.USER_1;
     voxels: Voxels;
-    registry: Blocks;
     aabb: Box3;
     centerOfMass: Vec3;
     volume: number;
 };
 
-export function createVoxelPhysicsShape(voxels: Voxels, registry: Blocks, aabb: Box3): VoxelPhysicsShape {
+/** The block registry is deliberately NOT a field here: it is reached through
+ *  `voxels.registry`, the one reference `registry-dispatch.refreshBlockResources`
+ *  repoints on an HMR block change (alongside `resolveAllChunks`, which rewrites
+ *  every chunk palette to the new state ids). A second cached `Blocks` would go
+ *  stale on that swap and then index new state ids into old, shorter typed arrays. */
+export function createVoxelPhysicsShape(voxels: Voxels, aabb: Box3): VoxelPhysicsShape {
     return {
         type: ShapeType.USER_1,
         voxels,
-        registry,
         aabb: box3.clone(aabb),
         centerOfMass: vec3.create(),
         volume: 0,
@@ -734,7 +737,7 @@ function castRayVsVoxels(
     raycastVoxels(
         _castRay_result,
         shape.voxels,
-        shape.registry,
+        shape.voxels.registry,
         _castRay_localOrigin[0],
         _castRay_localOrigin[1],
         _castRay_localOrigin[2],
@@ -752,7 +755,7 @@ function castRayVsVoxels(
 
     // push hit info into buffer
     const stateId = _castRay_result.stateId;
-    const cid = shape.registry.colliderId[stateId]!;
+    const cid = shape.voxels.registry.colliderId[stateId]!;
     let hitIdx: number;
     if (cid === 0) {
         hitIdx = pushCubeHit(_castRay_result.voxelX, _castRay_result.voxelY, _castRay_result.voxelZ, stateId);
@@ -844,10 +847,10 @@ function collidePointVsVoxels(
 
     const stateId = getStateId(shapeB.voxels, vx, vy, vz);
     if (stateId === AIR || stateId === MISSING) return;
-    if (!(shapeB.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) return;
+    if (!(shapeB.voxels.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) return;
 
-    const mt = shapeB.registry.modelType[stateId]!;
-    if (mt === MODEL_NONE && shapeB.registry.colliderId[stateId] === 0) return;
+    const mt = shapeB.voxels.registry.modelType[stateId]!;
+    if (mt === MODEL_NONE && shapeB.voxels.registry.colliderId[stateId] === 0) return;
 
     // for custom shapes, approximate with unit cube containment check.
     // collidePoint is a rough test, exact shape containment would require
@@ -928,7 +931,8 @@ function collideVoxelsVsConvex(
     scaleBZ: number,
 ): void {
     const voxelShape = shapeA as unknown as VoxelPhysicsShape;
-    const { voxels, registry } = voxelShape;
+    const { voxels } = voxelShape;
+    const registry = voxels.registry;
 
     vec3.set(_collideVox_scaleB, scaleBX, scaleBY, scaleBZ);
 
@@ -989,7 +993,7 @@ function collideVoxelsVsConvex(
                 const paletteIdx = chunk.data[voxelIndex(lx, ly, lz)]!;
                 const stateId = chunk.palette[paletteIdx]!;
                 if (stateId === AIR || stateId === MISSING) continue;
-                if (!(voxelShape.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) continue;
+                if (!(voxelShape.voxels.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) continue;
 
                 const cid = registry.colliderId[stateId]!;
                 const mt = registry.modelType[stateId]!;
@@ -1221,7 +1225,8 @@ function castConvexVsVoxels(
     scaleBZ: number,
 ): void {
     const voxelShape = shapeB as unknown as VoxelPhysicsShape;
-    const { voxels, registry } = voxelShape;
+    const { voxels } = voxelShape;
+    const registry = voxels.registry;
 
     vec3.set(_castVox_posA, posAX, posAY, posAZ);
     quat.set(_castVox_quatA, quatAX, quatAY, quatAZ, quatAW);
@@ -1280,7 +1285,7 @@ function castConvexVsVoxels(
                 const paletteIdx = chunk.data[voxelIndex(lx, ly, lz)]!;
                 const stateId = chunk.palette[paletteIdx]!;
                 if (stateId === AIR || stateId === MISSING) continue;
-                if (!(voxelShape.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) continue;
+                if (!(voxelShape.voxels.registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) continue;
 
                 const cid = registry.colliderId[stateId]!;
                 const mt = registry.modelType[stateId]!;

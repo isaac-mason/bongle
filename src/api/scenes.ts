@@ -18,8 +18,14 @@
 
 import { recordScene } from '../core/capture/module-scope';
 import type { ScenePayload } from '../core/content/scene-store';
-import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../core/registry';
-import { createSceneHandle, type SceneHandle, type SceneOptions } from '../core/scene/scene-handle';
+import { declare, get, registry, touch, upsertPlaceholder } from '../core/registry';
+import {
+    createSceneDef,
+    createSceneHandle,
+    type SceneDef,
+    type SceneHandle,
+    type SceneOptions,
+} from '../core/scene/scene-handle';
 
 export { cloneVoxels, copyVoxels } from '../core/voxels/voxels';
 export type { SceneHandle, SceneOptions };
@@ -59,23 +65,16 @@ export function scene(id: string, options?: SceneOptions): SceneHandle {
     // (those affect transport routing, flipping them mid-session would
     // require a reload anyway). `name` is patched in place so authors
     // can rename without restarting.
-    const existing = get(registry.scenes, id);
-    if (existing) {
-        const nextName = options?.name ?? id;
-        if (existing.name !== nextName) existing.name = nextName;
-        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
-        // boot, where `_registerScenePayload` pre-populated the entry) to
-        // this user module, stamps the id into the registry's per-module
-        // pending set (so `endModuleRun` doesn't fire a spurious 'removed'
-        // → handle.voxels nulled), throws on a duplicate declaration from
-        // another module.
-        claimOwnership(registry.scenes, id);
-        recordScene(id);
-        return existing;
-    }
-
-    const handle = createSceneHandle(id, options);
-    upsert(registry.scenes, id, handle);
+    const handle = declare(
+        registry.scenes,
+        id,
+        // only the first call decides client/server (they affect transport routing;
+        // flipping them mid-session needs a reload anyway). `name` follows the latest
+        // declaration so authors can rename without restarting, and `_payload` is
+        // owned by the codegen barrel, so both ride the previous def.
+        (previous): SceneDef => (previous ? { ...previous, name: options?.name ?? id } : createSceneDef(id, options)),
+        createSceneHandle,
+    );
     recordScene(id);
     return handle;
 }
@@ -101,7 +100,7 @@ export function _registerScenePayload(id: string, payload: ScenePayload): void {
     const existing = get(registry.scenes, id);
     if (existing) {
         existing._payload = payload;
-        // sceneHash includes `_payload`, so touch detects the hash change
+        // sceneHash covers `_payload`, so touch detects the hash change
         // and fires a `changed` event. registry-dispatch's scenes branch
         // then runs `Content.populateScene`, bumping `SceneHandle.version`
         // so prefab deps unblock. Without this, a barrel re-eval that
@@ -111,7 +110,8 @@ export function _registerScenePayload(id: string, payload: ScenePayload): void {
         touch(registry.scenes, id);
         return;
     }
-    const handle = createSceneHandle(id);
-    handle._payload = payload;
-    upsertPlaceholder(registry.scenes, id, handle);
+    const def = createSceneDef(id);
+    def._payload = payload;
+    upsertPlaceholder(registry.scenes, id, def);
+    // no handle yet: `scene()` mints one against this def when user code declares it.
 }

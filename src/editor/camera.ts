@@ -115,7 +115,7 @@ export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Re
 
     const mesh = getTrait(node, MeshTrait);
     const meshId = mesh?.meshId;
-    const handle = meshId ? resources.models.get(meshId.modelId)?.handle : null;
+    const handle = meshId ? resources.models.get(meshId.modelId)?.def : null;
     const meshEntry = handle && meshId ? handle.meshes[meshId.meshName] : undefined;
     if (meshEntry) {
         box3.copy(_meshLocalAabb, meshEntry.aabb);

@@ -19,7 +19,7 @@
 
 import type { Filesystem } from '../../../os/interface';
 import { type Config, DEFAULT_CONFIG, isStandalone } from '../../core/config';
-import type { ModelHandle } from '../../core/models/handle';
+import type { ModelDef } from '../../core/models/handle';
 import { type Registry, resolveConfig } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SceneHandle } from '../../core/scene/scene-handle';
@@ -40,11 +40,15 @@ import { buildSpriteAtlas } from './sprite-atlas';
  *  result (env.runner.import vs await import) into the same parameter. */
 export type PipelineInternal = {
     registry: Registry;
+    createBlockRegistry: () => Blocks;
+    /** fills its first argument in place; the bake wants a throwaway view, so it
+     *  pairs this with its own `createBlockRegistry()` rather than the engine's. */
     buildBlockRegistry: (
+        out: Blocks,
         defs: Map<string, BlockDef>,
         handles: Map<string, BlockHandle>,
         blockTextures: Map<string, BlockTextureDef>,
-    ) => Blocks;
+    ) => void;
 };
 
 export type PipelineOpts = {
@@ -198,18 +202,20 @@ export async function runAssetPipelinePass(
     if (atlasDirty || modelsDirty || scenesDirty) {
         const defs = new Map<string, BlockDef>();
         const handles = new Map<string, BlockHandle>();
-        for (const [id, h] of registry.blocks.byId) {
-            handles.set(id, h);
-            defs.set(id, h._def);
+        for (const [id, def] of registry.blocks.byId) {
+            defs.set(id, def);
+            const handle = registry.blocks.handles.get(id);
+            if (handle) handles.set(id, handle);
         }
         const blockTextures = new Map<string, BlockTextureDef>();
         for (const [id, h] of registry.blockTextures.byId) blockTextures.set(id, h);
-        const models = new Map<string, ModelHandle>();
+        const models = new Map<string, ModelDef>();
         for (const [id, h] of registry.models.byId) models.set(id, h);
 
-        const blocks = internal.buildBlockRegistry(defs, handles, blockTextures);
+        const blocks = internal.createBlockRegistry();
+        internal.buildBlockRegistry(blocks, defs, handles, blockTextures);
         const scenes = new Map<string, SceneHandle>();
-        for (const [id, h] of registry.scenes.byId) scenes.set(id, h);
+        for (const [id, h] of registry.scenes.handles) scenes.set(id, h);
         moduleView = { blocks, blockTextures, models, scenes };
     }
 

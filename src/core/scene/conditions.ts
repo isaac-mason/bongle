@@ -76,7 +76,7 @@ export function Optional<T extends TraitHandle, S extends Src>(c: Condition<T, O
 export function Optional(c: TraitHandle | Condition<any, any, any>): Condition<any, Oper.Optional, any> {
     // bare handle sugars to `Optional(With(t))`, same as a bare handle in a
     // query arg list sugars to `With(t)`.
-    if ('_slot' in c) return { trait: c, oper: Oper.Optional, src: Src.Self };
+    if ('slot' in c) return { trait: c, oper: Oper.Optional, src: Src.Self };
     return { trait: c.trait, oper: Oper.Optional, src: c.src };
 }
 

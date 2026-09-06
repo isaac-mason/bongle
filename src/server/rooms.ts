@@ -289,7 +289,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     const voxels = createVoxels(blocks);
     voxels.authority = createVoxelsAuthority();
 
-    const physics = Physics.init(sceneGraph, voxels, blocks);
+    const physics = Physics.init(sceneGraph, voxels);
 
     const chat = Chat.init();
     const clock = Clock.init();
@@ -324,7 +324,9 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
             voxels,
             physics,
             clock,
-            blocks,
+            get blocks() {
+                return voxels.registry;
+            },
             instances: new Map(),
         },
     };
@@ -422,14 +424,14 @@ const EDITOR_SERVER_TRAIT_ID = 'editor.server';
 const EDITOR_STATE_TRAIT_ID = 'editor.state';
 
 function attachEditorServerTrait(room: Room): void {
-    const handle = registry.traits.byId.get(EDITOR_SERVER_TRAIT_ID)?.handle;
+    const handle = registry.traits.handles.get(EDITOR_SERVER_TRAIT_ID);
     if (!handle) return;
     if (hasTrait(room.scene.root, handle)) return;
     addTrait(room.scene.root, handle);
 }
 
 function attachEditorStateTrait(node: Node): void {
-    const handle = registry.traits.byId.get(EDITOR_STATE_TRAIT_ID)?.handle;
+    const handle = registry.traits.handles.get(EDITOR_STATE_TRAIT_ID);
     if (!handle) return;
     if (hasTrait(node, handle)) return;
     addTrait(node, handle);
@@ -726,7 +728,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     }
 
     const physT0 = performance.now();
-    room.physics = Physics.init(room.scene, room.voxels, registry.blockRegistry);
+    room.physics = Physics.init(room.scene, room.voxels);
     const physMs = performance.now() - physT0;
     room.context.physics = room.physics;
 
@@ -1147,10 +1149,10 @@ export function applyOwnerSync(
     if (!cs) return;
     const traitId = cs.inbound.traits.indexToId[message.traitNetIndex];
     if (traitId === undefined) return;
-    const def = registry.traits.byId.get(traitId);
-    if (!def) return;
+    const handle = registry.traits.handles.get(traitId);
+    if (!handle) return;
 
-    const instance = node.traits[def.slot];
+    const instance = node.traits[handle.slot];
     if (!instance) return;
 
     Discovery.acceptOwnerFields(
@@ -1160,7 +1162,7 @@ export function applyOwnerSync(
         client,
         room.scene,
         node,
-        def,
+        handle.def,
         instance,
         message.fields,
         room.mode,

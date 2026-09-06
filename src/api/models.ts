@@ -14,7 +14,7 @@
 // iframes, in-process tools) can drive it directly without a server
 // roundtrip.
 
-import type { ModelHandle } from '../core/models/handle';
+import type { ModelDef } from '../core/models/handle';
 import * as Resources from '../core/resources';
 import type { ScriptContext } from '../core/scene/scripts';
 
@@ -29,11 +29,11 @@ import type { ScriptContext } from '../core/scene/scripts';
  * so a non-null result keeps the same object reference across HMR /
  * re-registrations of the same id.
  */
-export function getModel(ctx: ScriptContext, id: string): ModelHandle | null {
+export function getModel(ctx: ScriptContext, id: string): ModelDef | null {
     const resources = ctx._runtime?.resources;
     if (!resources) return null;
     if (!Resources.hasModel(resources, id)) return null;
-    return Resources.modelHandle(resources, id);
+    return Resources.modelDef(resources, id);
 }
 
 /**
@@ -80,7 +80,7 @@ export type LoadModelOptions = {
  * then, transient failures retry in the background and the promise stays
  * pending, the load self-drives its own retries while awaited.
  */
-export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelHandle> {
+export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelDef> {
     const resources = ctx._runtime?.resources;
     if (!resources) {
         return Promise.reject(new Error('[bongle] loadModel: no runtime resources on ctx'));

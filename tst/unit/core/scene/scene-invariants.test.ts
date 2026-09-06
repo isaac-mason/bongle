@@ -40,16 +40,16 @@ function rng(seed: number): () => number {
 function nearest(node: Node | null, slot: number, inclusive: boolean) {
     let cursor = inclusive ? node : (node?.parent ?? null);
     while (cursor !== null) {
-        const instance = cursor._traits[slot];
+        const instance = cursor.traits[slot];
         if (instance !== undefined) return instance;
         cursor = cursor.parent;
     }
     return undefined;
 }
 
-function resolveCondition(node: Node, condition: { trait: { _slot: number }; oper: Oper; src: Src }) {
-    const slot = condition.trait._slot;
-    if (condition.src === Src.Self) return node._traits[slot];
+function resolveCondition(node: Node, condition: { trait: { slot: number }; oper: Oper; src: Src }) {
+    const slot = condition.trait.slot;
+    if (condition.src === Src.Self) return node.traits[slot];
     return nearest(node, slot, condition.src === Src.Up);
 }
 
@@ -79,7 +79,7 @@ function freshChildren(node: Node): unknown[] {
     const out: unknown[] = [];
     const visit = (n: Node) => {
         for (const child of n.children) {
-            const t = child._traits[TransformTrait._slot!];
+            const t = child.traits[TransformTrait.slot!];
             if (t !== undefined) out.push(t);
             else visit(child);
         }
@@ -94,7 +94,7 @@ function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: N
         const transform = getTrait(node, TransformTrait);
         if (transform) {
             expect(parentTransform(transform), `parentTransform after ${op} on ${node.name}`).toBe(
-                (nearest(node, TransformTrait._slot!, false) as typeof transform | undefined) ?? null,
+                (nearest(node, TransformTrait.slot!, false) as typeof transform | undefined) ?? null,
             );
             // the other direction: every contracted child points back at this transform.
             for (const child of freshChildren(node)) {
@@ -106,7 +106,7 @@ function checkAll(sceneTree: SceneTree, queries: Array<Query<any>>, everyNode: N
     for (const node of everyNode) {
         if (destroyed.has(node) || node.parent === null) continue;
         expect(childIndexOf(node), `childIndexOf after ${op} on ${node.name}`).toBe(node.parent.children.indexOf(node));
-        expect(node._childIndex, `_childIndex hint after ${op} on ${node.name}`).toBe(node.parent.children.indexOf(node));
+        expect(node.childIndex, `_childIndex hint after ${op} on ${node.name}`).toBe(node.parent.children.indexOf(node));
     }
 
     const live = liveNodes(sceneTree);
@@ -200,10 +200,10 @@ describe.each([0x51e5ed, 0xbeef01, 0x1234ab, 0xfeed99])('scene tree invariants, 
                 removeTrait(pick(), TransformTrait);
             } else if (roll < 0.82) {
                 op = 'addTraitBySlot';
-                addTraitBySlot(pick(), Model._slot!);
+                addTraitBySlot(pick(), Model.slot!);
             } else if (roll < 0.88) {
                 op = 'removeTraitBySlot';
-                removeTraitBySlot(pick(), Model._slot!);
+                removeTraitBySlot(pick(), Model.slot!);
             } else if (roll < 0.94) {
                 op = 'reorderChild';
                 const node = pick();

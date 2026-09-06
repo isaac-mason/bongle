@@ -1,6 +1,6 @@
 import { recordCommand } from './capture/module-scope';
 import type { NetMessage } from './protocol';
-import { get, type ProtocolTable, registry, upsert } from './registry';
+import { declare, get, type ProtocolTable, registry } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 
@@ -159,7 +159,7 @@ export function send<S extends pack.Schema, D extends RpcDirection>(
         return;
     }
     const payload = def.serdes.pack(data);
-    const isClientToServer = handle.direction === CLIENT_TO_SERVER;
+    const isClientToServer = handle.def.direction === CLIENT_TO_SERVER;
     if (isClientToServer || client) {
         rpc.send(index, roomId, payload, client);
     } else {
@@ -170,13 +170,15 @@ export function send<S extends pack.Schema, D extends RpcDirection>(
 /* ── types ───────────────────────────────────────────────────────── */
 
 /** a command handle returned by command(). */
+/** Stable wrapper around a `CommandDef`. Identity plus the live def; the schema
+ *  and codec are read through `.def` rather than copied out (see `declare`). */
 export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
+    /** the declared id (identity, never changes). */
     readonly id: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'commands'; id: string };
-    readonly direction: D;
-    readonly schema: S;
-    readonly serdes: ReturnType<typeof pack.build<S>>;
+    /** the declared data. re-pointed on every re-declaration. */
+    def: CommandDef & { direction: D; schema: S; serdes: ReturnType<typeof pack.build<S>> };
 };
 
 /** internal def stored in registry. */
@@ -184,6 +186,8 @@ export type CommandDef = {
     id: string;
     direction: RpcDirection;
     schema: pack.Schema;
+    /** codec built from `schema`. DERIVED, so it is rebuilt whenever the schema
+     *  moves and excluded from `commandHash`. */
     serdes: ReturnType<typeof pack.build>;
 };
 
@@ -216,21 +220,12 @@ export type CommandDef = {
 export function command<S extends pack.Schema, D extends RpcDirection>(id: string, direction: D, schema: S): CommandHandle<S, D> {
     const serdes = pack.build(schema);
 
-    const def: CommandDef = {
+    const handle = declare(
+        registry.commands,
         id,
-        direction,
-        schema,
-        serdes: serdes as CommandDef['serdes'],
-    };
-
-    upsert(registry.commands, id, def);
+        (): CommandDef => ({ id, direction, schema, serdes: serdes as CommandDef['serdes'] }),
+        (def): CommandHandle<pack.Schema, RpcDirection> => ({ id, dependency: { registry: 'commands', id }, def }),
+    );
     recordCommand(id);
-
-    return {
-        id,
-        dependency: { registry: 'commands', id },
-        direction,
-        schema,
-        serdes,
-    };
+    return handle as unknown as CommandHandle<S, D>;
 }

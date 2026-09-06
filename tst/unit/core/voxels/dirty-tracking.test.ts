@@ -40,8 +40,20 @@ function clearAllLightDirty(voxels: ReturnType<typeof createVoxels>) {
 
 // ── block op recording ──────────────────────────────────────────────
 
+/** A describe-scope registry that survives this file's `beforeEach` reset.
+ *  `buildTestRegistry` fills the registry IN PLACE, so a value captured at describe
+ *  scope is the very object `resetVoxelRegistry` empties before each test body runs.
+ *  Re-declaring in a `beforeEach` refills that same object, so the returned reference
+ *  stays valid for every test in the suite. */
+function suiteRegistry(specs: Parameters<typeof buildTestRegistry>[0]) {
+    beforeEach(() => {
+        buildTestRegistry(specs);
+    });
+    return buildTestRegistry(specs);
+}
+
 describe('block op recording', () => {
-    const registry = buildTestRegistry([
+    const registry = suiteRegistry([
         { id: 'stone', texId: 'stone' },
         { id: 'dirt', texId: 'dirt' },
     ]);
@@ -116,7 +128,7 @@ describe('block op recording', () => {
 // ── snapshot invalidation ───────────────────────────────────────────
 
 describe('snapshot invalidation', () => {
-    const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+    const registry = suiteRegistry([{ id: 'stone', texId: 'stone' }]);
 
     it('setBlock invalidates compressedSnapshot', () => {
         const voxels = makeServerVoxels(registry);
@@ -150,7 +162,7 @@ describe('snapshot invalidation', () => {
 // ── light dirty tracking ────────────────────────────────────────────
 
 describe('light dirty tracking', () => {
-    const registry = buildTestRegistry([
+    const registry = suiteRegistry([
         { id: 'stone', texId: 'stone' },
         { id: 'lamp', texId: 'lamp', lightEmission: [15, 15, 15], cull: CullType.NONE, lightOpacity: 0 },
     ]);
@@ -240,7 +252,7 @@ describe('light dirty tracking', () => {
 // ── light epoch ─────────────────────────────────────────────────────
 
 describe('light epoch', () => {
-    const registry = buildTestRegistry([
+    const registry = suiteRegistry([
         { id: 'stone', texId: 'stone' },
         { id: 'lamp', texId: 'lamp', lightEmission: [15, 15, 15], cull: CullType.NONE, lightOpacity: 0 },
     ]);
@@ -332,7 +344,7 @@ describe('clearVoxelChanges', () => {
 // the correct chunks and measure how many voxels actually changed.
 
 describe('ceiling toggle lightDirty tracking', () => {
-    const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+    const registry = suiteRegistry([{ id: 'stone', texId: 'stone' }]);
 
     it('5x5 ceiling place sets lightDirty on affected chunks only', () => {
         const voxels = makeServerVoxels(registry);
@@ -422,7 +434,7 @@ describe('ceiling toggle lightDirty tracking', () => {
 // updateLightOnBlockChange.
 
 describe('flushPendingLight (batched)', () => {
-    const registry = buildTestRegistry([
+    const registry = suiteRegistry([
         { id: 'stone', texId: 'stone' },
         { id: 'lamp', texId: 'lamp', lightEmission: [15, 15, 15], cull: CullType.NONE, lightOpacity: 0 },
     ]);

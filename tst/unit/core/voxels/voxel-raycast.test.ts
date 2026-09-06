@@ -487,3 +487,51 @@ describe('raycastVoxels', () => {
         });
     });
 });
+
+// ── DDA termination ─────────────────────────────────────────────────
+//
+// The custom-collider branch runs INSIDE the DDA loop, whose advance sits at the
+// bottom of the body. Any early-out that skips the shape test must therefore fall
+// through to that advance — a `continue` re-tests the same cell at the same
+// distance forever, which is an unbreakable main-thread spin (no throw, no stack).
+// A diagonal ray ties two tMax values, which leaves the un-stepped axis's tMax
+// exactly equal to `distance` on the next cell and makes its in-cell segment
+// zero-length. That is the shape of the hang, and it needs no registry skew.
+
+describe('DDA termination', () => {
+    it('terminates on a zero-length segment through a custom-collider block', () => {
+        const registry = buildTestRegistry([
+            { id: 'stone', texId: 'stone' },
+            { id: 'slab', texId: 'slab', shape: aabbs([[0, 0, 0, 1, 0.5, 1]]) },
+        ]);
+        const voxels = createVoxels(registry);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        // (0,0,0) stays air; the slab sits where the diagonal's tie lands.
+        setChunkBlock(voxels, chunk, 0, 1, 0, 'slab');
+
+        const out = createVoxelRaycastResult();
+        // exact 45° in xy from the corner: tMaxX === tMaxY every boundary, so after
+        // stepping y the un-stepped tMaxX still equals `distance` → segLen === 0.
+        const inv = Math.SQRT1_2;
+        raycastVoxels(out, voxels, registry, 0, 0, 0.5, inv, inv, 0, 16, 0);
+
+        // the assertion is that we got here at all — a spin never returns.
+        expect(out).toBeDefined();
+    });
+
+    it('terminates when the ray origin sits exactly on a boundary going negative', () => {
+        const registry = buildTestRegistry([{ id: 'slab', texId: 'slab', shape: aabbs([[0, 0, 0, 1, 0.5, 1]]) }]);
+        const voxels = createVoxels(registry);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        setChunkBlock(voxels, chunk, 4, 4, 4, 'slab');
+
+        const out = createVoxelRaycastResult();
+        // integer origin + negative direction makes tMaxX === 0 on the first cell.
+        raycastVoxels(out, voxels, registry, 5, 4.25, 4.5, -1, 0, 0, 16, 0);
+
+        expect(out.hit).toBe(true);
+        expect(out.voxelX).toBe(4);
+    });
+});

@@ -7,8 +7,15 @@ import {
     BLOCK_FLAG_PATHFINDABLE,
     BLOCK_FLAG_SELECTION,
     BLOCK_FLAG_SNEAK_GUARD,
+    resolveKey,
 } from '../../../../src/core/voxels/block-registry';
-import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from '../../../../src/core/voxels/test-helpers';
+import * as blockState from '../../../../src/core/voxels/block-state';
+import {
+    buildTestRegistry,
+    resetVoxelRegistry,
+    resetVoxelRegistryStoresOnly,
+    type TestBlockSpec,
+} from '../../../../src/core/voxels/test-helpers';
 
 beforeAll(() => {
     registerAllShapes();
@@ -91,5 +98,67 @@ describe('block registry flags', () => {
         expect(registry.friction[0]).toBe(1); // default
         expect(registry.restitution[0]).toBe(0); // default
         expect(registry.liquidViscosity[0]).toBe(0);
+    });
+});
+
+// ── state-id stability ──────────────────────────────────────────────
+//
+// `chunk.palette` stores RESOLVED global state ids, so an id that shifts silently
+// re-points every voxel already written with it. Ids are reserved per block id for
+// the process lifetime (see `reserveBlockSlot`) so that can't happen: declaring a
+// new block appends, removing one abandons its range rather than compacting, and
+// re-declaring hands the original range back.
+
+describe('global state id stability', () => {
+    it('keeps existing ids when a new block is declared alongside', () => {
+        const before = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const stoneId = resolveKey(before, 'stone');
+
+        const after = buildTestRegistry([{ id: 'dirt', texId: 'dirt' }]);
+        expect(resolveKey(after, 'stone'), 'declaring dirt must not move stone').toBe(stoneId);
+        expect(resolveKey(after, 'dirt')).not.toBe(stoneId);
+    });
+
+    it('hands an id its original range back after it is removed and re-declared', () => {
+        const first = buildTestRegistry([
+            { id: 'stone', texId: 'stone' },
+            { id: 'dirt', texId: 'dirt' },
+        ]);
+        const stoneId = resolveKey(first, 'stone');
+        const dirtId = resolveKey(first, 'dirt');
+
+        // dirt's declaration disappears (its module stopped declaring it).
+        resetVoxelRegistryStoresOnly();
+        const without = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        expect(resolveKey(without, 'stone'), 'stone must not slide into the gap').toBe(stoneId);
+
+        // ...and comes back. A palette written before the removal still means dirt.
+        resetVoxelRegistryStoresOnly();
+        const again = buildTestRegistry([
+            { id: 'stone', texId: 'stone' },
+            { id: 'dirt', texId: 'dirt' },
+        ]);
+        expect(resolveKey(again, 'stone')).toBe(stoneId);
+        expect(resolveKey(again, 'dirt')).toBe(dirtId);
+    });
+
+    it('moves a block whose state schema changed size, keeping its dense index', () => {
+        const before = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const index = before.idToHandle.get('stone')!._index;
+        const baseStateId = before.idToHandle.get('stone')!._baseStateId;
+
+        // an author adds a prop: the old range is one state wide and can't hold it.
+        resetVoxelRegistryStoresOnly();
+        const after = buildTestRegistry([
+            {
+                id: 'stone',
+                texId: 'stone',
+                states: blockState.create({ half: blockState.enumeration(['bottom', 'top'] as const) }),
+            },
+        ]);
+        const handle = after.idToHandle.get('stone')!;
+        expect(handle._baseStateId, 'the range must move to fit the wider schema').not.toBe(baseStateId);
+        // ...but the dense index is identity, so per-room block observers survive.
+        expect(handle._index).toBe(index);
     });
 });

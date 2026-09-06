@@ -32,9 +32,9 @@
 //     first user `model()` call promotes ownership via `claimOwnership`.
 
 import { recordModel } from '../capture/module-scope';
-import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../registry';
+import { declare, registry, touch, upsertPlaceholder } from '../registry';
 import { createNode } from '../scene/scene-tree';
-import type { ModelHandle } from './handle';
+import type { ModelDef, ModelHandle } from './handle';
 
 /* ── types ── */
 
@@ -70,8 +70,6 @@ export type ModelOptions = {
 // biome-ignore lint/suspicious/noEmptyInterface: augmented by codegen
 export interface ModelHandleMap {}
 
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-
 /* ── codegen-seeded registry ── */
 
 /**
@@ -89,22 +87,18 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
  * is what bumps `revision` so the cli's flush handler picks up bin-url
  * changes for codegen.
  */
-export function _registerModelHandle(id: string, handle: ModelHandle): void {
-    const existing = get(registry.models, id);
-    if (existing) {
-        const target = existing as Mutable<ModelHandle>;
-        target.src = handle.src;
-        target.bin = handle.bin;
-        target.scene = handle.scene;
-        target.aabb = handle.aabb;
-        target.nodes = handle.nodes;
-        target.meshes = handle.meshes;
-        target.animations = handle.animations;
-        target.version = handle.version;
+export function _registerModelDef(id: string, def: ModelDef): void {
+    const handle = registry.models.handles.get(id);
+    if (registry.models.byId.has(id)) {
+        // codegen caught up with a declaration already in the registry: swap the def
+        // wholesale and re-point the handle user code is holding.
+        registry.models.byId.set(id, def);
+        if (handle) handle.def = def;
         touch(registry.models, id);
-    } else {
-        upsertPlaceholder(registry.models, id, handle);
+        return;
     }
+    upsertPlaceholder(registry.models, id, def);
+    if (handle) handle.def = def;
 }
 
 /**
@@ -115,11 +109,10 @@ export function _registerModelHandle(id: string, handle: ModelHandle): void {
  * in place once codegen catches up, preserving the user-held reference. No
  * scene graph/tree dependencies.
  */
-function createPlaceholderHandle(id: string, src: string, name: string): ModelHandle {
+function createPlaceholderDef(id: string, src: string, name: string): ModelDef {
     return {
         modelId: id,
         name,
-        dependency: { registry: 'models', id },
         src,
         bin: { client: '', server: '' },
         scene: createNode({ name: `__placeholder_${id}__` }),
@@ -152,38 +145,45 @@ export function model<const Id extends string>(
 ): Id extends keyof ModelHandleMap ? ModelHandleMap[Id] : ModelHandle {
     const src = options.src;
     const name = options.name ?? id;
-    const existing = get(registry.models, id);
-    if (existing) {
-        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
-        // boot) to this user module, adds id to module's pending set so
-        // endModuleRun doesn't fire removed on this run, throws on
-        // duplicate declaration from another file.
-        claimOwnership(registry.models, id);
-        // patch `src` when the user changed the source-string arg so the
-        // cli pipeline picks up the new path on its next pass. `touch()`
-        // re-hashes and fires `changed`, bumping `revision`.
-        let dirty = false;
-        if (existing.src !== src) {
-            (existing as Mutable<ModelHandle>).src = src;
-            dirty = true;
-        }
-        if (existing.name !== name) {
-            (existing as Mutable<ModelHandle>).name = name;
-            dirty = true;
-        }
-        if (dirty) touch(registry.models, id);
-        recordModel(id);
-        return existing as never;
-    }
-
-    // no warning here, placeholder is the normal cold-start state. the
+    // minting a placeholder is the normal cold-start path, not a warning case: the
     // user-entry shim wipes `src/generated/models.ts` on every dev start
-    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY
-    // declared model hits this path before the pipeline's first flush
-    // populates the barrel. warning would fire on every cold boot for
-    // every model in the project, which isn't actionable.
-    const placeholder = createPlaceholderHandle(id, src, name);
-    const handle = upsert(registry.models, id, placeholder);
+    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY declared model
+    // hits it before the pipeline's first flush populates the barrel.
+    const handle = declare(
+        registry.models,
+        id,
+        // codegen owns everything but `src` / `name`, so merge onto whatever the
+        // barrel already registered rather than replacing it.
+        (previous): ModelDef => (previous ? { ...previous, src, name } : createPlaceholderDef(id, src, name)),
+        (def): ModelHandle => ({
+            id,
+            dependency: { registry: 'models', id },
+            def,
+            // forwarding accessors; see the ModelHandle doc for why these are
+            // getters rather than copied fields.
+            get name() {
+                return this.def.name;
+            },
+            get src() {
+                return this.def.src;
+            },
+            get scene() {
+                return this.def.scene;
+            },
+            get aabb() {
+                return this.def.aabb;
+            },
+            get nodes() {
+                return this.def.nodes;
+            },
+            get meshes() {
+                return this.def.meshes;
+            },
+            get animations() {
+                return this.def.animations;
+            },
+        }),
+    );
     recordModel(id);
     return handle as never;
 }

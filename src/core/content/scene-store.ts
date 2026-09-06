@@ -45,8 +45,8 @@ export type ScenePayload = {
  * to clients without keeping a populated handle for them server-side.
  *
  * `side` selects which handle flag gates handle mutation:
- *   - `'server'` → mutates only when `handle.server`
- *   - `'client'` → mutates only when `handle.client`
+ *   - `'server'` → mutates only when `handle.def.server`
+ *   - `'client'` → mutates only when `handle.def.client`
  *
  * the handle's `node` reference itself is preserved (closures over
  * `handle.node` stay valid); only its children change.
@@ -60,10 +60,10 @@ export function populateScene(
 ): void {
     content.payloads.set(id, raw);
 
-    const handle = registry.scenes.byId.get(id);
+    const handle = registry.scenes.handles.get(id);
     if (!handle) return;
-    if (side === 'server' && !handle.server) return;
-    if (side === 'client' && !handle.client) return;
+    if (side === 'server' && !handle.def.server) return;
+    if (side === 'client' && !handle.def.client) return;
 
     // detach current children, the handle's node is free-floating (no
     // scene tree runtime), so no unregister is needed; just clear the list and
@@ -83,19 +83,19 @@ export function populateScene(
     // `handle.node` see the full authored shape including root traits.
     if (raw.nodes.root.traits) {
         for (const st of raw.nodes.root.traits) {
-            const def = registry.traits.byId.get(st.id);
-            if (!def) {
+            const traitHandle = registry.traits.handles.get(st.id);
+            if (!traitHandle) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
                 if (handle.node.unresolved === null) handle.node.unresolved = new Map();
                 handle.node.unresolved.set(st.id, structuredClone(st.controls) as Record<string, unknown> | undefined);
                 continue;
             }
             const controls = structuredClone(st.controls);
-            const instance = buildTraitInstance(def, controls);
+            const instance = buildTraitInstance(traitHandle, controls);
             instance._node = handle.node;
-            handle.node.traits[def.slot] = instance;
-            bitset.add(handle.node.bitset, def.slot);
-            refreshTraitIssues(def, instance, `root of scene "${id}"`);
+            handle.node.traits[traitHandle.slot] = instance;
+            bitset.add(handle.node.bitset, traitHandle.slot);
+            refreshTraitIssues(traitHandle.def, instance, `root of scene "${id}"`);
         }
     }
 
@@ -127,10 +127,10 @@ export function populateScene(
 export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
     content.payloads.delete(id);
 
-    const handle = registry.scenes.byId.get(id);
+    const handle = registry.scenes.handles.get(id);
     if (!handle) return;
-    if (side === 'server' && !handle.server) return;
-    if (side === 'client' && !handle.client) return;
+    if (side === 'server' && !handle.def.server) return;
+    if (side === 'client' && !handle.def.client) return;
 
     for (const child of handle.node.children) {
         detachOrphan(child);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MeshTrait } from '../../../../src/builtins/mesh';
 import { TransformTrait } from '../../../../src/builtins/transform';
-import { createEmptyHandle, hydrateRuntimeHandle } from '../../../../src/core/models/build-runtime-handle';
+import { createEmptyDef, hydrateRuntimeHandle } from '../../../../src/core/models/build-runtime-handle';
 import type { Model, ModelNode } from '../../../../src/core/models/model';
 import { getTrait } from '../../../../src/core/scene/scene-tree';
 
@@ -65,24 +65,24 @@ function makeMinimalModel(): Model {
 
 describe('hydrateRuntimeHandle', () => {
     it('populates scene/nodes/meshes/animations and bumps version', () => {
-        const handle = createEmptyHandle('avatar');
-        const v0 = handle.version;
+        const def = createEmptyDef('avatar');
+        const v0 = def.version;
         const model = makeMinimalModel();
 
-        hydrateRuntimeHandle(handle, model);
+        hydrateRuntimeHandle(def, model);
 
-        expect(handle.version).toBe(v0 + 1);
-        expect(handle.aabb).toEqual([0, 0, 0, 1, 2, 1]);
-        expect(Object.keys(handle.nodes).sort()).toEqual(['arm', 'avatar_root', 'head']);
-        expect(handle.scene).toBe(handle.nodes.avatar_root);
-        expect(handle.meshes.HeadMesh!.id).toEqual({ modelId: 'avatar', meshName: 'HeadMesh' });
+        expect(def.version).toBe(v0 + 1);
+        expect(def.aabb).toEqual([0, 0, 0, 1, 2, 1]);
+        expect(Object.keys(def.nodes).sort()).toEqual(['arm', 'avatar_root', 'head']);
+        expect(def.scene).toBe(def.nodes.avatar_root);
+        expect(def.meshes.HeadMesh!.id).toEqual({ modelId: 'avatar', meshName: 'HeadMesh' });
     });
 
     it('stamps TransformTrait + MeshTrait on mesh-bearing nodes', () => {
-        const handle = createEmptyHandle('avatar');
-        hydrateRuntimeHandle(handle, makeMinimalModel());
+        const def = createEmptyDef('avatar');
+        hydrateRuntimeHandle(def, makeMinimalModel());
 
-        const head = handle.nodes.head!;
+        const head = def.nodes.head!;
         const transform = getTrait(head, TransformTrait);
         expect(transform).toBeDefined();
         expect(transform!.position).toEqual([0, 1, 0]);
@@ -93,10 +93,10 @@ describe('hydrateRuntimeHandle', () => {
     });
 
     it('skips TransformTrait on identity-TRS non-mesh non-animated nodes', () => {
-        const handle = createEmptyHandle('avatar');
-        hydrateRuntimeHandle(handle, makeMinimalModel());
+        const def = createEmptyDef('avatar');
+        hydrateRuntimeHandle(def, makeMinimalModel());
 
-        const arm = handle.nodes.arm!;
+        const arm = def.nodes.arm!;
         expect(getTrait(arm, TransformTrait)).toBeUndefined();
     });
 });

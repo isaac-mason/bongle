@@ -60,11 +60,38 @@ export type SceneOptions = {
     server?: boolean;
 };
 
-export type SceneHandle = {
+/** The declared + authored data for one scene. Pure data: hashed for change
+ *  detection, swapped wholesale on re-declaration (see `declare`). */
+export type SceneDef = {
     readonly id: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
+    /** does this scene reach the client? */
+    readonly client: boolean;
+    /** does this scene get loaded on the server? */
+    readonly server: boolean;
+    /**
+     * authored payload (parsed `.scene.json`, nodes + optional chunks).
+     * stamped by `scene()` from the codegen barrel's `_registerScenePayload`
+     * write. engine `load()` reads this to seed `node`/`voxels` via
+     * `populateScene` on both sides. live HMR updates and registry-dispatch
+     * scene branches rewrite this field then re-`populateScene`. null when
+     * the scene is declared but no file is on disk yet.
+     */
+    _payload: ScenePayload | null;
+};
+
+/**
+ * Stable wrapper around a `SceneDef`. Beyond identity and the live def it also
+ * carries the ENGINE-POPULATED runtime state for this scene — the deserialized
+ * node tree and voxels. Those aren't declared data and aren't derived from the
+ * def, so they live here rather than polluting it; the handle is the one
+ * per-id object with a process lifetime, which is exactly what they need.
+ */
+export type SceneHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
     /**
      * DepGraph dependency, `{ registry: 'scenes', id }`. Consumed by
      * the unified `deps:` API on `prefab()` / `script()`: any handle in
@@ -72,10 +99,8 @@ export type SceneHandle = {
      * by `createSceneHandle`; never mutated.
      */
     dependency: { registry: 'scenes'; id: string };
-    /** does this scene reach the client? */
-    readonly client: boolean;
-    /** does this scene get loaded on the server? */
-    readonly server: boolean;
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SceneDef;
     /**
      * deserialized root node. mutated in place on hot reload.
      * empty placeholder until the engine populates it.
@@ -93,15 +118,6 @@ export type SceneHandle = {
      * starts at 0; first populate bumps to 1.
      */
     version: number;
-    /**
-     * authored payload (parsed `.scene.json`, nodes + optional chunks).
-     * stamped by `scene()` from the codegen barrel's `_registerScenePayload`
-     * write. engine `load()` reads this to seed `node`/`voxels` via
-     * `populateScene` on both sides. live HMR updates and registry-dispatch
-     * scene branches rewrite this field then re-`populateScene`. null when
-     * the scene is declared but no file is on disk yet.
-     */
-    _payload: ScenePayload | null;
 };
 
 /**
@@ -110,16 +126,23 @@ export type SceneHandle = {
  *
  * caller owns capture/registration, this just shapes the object.
  */
-export function createSceneHandle(id: string, options?: SceneOptions): SceneHandle {
+export function createSceneDef(id: string, options?: SceneOptions): SceneDef {
     return {
         id,
         name: options?.name ?? id,
-        dependency: { registry: 'scenes', id },
         client: options?.client !== false,
         server: options?.server !== false,
-        node: createNode({ name: `__scene_handle:${id}` }),
+        _payload: null,
+    };
+}
+
+export function createSceneHandle(def: SceneDef): SceneHandle {
+    return {
+        id: def.id,
+        dependency: { registry: 'scenes', id: def.id },
+        def,
+        node: createNode({ name: `__scene_handle:${def.id}` }),
         voxels: null,
         version: 0,
-        _payload: null,
     };
 }

@@ -159,18 +159,18 @@ export function update(
             continue;
         }
 
-        const entry = spriteResources.frames.get(sprite.spriteId);
+        const entry = spriteResources.frames.get(sprite.def.spriteId);
         if (!entry) continue;
 
         const existing = trait._state;
-        if (existing !== null && existing.spriteIdAtInstall === sprite.spriteId) {
+        if (existing !== null && existing.spriteIdAtInstall === sprite.def.spriteId) {
             existing.lastSeenFrame = frameId;
             continue;
         }
 
         if (existing !== null) destroyInstance(visuals, batch, trait, resources, visibility);
 
-        const geomSlot = acquireGeometry(resources, sprite.spriteId);
+        const geomSlot = acquireGeometry(resources, sprite.def.spriteId);
         if (!geomSlot) continue;
 
         const slot = allocateSlot(batch.instanceAllocator);
@@ -196,7 +196,7 @@ export function update(
             slot,
             trait,
             cull,
-            spriteIdAtInstall: sprite.spriteId,
+            spriteIdAtInstall: sprite.def.spriteId,
             entry,
             geomSlot,
             installedAtMs: nowMs,

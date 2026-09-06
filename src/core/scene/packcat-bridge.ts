@@ -3,7 +3,7 @@ import * as p from 'packcat';
 import type { Schema as PropSchema } from './prop/prop';
 import { enumValue } from './prop/prop';
 import type { Node } from './scene-tree';
-import { clearSyncDirty, type SyncDef, type TraitBase, type TraitDef } from './traits';
+import { clearSyncDirty, type SyncDef, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
 /* ── per-sync codecs (replication) ── */
 
@@ -30,12 +30,12 @@ export type SyncCodec = {
  * positional array of per-sync codecs, parallel to `def.syncDefs`.
  * returns null when the trait has no syncs registered.
  */
-export function getSyncCodecs(def: TraitDef): SyncCodec[] | null {
-    const cached = def._syncCodecs;
-    if (cached !== undefined) return cached;
+export function getSyncCodecs(handle: TraitHandle): SyncCodec[] | null {
+    const cached = handle.syncCodecs;
+    if (cached !== null) return cached;
 
-    const result = buildSyncCodecs(def);
-    def._syncCodecs = result;
+    const result = buildSyncCodecs(handle.def);
+    handle.syncCodecs = result;
     return result;
 }
 
@@ -132,12 +132,12 @@ export type ControlCodec = {
  * positional array of per-control codecs, parallel to `def.controls`.
  * returns null when the trait has no controls registered.
  */
-export function getControlCodecs(def: TraitDef): ControlCodec[] | null {
-    const cached = def._controlCodecs;
-    if (cached !== undefined) return cached;
+export function getControlCodecs(handle: TraitHandle): ControlCodec[] | null {
+    const cached = handle.controlCodecs;
+    if (cached !== null) return cached;
 
-    const result = buildControlCodecs(def);
-    def._controlCodecs = result;
+    const result = buildControlCodecs(handle.def);
+    handle.controlCodecs = result;
     return result;
 }
 

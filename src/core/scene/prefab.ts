@@ -52,6 +52,7 @@ export type PrefabState = {
      */
     generation: number;
 };
+
 import type { SceneTreeContext } from './scripts';
 
 /**

@@ -28,6 +28,54 @@ export const MISSING = 1;
 /** first global state id available for user blocks. */
 const USER_BLOCKS_START = 2;
 
+/**
+ * Per-id reservation of a block's dense index and its global state-id range,
+ * cached for the PROCESS lifetime. Mirrors `traitSlots`.
+ *
+ * Without this, `buildBlockRegistry` numbered blocks from scratch in declaration
+ * order on every rebuild, so declaring a block shifted every later block's state
+ * ids — and a `chunk.palette` (which stores resolved ids) silently came to mean
+ * different blocks. `resolveAllChunks` existed to renumber every palette after
+ * each rebuild to cover that.
+ *
+ * Reserving instead makes ids durable: an id keeps its range across HMR, a removed
+ * id's range is simply abandoned (its key resolves to MISSING), and re-declaring
+ * that id later hands the original range back, so palettes written before the
+ * removal still mean what they meant.
+ *
+ * The range MOVES only when the block's state schema changes size — the old range
+ * can no longer hold it. The dense index is identity and never moves, so anything
+ * keyed by block index (per-room block observers) survives a schema edit.
+ */
+type BlockSlot = { index: number; baseStateId: number; totalStates: number };
+const blockSlots = new Map<string, BlockSlot>();
+/** 0 is reserved for air. */
+let nextBlockIndex = 1;
+let nextBlockStateId = USER_BLOCKS_START;
+
+function reserveBlockSlot(id: string, totalStates: number): BlockSlot {
+    const existing = blockSlots.get(id);
+    if (existing && existing.totalStates === totalStates) return existing;
+    const slot: BlockSlot = {
+        // identity: kept even when the state range has to move.
+        index: existing ? existing.index : nextBlockIndex++,
+        baseStateId: nextBlockStateId,
+        totalStates,
+    };
+    nextBlockStateId += totalStates;
+    blockSlots.set(id, slot);
+    return slot;
+}
+
+/** Drop every reservation. Tests only — `registry._reset()` wipes the stores, and a
+ *  suite that declares different blocks per case would otherwise keep growing the
+ *  state-id high-water mark (and every table sized from it). */
+export function _resetBlockSlots(): void {
+    blockSlots.clear();
+    nextBlockIndex = 1;
+    nextBlockStateId = USER_BLOCKS_START;
+}
+
 /** block participates in physics collision. */
 export const BLOCK_FLAG_COLLISION = 1 << 0;
 
@@ -620,11 +668,92 @@ export type Blocks = {
 
 // ── build ───────────────────────────────────────────────────────────
 
+/**
+ * An empty `Blocks` — every field at its real shape, nothing null. Pair with
+ * `buildBlockRegistry`, which fills one IN PLACE.
+ *
+ * The identity of a `Blocks` is load-bearing: `voxels.registry`, the per-room
+ * scene context, blueprint canvases and content-store scene voxels all hold a
+ * reference to one, and a block edit under HMR rebuilds its contents. Replacing
+ * the object instead of refilling it silently strands every one of those holders
+ * on tables sized for the old `totalStates`, so a new state id then reads past
+ * the end of a typed array and comes back `undefined`.
+ *
+ * Deliberately reaches into no sibling module (no model eval, no dust derivation),
+ * so the registry singleton can call it at module-load without tripping the
+ * circular-init hazard that `buildBlockRegistry` itself has.
+ */
+export function createBlockRegistry(): Blocks {
+    return {
+        totalStates: 0,
+        blockCount: 0,
+        defs: [],
+        idToDef: new Map(),
+        handles: [],
+        idToHandle: new Map(),
+        stateToBlockIndex: new Uint16Array(0),
+        stateToLocalIndex: new Uint16Array(0),
+        modelType: new Uint8Array(0),
+        cubeTexIndices: new Uint16Array(0),
+        cubeFaceUVs: new Uint8Array(0),
+        meshId: new Uint16Array(0),
+        meshQuads: [],
+        meshTexIndices: [],
+        meshQuadMaterials: [],
+        meshQuadShape: [],
+        meshQuadFaceDir: [],
+        meshQuadCullFaceDir: [],
+        meshQuadDepth: [],
+        meshQuadVertDepth: [],
+        meshQuadVertNormal: [],
+        meshQuadCornerUV: [],
+        meshQuadCornerPos: [],
+        meshQuadCornerNormSq: [],
+        meshQuadNormal: [],
+        meshQuadUVs: [],
+        meshQuadVerts: [],
+        colliderId: new Uint16Array(0),
+        colliderShapes: [],
+        shapeKind: new Uint8Array(0),
+        shapeAabbs: [],
+        cull: new Uint8Array(0),
+        blockTypeId: new Uint16Array(0),
+        material: new Uint8Array(0),
+        vertexAnimation: new Uint8Array(0),
+        lightEmission: new Uint16Array(0),
+        lightOpacity: new Uint8Array(0),
+        emissive: new Uint8Array(0),
+        flags: new Uint32Array(0),
+        friction: new Float32Array(0),
+        restitution: new Float32Array(0),
+        liquidViscosity: new Float32Array(0),
+        surfaceHeight: new Float32Array(0),
+        fluidGroup: new Uint16Array(0),
+        screenTint: new Float32Array(0),
+        sounds: [],
+        particles: [],
+        stateToKey: [],
+        keyToState: new Map(),
+        textures: [],
+        textureIndex: new Map(),
+        // one padded entry: WebGPU rejects a zero-sized storage buffer, and this
+        // is the value `buildBlockRegistry` also lands on for a block-less project.
+        texAnimData: new Float32Array([1, 0, 0, 0]),
+        textureCutout: new Uint8Array(0),
+    };
+}
+
+/**
+ * Rebuild `out` from the current block + texture declarations, IN PLACE. See
+ * `createBlockRegistry` for why identity is preserved rather than a fresh object
+ * returned. Callers with no registry yet start from `createBlockRegistry()`.
+ */
 export function buildBlockRegistry(
-    defs: Map<string, BlockDef>,
-    handles: Map<string, BlockHandle>,
+    out: Blocks,
+    blockDefs: Map<string, BlockDef>,
+    blockHandles: Map<string, BlockHandle>,
     blockTextures: Map<string, BlockTextureDef>,
-): Blocks {
+): void {
     const orderedDefs: BlockDef[] = [];
     const orderedHandles: BlockHandle[] = [];
     const idToDef = new Map<string, BlockDef>();
@@ -634,11 +763,9 @@ export function buildBlockRegistry(
     // air must be the first user-registered block. we enforce this by
     // starting user block assignment at USER_BLOCKS_START and special-casing
     // air below.
-    let nextStateId = USER_BLOCKS_START;
-
     // check if air is registered. if so, it gets global id 0 as expected.
-    const airDef = defs.get('air');
-    const airHandle = handles.get('air');
+    const airDef = blockDefs.get('air');
+    const airHandle = blockHandles.get('air');
 
     if (airDef && airHandle) {
         // air is always block type index 0, global state id 0
@@ -651,17 +778,17 @@ export function buildBlockRegistry(
     }
 
     // assign remaining blocks
-    for (const [id, def] of defs) {
+    for (const [id, def] of blockDefs) {
         if (id === 'air') continue; // already handled
 
-        const handle = handles.get(id);
+        const handle = blockHandles.get(id);
         if (!handle) {
             throw new Error(`[block-registry] no handle for block '${id}'`);
         }
 
-        const index = orderedDefs.length;
-        const baseStateId = nextStateId;
-        const totalStates = def.states.totalStates;
+        const slot = reserveBlockSlot(id, def.states.totalStates);
+        const index = slot.index;
+        const baseStateId = slot.baseStateId;
 
         handle._index = index;
         handle._baseStateId = baseStateId;
@@ -672,23 +799,26 @@ export function buildBlockRegistry(
         if (def.onNeighbourChanged) hooks |= 1 << 1; // HOOK_ON_NEIGHBOUR_CHANGED
         handle._hooks = hooks;
 
+        // `defs` is the ENUMERATION view (editor palettes, chat completion) and stays
+        // dense. `handles` is the INDEX-ALIGNED lookup `stateToBlockIndex` feeds, so
+        // it is keyed by the reserved index and a removed block leaves a hole rather
+        // than shifting everything after it down.
         orderedDefs.push(def);
-        orderedHandles.push(handle);
+        orderedHandles[index] = handle;
         idToDef.set(id, def);
         idToHandle.set(id, handle);
-
-        nextStateId += totalStates;
     }
 
-    const totalStates = nextStateId;
+    const totalStates = nextBlockStateId;
 
     // build flat lookup tables
     const stateToBlockIndex = new Uint16Array(totalStates);
     const stateToLocalIndex = new Uint16Array(totalStates);
 
-    for (let bi = 0; bi < orderedDefs.length; bi++) {
-        const handle = orderedHandles[bi]!;
-        for (let local = 0; local < handle.totalStates; local++) {
+    for (let bi = 0; bi < orderedHandles.length; bi++) {
+        const handle = orderedHandles[bi];
+        if (!handle) continue; // reserved index with no live declaration
+        for (let local = 0; local < handle.def.states.totalStates; local++) {
             const globalId = handle._baseStateId + local;
             stateToBlockIndex[globalId] = bi;
             stateToLocalIndex[globalId] = local;
@@ -704,9 +834,10 @@ export function buildBlockRegistry(
     keyToState.set('air', AIR);
     // missing (1) has no string key, stateToKey[1] stays ""
 
-    for (let bi = 0; bi < orderedDefs.length; bi++) {
-        const def = orderedDefs[bi]!;
-        const handle = orderedHandles[bi]!;
+    for (let bi = 0; bi < orderedHandles.length; bi++) {
+        const handle = orderedHandles[bi];
+        if (!handle) continue; // reserved index with no live declaration
+        const def = handle.def;
         for (let local = 0; local < def.states.totalStates; local++) {
             const globalId = handle._baseStateId + local;
             const key = formatKey(def.id, def.states, local);
@@ -781,9 +912,10 @@ export function buildBlockRegistry(
     // this. missing (1) intentionally stays non-pathfindable (unknown = blocked).
     flagsTable[AIR] |= BLOCK_FLAG_PATHFINDABLE;
 
-    for (let bi = 0; bi < orderedDefs.length; bi++) {
-        const def = orderedDefs[bi]!;
-        const handle = orderedHandles[bi]!;
+    for (let bi = 0; bi < orderedHandles.length; bi++) {
+        const handle = orderedHandles[bi];
+        if (!handle) continue; // reserved index with no live declaration
+        const def = handle.def;
 
         // default dust handles, derived once per block from the default
         // state's model (state 0). shared across every state of the
@@ -1334,9 +1466,11 @@ export function buildBlockRegistry(
         }
     }
 
-    return {
+    // one assign over the complete field set — `Blocks` has no optional fields, so
+    // TS proves this leaves nothing from the previous build behind.
+    Object.assign(out, {
         totalStates,
-        blockCount: orderedDefs.length,
+        blockCount: nextBlockIndex,
         defs: orderedDefs,
         idToDef,
         handles: orderedHandles,
@@ -1388,7 +1522,7 @@ export function buildBlockRegistry(
         textureIndex,
         texAnimData,
         textureCutout,
-    };
+    } satisfies Blocks);
 }
 
 /**

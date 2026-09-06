@@ -37,7 +37,7 @@ export type Falloff = Audio.Falloff;
 export function playMono(ctx: ScriptContext, sound: SoundHandle, opts?: PlayOpts): PlaybackHandle | null {
     const room = ctx.client?.room;
     if (!room) return null;
-    return Audio.playMono(room.audio, sound.soundId, opts);
+    return Audio.playMono(room.audio, sound.def.soundId, opts);
 }
 
 /** play at a fixed world-space position. position is sampled once at
@@ -50,7 +50,7 @@ export function playAt(
 ): PlaybackHandle | null {
     const room = ctx.client?.room;
     if (!room) return null;
-    return Audio.playAt(room.audio, sound.soundId, pos, opts);
+    return Audio.playAt(room.audio, sound.def.soundId, pos, opts);
 }
 
 /** play following a scene node, panner position refreshes every frame
@@ -59,5 +59,5 @@ export function playAt(
 export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, opts?: SpatialOpts): PlaybackHandle | null {
     const room = ctx.client?.room;
     if (!room) return null;
-    return Audio.playOnNode(room.audio, sound.soundId, node, opts);
+    return Audio.playOnNode(room.audio, sound.def.soundId, node, opts);
 }

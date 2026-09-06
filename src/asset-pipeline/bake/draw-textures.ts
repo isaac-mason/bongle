@@ -15,7 +15,7 @@
 
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
-import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
+import type { DrawSource, NormalizedImageSource, SpriteDef } from '../../core/sprites/sprites';
 import type { BlockTextureDef } from '../../core/voxels/blocks';
 import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
 import type { Raster, RasterCanvas, RasterContext2D, RasterImage } from './raster';
@@ -50,7 +50,7 @@ type DrawFn = (
  */
 export async function bakeDrawTextures(
     blockTexturesRegistry: KindStore<BlockTextureDef>,
-    spritesRegistry: KindStore<SpriteHandle>,
+    spritesRegistry: KindStore<SpriteDef>,
     opts: BakeDrawTexturesOptions,
 ): Promise<BakedDraws> {
     const baked: BakedDraws = new Map();

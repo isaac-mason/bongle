@@ -57,7 +57,6 @@ import { getTrait, query } from '../../scene/scene-tree';
 import { logScriptError } from '../../scene/script-errors';
 import type { PhysicsContactArgs } from '../../scene/scripts';
 import { traverse } from '../../scene/traverse';
-import type { Blocks } from '../../voxels/block-registry';
 import { createVoxelPhysicsShape, unpackVoxelHitInfo, type VoxelPhysicsShape } from '../../voxels/voxel-physics-shape';
 import type { Voxels } from '../../voxels/voxels';
 import {
@@ -180,9 +179,9 @@ export function stats(world: World): WorldStats {
     return { total, active: bodies.activeBodyCount, static: staticCount, kinematic, dynamic };
 }
 
-export function create(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): World {
+export function create(sceneTree: SceneTree, voxels: Voxels): World {
     const world = createWorld(settings);
-    const terrainShape = createVoxelPhysicsShape(voxels, registry, INFINITE_AABB);
+    const terrainShape = createVoxelPhysicsShape(voxels, INFINITE_AABB);
     const terrainBody = rigidBody.create(world, {
         shape: terrainShape,
         objectLayer: OBJECT_LAYER_VOXELS,
@@ -318,9 +317,9 @@ function computeAutoBoundsAabb(out: Box3, contribs: MeshContribution[], resource
     box3.empty(out);
     let any = false;
     for (const c of contribs) {
-        const handle = Resources.modelHandle(resources, c.meshId.modelId);
-        if (!handle) continue;
-        const meshEntry = handle.meshes[c.meshId.meshName];
+        const def = Resources.modelDef(resources, c.meshId.modelId);
+        if (!def) continue;
+        const meshEntry = def.meshes[c.meshId.meshName];
         if (!meshEntry) continue;
         box3.transformMat4(_tmpAabb, meshEntry.aabb, c.localMat);
         box3.union(out, out, _tmpAabb);
@@ -742,7 +741,7 @@ function applyVoxelMaterialOverride(
         : ((manifold as { subShapeIdB?: number }).subShapeIdB ?? 0);
 
     const info = unpackVoxelHitInfo(terrainSubShapeId);
-    const registry = world.terrainShape.registry;
+    const registry = world.terrainShape.voxels.registry;
     const blockFriction = registry.friction[info.stateId] ?? 1;
     const blockRestitution = registry.restitution[info.stateId] ?? 0;
 

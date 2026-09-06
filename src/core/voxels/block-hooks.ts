@@ -96,7 +96,7 @@ function recomputeAt(voxels: Voxels, wx: number, wy: number, wz: number): void {
     const { stateToBlockIndex, handles, stateToKey } = voxels.registry;
     const handle = handles[stateToBlockIndex[stateId]!]!;
     if ((handle._hooks & HOOK_ON_NEIGHBOUR_UPDATE) === 0) return;
-    const newId = handle._def.onNeighbourUpdate?.({ voxels, worldX: wx, worldY: wy, worldZ: wz, stateId });
+    const newId = handle.def.onNeighbourUpdate?.({ voxels, worldX: wx, worldY: wy, worldZ: wz, stateId });
     if (newId === undefined || newId === stateId) return;
     const newKey = stateToKey[newId];
     if (!newKey) return;
@@ -116,6 +116,6 @@ function fireNeighbourChanged(voxels: Voxels, wx: number, wy: number, wz: number
         if (stateId === AIR) continue;
         const handle = handles[stateToBlockIndex[stateId]!]!;
         if ((handle._hooks & HOOK_ON_NEIGHBOUR_CHANGED) === 0) continue;
-        handle._def.onNeighbourChanged?.({ voxels, worldX: nwx, worldY: nwy, worldZ: nwz, stateId });
+        handle.def.onNeighbourChanged?.({ voxels, worldX: nwx, worldY: nwy, worldZ: nwz, stateId });
     }
 }

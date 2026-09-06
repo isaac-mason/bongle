@@ -14,30 +14,30 @@ import { registerAllShapes } from 'crashcat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { RotAxis } from '../../../../src/core/voxels/block-orient';
 import { column, fence, ladder, slab, stairs, trapdoor } from '../../../../src/core/voxels/block-presets';
-import { buildBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
+import { type Blocks, buildBlockRegistry, createBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../../../../src/core/voxels/block-transform';
-import type { BlockDef, BlockHandle, BlockPlaceCtx, BlockTextureDef } from '../../../../src/core/voxels/blocks';
+import type {
+    BlockDef,
+    BlockHandle,
+    BlockPlaceCtx,
+    BlockTextureDef,
+    BlockTextureHandle,
+} from '../../../../src/core/voxels/blocks';
 
-const oakTex: BlockTextureDef = {
+const oakTex: BlockTextureHandle = {
     id: 'oak',
     dependency: { registry: 'blockTextures', id: 'oak' },
-    frames: ['oak.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false },
 };
-const oakEndTex: BlockTextureDef = {
+const oakEndTex: BlockTextureHandle = {
     id: 'oak-end',
     dependency: { registry: 'blockTextures', id: 'oak-end' },
-    frames: ['oak-end.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'oak-end', frames: ['oak-end.png'], fps: 1, interpolate: false },
 };
-const stoneTex: BlockTextureDef = {
+const stoneTex: BlockTextureHandle = {
     id: 'stone',
     dependency: { registry: 'blockTextures', id: 'stone' },
-    frames: ['stone.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false },
 };
 
 const stairHandle = stairs('test:stairs', { textures: stoneTex }) as BlockHandle;
@@ -48,12 +48,12 @@ const columnHandle = column('test:column', { textures: { end: oakEndTex, side: o
 const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
-    [stairHandle.id, stairHandle._def],
-    [slabHandle.id, slabHandle._def],
-    [ladderHandle.id, ladderHandle._def],
-    [trapdoorHandle.id, trapdoorHandle._def],
-    [columnHandle.id, columnHandle._def],
-    [fenceHandle.id, fenceHandle._def],
+    [stairHandle.id, stairHandle.def],
+    [slabHandle.id, slabHandle.def],
+    [ladderHandle.id, ladderHandle.def],
+    [trapdoorHandle.id, trapdoorHandle.def],
+    [columnHandle.id, columnHandle.def],
+    [fenceHandle.id, fenceHandle.def],
 ]);
 const handles = new Map<string, BlockHandle>([
     [stairHandle.id, stairHandle as BlockHandle],
@@ -64,15 +64,16 @@ const handles = new Map<string, BlockHandle>([
     [fenceHandle.id, fenceHandle as BlockHandle],
 ]);
 const textures = new Map<string, BlockTextureDef>([
-    [oakTex.id, oakTex],
-    [oakEndTex.id, oakEndTex],
-    [stoneTex.id, stoneTex],
+    [oakTex.id, oakTex.def],
+    [oakEndTex.id, oakEndTex.def],
+    [stoneTex.id, stoneTex.def],
 ]);
 
-let registry: ReturnType<typeof buildBlockRegistry>;
+let registry: Blocks;
 beforeAll(() => {
     registerAllShapes();
-    registry = buildBlockRegistry(defs, handles, textures);
+    registry = createBlockRegistry();
+    buildBlockRegistry(registry, defs, handles, textures);
 });
 
 function rotate4(key: string, axis: RotAxis): string {
@@ -193,22 +194,22 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
     }
 
     it('slab top-face click → bottom half', () => {
-        const key = placedKey(slabHandle._def, placeCtx({ normalX: 0, normalY: 1, normalZ: 0 }));
+        const key = placedKey(slabHandle.def, placeCtx({ normalX: 0, normalY: 1, normalZ: 0 }));
         expect(key).toBe('test:slab[half=bottom]');
     });
 
     it('slab bottom-face click → top half', () => {
-        const key = placedKey(slabHandle._def, placeCtx({ normalX: 0, normalY: -1, normalZ: 0, hitY: 1 }));
+        const key = placedKey(slabHandle.def, placeCtx({ normalX: 0, normalY: -1, normalZ: 0, hitY: 1 }));
         expect(key).toBe('test:slab[half=top]');
     });
 
     it('slab wall click with hitY=0.2 → bottom half', () => {
-        const key = placedKey(slabHandle._def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.2 }));
+        const key = placedKey(slabHandle.def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.2 }));
         expect(key).toBe('test:slab[half=bottom]');
     });
 
     it('slab wall click with hitY=0.8 → top half', () => {
-        const key = placedKey(slabHandle._def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.8 }));
+        const key = placedKey(slabHandle.def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.8 }));
         expect(key).toBe('test:slab[half=top]');
     });
 
@@ -216,7 +217,7 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
         // yaw=π → forward = (sin π, cos π) = (0, -1), so snapCardinal picks
         // -Z → 'north'. with the floor-click branch we pick from yaw.
         const key = placedKey(
-            stairHandle._def,
+            stairHandle.def,
             placeCtx({
                 normalX: 0,
                 normalY: 1,
@@ -233,7 +234,7 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
 
     it('stairs wall click (east normal) → facing=east, half from hitY', () => {
         const key = placedKey(
-            stairHandle._def,
+            stairHandle.def,
             placeCtx({
                 normalX: 1,
                 normalY: 0,
@@ -248,7 +249,7 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
 
     it('trapdoor wall click → facing=normal, half from hitY, open=false', () => {
         const key = placedKey(
-            trapdoorHandle._def,
+            trapdoorHandle.def,
             placeCtx({
                 normalX: 0,
                 normalY: 0,

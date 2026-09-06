@@ -3,7 +3,7 @@ import { mulberry32 } from 'math/random';
 import { recordBlock, recordBlockTexture } from '../capture/module-scope';
 import { particleUpdate } from '../particles/particle-update';
 import { type ParticleHandle, particle } from '../particles/particles';
-import { registry, upsert } from '../registry';
+import { declare, registry } from '../registry';
 import type { SoundHandle } from '../sounds/sounds';
 import { draw, type ImageSource, type NormalizedImageSource } from '../sprites/draw';
 import { sprite } from '../sprites/sprites';
@@ -33,12 +33,13 @@ export type BlockTextureOptions = {
     interpolate?: boolean;
 };
 
+/** The declared data for one block texture. Pure: hashed wholesale, swapped
+ *  wholesale on re-declaration (see `declare`). */
 export type BlockTextureDef = {
     /** texture string id (e.g. 'lava') */
     id: string;
 
     /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'blockTextures'; id: string };
 
     /** source declarations, post-URL-normalization. each entry is either
      *  a path string or a `DrawSource` descriptor; the asset-pipeline
@@ -53,6 +54,16 @@ export type BlockTextureDef = {
     interpolate: boolean;
 };
 
+/** Stable wrapper around a `BlockTextureDef`; identity plus the live def. */
+export type BlockTextureHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'blockTextures'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: BlockTextureDef;
+};
+
 /*#__NO_SIDE_EFFECTS__*/
 /**
  * declare a block texture. called at module scope.
@@ -63,22 +74,22 @@ export type BlockTextureDef = {
  *
  * returns a handle that can be passed to block model definitions.
  */
-export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureDef {
+export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureHandle {
     const src = options.src;
     const frames: NormalizedImageSource[] = Array.isArray(src) ? src : [src];
-    const def: BlockTextureDef = {
+    const fps = options.fps ?? 1;
+    const interpolate = options.interpolate ?? false;
+    const handle = declare(
+        registry.blockTextures,
         id,
-        dependency: { registry: 'blockTextures', id },
-        frames,
-        fps: options.fps ?? 1,
-        interpolate: options.interpolate ?? false,
-    };
-    upsert(registry.blockTextures, id, def);
+        (): BlockTextureDef => ({ id, frames, fps, interpolate }),
+        (def): BlockTextureHandle => ({ id, dependency: { registry: 'blockTextures', id }, def }),
+    );
     recordBlockTexture(id);
-    return def;
+    return handle;
 }
 
-export type TextureRef = BlockTextureDef | string;
+export type TextureRef = BlockTextureHandle | string;
 
 /** resolve a TextureRef to its string id. */
 export function resolveTextureRef(ref: TextureRef): string {
@@ -762,32 +773,23 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
 // _baseStateId and _index at freeze time. user code only calls
 // stateId()/defaultId() inside script callbacks, which run after freeze.
 
+/** Stable wrapper around a `BlockDef`; identity, the live def, and the state-id
+ *  helpers gameplay code calls. The three `_`-prefixed slots are stamped by
+ *  `buildBlockRegistry` at freeze time and are NOT declared data, which is why
+ *  they live here rather than on the def (hashing them would make every rebuild
+ *  look like a content change). */
 export type BlockHandle<P extends PropsDef = PropsDef> = {
-    /** block string id (e.g. 'oak_log') */
+    /** the declared id (identity, never changes). */
     readonly id: string;
-
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `id` when the author didn't supply one. */
-    readonly name: string;
-
-    /** DepGraph dependency, see SceneHandle.dependency. */
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'blocks'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: BlockDef<P>;
 
-    /** the block's state schema */
-    readonly states: BlockStateDef<P>;
-
-    /** the block def */
-    readonly _def: BlockDef<P>;
-
-    /** dense block type index. set by registry builder at freeze time. */
+    /** dense block type index. set by the registry builder at freeze time. */
     _index: number;
-
-    /** first global state id. set by registry builder at freeze time. */
+    /** first global state id. set by the registry builder at freeze time. */
     _baseStateId: number;
-
-    /** total number of states for this block. */
-    readonly totalStates: number;
-
     /**
      * bitmask of hooks this block has (intrinsic + any observer handlers
      * registered at module scope). populated by the registry builder at
@@ -835,9 +837,10 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
     const material = options.material ?? MaterialType.OPAQUE;
     const defaultLocalIdx = options.defaultState ? states.encode(options.defaultState) : 0;
 
+    const name = options.name ?? id;
     const def: BlockDef<P> = {
         id,
-        name: options.name ?? id,
+        name,
         states,
         defaultLocalIdx,
         model: options.model,
@@ -869,47 +872,51 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
         flip: options.flip,
     };
 
-    const handle: BlockHandle<P> = {
+    // Methods read the schema off `this.def`, never a closure capture: the handle
+    // outlives every re-declaration (see `declare`), so a capture of THIS call's
+    // `states` / `defaultLocalIdx` would be stale for every importer the moment the
+    // author edits the state schema.
+    const stored = declare(
+        registry.blocks,
         id,
-        name: options.name ?? id,
-        dependency: { registry: 'blocks', id },
-        states,
-        _def: def,
-        _baseStateId: 0,
-        _index: 0,
-        _hooks: 0,
-        totalStates: states.totalStates,
+        (): BlockDef => def as BlockDef,
+        (d, previous): BlockHandle => ({
+            id,
+            dependency: { registry: 'blocks', id },
+            def: d,
+            // stamped by `buildBlockRegistry` at freeze, NOT derived from the def, so
+            // they must survive a re-declaration: the next reindex re-patches them,
+            // and anything reading a state id in between would otherwise see 0.
+            _index: previous?._index ?? 0,
+            _baseStateId: previous?._baseStateId ?? 0,
+            _hooks: previous?._hooks ?? 0,
 
-        stateId(props: PropsValues<P>): number {
-            return this._baseStateId + states.encode(props);
-        },
+            stateId(props): number {
+                return this._baseStateId + this.def.states.encode(props);
+            },
 
-        stateIdLocal(localIdx: number): number {
-            return this._baseStateId + localIdx;
-        },
+            stateIdLocal(localIdx: number): number {
+                return this._baseStateId + localIdx;
+            },
 
-        defaultId(): number {
-            return this._baseStateId + defaultLocalIdx;
-        },
+            defaultId(): number {
+                return this._baseStateId + (this.def.defaultLocalIdx ?? 0);
+            },
 
-        stateKey(props: PropsValues<P>): string {
-            return formatKey(id, states, states.encode(props));
-        },
+            stateKey(props): string {
+                return formatKey(this.id, this.def.states, this.def.states.encode(props));
+            },
 
-        defaultKey(): string {
-            return formatKey(id, states, defaultLocalIdx);
-        },
-    };
-
-    const stored = upsert(registry.blocks, id, handle as BlockHandle);
+            defaultKey(): string {
+                return formatKey(this.id, this.def.states, this.def.defaultLocalIdx ?? 0);
+            },
+        }),
+    );
 
     // presence-only snapshot record. block content changes propagate via
     // the flush path, `applyRegistryChanges` rebuilds BlockRegistry,
     // refreshes the atlas, repoints per-room `voxels.registry`, and
-    // `resolveAllChunks` triggers a remesh on the next tick. when upsert
-    // returns the existing wrapper (content unchanged), we keep the
-    // already-patched handle from the previous build instead of leaking
-    // the freshly-constructed unpatched one.
+    // `resolveAllChunks` triggers a remesh on the next tick.
     recordBlock(id);
 
     return stored as BlockHandle<P>;
@@ -964,7 +971,7 @@ function hashStringFnv1a(s: string): number {
  *  doesn't resolve, the deriver silently skips in that case (block
  *  authoring order would have to be wrong for this to fire). */
 function resolveTextureFrame(ref: TextureRef): NormalizedImageSource | null {
-    const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref) : ref;
+    const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref) : ref.def;
     return def?.frames[0] ?? null;
 }
 

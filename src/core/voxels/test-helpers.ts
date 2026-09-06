@@ -7,7 +7,7 @@
 // in `beforeEach` so test files don't cross-pollute.
 
 import { registry, reindexRegistry } from '../registry';
-import type { Blocks } from './block-registry';
+import { _resetBlockSlots, type Blocks } from './block-registry';
 import type { BlockStateDef, PropsDef } from './block-state';
 import { type BlockHandle, type BlockOptions, block, blockTexture } from './blocks';
 
@@ -32,7 +32,21 @@ function clearStore(store: AnyStore): void {
 /** clear voxel-adjacent registry state between tests. covers the stores
  *  `block()` / `blockTexture()` write into directly, plus the auto-
  *  derived sprite/particle entries the registry builder emits per cube. */
+/** clear the voxel-adjacent registry STORES but keep block state-id reservations,
+ *  which is what an HMR re-declaration looks like: user modules re-evaluate into a
+ *  wiped store, but the process (and so `reserveBlockSlot`) lives on. */
+export function resetVoxelRegistryStoresOnly(): void {
+    clearStore(registry.blocks as unknown as AnyStore);
+    clearStore(registry.blockTextures as unknown as AnyStore);
+    clearStore(registry.sprites as unknown as AnyStore);
+    clearStore(registry.particles as unknown as AnyStore);
+    // these clears bypass the registration path, so rebuild the derived index
+    // fields to reflect the now-empty stores (mirrors a real boot/flush).
+    reindexRegistry(registry);
+}
+
 export function resetVoxelRegistry(): void {
+    _resetBlockSlots();
     clearStore(registry.blocks as unknown as AnyStore);
     clearStore(registry.blockTextures as unknown as AnyStore);
     clearStore(registry.sprites as unknown as AnyStore);

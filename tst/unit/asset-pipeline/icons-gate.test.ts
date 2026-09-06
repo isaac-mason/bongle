@@ -20,7 +20,7 @@ const BLOCK_ICON_JSON = 'resources/client/voxels-icons.json';
 const PREFAB_ICON_MANIFEST = 'resources/client/prefab-icons.json';
 
 function texture(id: string): BlockTextureDef {
-    return { id, dependency: { registry: 'blockTextures', id }, frames: [`${id}.png`], fps: 1, interpolate: false };
+    return { id, frames: [`${id}.png`], fps: 1, interpolate: false };
 }
 
 /** map-backed stand-in for the project disk: the read/write/exists surface the
@@ -68,15 +68,18 @@ const moss = texture('moss');
 /** publish a block registry onto the engine registry, the way `reindexRegistry`
  *  does after a declaration flush. */
 function declareBlocks(...wearing: [id: string, texture: BlockTextureDef][]): void {
-    const handles = wearing.map(([id, t]) => cube(id, { textures: t }) as BlockHandle);
-    const defs = new Map<string, BlockDef>(handles.map((h) => [h.id, h._def]));
+    const handles = wearing.map(
+        ([id, t]) =>
+            cube(id, { textures: { id: t.id, dependency: { registry: 'blockTextures', id: t.id }, def: t } }) as BlockHandle,
+    );
+    const defs = new Map<string, BlockDef>(handles.map((h) => [h.id, h.def]));
     const handleMap = new Map<string, BlockHandle>(handles.map((h) => [h.id, h]));
     const textures = new Map<string, BlockTextureDef>([
         [stone.id, stone],
         [dirt.id, dirt],
         [moss.id, moss],
     ]);
-    registry.blockRegistry = buildBlockRegistry(defs, handleMap, textures);
+    buildBlockRegistry(registry.blockRegistry, defs, handleMap, textures);
 }
 
 const BASE_BLOCKS: [string, BlockTextureDef][] = [

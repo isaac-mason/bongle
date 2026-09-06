@@ -236,7 +236,7 @@ export function column(id: string, { textures, ...options }: ColumnPresetOptions
         place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ axis: axisFromPlaceCtx(ctx) })),
         rotate: (stateId, axis) => {
             const local = stateId - handle._baseStateId;
-            const p = handle.states.decode(local);
+            const p = handle.def.states.decode(local);
             return handle.stateId({ axis: AXIS_REMAP[axis][p.axis as 'x' | 'y' | 'z'] });
         },
         // axis is directionless, flips are identity.
@@ -407,7 +407,7 @@ function readStairAt(
     if (id === AIR) return null;
     if (voxels.registry.stateToBlockIndex[id] !== handle._index) return null;
     const local = voxels.registry.stateToLocalIndex[id]!;
-    const props = handle.states.decode(local);
+    const props = handle.def.states.decode(local);
     if (props.half !== matchHalf) return null;
     return props.facing as Facing4;
 }
@@ -442,7 +442,7 @@ export function stairs(id: string, { textures: texturesInput, ...options }: Stai
             );
         },
         onNeighbourUpdate(ctx) {
-            const me = handle.states.decode(ctx.voxels.registry.stateToLocalIndex[ctx.stateId]!);
+            const me = handle.def.states.decode(ctx.voxels.registry.stateToLocalIndex[ctx.stateId]!);
             const f = me.facing as Facing4;
             const h = me.half as StairHalf;
             // CW / CCW rotations of our facing (from above). used to recognise
@@ -484,7 +484,7 @@ export function stairs(id: string, { textures: texturesInput, ...options }: Stai
         rotate: (stateId, axis, cw) => {
             // sideways stair has no valid state, only Y rotation maps cleanly.
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return handle.stateId({
                 facing: rotateFacing4(p.facing as Facing4, cw),
                 half: p.half,
@@ -492,7 +492,7 @@ export function stairs(id: string, { textures: texturesInput, ...options }: Stai
             });
         },
         flip: (stateId, axis) => {
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             const f = p.facing as Facing4;
             const h = p.half as StairHalf;
             const s = p.shape as StairShape;
@@ -545,7 +545,7 @@ export function slab(id: string, { textures: texturesInput, ...options }: SlabPr
         // rotate is identity (half/double are axis-aligned).
         flip: (stateId, axis) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (p.half === 'double') return stateId;
             return handle.stateId({ half: p.half === 'top' ? 'bottom' : 'top' });
         },
@@ -644,12 +644,12 @@ export function ladder(id: string, { textures: texture, ...options }: LadderPres
         place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ facing: facing4FromPlaceCtx(ctx) })),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return handle.stateId({ facing: rotateFacing4(p.facing as Facing4, cw) });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             const table = axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z;
             return handle.stateId({ facing: table[p.facing as Facing4] });
         },
@@ -860,7 +860,7 @@ export function fence(id: string, { textures: texturesInput, ...options }: Fence
         },
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             // a neighbour that was at direction D before rotation is at
             // direction rotateFacing4(D, cw) after rotation. so the new bool
             // at direction D' = old bool at the direction that rotates *to*
@@ -871,7 +871,7 @@ export function fence(id: string, { textures: texturesInput, ...options }: Fence
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (axis === 'x') return handle.stateId({ north: p.north, south: p.south, east: p.west, west: p.east });
             return handle.stateId({ east: p.east, west: p.west, north: p.south, south: p.north });
         },
@@ -933,14 +933,14 @@ export function pane(id: string, { textures: texturesInput, ...options }: PanePr
         },
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return cw
                 ? handle.stateId({ north: p.east, east: p.south, south: p.west, west: p.north })
                 : handle.stateId({ north: p.west, east: p.north, south: p.east, west: p.south });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (axis === 'x') return handle.stateId({ north: p.north, south: p.south, east: p.west, west: p.east });
             return handle.stateId({ east: p.east, west: p.west, north: p.south, south: p.north });
         },
@@ -1051,7 +1051,7 @@ export function trapdoor(id: string, { textures: texturesInput, ...options }: Tr
             ),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return handle.stateId({
                 facing: rotateFacing4(p.facing as Facing4, cw),
                 half: p.half,
@@ -1059,7 +1059,7 @@ export function trapdoor(id: string, { textures: texturesInput, ...options }: Tr
             });
         },
         flip: (stateId, axis) => {
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             const f = p.facing as Facing4;
             if (axis === 'y') {
                 return handle.stateId({
@@ -1203,14 +1203,14 @@ export function wall(id: string, { textures: texturesInput, ...options }: WallPr
         },
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return cw
                 ? handle.stateId({ north: p.east, east: p.south, south: p.west, west: p.north, up: p.up })
                 : handle.stateId({ north: p.west, east: p.north, south: p.east, west: p.south, up: p.up });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (axis === 'x') return handle.stateId({ north: p.north, south: p.south, east: p.west, west: p.east, up: p.up });
             return handle.stateId({ east: p.east, west: p.west, north: p.south, south: p.north, up: p.up });
         },
@@ -1395,7 +1395,7 @@ export function torch(id: string, { textures: texture, ...options }: TorchPreset
         // side the player aimed at, not a fixed-priority default.
         place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ mount: torchMountFromPlaceCtx(ctx) })),
         onNeighbourUpdate(ctx) {
-            const current = handle.states.decode(ctx.stateId - handle._baseStateId).mount as TorchMount;
+            const current = handle.def.states.decode(ctx.stateId - handle._baseStateId).mount as TorchMount;
             // keep the current mount while its support survives, so a corner
             // torch is not yanked onto a different wall by a fixed priority.
             if (torchMountSupported(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ, current)) return ctx.stateId;
@@ -1410,13 +1410,13 @@ export function torch(id: string, { textures: texture, ...options }: TorchPreset
         },
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (p.mount === 'floor') return stateId;
             return handle.stateId({ mount: rotateFacing4(p.mount as Facing4, cw) });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             if (p.mount === 'floor') return stateId;
             const table = axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z;
             return handle.stateId({ mount: table[p.mount as Facing4] });
@@ -1508,11 +1508,11 @@ export function door(id: string, { textures, ...options }: DoorPresetOptions) {
         },
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             return handle.stateId({ ...p, facing: rotateFacing4(p.facing as Facing4, cw) });
         },
         flip: (stateId, axis) => {
-            const p = handle.states.decode(stateId - handle._baseStateId);
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
             const facing =
                 axis === 'y' ? (p.facing as Facing4) : (axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z)[p.facing as Facing4];
             const hinge = axis === 'y' ? p.hinge : p.hinge === 'left' ? 'right' : 'left';

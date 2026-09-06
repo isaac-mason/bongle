@@ -7,7 +7,7 @@ import { registerAllShapes } from 'crashcat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as blockModel from '../../../../src/core/voxels/block-model';
 import { cube, door, getDoorOpen, setDoorOpen } from '../../../../src/core/voxels/block-presets';
-import { buildBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
+import { type Blocks, buildBlockRegistry, createBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../../../../src/core/voxels/block-transform';
 import type {
     BlockDef,
@@ -15,53 +15,49 @@ import type {
     BlockPlaceCtx,
     BlockQuad,
     BlockTextureDef,
+    BlockTextureHandle,
     PlaceIO,
 } from '../../../../src/core/voxels/blocks';
 import { createVoxels, setBlock } from '../../../../src/core/voxels/voxels';
 
-const topTex: BlockTextureDef = {
+const topTex: BlockTextureHandle = {
     id: 'door-top',
     dependency: { registry: 'blockTextures', id: 'door-top' },
-    frames: ['door-top.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'door-top', frames: ['door-top.png'], fps: 1, interpolate: false },
 };
-const botTex: BlockTextureDef = {
+const botTex: BlockTextureHandle = {
     id: 'door-bot',
     dependency: { registry: 'blockTextures', id: 'door-bot' },
-    frames: ['door-bot.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'door-bot', frames: ['door-bot.png'], fps: 1, interpolate: false },
 };
-const stoneTex: BlockTextureDef = {
+const stoneTex: BlockTextureHandle = {
     id: 'stone',
     dependency: { registry: 'blockTextures', id: 'stone' },
-    frames: ['stone.png'],
-    fps: 1,
-    interpolate: false,
+    def: { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false },
 };
 
 const doorHandle = door('test:door', { textures: { top: topTex, bottom: botTex } }) as BlockHandle;
 const stoneHandle = cube('test:stone', { textures: stoneTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
-    [doorHandle.id, doorHandle._def],
-    [stoneHandle.id, stoneHandle._def],
+    [doorHandle.id, doorHandle.def],
+    [stoneHandle.id, stoneHandle.def],
 ]);
 const handles = new Map<string, BlockHandle>([
     [doorHandle.id, doorHandle as BlockHandle],
     [stoneHandle.id, stoneHandle as BlockHandle],
 ]);
 const textures = new Map<string, BlockTextureDef>([
-    [topTex.id, topTex],
-    [botTex.id, botTex],
-    [stoneTex.id, stoneTex],
+    [topTex.id, topTex.def],
+    [botTex.id, botTex.def],
+    [stoneTex.id, stoneTex.def],
 ]);
 
-let registry: ReturnType<typeof buildBlockRegistry>;
+let registry: Blocks;
 beforeAll(() => {
     registerAllShapes();
-    registry = buildBlockRegistry(defs, handles, textures);
+    registry = createBlockRegistry();
+    buildBlockRegistry(registry, defs, handles, textures);
 });
 
 // floor-click ctx at (x,y,z); camera yaw controls the resolved facing.
@@ -88,7 +84,7 @@ function runPlace(ctx: BlockPlaceCtx, world: Record<string, string> = {}): Map<s
         get: (x, y, z) => writes.get(`${x},${y},${z}`) ?? world[`${x},${y},${z}`] ?? 'air',
         set: (x, y, z, key) => writes.set(`${x},${y},${z}`, key),
     };
-    doorHandle._def.place!(ctx, io);
+    doorHandle.def.place!(ctx, io);
     return writes;
 }
 
@@ -162,10 +158,10 @@ describe('door model — hinge mirror', () => {
     });
 
     it('right-hinge closed door is the horizontal mirror of left', () => {
-        const left = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'left', open: false }) as {
+        const left = doorHandle.def.model!({ facing: 'north', half: 'lower', hinge: 'left', open: false }) as {
             quads: BlockQuad[];
         };
-        const right = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'right', open: false }) as {
+        const right = doorHandle.def.model!({ facing: 'north', half: 'lower', hinge: 'right', open: false }) as {
             quads: BlockQuad[];
         };
         expect(right.quads).not.toEqual(left.quads); // texture/uvs mirrored → quads differ

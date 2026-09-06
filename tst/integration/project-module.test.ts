@@ -62,8 +62,8 @@ describe('project-module — deterministic wire indices', () => {
             expect(registry.protocol.traits.idToIndex.get(id)).toBe(i);
         }
 
-        expect(TraitAZ._slot).not.toBe(TraitAC._slot);
-        expect(TraitAC._slot).not.toBe(TraitAM._slot);
+        expect(TraitAZ.slot).not.toBe(TraitAC.slot);
+        expect(TraitAC.slot).not.toBe(TraitAM.slot);
 
         expect(CmdAZ.id).toBe('wire-test-a/z-late');
         expect(CmdAC.id).toBe('wire-test-a/c-mid');
@@ -83,8 +83,8 @@ describe('project-module — deterministic wire indices', () => {
         const node = createNode({ name: 'persistent' });
         addChild(server.room.scene.root, node);
         addTrait(node, TraitBC);
-        const slotBefore = TraitBC._slot;
-        expect(node._traits[slotBefore]).toBeDefined();
+        const slotBefore = TraitBC.slot;
+        expect(node.traits[slotBefore]).toBeDefined();
 
         // simulate HMR re-eval: a new trait whose id sorts FIRST among our
         // b-prefix entries. `trait()` upserts into the registry, bumping the
@@ -97,13 +97,13 @@ describe('project-module — deterministic wire indices', () => {
         expect(registry.protocol.traits.idToIndex.get('wire-test-b/c-mid')!).toBe(indexBefore + 1);
 
         // but the runtime slot didn't move — the live node's trait is still there.
-        expect(TraitBC._slot).toBe(slotBefore);
-        expect(TraitBA._slot).not.toBe(slotBefore);
-        expect(node._traits[slotBefore]).toBeDefined();
+        expect(TraitBC.slot).toBe(slotBefore);
+        expect(TraitBA.slot).not.toBe(slotBefore);
+        expect(node.traits[slotBefore]).toBeDefined();
         expect(registry.slotToTrait[slotBefore]?.id).toBe('wire-test-b/c-mid');
 
-        expect(node._traits[TraitBM._slot]).toBeUndefined();
-        expect(registry.slotToTrait[TraitBM._slot]?.id).toBe('wire-test-b/m-middle');
+        expect(node.traits[TraitBM.slot]).toBeUndefined();
+        expect(registry.slotToTrait[TraitBM.slot]?.id).toBe('wire-test-b/m-middle');
 
         server.dispose();
     });
@@ -137,10 +137,10 @@ describe('project-module — deterministic wire indices', () => {
         // trait occupies the sender's old wire slot — NOT m-middle. When
         // ids happen to overlap (the common HMR case) we get silent
         // mis-routing; when they don't, decode no-ops via missing def.
-        const misroutedDef = registry.traits.byId.get(misroutedId);
+        const misroutedDef = registry.traits.handles.get(misroutedId);
         if (misroutedId !== 'wire-test-c/m-middle' && misroutedDef !== undefined) {
-            expect(decodedNode!._traits[misroutedDef.slot]).toBeDefined();
-            expect(decodedNode!._traits[TraitCM._slot]).toBeUndefined();
+            expect(decodedNode!.traits[misroutedDef.slot]).toBeDefined();
+            expect(decodedNode!.traits[TraitCM.slot]).toBeUndefined();
         }
 
         sender.dispose();
