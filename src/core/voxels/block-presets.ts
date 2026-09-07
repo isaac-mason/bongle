@@ -121,6 +121,10 @@ export type WallPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTe
 export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
     textures: TextureRef;
 };
+export type CropPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one texture per growth stage, youngest first. */
+    textures: TextureRef[];
+};
 export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & { textures: TextureRef };
 export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & { textures: TextureRef };
 export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & { textures: TextureRef };
@@ -568,6 +572,50 @@ export function plant(id: string, { textures: texture, ...options }: PlantPreset
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
     });
+}
+
+// ── crop ────────────────────────────────────────────────────────────
+//
+// a plant that grows through numbered stages. same cross-quad shape as
+// `plant()`, but carries an `age` state selecting one texture per stage, so a
+// single block id covers the whole life of the crop:
+//
+//   Wheat.stage(1)   // just sown
+//   Wheat.ripe()     // ready to harvest
+//
+// stages are 1-based to match how the textures are named on disk.
+
+export type CropHandle = BlockHandle & {
+    /** state key for a growth stage (1..stages). */
+    stage(n: number): string;
+    /** state key for the final stage. */
+    ripe(): string;
+};
+
+/*#__NO_SIDE_EFFECTS__*/
+export function crop(id: string, { textures, ...options }: CropPresetOptions): CropHandle {
+    if (textures.length === 0) throw new Error(`crop ${id} needs at least one stage texture`);
+    const stages = textures.length;
+    const AgeState = blockState.create({ age: blockState.int(1, stages) });
+
+    const handle = block(id, {
+        ...options,
+        states: AgeState,
+        defaultState: { age: 1 },
+        model: ({ age }) => ({ type: 'custom' as const, quads: blockModel.cross(textures[age - 1]) }),
+        cull: CullType.SELF,
+        collision: false,
+        // sparse cross-quads, don't filter light. without this, CullType.SELF
+        // would default to opacity 1 (like leaves/glass) and dim what's behind.
+        lightOpacity: 0,
+        material: options?.material ?? MaterialType.TRANSPARENT,
+        vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
+    });
+
+    const cropHandle = handle as unknown as CropHandle;
+    cropHandle.stage = (n: number) => handle.stateKey({ age: Math.min(Math.max(n, 1), stages) });
+    cropHandle.ripe = () => handle.stateKey({ age: stages });
+    return cropHandle;
 }
 
 // ── leaves ──────────────────────────────────────────────────────────
