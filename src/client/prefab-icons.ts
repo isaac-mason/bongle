@@ -19,7 +19,7 @@ import * as Prefab from '../core/scene/prefab';
 import { addChild, createNode, createPrefabConfig, query, setPrefab } from '../core/scene/scene-tree';
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { createMeshOutput } from '../core/voxels/chunk-mesher';
-import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
+import { CHUNK_SIZE, chunkLight, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import * as MeshResources from '../render/mesh/mesh-resources';
 import { meshInfoIndexOf } from '../render/mesh/mesh-resources';
@@ -130,7 +130,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
         const meshOutput = createMeshOutput();
         for (const chunk of room.voxels.chunks.values()) {
-            chunk.light.fill(0xffff);
+            chunkLight(chunk).fill(0xffff);
             markChunkDirty(room.voxels, chunk);
             deps.offline.remeshChunkInto(deps, room.voxels, room.voxels.registry, chunk, meshOutput);
         }

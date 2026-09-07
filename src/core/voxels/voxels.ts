@@ -517,6 +517,16 @@ export function chunkData(chunk: Chunk): Uint16Array {
     return chunk.data;
 }
 
+/** Writable light for a chunk, copy-on-write off `EMPTY_LIGHT` — the twin of
+ *  `chunkData`, and the enforcement of the aliasing contract above. Every empty
+ *  stub the server ships aliases that one buffer, so a write straight through
+ *  `chunk.light` does not darken one chunk, it darkens EVERY empty chunk in the
+ *  world at once (and stays wrong until real light arrives for each). */
+export function chunkLight(chunk: Chunk): Uint16Array {
+    if (chunk.light === EMPTY_LIGHT) chunk.light = new Uint16Array(EMPTY_LIGHT);
+    return chunk.light;
+}
+
 /**
  * set a block at a chunk-local position — the meat of a voxel write. resolves
  * the palette slot, writes the cell, maintains nonAir/solid counts + mesh gen,
@@ -665,7 +675,7 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
         // flood-fill disabled (flat / fullbright): the raw writes bypassed inline
         // seeding, so flat-seed the chunk here (sky base + per-cell emission).
         const skyPacked = (lighting.floodFill.minLevel & 0xf) << 12;
-        chunk.light.fill(skyPacked);
+        chunkLight(chunk).fill(skyPacked);
         const emissionTable = registry.lightEmission;
         for (let i = 0; i < data.length; i++) {
             const emission = emissionTable[palette[data[i]!]!] ?? 0;
@@ -691,7 +701,7 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
  * setLight only owns the data + mask, not the dirty-set membership.
  */
 export function setLight(chunk: Chunk, index: number, value: number): void {
-    chunk.light[index] = value;
+    chunkLight(chunk)[index] = value;
     chunk.meshGen++;
     chunk.version++;
     if (chunk.lightDirtyMask === EMPTY_LIGHT_MASK) {
@@ -1102,7 +1112,7 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
             lighting.newChunks.push(chunk);
         } else {
             const sky = lighting.floodFill.minLevel & 0xf;
-            chunk.light.fill(sky << 12);
+            chunkLight(chunk).fill(sky << 12);
             // no markChunkLightDirty here, an authority's initial light ships
             // with voxel_chunk_full via addedChunks, and the bulk fill bypasses
             // setLight (mask stays empty). entering the dirty queue with

@@ -308,7 +308,7 @@ export function applyChunkLightDelta(voxels: Voxels.Voxels, message: Protocol.Vo
     neighbourCellMask.fill(0);
 
     for (const change of message.changes) {
-        chunk.light[change.index] = change.light;
+        Voxels.chunkLight(chunk)[change.index] = change.light;
 
         const idx = change.index;
         const x = idx & 0xf;

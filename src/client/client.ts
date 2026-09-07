@@ -559,12 +559,6 @@ export function update(state: EngineClient, delta: number) {
             Physics.flush(room.physics);
             Debug.end(room.clientMetrics, 'physics');
 
-            // authoritative (local/standalone) rooms drain relight; no-op on networked
-            // rooms, which receive baked light over the wire.
-            Debug.begin(room.clientMetrics, 'lighting');
-            Light.flushPendingLight(room.voxels);
-            Debug.end(room.clientMetrics, 'lighting');
-
             Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
 
             Debug.end(room.clientMetrics, 'room');
@@ -591,6 +585,15 @@ export function update(state: EngineClient, delta: number) {
         SceneTree.runOnFrame(room.scene, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-frame');
 
+        // settle light here: after the frame's last writer (onFrame, and the tick loop
+        // above it), before its first reader (modelLighting, then the mesher). a block
+        // write marks the chunk dirty immediately but only QUEUES the light, so reading
+        // it first bakes a black hole where the player dug. above the `continue` below,
+        // so a room with no camera drains too instead of growing its queue forever.
+        Debug.begin(room.clientMetrics, 'lighting');
+        Light.flushPendingLight(room.voxels);
+        Debug.end(room.clientMetrics, 'lighting');
+
         Chat.tick(room.chat, state.net, room.roomId);
 
         // resolve the POV camera AFTER frame scripts write its pose/fov, BEFORE any reader.
@@ -612,9 +615,8 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'on-post-animate');
 
         // last writer of a bone local has now had its turn, so concatenate each interp
-        // root's subtree once. Everything below this line reads visual transforms; nothing
-        // below it writes a local. Godot's second `SceneTreeFTI::frame_update`, in the same
-        // slot: after process, before the renderer is handed transforms.
+        // root's subtree once. Everything below this line should read visual transforms;
+        // nothing below it writes a local.
         Debug.begin(room.clientMetrics, 'concatenate');
         Interpolation.concatenate(room.scene);
         Debug.end(room.clientMetrics, 'concatenate');

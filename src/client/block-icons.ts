@@ -13,7 +13,7 @@ import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
 import { type Blocks, MODEL_NONE } from '../core/voxels/block-registry';
 import { createMeshOutput } from '../core/voxels/chunk-mesher';
-import { ensureChunk, setBlock } from '../core/voxels/voxels';
+import { chunkLight, ensureChunk, setBlock } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
@@ -142,7 +142,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             coords[key] = [col, row];
 
             setBlock(room.voxels, 1, 1, 1, key);
-            chunk.light.fill(0xf000);
+            chunkLight(chunk).fill(0xf000);
 
             // remeshChunkInto evicts any prior slot when the chunk is all-air after culling
             // (shouldn't happen for a solid block); skip rendering an empty tile if so.

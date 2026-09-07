@@ -31,6 +31,7 @@ import type { Blocks } from './block-registry';
 import {
     CHUNK_SIZE,
     type Chunk,
+    chunkLight,
     EMPTY_LIGHT_MASK,
     getChunkAt,
     rebuildSpatialIndexes,
@@ -606,7 +607,7 @@ export function propagateAllLight(voxels: Voxels): void {
     // zero all light + clear per-chunk dirty masks. BFS rebuild below
     // will re-mark via setLight for chunks that end up with light.
     for (const chunk of voxels.chunks.values()) {
-        chunk.light.fill(0);
+        chunkLight(chunk).fill(0);
         if (chunk.lightDirtyMask !== EMPTY_LIGHT_MASK) {
             chunk.lightDirtyMask.fill(0);
         }
@@ -809,7 +810,7 @@ export function relightChunks(voxels: Voxels, dirty: Set<Chunk>): void {
 
     // zero light in the working set only (preserves every other chunk).
     for (const c of working) {
-        c.light.fill(0);
+        chunkLight(c).fill(0);
         if (c.lightDirtyMask !== EMPTY_LIGHT_MASK) c.lightDirtyMask.fill(0);
         c.lightDirtyCount = 0;
     }
