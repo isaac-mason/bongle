@@ -30,10 +30,10 @@ export type ClientBootCaps = {
     /** open the game transport: register the inbound handler, get `send` back.
      *  host = env.connect('game'); guest = the transferred game port. */
     connectGame: (onReceive: (bytes: Uint8Array) => void) => Promise<{ send: (bytes: Uint8Array) => void }>;
-    /** resolves once the baked resources under resources/client/ are real (the pipeline's first
-     *  bake). Reads of those paths wait on it, so a client spawned while the bake runs boots as
-     *  far as the GPU handshake and parks at its first atlas read. Absent where the resources
-     *  are known to exist already (a guest reads the host's finished tree). */
+    /** resolves once the pipeline's first bake is done: the generated barrels and the baked
+     *  resources under resources/client/ are real. A client spawned while the bake runs boots up
+     *  to its UI mount, then waits on this before importing the barrels and loading. Absent where
+     *  the bake is known to be done (a guest reads the host's finished tree). */
     bakeReady?: Promise<void>;
     log: (...parts: unknown[]) => void;
     err: (...parts: unknown[]) => void;
@@ -98,8 +98,6 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         rt.server = false;
         rt.editor = true;
         await runner.import(caps.entry ?? 'src/index.ts');
-        await runner.import('src/generated/models.ts');
-        await runner.import('src/generated/scenes.ts');
         const { EngineClient } = await runner.import('bongle/engine-client');
         const EngineClientEditor = await runner.import('bongle/engine-client-editor');
 
@@ -121,12 +119,22 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         const state = EngineClient.init({
             mode: 'edit',
             driver,
-            resourceLoader: clientResourceLoader(fs, caps.bakeReady),
+            resourceLoader: clientResourceLoader(fs),
             domElement: surface,
         });
 
         progress('booting');
         await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs) });
+        // Everything from here reads bake outputs: the generated barrels (baked bin paths on the
+        // model handles, scene payloads) and the atlases `load` fetches. The client is spawned
+        // while the first bake runs, so this is where it waits for it; the engine import, init
+        // and the UI mount above have already overlapped the bake.
+        if (caps.bakeReady) {
+            progress('waiting for bake');
+            await caps.bakeReady;
+        }
+        await runner.import('src/generated/models.ts');
+        await runner.import('src/generated/scenes.ts');
         // `load` runs the device handshake, so the crash bracket opens here and is
         // closed by the driver's `started` from inside it.
         caps.graphics?.handshakeStarted();
@@ -272,7 +280,7 @@ const client: App = async (env) => {
             const chan = await env.connect('game', (data) => onReceive(toU8(data)));
             return { send: (bytes) => chan.send(bytes) };
         },
-        // the pipeline serves once its first bake is done; the loader waits on this for baked paths.
+        // the pipeline serves once its first bake is done.
         bakeReady: env.connect('pipeline', () => {}).then((chan) => chan.close()),
         // 'platform' is served by the shell when something is embedding the
         // editor. One dial per request: send the ask, take the single answer,
@@ -348,7 +356,7 @@ export function sessionUser(session: EditorSession): ClientUser {
 
 /** load bytes from the project fs (baked client resources under resources/client/,
  *  builtin engine assets under file:///node_modules/…, runtime avatar urls). */
-function clientResourceLoader(fs: Filesystem, bakeReady?: Promise<void>) {
+function clientResourceLoader(fs: Filesystem) {
     return {
         loadBytes: async (url: string): Promise<Uint8Array> => {
             if (url.startsWith('http:') || url.startsWith('https:')) {
@@ -357,7 +365,6 @@ function clientResourceLoader(fs: Filesystem, bakeReady?: Promise<void>) {
                 return new Uint8Array(await r.arrayBuffer());
             }
             if (url.startsWith('file:')) return fs.read(new URL(url).pathname.replace(/^\/+/, ''));
-            if (bakeReady) await bakeReady; // baked output: real only after the pipeline's first bake
             return fs.read(`resources/client/${url.replace(/^\//, '')}`);
         },
     };
