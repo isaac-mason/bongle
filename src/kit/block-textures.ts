@@ -88,6 +88,9 @@ export const oakLogSide = blockTexture('kit:oak_log_side', {
 export const cobblestone = blockTexture('kit:cobblestone', {
     src: asset('./assets/textures/cobblestone.png', import.meta.url),
 });
+export const sand = blockTexture('kit:sand', {
+    src: asset('./assets/textures/sand.png', import.meta.url),
+});
 export const gravel = blockTexture('kit:gravel', {
     src: asset('./assets/textures/gravel.png', import.meta.url),
 });

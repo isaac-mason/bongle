@@ -60,6 +60,8 @@ export const dirtPath = block('kit:dirt_path', {
     sounds: soundPreset.dirt,
 });
 
+export const sand = blockPreset.cube('kit:sand', { name: 'Sand', textures: tex.sand, sounds: soundPreset.sand });
+
 export const gravel = blockPreset.cube('kit:gravel', { name: 'Gravel', textures: tex.gravel, sounds: soundPreset.gravel });
 
 // ── Stone & cobblestone ─────────────────────────────────────────────
