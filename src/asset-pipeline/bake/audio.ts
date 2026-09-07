@@ -268,17 +268,17 @@ async function loadSources(
     loader: ResourceLoader,
     sounds: Array<{ id: string; src: string; long: boolean }>,
 ): Promise<LoadedSource[]> {
-    const out: LoadedSource[] = [];
-    for (const s of sounds) {
+    // each load is a service-worker round trip to the project fs; one at a time they were the
+    // longest part of the audio stage. mapConcurrent keeps the input order.
+    return mapConcurrent(sounds, BAKE_CONCURRENCY, async (s) => {
         let bytes: Uint8Array;
         try {
             bytes = await loader.loadBytes(s.src);
         } catch {
             throw new Error(`[bongle] sound "${s.id}" source missing or unreadable: ${s.src}`);
         }
-        out.push({ ...s, bytes });
-    }
-    return out;
+        return { ...s, bytes };
+    });
 }
 
 /* ── manifest helpers ── */
