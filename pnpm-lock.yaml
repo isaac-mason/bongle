@@ -46,7 +46,7 @@ importers:
         version: 7.0.1
       crashcat:
         specifier: github:isaac-mason/crashcat#dev
-        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/fa50632cef4ac40cfc74e279b9f10f74e1120871
+        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/3f77e779b5fb1b9e44bab376bcc5c7d022588e91
       dashcat:
         specifier: github:isaac-mason/dashcat#main
         version: https://codeload.github.com/isaac-mason/dashcat/tar.gz/303478bc4dd20cec56b0e4f2f58cfdc1a79e172d
@@ -55,16 +55,16 @@ importers:
         version: 0.8.2
       gatho:
         specifier: github:isaac-mason/gatho
-        version: https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d
+        version: https://codeload.github.com/isaac-mason/gatho/tar.gz/cb8c8b4d3f18c903d287d43019b927b8f022511a
       gpucat:
         specifier: github:isaac-mason/gpucat#main
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/bd06a8a7cbf8505bc0859853df18f0d31a1bc0b4
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/5902bf538cd79a54121b798511f6b49281c91a08
       magic-string:
         specifier: ^0.30.21
         version: 0.30.21
       math:
         specifier: canary
-        version: 1.0.0-canary-70592f44-20260907
+        version: 1.0.0-canary-5e895055-20260907
       mediabunny:
         specifier: ^1.50.8
         version: 1.50.8
@@ -1431,8 +1431,8 @@ packages:
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/fa50632cef4ac40cfc74e279b9f10f74e1120871:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/fa50632cef4ac40cfc74e279b9f10f74e1120871}
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/3f77e779b5fb1b9e44bab376bcc5c7d022588e91:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/3f77e779b5fb1b9e44bab376bcc5c7d022588e91}
     version: 0.0.5
     peerDependencies:
       three: '>=0.182.0'
@@ -1601,8 +1601,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d}
+  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/cb8c8b4d3f18c903d287d43019b927b8f022511a:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gatho/tar.gz/cb8c8b4d3f18c903d287d43019b927b8f022511a}
     version: 0.0.0-alpha-3
     peerDependencies:
       ioredis: ^5.10.1
@@ -1623,8 +1623,8 @@ packages:
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/bd06a8a7cbf8505bc0859853df18f0d31a1bc0b4:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/bd06a8a7cbf8505bc0859853df18f0d31a1bc0b4}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/5902bf538cd79a54121b798511f6b49281c91a08:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/5902bf538cd79a54121b798511f6b49281c91a08}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -1778,8 +1778,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  math@1.0.0-canary-70592f44-20260907:
-    resolution: {integrity: sha512-PP8e7lEiq22AqqzLHdIe9I9mVU66c8AfqA1CGPE6u6MeDZk0nHVpoD1IZjNm75a7KJ7b4vFxmyxzKTWpuoNAKA==}
+  math@1.0.0-canary-5e895055-20260907:
+    resolution: {integrity: sha512-+Ry7UH0dj/f+Eb4Uh/ViREz7w6+Q1SDQTmtL4fWTISHjJbsX87xsiO8g39ui0Oab/2pid8zTV2D80pR7vQ9Ntw==}
 
   mediabunny@1.50.8:
     resolution: {integrity: sha512-LgykLyQzhdpo0V2yw3UXmOpj+b4JAGdpHBwsPE6kjSt8Za0d1VllD+FV7EGHBcdV4+oHUAo+yrqbVAWxNSDCPQ==}
@@ -3238,9 +3238,9 @@ snapshots:
 
   core-util-is@1.0.3: {}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/fa50632cef4ac40cfc74e279b9f10f74e1120871:
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/3f77e779b5fb1b9e44bab376bcc5c7d022588e91:
     dependencies:
-      math: 1.0.0-canary-70592f44-20260907
+      math: 1.0.0-canary-5e895055-20260907
 
   crc-32@1.2.2: {}
 
@@ -3385,7 +3385,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d:
+  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/cb8c8b4d3f18c903d287d43019b927b8f022511a:
     dependencies:
       packcat: 0.3.0
       ws: 8.20.0
@@ -3408,9 +3408,9 @@ snapshots:
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/bd06a8a7cbf8505bc0859853df18f0d31a1bc0b4:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/5902bf538cd79a54121b798511f6b49281c91a08:
     dependencies:
-      math: 1.0.0-canary-70592f44-20260907
+      math: 1.0.0-canary-5e895055-20260907
 
   graceful-fs@4.2.11: {}
 
@@ -3528,7 +3528,7 @@ snapshots:
 
   marked@14.0.0: {}
 
-  math@1.0.0-canary-70592f44-20260907: {}
+  math@1.0.0-canary-5e895055-20260907: {}
 
   mediabunny@1.50.8:
     dependencies:
