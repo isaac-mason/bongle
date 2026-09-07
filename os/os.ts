@@ -45,7 +45,7 @@ type Rec = {
     exited: boolean;
     code: number;
     stopping?: boolean;
-    progress?: unknown;
+    progress?: string;
     onDisposed?: () => void;
     resolveClosed?: () => void;
 };
@@ -100,7 +100,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     }
 
     /** Park on `name`, retracting the waiter if `signal` aborts first. `owner` gives an
-     *  app-side connect an identity so `cancel-connect` can retract it too. */
+     *  app-side wait an identity so `cancel-connect` / `cancel-served` can retract it. */
     function parkUntil<T>(
         name: string,
         signal: AbortSignal | undefined,
@@ -314,7 +314,16 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 break;
             }
             case 'cancel-connect':
-                cancelConnect(rec.pid, msg.req);
+                cancelWait(rec.pid, msg.req);
+                break;
+            case 'served': {
+                const answer = (): void => toApp(rec.link, { k: 'served', req: msg.req });
+                if (listeners.has(msg.name) || shellListeners.has(msg.name)) answer();
+                else park(msg.name, { owner: { pid: rec.pid, req: msg.req }, resolve: answer });
+                break;
+            }
+            case 'cancel-served':
+                cancelWait(rec.pid, msg.req);
                 break;
             case 'close':
                 closeConn(msg.conn, rec.pid);
@@ -439,7 +448,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return { conn, port: ch.port2, opened, close };
     }
 
-    function cancelConnect(pid: number, req: number): void {
+    function cancelWait(pid: number, req: number): void {
         for (const [name, arr] of waiters) {
             const i = arr.findIndex((w) => w.owner?.pid === pid && w.owner?.req === req);
             if (i >= 0) {

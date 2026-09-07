@@ -1,4 +1,4 @@
-import type { App, Channel, Process } from '../interface';
+import type { App, AppInit, Channel, Process } from '../interface';
 
 // The boot supervisor. Owns the service topology + spawn order the host used to
 // hardcode: bake the pipeline, then start the server, emitting the aggregate boot
@@ -10,7 +10,7 @@ import type { App, Channel, Process } from '../interface';
 // restart a service — it runs this blind and dials only the services it genuinely
 // needs ('pipeline' for the prod-build config, 'game' readiness for the client
 // backend), plus 'supervisor' to request a restart and to hear crash events.
-const boot: App = async (env) => {
+const boot: App<AppInit> = async (env) => {
     // the services this supervisor owns, restarted in place on command.
     const procs: Record<string, Process> = {};
     // open supervisor connections — the shell holds one to hear crash events.
@@ -60,7 +60,7 @@ const boot: App = async (env) => {
     // parts that read bake outputs (the generated barrel, resource loads). Spawning it only after
     // the bake put that whole stretch on the critical path.
     spawn('server');
-    await env.connect('pipeline'); // resolves once the first bake is done (pipeline serves post-bake)
+    await env.served('pipeline'); // resolves once the first bake is done (pipeline serves post-bake)
     env.progress('starting server');
 };
 

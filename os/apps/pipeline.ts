@@ -1,14 +1,13 @@
 import { bootMarks } from '../boot-marks';
-import type { App, Channel, Config, EditorSession, PipelineReport } from '../interface';
+import type { App, AppInit, Channel, Config, PipelineReport } from '../interface';
 
 // The asset-pipeline app. Evaluates the user graph through the runner, drives
 // the engine's EditPipeline bake, then serves "pipeline" as a readiness signal —
 // connect resolves once the first bake is done. Holds an fs watcher + a
 // listener, so it stays alive.
-const pipeline: App = async (env) => {
+const pipeline: App<AppInit> = async (env) => {
     const fs = env.fs;
     const runner = env.runner;
-    const editorSession = env.init as EditorSession | undefined;
     const mark = bootMarks('pipeline');
     mark('realm up');
 
@@ -21,7 +20,7 @@ const pipeline: App = async (env) => {
         // the SAME entry the client and server realms take: baking a different module
         // graph than the game runs would leave this realm's registry — and so every
         // artifact gated on it — describing a project nobody plays.
-        await runner.import(editorSession?.entry ?? 'src/index.ts'); // user declarations register into this realm
+        await runner.import(env.init.entry ?? 'src/index.ts'); // user declarations register into this realm
     } catch (err) {
         env.err('user code threw at eval — baking what registered:', String((err as Error).message));
     }
@@ -55,7 +54,7 @@ const pipeline: App = async (env) => {
         // a worker, so the icon bake can't read it off `self.location` the way a
         // windowed app does, and guessing could bake icons on a backend the client
         // isn't running.
-        { mode: 'edit', cache: true, renderer: editorSession?.renderer },
+        { mode: 'edit', cache: true, renderer: env.init.renderer },
     );
 
     // asset-file edits re-bake (they bump no registry revision → forceAll).

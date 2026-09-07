@@ -3,7 +3,7 @@ import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface'
 import { createNetSim } from '../../build/dev/net-sim';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
-import type { App, EditorSession, Filesystem, Runner } from '../interface';
+import type { App, AppInit, Env, Filesystem } from '../interface';
 
 // The edit-mode client — ONE implementation of "render the game in an editable
 // preview". `bootEditClient` holds everything real and takes its host-varying
@@ -16,64 +16,11 @@ import type { App, EditorSession, Filesystem, Runner } from '../interface';
 
 const toU8 = (d: unknown): Uint8Array => (d instanceof ArrayBuffer ? new Uint8Array(d) : (d as Uint8Array));
 
-/** the host-varying capabilities the client boot needs. */
-export type ClientBootCaps = {
-    /** the project disk (host: OPFS; guest: remote-fs over the relay). */
-    fs: Filesystem;
-    /** the module runner (host: local substrate; guest: bridged to the host). */
-    runner: Runner;
-    /** where to render + inject styles + paint a boot-error card. */
-    surface: HTMLElement;
-    /** the account user the local player wears. */
-    user: ClientUser;
-    /** the game entry module (project-root-relative); default 'src/index.ts'. */
-    entry?: string;
-    /** open the game transport: register the inbound handler, get `send` back.
-     *  host = env.connect('game'); guest = the transferred game port. */
-    connectGame: (onReceive: (bytes: Uint8Array) => void) => Promise<{ send: (bytes: Uint8Array) => void }>;
-    /** resolves once the pipeline's first bake is done: the generated barrels and the baked
-     *  resources under resources/client/ are real. A client spawned while the bake runs boots up
-     *  to its UI mount, then waits on this before importing the barrels and loading. Absent where
-     *  the bake is known to be done (a guest reads the host's finished tree). */
-    bakeReady?: Promise<void>;
-    log: (...parts: unknown[]) => void;
-    err: (...parts: unknown[]) => void;
-    /** structured boot status for the task manager (host + guest debugging). */
-    progress: (status: unknown) => void;
-    /** the game asked to send this player to another project (`client.transfer`
-     *  with a `project`). Whether to ask, and how to get them there — a route, a
-     *  new tab, a redirect — is entirely the host's business, so this just
-     *  forwards the slug and resolves whether the player went. Required, not
-     *  optional: a boot site that silently answered `false` would look like a
-     *  player who declined, so each one states its answer. */
-    transfer: (req: {
-        slug: string;
-        options: Record<string, string | number | boolean>;
-        joinData: Record<string, string | number | boolean>;
-    }) => Promise<boolean>;
-    /** register graceful teardown (release WebGPU). Absent where teardown is a
-     *  frame reload (the guest). */
-    onDispose?: (fn: () => void) => void;
-    /** report the render backend's fate to the host that chose it. The host probes
-     *  the device, picks a backend, and hands it in as `?renderer=`; these tell it
-     *  whether the choice held, so a bad call or a dead driver doesn't repeat on
-     *  every session.
-     *
-     *  `handshakeStarted` brackets the one stretch that can take the whole frame
-     *  down before anything can report it — the host writes a marker it can find
-     *  next load — and `handshakeSucceeded` closes that bracket. Optional: a boot
-     *  site with nowhere to record the answer omits it. */
-    graphics?: {
-        handshakeStarted(): void;
-        handshakeSucceeded(backend: 'webgpu' | 'webgl' | 'none'): void;
-        deviceLost(backend: 'webgpu' | 'webgl' | 'none'): void;
-    };
-};
-
-/** Boot EngineClient in edit mode against the given capabilities, wire the game
- *  transport + the debug net-sim, run the frame loop, and refresh on fs edits. */
-export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
-    const { fs, runner, surface, user, log, err, progress } = caps;
+const client: App<AppInit> = async (env) => {
+    const { fs, runner, log, err, progress } = env;
+    const surface = env.surface!.root;
+    const user = sessionUser(env.init);
+    const graphics = graphicsReporter(env);
     const mark = bootMarks('client');
     mark('realm up');
     try {
@@ -100,7 +47,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         rt.client = true;
         rt.server = false;
         rt.editor = true;
-        await runner.import(caps.entry ?? 'src/index.ts');
+        await runner.import(env.init.entry ?? 'src/index.ts');
         const { EngineClient } = await runner.import('bongle/engine-client');
         const EngineClientEditor = await runner.import('bongle/engine-client-editor');
         mark('engine + user entry imported');
@@ -108,15 +55,19 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         const driver: ClientDriver = {
             matchmake() {},
             transfer({ slug, options, joinData }) {
-                return caps.transfer({ slug, options, joinData: (joinData ?? {}) as Record<string, string | number | boolean> });
+                return askToTransfer(env, {
+                    slug,
+                    options,
+                    joinData: (joinData ?? {}) as Record<string, string | number | boolean>,
+                });
             },
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
             user,
             // The engine reports the backend it landed on and any later device loss;
             // the caps carry both out to whoever chose the backend.
-            graphics: caps.graphics && {
-                started: (backend) => caps.graphics?.handshakeSucceeded(backend),
-                deviceLost: (backend) => caps.graphics?.deviceLost(backend),
+            graphics: {
+                started: (backend) => graphics.handshakeSucceeded(backend),
+                deviceLost: (backend) => graphics.deviceLost(backend),
             },
         };
 
@@ -134,20 +85,20 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         // model handles, scene payloads) and the atlases `load` fetches. The client is spawned
         // while the first bake runs, so this is where it waits for it; the engine import, init
         // and the UI mount above have already overlapped the bake.
-        if (caps.bakeReady) {
-            progress('waiting for bake');
-            await caps.bakeReady;
-            mark('bake ready');
-        }
+        // the pipeline serves once its first bake is done: from here the generated
+        // barrels and resources/client/ are the real ones.
+        progress('waiting for bake');
+        await env.served('pipeline');
+        mark('bake ready');
         await runner.import('src/generated/models.ts');
         await runner.import('src/generated/scenes.ts');
         // `load` runs the device handshake, so the crash bracket opens here and is
         // closed by the driver's `started` from inside it.
-        caps.graphics?.handshakeStarted();
+        graphics.handshakeStarted();
         await EngineClient.load(state);
         mark('loaded (device handshake + resources)');
         EngineClientEditor.watchRegistry(state);
-        caps.onDispose?.(() => EngineClient.dispose(state));
+        env.onDispose(() => EngineClient.dispose(state));
 
         // DevTools automation surface for this client realm: `bongle` in the frame's
         // console context.
@@ -175,7 +126,11 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         // wire receive first, then take `send` — so a snapshot sent at join-time
         // isn't dropped before the handler exists.
         progress('joining game');
-        game = await caps.connectGame((bytes) => netSim.receive(bytes, performance.now()));
+        // Parks until 'game' is served: the client is spawned while the stack is still
+        // coming up, and a server that arrives later (a fixed src/ + restart) is joined
+        // then. A crashed server is reported by the boot supervisor, not by a timeout.
+        const gameChannel = await env.connect('game', (data) => netSim.receive(toU8(data), performance.now()));
+        game = { send: (bytes) => gameChannel.send(bytes) };
         mark('joined game');
 
         // frame loop: advance, drain the outbox onto the game transport.
@@ -272,60 +227,40 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         err('client boot failed:', message);
         showBootError(surface, message);
     }
-}
-
-// ── the OS client app: caps from `env` ──────────────────────────────────────
-const client: App = async (env) => {
-    const session = env.init as EditorSession;
-    await bootEditClient({
-        fs: env.fs,
-        runner: env.runner,
-        surface: env.surface!.root,
-        user: sessionUser(session),
-        entry: session.entry,
-        // join the sim. Parks until 'game' is served: the client is spawned while the stack is
-        // still coming up, and a server that arrives later (a fixed src/ + restart) is joined
-        // then. A crashed server is reported by the boot supervisor, not by a timeout here.
-        connectGame: async (onReceive) => {
-            const chan = await env.connect('game', (data) => onReceive(toU8(data)));
-            return { send: (bytes) => chan.send(bytes) };
-        },
-        // the pipeline serves once its first bake is done.
-        bakeReady: env.connect('pipeline', () => {}).then((chan) => chan.close()),
-        // 'platform' is served by the shell when something is embedding the
-        // editor. One dial per request: send the ask, take the single answer,
-        // hang up. Nothing serving it (a bare OS) means nowhere to send the
-        // player, which the timeout resolves to `false`.
-        transfer: async (req) => {
-            try {
-                let answer!: (ok: boolean) => void;
-                const answered = new Promise<boolean>((resolve) => {
-                    answer = resolve;
-                });
-                const chan = await env.connect('platform', (m) => answer(!!(m as { ok?: boolean } | null)?.ok), {
-                    signal: AbortSignal.timeout(TRANSFER_ASK_TIMEOUT_MS),
-                });
-                chan.send({ type: 'transfer', ...req });
-                const ok = await answered;
-                chan.close();
-                return ok;
-            } catch {
-                return false;
-            }
-        },
-        // Same 'platform' service as `transfer`, but nothing to wait for: these are
-        // told, not asked. Dial, say it, hang up — and if nothing is serving
-        // (a bare OS), there is no host keeping score and the report is moot.
-        graphics: graphicsReporter(env),
-        log: (...p) => env.log(...p),
-        err: (...p) => env.err(...p),
-        progress: (status) => env.progress(status),
-        onDispose: (fn) => env.onDispose(fn),
-    });
 };
 
-/** Fire-and-forget reports to the embedding platform over the 'platform' service. */
-function graphicsReporter(env: Parameters<App>[0]): ClientBootCaps['graphics'] {
+/** Ask the embedding shell to send this player to another project. 'platform' is
+ *  served by the shell when something is embedding the editor; a bare OS serves
+ *  nothing, so the dial parks and the timeout answers `false`. */
+async function askToTransfer(
+    env: Env<AppInit>,
+    req: {
+        slug: string;
+        options: Record<string, string | number | boolean>;
+        joinData: Record<string, string | number | boolean>;
+    },
+): Promise<boolean> {
+    try {
+        let answer!: (ok: boolean) => void;
+        const answered = new Promise<boolean>((resolve) => {
+            answer = resolve;
+        });
+        const chan = await env.connect('platform', (m) => answer(!!(m as { ok?: boolean } | null)?.ok), {
+            signal: AbortSignal.timeout(TRANSFER_ASK_TIMEOUT_MS),
+        });
+        chan.send({ type: 'transfer', ...req });
+        const ok = await answered;
+        chan.close();
+        return ok;
+    } catch {
+        return false;
+    }
+}
+
+/** Fire-and-forget reports to whoever chose the render backend, over 'platform'.
+ *  These are told, not asked: dial, say it, hang up. Nothing serving it (a bare OS)
+ *  means nobody is keeping score and the report is moot. */
+function graphicsReporter(env: Env<AppInit>) {
     const send = (report: Record<string, unknown>) => {
         void (async () => {
             try {
@@ -339,8 +274,8 @@ function graphicsReporter(env: Parameters<App>[0]): ClientBootCaps['graphics'] {
     };
     return {
         handshakeStarted: () => send({ phase: 'booting' }),
-        handshakeSucceeded: (backend) => send({ phase: 'started', backend }),
-        deviceLost: (backend) => send({ phase: 'device-lost', backend }),
+        handshakeSucceeded: (backend: string) => send({ phase: 'started', backend }),
+        deviceLost: (backend: string) => send({ phase: 'device-lost', backend }),
     };
 }
 
@@ -351,7 +286,7 @@ const TRANSFER_ASK_TIMEOUT_MS = 120_000;
 
 /** the account user the local play-preview joins as (avatar resolution — engine
  *  knowledge, so it lives with the client). */
-export function sessionUser(session: EditorSession): ClientUser {
+export function sessionUser(session: AppInit): ClientUser {
     const avatar: ResolvedAvatar = session.avatarUrl
         ? {
               source: 'runtime',

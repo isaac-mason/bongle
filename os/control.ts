@@ -25,6 +25,9 @@ export type ToApp =
     /** a `connect` that will never pair — the name is not routable, or the far side
      *  refused it. Without this an app's connect just never settles. */
     | { k: 'refused'; req: number; reason: string }
+    /** a `served` wait resolved: the name now has a listener. Carries no port —
+     *  nothing was connected. */
+    | { k: 'served'; req: number }
     | { k: 'stdin'; data: string | Uint8Array }
     | { k: 'dispose' };
 
@@ -34,6 +37,8 @@ export type ToOS =
     | { k: 'unlisten'; name: string }
     | { k: 'connect'; name: string; req: number }
     | { k: 'cancel-connect'; req: number }
+    | { k: 'served'; name: string; req: number }
+    | { k: 'cancel-served'; req: number }
     | { k: 'close'; conn: number }
     | { k: 'spawn'; ref: string; init?: unknown; req: number }
     | { k: 'wait'; pid: number; req: number }
@@ -41,5 +46,5 @@ export type ToOS =
     | { k: 'disposed' }
     | { k: 'stdout'; line: string }
     | { k: 'stderr'; line: string }
-    | { k: 'progress'; status: unknown }
+    | { k: 'progress'; status: string }
     | { k: 'exit'; code: number };

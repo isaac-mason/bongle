@@ -72,7 +72,7 @@ export async function runApp(
     surface: boolean,
     link: Link,
     fs: Filesystem,
-    caps: { runner: Runner },
+    runner: Runner,
 ): Promise<void> {
     let nextReq = 1;
     // request/reply correlation is by number, so the reply payload is genuinely
@@ -152,7 +152,7 @@ export async function runApp(
         signal: shutdown.signal,
         onDispose: (fn) => void disposers.add(fn),
         fs,
-        runner: caps.runner,
+        runner,
         spawn(childRef, childInit): Process {
             let pid = -1;
             const exit = (async () => {
@@ -191,6 +191,24 @@ export async function runApp(
                 });
                 signal?.addEventListener('abort', onAbort, { once: true });
                 send({ k: 'connect', name, req });
+            });
+        },
+        served(name, opts) {
+            const signal = opts?.signal;
+            return new Promise<void>((resolve, reject) => {
+                if (signal?.aborted) return reject(abortReason(signal));
+                const req = nextReq++;
+                const onAbort = () => {
+                    pending.delete(req);
+                    send({ k: 'cancel-served', req });
+                    reject(abortReason(signal!));
+                };
+                pending.set(req, () => {
+                    signal?.removeEventListener('abort', onAbort);
+                    resolve();
+                });
+                signal?.addEventListener('abort', onAbort, { once: true });
+                send({ k: 'served', name, req });
             });
         },
         listen(name, onConnect): Server {

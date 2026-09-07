@@ -23,7 +23,7 @@ function testOS(apps: Record<string, App>) {
             appSide.onMessage((msg) => {
                 if (msg?.k === 'start') {
                     const app = apps[msg.module];
-                    if (app) void runApp(app, msg.init, false, appSide, stubFs, { runner: stubRunner });
+                    if (app) void runApp(app, msg.init, false, appSide, stubFs, stubRunner);
                 }
             });
             return portLink(ch.port1);

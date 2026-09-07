@@ -1,7 +1,7 @@
 import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
-import type { App, EditorSession } from '../interface';
+import type { App, AppInit } from '../interface';
 import { type EditorServer, startEditorServer } from './server/editor-server';
 import { type ClientMeta, createPortTransport } from './server/transport-server';
 
@@ -12,8 +12,8 @@ import { type ClientMeta, createPortTransport } from './server/transport-server'
 // Engine RUNTIME is reached only via env.runner.import (env flags must be set
 // before engine modules evaluate); statics are leaf utilities bundled into this
 // entry at engine build.
-const server: App = async (env) => {
-    const cfg = env.init as EditorSession;
+const server: App<AppInit> = async (env) => {
+    const cfg = env.init;
 
     const fs = env.fs;
     const runner = env.runner;
@@ -37,7 +37,7 @@ const server: App = async (env) => {
     // the pipeline serves once its first bake is done: from here on src/generated/* and
     // resources/server/* are the real ones.
     env.progress('waiting for bake');
-    await env.connect('pipeline');
+    await env.served('pipeline');
     mark('bake ready');
     env.progress('starting');
     await runner.import('src/generated/models.ts');

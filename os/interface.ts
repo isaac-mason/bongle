@@ -46,8 +46,10 @@ export type Filesystem = {
 // ── apps ─────────────────────────────────────────────────────────────────────
 
 /** an app: given its environment, do work. Returning ends it unless it holds a
- *  window, a listener, or a watcher. */
-export type App = (env: Env) => void | Promise<void>;
+ *  window, a listener, or a watcher. `TInit` is what the spawner hands it; the
+ *  engine's own apps take `AppInit`. Only the module loader deals in `unknown`,
+ *  because only it resolves an app by string at runtime. */
+export type App<TInit = unknown> = (env: Env<TInit>) => void | Promise<void>;
 
 /** a defined app: a module specifier the runner evaluates; its default export
  *  is the App. */
@@ -63,8 +65,10 @@ export type AppDefs = Record<string, AppDef>;
 
 export type ResolveDef = (ref: string) => Promise<AppDef | null>;
 
-/** what every auto-started app (and shell-opened window) receives as init. */
-export type EditorSession = {
+/** what the shell hands every app it starts. Not a "session": the pipeline bake is
+ *  headless and takes this too. It is the set of decisions the HOST has already made
+ *  that a realm cannot work out for itself. */
+export type AppInit = {
     user: { id: string; username: string };
     /** `file:///<path>` reads the project vfs; http(s) is fetched. */
     avatarUrl?: string;
@@ -90,8 +94,8 @@ export type Config = { server?: false | { maxPlayers: number } };
 export type PipelineReport = { config: Config | null };
 
 /** an app's whole syscall surface. */
-export type Env = {
-    readonly init: unknown;
+export type Env<TInit = unknown> = {
+    readonly init: TInit;
     /** aborts on shutdown. */
     readonly signal: AbortSignal;
     /** AWAITED teardown (flush-to-disk) — the OS holds shutdown for these. */
@@ -102,14 +106,18 @@ export type Env = {
     readonly runner: Runner;
     spawn(ref: string, init?: unknown): Process;
     connect(name: string, onMessage?: (m: unknown) => void, opts?: { signal?: AbortSignal }): Promise<Channel>;
+    /** side-effect-free readiness: resolves once `name` is served, WITHOUT opening a
+     *  connection. `connect(name)` used to stand in for this, which left the waiter
+     *  parked in the server's subscriber set for the life of the process. */
+    served(name: string, opts?: { signal?: AbortSignal }): Promise<void>;
     listen(name: string, onConnect: (conn: Channel, meta: ConnMeta) => ((m: unknown) => void) | void): Server;
     readonly surface?: Surface;
     log(...parts: unknown[]): void;
     err(...parts: unknown[]): void;
-    /** emit a STRUCTURED status (distinct from log lines) — a boot phase today,
-     *  richer later. The host reflects it (task manager / a phase chip); the OS
-     *  keeps the latest on the process (see ProcInfo.progress). */
-    progress(status: unknown): void;
+    /** the process's current phase, as one short human string ('baking assets').
+     *  Distinct from log lines: this REPLACES, it doesn't append. The host reflects
+     *  it (task manager / phase chip) and the OS keeps the latest on the process. */
+    progress(status: string): void;
     /** receive stdin written to this process by the operator (OS.stdin). An app
      *  that never calls this simply never reads stdin. */
     onStdin(cb: (data: string | Uint8Array) => void): void;
@@ -138,8 +146,8 @@ export type ProcInfo = {
     state: 'running' | 'stopping';
     serves: string[];
     surface: boolean;
-    /** the latest structured status the process emitted via env.progress. */
-    progress?: unknown;
+    /** the latest phase the process emitted via env.progress. */
+    progress?: string;
 };
 
 export type ConnEndpoint = number | 'shell' | 'peer';
@@ -232,10 +240,10 @@ export type IO = {
     /** a runner conduit keyed to this process's module graph, transferred in
      *  the start message. */
     openRunner(ref: string, pid: number): MessagePort;
-    /** an fsrpc conduit for this process's disk, or null to open the local
-     *  project disk in the shim. A guest OS returns a port served from the
-     *  host's fs (over the relay); a local OS returns null (OPFS in-shim). */
-    openFs?(ref: string, pid: number): MessagePort | null;
+    /** an fsrpc conduit for this process's disk. A guest OS serves one from the
+     *  host's fs over the relay; a LOCAL OS omits this method entirely and the shim
+     *  opens the project disk itself (OPFS). */
+    openFs?(ref: string, pid: number): MessagePort;
     mount(win: Window): void;
     stdout(ref: string, pid: number, line: string, isErr: boolean): void;
 };
