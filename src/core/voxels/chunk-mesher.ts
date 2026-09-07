@@ -1356,6 +1356,11 @@ function packQuadMeta(aoPacked: number): number {
     return aoPacked & 0xffff;
 }
 
+/** all 4 corners at full brightness (`round((1.0 - 0.5) * 30)` = 15 each).
+ *  used by quads whose AO neighbourhood is meaningless because they sit
+ *  inside a solid until a vertex animation pulls them out of it. */
+const AO_PACKED_UNOCCLUDED = 0xffff;
+
 /** convert a chunk-local position component (voxels, [0..16]) to u8.
  *  scale = 255/16 so v=0 → 0 and v=16 → 255 exactly, chunk-top
  *  boundary meets the next chunk's origin with no sub-pixel seam. VS
@@ -1758,8 +1763,13 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         // liquid neighbours don't cull cube faces, they
                         // occupy partial volume so the cube face stays
                         // visible through the empty band.
+                        // a solid only hides the face if it shares this
+                        // block's animType: differing types displace by
+                        // different amounts in the shader, so the face has
+                        // to survive as the cover for the sliver that opens
+                        // when they separate. two static blocks are 0 === 0.
                         if (neighborFluidGroup === 0) {
-                            if (neighborCull === CULL_SOLID) continue;
+                            if (neighborCull === CULL_SOLID && animTable[neighborId]! === animType) continue;
                             if (
                                 neighborCull === CULL_SELF &&
                                 myCull === CULL_SELF &&
@@ -1767,6 +1777,13 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             )
                                 continue;
                         }
+
+                        // face survived a solid neighbour only because the two
+                        // animate differently: it sits buried in that solid at
+                        // rest, so its own cell lights it and nothing occludes
+                        // it. sampling the neighbour would bake in the solid's
+                        // black interior and show up the moment it separates.
+                        const coversAnimSeam = neighborFluidGroup === 0 && neighborCull === CULL_SOLID;
 
                         const facing = FACE_TO_FACING[face]!;
                         const target = quadScratch[passBase + facing]!;
@@ -1857,7 +1874,9 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         const ao1Bits = Math.round((ao1 - 0.5) * 30) | 0;
                         const ao2Bits = Math.round((ao2 - 0.5) * 30) | 0;
                         const ao3Bits = Math.round((ao3 - 0.5) * 30) | 0;
-                        const aoPacked = ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
+                        const aoPacked = coversAnimSeam
+                            ? AO_PACKED_UNOCCLUDED
+                            : ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
 
                         const faceVertBase = face * 12;
                         const faceUvBase = uvStateBase + face * 8;
@@ -1896,7 +1915,16 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         if (emissiveTable[stateId]!) {
                             emitQuadLightEmissive(target, quadIdx);
                         } else {
-                            emitQuadLightSmooth(target, quadIdx, slabIdx, face, 1, CUBE_VERT_CORNER_PICKS, metaWord, cullTable);
+                            emitQuadLightSmooth(
+                                target,
+                                quadIdx,
+                                slabIdx,
+                                face,
+                                coversAnimSeam ? 0 : 1,
+                                CUBE_VERT_CORNER_PICKS,
+                                metaWord,
+                                cullTable,
+                            );
                         }
                         target.quadCount++;
 
@@ -1960,6 +1988,11 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         const neighborEffectiveHeight = sameFluidAboveNeighbor ? 1 : (surfaceHeightTable[neighborId] ?? 0);
                         // ── face-aware cull for MODEL_LIQUID (Luanti) ─────
                         const sameFluid = myFluidGroup !== 0 && neighborFluidGroup === myFluidGroup;
+                        // same rule as the cube path: a solid only occludes
+                        // when it shares this block's animType, otherwise the
+                        // two separate at runtime and the face is the cover.
+                        const solidOccludes = neighborCull === CULL_SOLID && animTable[neighborId]! === animType;
+                        const coversAnimSeam = neighborCull === CULL_SOLID && !solidOccludes;
                         if (face === 2) {
                             // TOP (drawLiquidTop: drawn iff !top_is_same_liquid).
                             // merged into the same-fluid column above → hidden.
@@ -1967,12 +2000,12 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             // a lowered surface is visible through the gap. only a
                             // full surface flush against a solid is occluded.
                             if (sameFluidAbove) continue;
-                            if (effectiveHeight >= 1 && neighborCull === CULL_SOLID) continue;
+                            if (effectiveHeight >= 1 && solidOccludes) continue;
                         } else if (face === 3) {
                             // BOTTOM (draw_bottom): hidden against same fluid below
                             // (merged column) or a solid floor.
                             if (sameFluid) continue;
-                            if (neighborCull === CULL_SOLID) continue;
+                            if (solidOccludes) continue;
                         } else {
                             // SIDES (drawLiquidSides): a same-fluid side is the visible
                             // step down wherever OUR surface rises above the neighbour's,
@@ -1985,7 +2018,7 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             // The riser is clipped to [neighbourSurface, ourSurface] below.
                             if (sameFluid) {
                                 if (effectiveHeight <= neighborEffectiveHeight) continue;
-                            } else if (neighborCull === CULL_SOLID) {
+                            } else if (solidOccludes) {
                                 continue;
                             }
                         }
@@ -2109,7 +2142,9 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         const a1Bits = Math.round((a1 - 0.5) * 30) | 0;
                         const a2Bits = Math.round((a2 - 0.5) * 30) | 0;
                         const a3Bits = Math.round((a3 - 0.5) * 30) | 0;
-                        const aoPacked = a0Bits | (a1Bits << 4) | (a2Bits << 8) | (a3Bits << 12);
+                        const aoPacked = coversAnimSeam
+                            ? AO_PACKED_UNOCCLUDED
+                            : a0Bits | (a1Bits << 4) | (a2Bits << 8) | (a3Bits << 12);
 
                         const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
@@ -2148,7 +2183,7 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                                 liquidQuadIdx,
                                 slabIdx,
                                 face,
-                                1,
+                                coversAnimSeam ? 0 : 1,
                                 CUBE_VERT_CORNER_PICKS,
                                 metaWord,
                                 cullTable,
@@ -2186,10 +2221,16 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                     const quadCount = qShape.length;
                     for (let qi = 0; qi < quadCount; qi++) {
                         const cfDir = qCullFaceDir[qi]!;
+                        // same rule as the cube path: a solid neighbour only
+                        // hides this quad when it shares the block's animType.
+                        let coversAnimSeam = false;
                         if (cfDir !== FACE_DIR_NONE) {
                             const neighborId = _slab[slabIdx + FACE_STRIDE[cfDir]!]!;
                             const neighborCull = cullTable[neighborId] ?? CULL_NONE;
-                            if (neighborCull === CULL_SOLID) continue;
+                            if (neighborCull === CULL_SOLID) {
+                                if (animTable[neighborId]! === animType) continue;
+                                coversAnimSeam = true;
+                            }
                             if (
                                 neighborCull === CULL_SELF &&
                                 myCull === CULL_SELF &&
@@ -2392,7 +2433,9 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         const ao1Bits = Math.round((ao1 - 0.5) * 30) | 0;
                         const ao2Bits = Math.round((ao2 - 0.5) * 30) | 0;
                         const ao3Bits = Math.round((ao3 - 0.5) * 30) | 0;
-                        const aoPacked = ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
+                        const aoPacked = coversAnimSeam
+                            ? AO_PACKED_UNOCCLUDED
+                            : ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
 
                         const vBase = qi * 12;
                         const px0 = x + qVerts[vBase]!,
@@ -2452,7 +2495,9 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             // bake 4 × 2-bit per-vert corner picks via UV-hash
                             // for proper 4-corner Sodium smooth blend.
                             const meshFace = qFaceDir[qi]!;
-                            const meshOffset = qDepth[qi]! > 0.5 ? 0 : 1;
+                            // a seam cover sits inside the solid it borders, so
+                            // its own cell is the only sane light source.
+                            const meshOffset = coversAnimSeam || qDepth[qi]! > 0.5 ? 0 : 1;
                             const meshHashBase = meshFace * 4;
                             let picks = 0;
                             for (let v = 0; v < 4; v++) {
