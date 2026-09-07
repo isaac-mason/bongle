@@ -150,8 +150,15 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
                 const t0 = performance.now();
                 const r = await AssetPipeline.run(state.pipeline, { forceAll });
                 atlasHash = r.atlasHash;
+                // per-stage wall-clock alongside the total: the stages run in parallel behind
+                // `draw`, so the longest one is the bake's critical path.
+                const stages = Object.entries(r.timings)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([label, ms]) => `${label} ${ms.toFixed(0)}`)
+                    .join(', ');
                 state.driver.log?.(
-                    `bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`,
+                    `bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}` +
+                        (stages ? ` (${stages})` : ''),
                 );
                 state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
             } catch (err) {
