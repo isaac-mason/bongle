@@ -14,23 +14,28 @@ import { type ClientMeta, createPortTransport } from './server/transport-server'
 const server: App = async (env) => {
     const cfg = env.init as EditorSession;
 
-    // wait for the pipeline's first bake (src/generated/* exists) before booting.
-    env.progress('waiting for bake');
-    await env.connect('pipeline');
-    env.progress('loading');
-
     const fs = env.fs;
     const runner = env.runner;
 
+    // Everything that needs no bake output loads while the pipeline bakes: the engine, the user
+    // entry (a project that imports its generated barrel gets the empty one the shell seeds, and
+    // the bake's rewrite reaches it through HMR like any other edit).
+    env.progress('loading');
     const { env: rt } = await runner.import('bongle/env');
     rt.client = false;
     rt.server = true;
     rt.editor = true;
     await runner.import(cfg.entry ?? 'src/index.ts');
-    await runner.import('src/generated/models.ts');
     const engineServerModule = await runner.import('bongle/engine-server');
     const { EngineServer } = engineServerModule;
     const EngineServerEditor = await runner.import('bongle/engine-server-editor');
+
+    // the pipeline serves once its first bake is done: from here on src/generated/* and
+    // resources/server/* are the real ones.
+    env.progress('waiting for bake');
+    await env.connect('pipeline');
+    env.progress('starting');
+    await runner.import('src/generated/models.ts');
 
     const srv: EditorServer = await startEditorServer({
         fs,

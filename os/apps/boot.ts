@@ -55,9 +55,13 @@ const boot: App = async (env) => {
 
     env.progress('baking assets');
     spawn('pipeline');
+    // The server starts alongside the bake: its realm boot, engine import and user-entry
+    // evaluation need nothing from the pipeline, and it gates itself on 'pipeline' before the
+    // parts that read bake outputs (the generated barrel, resource loads). Spawning it only after
+    // the bake put that whole stretch on the critical path.
+    spawn('server');
     await env.connect('pipeline'); // resolves once the first bake is done (pipeline serves post-bake)
     env.progress('starting server');
-    spawn('server'); // the server self-gates on the pipeline again
 };
 
 export default boot;
