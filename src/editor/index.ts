@@ -112,7 +112,12 @@ import * as GridVisuals from './visuals/grid-visuals';
 import * as InspectMesh from './visuals/inspect-mesh';
 import * as PivotPoint from './visuals/pivot-point';
 import * as PrefabVisuals from './visuals/prefab-visuals';
-import { createSelectionMeshState, disposeSelectionMeshState, updateSelectionMeshes } from './visuals/selection-mesh';
+import {
+    createSelectionMeshState,
+    disposeSelectionMeshState,
+    setSelectionMeshesVisible,
+    updateSelectionMeshes,
+} from './visuals/selection-mesh';
 
 /* ── server-only module refs, populated by registerServer before any script inits ── */
 
@@ -706,6 +711,9 @@ script(
             // placement without a clean teardown. no-op in the common case.
             TransformTool.reconcilePlacementGhosts(transformToolState);
 
+            // hide through each visual's own visibility, not by writing
+            // `mesh.visible` behind its back: the two go out of sync and the
+            // overlay stays hidden once the view comes back.
             if (!editorViewActive) {
                 gridVisualsState.minorLines.visible = false;
                 gridVisualsState.majorLines.visible = false;
@@ -713,19 +721,15 @@ script(
                 gridVisualsState.zAxisLines.visible = false;
                 debugVisualsState.mesh.visible = false;
                 chunkBoundsState.lines.visible = false;
-                if (pivotPoint.mesh) pivotPoint.mesh.visible = false;
+                PivotPoint.setVisible(pivotPoint, false);
                 if (inspectMeshState.mesh) inspectMeshState.mesh.visible = false;
-                const sm = meshState;
-                if (sm.selectionMesh) sm.selectionMesh.visible = false;
-                if (sm.selectionOutline) sm.selectionOutline.visible = false;
-                if (sm.selectionEdges) sm.selectionEdges.visible = false;
-                if (sm.brushMesh) sm.brushMesh.visible = false;
-                if (sm.brushEdges) sm.brushEdges.visible = false;
-                if (sm.hoverOutline) sm.hoverOutline.visible = false;
+                setSelectionMeshesVisible(meshState, false);
                 const helper = transformToolState.gizmo.getHelper?.();
                 if (helper) (helper as { visible: boolean }).visible = false;
                 return;
             }
+
+            setSelectionMeshesVisible(meshState, true);
 
             // resolve the active POV camera once; tools read this for
             // raycasts, nudge basis, build/inspect projection. also patch

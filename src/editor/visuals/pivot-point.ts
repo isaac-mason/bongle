@@ -49,6 +49,14 @@ export function dispose(state: State): void {
     state.scene.remove(state.mesh);
 }
 
+/** show / hide the point, for callers that gate the whole editor view. keeps
+ *  `state.visible` in step with the mesh so the next update() isn't skipped. */
+export function setVisible(state: State, visible: boolean): void {
+    if (visible === state.visible) return;
+    state.mesh.visible = visible;
+    state.visible = visible;
+}
+
 /**
  * update the pivot point position and visibility each frame.
  *
@@ -57,10 +65,7 @@ export function dispose(state: State): void {
  * @param show     whether to show the point at all
  */
 export function update(state: State, position: Vec3, show: boolean): void {
-    if (show !== state.visible) {
-        state.mesh.visible = show;
-        state.visible = show;
-    }
+    setVisible(state, show);
     if (show) {
         state.mesh.position[0] = position[0];
         state.mesh.position[1] = position[1];

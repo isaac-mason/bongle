@@ -798,6 +798,13 @@ export type SelectionMeshState = {
     // single-block aabb outline around the exact hovered voxel, tight box.
     hoverOutline: Mesh | null;
     scene: Scene;
+    // editor-view gate, set by the caller. setMesh / setOutlineMesh reuse their
+    // Mesh across geometry swaps, so this is re-applied every frame: a
+    // `visible = false` written straight onto a mesh survives every rebuild
+    // short of a full destroy, which the brush only hits when the ray misses.
+    visible: boolean;
+    // second gate, stacked on `visible` for the hover outline alone.
+    hoverOutlineWanted: boolean;
     // track last updated data to avoid redundant rebuilds
     _lastSelection: Selection.Selection | null;
     // brush signature: a Selection ref when the brush is cell-based, or a
@@ -816,6 +823,8 @@ export function createSelectionMeshState(scene: Scene): SelectionMeshState {
         brushEdges: null,
         hoverOutline: null,
         scene,
+        visible: true,
+        hoverOutlineWanted: false,
         _lastSelection: null,
         _lastBrushSig: null,
         _lastHoverKey: '',
@@ -914,6 +923,25 @@ function setOutlineMesh(
         state.scene.add(mesh);
         state[which] = mesh;
     }
+}
+
+// push both gates onto the meshes. `visible` is the editor-view gate and
+// covers all six; the hover outline carries a second gate on top of it.
+function applyVisibility(state: SelectionMeshState): void {
+    const show = state.visible;
+    if (state.selectionMesh) state.selectionMesh.visible = show;
+    if (state.selectionOutline) state.selectionOutline.visible = show;
+    if (state.selectionEdges) state.selectionEdges.visible = show;
+    if (state.brushMesh) state.brushMesh.visible = show;
+    if (state.brushEdges) state.brushEdges.visible = show;
+    if (state.hoverOutline) state.hoverOutline.visible = show && state.hoverOutlineWanted;
+}
+
+/** show / hide every selection + brush overlay, for callers that gate the
+ *  whole editor view (play mode, a lens peek into a play room). */
+export function setSelectionMeshesVisible(state: SelectionMeshState, visible: boolean): void {
+    state.visible = visible;
+    applyVisibility(state);
 }
 
 export function updateSelectionMeshes(meshState: SelectionMeshState, state: EditRoomState, time: TimeResources): void {
@@ -1035,12 +1063,11 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterial(elapsedTime));
     }
 
-    // white hover outline pins down the focal cell within a multi-cell
-    // brush region. for single-cell brushes the brush mesh+edges already
-    // show the cell bounds (or the sub-unit AABB in the useAabbBrush path),
-    // so the outline would be redundant. tools without a brush (inspect,
-    // transform) render no hover affordance at all.
-    if (meshState.hoverOutline) {
-        meshState.hoverOutline.visible = hasBrush && brushBig;
-    }
+    // the hover outline pins down the focal cell within a multi-cell brush
+    // region. for single-cell brushes the brush mesh+edges already show the
+    // cell bounds (or the sub-unit AABB in the useAabbBrush path), so the
+    // outline would be redundant. tools without a brush (inspect, transform)
+    // render no hover affordance at all.
+    meshState.hoverOutlineWanted = hasBrush && brushBig;
+    applyVisibility(meshState);
 }
