@@ -58,11 +58,11 @@ const STANDALONE_BITRATE_KBPS = 128;
 /** atlas Opus bitrate (VBR). 96k is ~4x smaller than the old FLAC atlas and
  *  transparent for SFX; the atlas ships to every player, so size wins. */
 // Mono SFX is near-transparent around 48-64 kbps; 96k was a stereo-music number that
-// doubled the atlas for nothing audible. Complexity 8 keeps nearly all of libopus's
-// quality-per-bit at a fraction of complexity 10's encode time (the default, and the
-// whole bake's critical path before this).
+// doubled the atlas for nothing audible. Complexity 5 encodes the kit's 88 clips in half
+// the time of libopus's default 10 for byte-identical output at this bitrate (measured on
+// the real clips; the difference only appears at 96k+).
 const ATLAS_OPUS_BITRATE = 48_000;
-const ATLAS_OPUS_COMPLEXITY = 8;
+const ATLAS_OPUS_COMPLEXITY = 5;
 
 // folded into atlasHash so that a builder-format change invalidates any
 // on-disk atlas + manifest without the user having to nuke their cache.
@@ -183,6 +183,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
     // Resolve source bytes once, up front: they feed the content hash gate
     // (and, on rebuild, the decoder). A missing source is fatal (a declared
     // sound with no file can't be baked).
+    const tLoad = performance.now();
     const atlasSources = await loadSources(
         loader,
         all.filter((s) => !s.long),
@@ -191,6 +192,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
         loader,
         all.filter((s) => s.long),
     );
+    console.log(`[bongle] audio sources: ${all.length} files loaded in ${(performance.now() - tLoad).toFixed(0)}ms`);
 
     const atlasHash = await computeBucketHash(atlasSources, ATLAS_FORMAT_VERSION);
     const standaloneHash = await computeBucketHash(standaloneSources);
