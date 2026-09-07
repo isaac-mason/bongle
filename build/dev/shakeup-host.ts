@@ -24,8 +24,38 @@ export type ShakeupHostOptions = {
      *  `projectUrl` (the project-fs service worker's `/@project/<path>`); the file is already in the
      *  vfs, so nothing is emitted. Omit to leave `?url` unhandled. */
     assetUrl?: (path: string) => string;
+    /** Map a resolved `node_modules/**` module id to a URL the realm imports NATIVELY. When set, the
+     *  dev server transforms and serves ONLY user modules: every dependency resolves to its URL as an
+     *  external, the runner `import()`s it, and the browser parses, caches and dedupes it per realm.
+     *  The seed is packed with relative specifiers for exactly this (scripts/pack-vfs.mjs). In the
+     *  editor this is `projectUrl`, the same scheme `import.meta.url` already uses. Omit to serve
+     *  everything through the runner (tests, hosts without a module-serving fs). */
+    moduleUrl?: (path: string) => string;
     reportError?: (message: string) => void;
 };
+
+const NODE_MODULES = /(^|\/)node_modules\//;
+
+/** Externalize every dependency to a natively importable URL. Runs after normal resolution
+ *  (`this.resolve` skips this plugin), so package `exports`, extensions and the fs probe all apply
+ *  as usual; only the RESULT is redirected. Importers are always user modules or the realm itself
+ *  (`runner.import('bongle/env')`): a natively loaded module never calls back into the dev server,
+ *  its own imports are relative and the browser resolves them. Left alone: unresolvable specifiers
+ *  (surface as today), plugin-virtual ids (`\0...`), and anything outside node_modules. */
+function nativeModulesPlugin(moduleUrl: (path: string) => string): Plugin {
+    // The nested `this.resolve` re-runs every resolveId hook including this one (the dev server's
+    // ctx does not skip the caller), so the inner call is tagged through `custom` and declined here.
+    const SELF = 'bongle:native-modules';
+    return {
+        name: SELF,
+        async resolveId(spec, importer, extra) {
+            if (extra.custom?.[SELF]) return null;
+            const r = await this.resolve(spec, importer, { kind: extra.kind, isEntry: extra.isEntry, custom: { [SELF]: true } });
+            if (r === null || r.external || r.id.startsWith('\0') || !NODE_MODULES.test(r.id)) return r;
+            return { id: moduleUrl(r.id), external: true };
+        },
+    };
+}
 
 export type ShakeupBundlerHost = {
     /** The shared dev server (transform cache + graph). */
@@ -68,7 +98,11 @@ export function createShakeupBundlerHost(opts: ShakeupHostOptions): ShakeupBundl
         // `?worker` — bundled into a self-contained chunk via shakeup's OWN bundle() (no rolldown);
         // inline-vs-chunk is per-import (`?worker&inline`). The dev server has no output sink, so a
         // plain `?worker` falls back to an inline blob anyway (matching the old always-blob).
-        plugins: [worker({ plugins: transforms, jsx: jsx ? {} : undefined }), ...transforms],
+        plugins: [
+            ...(opts.moduleUrl ? [nativeModulesPlugin(opts.moduleUrl)] : []),
+            worker({ plugins: transforms, jsx: jsx ? {} : undefined }),
+            ...transforms,
+        ],
         // JSX HANDLING is keyed on the file extension (.tsx/.jsx) inside shakeup; this only carries
         // the lowering options (importSource, pure). `{}` takes the automatic-runtime defaults.
         jsx: jsx ? {} : undefined,

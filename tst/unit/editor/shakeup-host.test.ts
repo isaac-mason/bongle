@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createShakeupBundlerHost } from '../../../build/dev/shakeup-host';
 import { connectRealmPort, type RealmPort } from '../../../build/dev/shakeup-port';
 import { browserEvaluator, ensureProcessShim, makeImportMeta } from '../../../build/dev/shakeup-runner-host';
+import type { ModuleEvaluator } from 'shakeup';
 
 function portPair(): [RealmPort, RealmPort] {
     const a: RealmPort = { postMessage: (d) => queueMicrotask(() => b.onmessage?.({ data: d })), onmessage: null };
@@ -193,6 +194,85 @@ describe('createShakeupBundlerHost (full assembly, async fs)', () => {
             files['src/index.ts'] = "import { state } from 'pkg';\nstate.fromEntry = 'edited';";
             const updates = await host.server.handleChange('src/index.ts'); // what onFsChange fans
             expect(updates.length).toBeGreaterThan(0); // the graph knew the module under this key
+            host.close();
+        });
+    });
+
+    describe('moduleUrl: dependencies are imported natively, only user modules are served', () => {
+        const project = {
+            'node_modules/pkg/package.json': '{ "name": "pkg", "type": "module", "exports": { ".": "./index.js" } }',
+            'node_modules/pkg/index.js': 'export const state = { fromEntry: false };',
+            'src/index.ts': "import { state } from 'pkg';\nstate.fromEntry = true;\nexport const seen = state;",
+        };
+        const editorFs = (files: Record<string, string>): Fs => {
+            const norm = (id: string) => id.replace(/^\/+/, '');
+            return { read: async (id) => files[norm(id)] ?? null, exists: async (id) => norm(id) in files };
+        };
+        const moduleUrl = (path: string) => `https://app.test/@project/${path}`;
+
+        // The realm's native `import()`, recorded: hands back one shared instance per URL, the way a
+        // browser's module map does.
+        function recordingEvaluator(): { evaluator: ModuleEvaluator; imported: string[]; instances: Map<string, unknown> } {
+            const imported: string[] = [];
+            const instances = new Map<string, unknown>();
+            const evaluator: ModuleEvaluator = {
+                ...browserEvaluator,
+                async runExternalModule(spec) {
+                    imported.push(spec);
+                    let ns = instances.get(spec);
+                    if (ns === undefined) {
+                        ns = { state: { fromEntry: false } };
+                        instances.set(spec, ns);
+                    }
+                    return ns;
+                },
+            };
+            return { evaluator, imported, instances };
+        }
+
+        it('a user import of a package resolves to its URL and never enters the dev server graph', async () => {
+            const host = createShakeupBundlerHost({ fs: editorFs(project), jsx: false, isUserModule: () => false, moduleUrl });
+            const [bp, rp] = portPair();
+            host.connectRealm('client', bp);
+            const { evaluator, imported } = recordingEvaluator();
+            const env = connectRealmPort(rp, { name: 'client', evaluator, prepare: ensureProcessShim });
+
+            const ns = await env.import('src/index.ts');
+
+            expect(imported).toEqual(['https://app.test/@project/node_modules/pkg/index.js']); // resolved through `exports`, then redirected
+            expect((ns.seen as { fromEntry: boolean }).fromEntry).toBe(true); // the user module ran against the native namespace
+            expect(host.server.moduleIds()).toEqual(['src/index.ts']); // nothing under node_modules was transformed
+            host.close();
+        });
+
+        it('the realm and user code reach a package by ONE URL, so they share its instance', async () => {
+            const host = createShakeupBundlerHost({ fs: editorFs(project), jsx: false, isUserModule: () => false, moduleUrl });
+            const [bp, rp] = portPair();
+            host.connectRealm('client', bp);
+            const { evaluator, imported, instances } = recordingEvaluator();
+            const env = connectRealmPort(rp, { name: 'client', evaluator, prepare: ensureProcessShim });
+
+            await env.import('src/index.ts');
+            // the engine's boot order: the OS app imports a dependency by bare name AFTER user code did.
+            const direct = await env.import('pkg');
+
+            expect(new Set(imported).size).toBe(1);
+            expect(instances.size).toBe(1);
+            expect((direct.state as { fromEntry: boolean }).fromEntry).toBe(true);
+            host.close();
+        });
+
+        it('without moduleUrl, dependencies are served through the runner as before', async () => {
+            const host = createShakeupBundlerHost({ fs: editorFs(project), jsx: false, isUserModule: () => false });
+            const [bp, rp] = portPair();
+            host.connectRealm('client', bp);
+            const { evaluator, imported } = recordingEvaluator();
+            const env = connectRealmPort(rp, { name: 'client', evaluator, prepare: ensureProcessShim });
+
+            await env.import('src/index.ts');
+
+            expect(imported).toEqual([]);
+            expect(host.server.moduleIds()).toContain('node_modules/pkg/index.js');
             host.close();
         });
     });
