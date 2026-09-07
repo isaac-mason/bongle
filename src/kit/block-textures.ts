@@ -45,15 +45,80 @@ export const shortGrass = blockTexture('kit:short_grass', {
     src: asset('./assets/textures/short_grass.png', import.meta.url),
 });
 
-export const water = blockTexture('kit:water', {
-    src: [asset('./assets/textures/water_1.png', import.meta.url), asset('./assets/textures/water_2.png', import.meta.url)],
-    fps: 1.5,
+// one texture per growth stage, youngest first, matching the order the crop
+// preset indexes them by its `age` state. Spelled out rather than mapped, for
+// the same reason as the liquid frames above: the dist asset rewrite only sees
+// literal `asset()` paths.
+export const wheatStages = [
+    blockTexture('kit:wheat_1', { src: asset('./assets/textures/wheat_1.png', import.meta.url) }),
+    blockTexture('kit:wheat_2', { src: asset('./assets/textures/wheat_2.png', import.meta.url) }),
+    blockTexture('kit:wheat_3', { src: asset('./assets/textures/wheat_3.png', import.meta.url) }),
+    blockTexture('kit:wheat_4', { src: asset('./assets/textures/wheat_4.png', import.meta.url) }),
+];
+
+// liquids carry a separate top and side: the top ripples in place while the
+// side runs downward, which only reads correctly if the two faces animate
+// independently. four frames each, and the last frame leads back into the
+// first, so the loop is continuous.
+//
+// interpolate is ON. It does blend between frames, which puts colours on screen
+// that are not in the four-tone palette, but a liquid whose whole animation is a
+// scroll of one tile per cycle steps hard in four-pixel jumps without it. The
+// motion matters more here than palette purity, and the blend is between two
+// neighbouring frames of the same ramp, so it stays in the family.
+//
+// Speeds are slow on purpose. One full tile of travel per cycle is a long way,
+// so a frame rate that looks reasonable as a number is far too fast on screen:
+// at 6fps the water crossed a whole block in well under a second. 1fps with
+// interpolation gives four seconds of continuous drift per cycle, which is
+// what reads as a body of liquid rather than a conveyor belt.
+//
+// Every frame is spelled out as its own `asset('<literal>', import.meta.url)`.
+// The dist build rewrites and copies asset refs by matching that exact literal
+// form (scripts/bongle-asset-rewrite.ts), so a path built with a template
+// string is silently skipped: the file never lands in dist/assets and the ref
+// resolves against the chunk instead. It renders magenta, and only once built.
+export const waterTop = blockTexture('kit:water_top', {
+    src: [
+        asset('./assets/textures/water_top_1.png', import.meta.url),
+        asset('./assets/textures/water_top_2.png', import.meta.url),
+        asset('./assets/textures/water_top_3.png', import.meta.url),
+        asset('./assets/textures/water_top_4.png', import.meta.url),
+    ],
+    fps: 1,
     interpolate: true,
 });
 
-export const lava = blockTexture('kit:lava', {
-    src: [asset('./assets/textures/lava_1.png', import.meta.url), asset('./assets/textures/lava_2.png', import.meta.url)],
-    fps: 1.5,
+export const waterSide = blockTexture('kit:water_side', {
+    src: [
+        asset('./assets/textures/water_side_1.png', import.meta.url),
+        asset('./assets/textures/water_side_2.png', import.meta.url),
+        asset('./assets/textures/water_side_3.png', import.meta.url),
+        asset('./assets/textures/water_side_4.png', import.meta.url),
+    ],
+    fps: 1,
+    interpolate: true,
+});
+
+export const lavaTop = blockTexture('kit:lava_top', {
+    src: [
+        asset('./assets/textures/lava_top_1.png', import.meta.url),
+        asset('./assets/textures/lava_top_2.png', import.meta.url),
+        asset('./assets/textures/lava_top_3.png', import.meta.url),
+        asset('./assets/textures/lava_top_4.png', import.meta.url),
+    ],
+    fps: 1,
+    interpolate: true,
+});
+
+export const lavaSide = blockTexture('kit:lava_side', {
+    src: [
+        asset('./assets/textures/lava_side_1.png', import.meta.url),
+        asset('./assets/textures/lava_side_2.png', import.meta.url),
+        asset('./assets/textures/lava_side_3.png', import.meta.url),
+        asset('./assets/textures/lava_side_4.png', import.meta.url),
+    ],
+    fps: 1,
     interpolate: true,
 });
 
@@ -90,6 +155,12 @@ export const cobblestone = blockTexture('kit:cobblestone', {
 });
 export const sand = blockTexture('kit:sand', {
     src: asset('./assets/textures/sand.png', import.meta.url),
+});
+export const sandstoneTop = blockTexture('kit:sandstone_top', {
+    src: asset('./assets/textures/sandstone_top.png', import.meta.url),
+});
+export const sandstoneSide = blockTexture('kit:sandstone_side', {
+    src: asset('./assets/textures/sandstone_side.png', import.meta.url),
 });
 export const gravel = blockTexture('kit:gravel', {
     src: asset('./assets/textures/gravel.png', import.meta.url),

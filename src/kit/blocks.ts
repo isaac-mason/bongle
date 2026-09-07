@@ -62,6 +62,14 @@ export const dirtPath = block('kit:dirt_path', {
 
 export const sand = blockPreset.cube('kit:sand', { name: 'Sand', textures: tex.sand, sounds: soundPreset.sand });
 
+// sandstone's cut faces differ from its banded sides, so it takes the column
+// preset (end covers top and bottom) rather than a plain cube.
+export const sandstone = blockPreset.column('kit:sandstone', {
+    name: 'Sandstone',
+    textures: { end: tex.sandstoneTop, side: tex.sandstoneSide },
+    sounds: soundPreset.stone,
+});
+
 export const gravel = blockPreset.cube('kit:gravel', { name: 'Gravel', textures: tex.gravel, sounds: soundPreset.gravel });
 
 // ── Stone & cobblestone ─────────────────────────────────────────────
@@ -244,7 +252,7 @@ export const slime = block('kit:slime', {
 
 export const water = blockPreset.liquid('kit:water', {
     name: 'Water',
-    textures: tex.water,
+    textures: { top: { texture: tex.waterTop }, bottom: { texture: tex.waterTop }, sides: { texture: tex.waterSide } },
     viscosity: 0.5,
     translucent: true,
     levels: 8,
@@ -255,7 +263,7 @@ export const water = blockPreset.liquid('kit:water', {
 
 export const lava = blockPreset.liquid('kit:lava', {
     name: 'Lava',
-    textures: tex.lava,
+    textures: { top: { texture: tex.lavaTop }, bottom: { texture: tex.lavaTop }, sides: { texture: tex.lavaSide } },
     viscosity: 1.5,
     levels: 8,
     tint: blockPreset.LAVA_DEFAULT_TINT,
@@ -280,6 +288,14 @@ export const grassPlant1 = blockPreset.plant('kit:grass_plant_1', {
 export const grassPlant2 = blockPreset.plant('kit:grass_plant_2', {
     name: 'Tall Grass',
     textures: tex.grassPlant2,
+    sounds: soundPreset.leaves,
+});
+
+// four growth stages on the crop preset: green shoots through to ripe gold.
+// `wheat.stage(n)` places a specific stage, `wheat.ripe()` the last.
+export const wheat = blockPreset.crop('kit:wheat', {
+    name: 'Wheat',
+    textures: tex.wheatStages,
     sounds: soundPreset.leaves,
 });
 
