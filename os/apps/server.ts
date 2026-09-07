@@ -1,4 +1,5 @@
 import { SERVER_TICK_HZ } from 'bongle/engine-server';
+import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, EditorSession } from '../interface';
 import { type EditorServer, startEditorServer } from './server/editor-server';
@@ -16,6 +17,8 @@ const server: App = async (env) => {
 
     const fs = env.fs;
     const runner = env.runner;
+    const mark = bootMarks('server');
+    mark('realm up');
 
     // Everything that needs no bake output loads while the pipeline bakes: the engine, the user
     // entry (a project that imports its generated barrel gets the empty one the shell seeds, and
@@ -29,11 +32,13 @@ const server: App = async (env) => {
     const engineServerModule = await runner.import('bongle/engine-server');
     const { EngineServer } = engineServerModule;
     const EngineServerEditor = await runner.import('bongle/engine-server-editor');
+    mark('engine + user entry imported');
 
     // the pipeline serves once its first bake is done: from here on src/generated/* and
     // resources/server/* are the real ones.
     env.progress('waiting for bake');
     await env.connect('pipeline');
+    mark('bake ready');
     env.progress('starting');
     await runner.import('src/generated/models.ts');
 
@@ -45,6 +50,7 @@ const server: App = async (env) => {
         storage: engineServerModule.createInMemoryStorageDriver(),
         localAvatarUrl: cfg.avatarUrl,
     });
+    mark('server started');
     exposeDevtools('server', { fs, server: EngineServer, state: srv.state, app: srv.app, editor: EngineServerEditor });
 
     const transport = createPortTransport(srv.app, srv.state, srv.resolveAvatar);
@@ -79,6 +85,7 @@ const server: App = async (env) => {
     // driver); the server sees the meta's user when the dialer carries one (a
     // relay guest) and a synthesized dev meta otherwise.
     let nextConn = 1;
+    mark('game served');
     env.listen('game', (conn, meta) => {
         const connectionId = nextConn++;
         const clientMeta: ClientMeta = {

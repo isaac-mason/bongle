@@ -1,3 +1,4 @@
+import { bootMarks } from '../boot-marks';
 import type { App, Channel, Config, EditorSession, PipelineReport } from '../interface';
 
 // The asset-pipeline app. Evaluates the user graph through the runner, drives
@@ -8,6 +9,8 @@ const pipeline: App = async (env) => {
     const fs = env.fs;
     const runner = env.runner;
     const editorSession = env.init as EditorSession | undefined;
+    const mark = bootMarks('pipeline');
+    mark('realm up');
 
     // NEUTRAL env: client/server/editor all stay false. The bake is its own entry
     // (EditPipeline), not a headless client or server, and nothing it touches reads
@@ -22,8 +25,10 @@ const pipeline: App = async (env) => {
     } catch (err) {
         env.err('user code threw at eval — baking what registered:', String((err as Error).message));
     }
+    mark('user entry imported');
 
     const { EditPipeline } = await runner.import('bongle/engine-asset-pipeline');
+    mark('pipeline module imported');
     let config: Config | null = null;
     // held connections get the fresh report after every bake (the shell holds
     // one open as its config subscription). PipelineReport is the ABI shape.
@@ -36,7 +41,11 @@ const pipeline: App = async (env) => {
                 config = r.config;
                 for (const conn of subscribers) conn.send(report());
             },
-            log: (m: string) => env.log(m),
+            // mirrored to the console so the bake's stage timings sit next to the boot marks.
+            log: (m: string) => {
+                env.log(m);
+                console.log(`[pipeline] ${m}`);
+            },
             // a bake or icon-render failure is stderr, not another progress line — the
             // shell renders it as an error, attributed to this pid. Without it an icon
             // failure only reached this worker's console, which nobody opens.
@@ -61,6 +70,7 @@ const pipeline: App = async (env) => {
 
     env.progress('baking assets');
     await EditPipeline.run(session); // the first bake, awaited (bake-then-run)
+    mark('first bake done');
     env.log('pipeline: initial bake done');
     env.progress('ready');
 
