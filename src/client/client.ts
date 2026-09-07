@@ -363,17 +363,9 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
             state.net.pingMs = message.pingMs;
             break;
 
-        case 'activate_room': {
-            // A session that opens in play holds this one back rather than showing the
-            // edit room for a frame and swapping it out. The room is still joined and
-            // live — the editor hands off to its play room as it comes up, and that
-            // becomes the first thing on screen. Only ever the opening activation:
-            // once anything is active, Tab and friends route through here normally.
-            const activating = state.rooms.rooms.get(message.playerId);
-            if (activating && Rooms.holdsOpeningActivation(state.rooms, activating.roomMode)) break;
+        case 'activate_room':
             Rooms.setActivePlayer(state.rooms, state.net, message.playerId);
             break;
-        }
 
         case 'room_left':
             Rooms.applyRoomLeft(state, message);

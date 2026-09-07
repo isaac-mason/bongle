@@ -81,10 +81,6 @@ export type AppInit = {
      *  that will display those icons. Absent only outside that host, where the realm
      *  falls back to its own adapter check. */
     renderer?: 'webgpu' | 'webgl';
-    /** Open the client in its PLAY room instead of the edit room. For the public
-     *  play+peek sandbox: the visitor followed a link to a sketch to play it. The
-     *  editor is still there and Tab still reaches it. */
-    autoplay?: boolean;
 };
 
 /** the project's launch config — DEFINED here because it crosses the boundary:

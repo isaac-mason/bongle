@@ -19,14 +19,7 @@ import { installEditorClientListeners } from '../client/editor';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
-import {
-    LOCAL_ROOM_PREFIX,
-    opensInPlay,
-    resolveRoomCamera,
-    setActivePlayer,
-    setOpeningRoom,
-    stopLocalRoom,
-} from '../client/rooms';
+import { LOCAL_ROOM_PREFIX, resolveRoomCamera, setActivePlayer, stopLocalRoom } from '../client/rooms';
 import { useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -509,13 +502,6 @@ script(
         transformToolState.store = store;
         const nodeBodies = NodeBodies.init(store);
         useEditor.getState().registerEditRoomStore(room, store);
-
-        // Open in the play room. Here because the trait attaching IS the event "this
-        // room's editor is live" — no watcher, no race. Once-ness is the world's:
-        // nothing is active yet precisely because the opening activation was held.
-        if (opensInPlay() && room.roomMode === 'edit' && client.state!.rooms.activePlayerId === null) {
-            store.getState().play();
-        }
 
         // per-room stroke state for the brush-family tools (active flag,
         // last centre, accumulating ops, preview keys). lives here rather
@@ -1466,13 +1452,6 @@ export function invalidatePrefabIcons(ids?: readonly string[]): void {
         dropped = true;
     }
     if (dropped) useEditor.setState({ prefabIconUrls: next });
-}
-
-/** Open this session in the play room instead of the edit room: the public play+peek
- *  sandbox, where the visitor followed a link to a sketch to play it. The policy lives
- *  with room activation (client/rooms), which is what has to honour it. */
-export function setAutoplay(on: boolean): void {
-    setOpeningRoom(on ? 'play' : 'edit');
 }
 
 export function registerClient(state: EngineClient): void {
