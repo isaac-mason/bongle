@@ -55,6 +55,16 @@ export function createShakeupBundlerHost(opts: ShakeupHostOptions): ShakeupBundl
     ];
     const server = createDevServer({
         fs: opts.fs,
+        // Module ids are fs-RELATIVE (`src/index.ts`, `node_modules/bongle/dist/index.js`): that is
+        // what the realms import, what `onFsChange` fans, and what bare-package resolution yields.
+        // shakeup probes an importer-less entry against its resolver cwd first, and in a browser
+        // that cwd defaults to `/`, so the entry resolved to `/src/index.ts` and every dep reached
+        // from it to `/node_modules/...`. The OS apps are bare specifiers and resolve WITHOUT the
+        // slash, so one realm evaluated two instances of the engine core: user code registered into
+        // one registry and the engine booted the other (empty blocks, no config, dead HMR because
+        // `handleChange('src/index.ts')` never matched `/src/index.ts`). An empty cwd keeps the
+        // cwd-relative probe on the fs-relative id scheme.
+        resolve: { cwd: '' },
         // `?worker` — bundled into a self-contained chunk via shakeup's OWN bundle() (no rolldown);
         // inline-vs-chunk is per-import (`?worker&inline`). The dev server has no output sink, so a
         // plain `?worker` falls back to an inline blob anyway (matching the old always-blob).

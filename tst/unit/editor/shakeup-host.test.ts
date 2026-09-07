@@ -1,5 +1,5 @@
 import type { Fs } from 'shakeup';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createShakeupBundlerHost } from '../../../build/dev/shakeup-host';
 import { connectRealmPort, type RealmPort } from '../../../build/dev/shakeup-port';
 import { browserEvaluator, ensureProcessShim, makeImportMeta } from '../../../build/dev/shakeup-runner-host';
@@ -137,5 +137,63 @@ describe('createShakeupBundlerHost (full assembly, async fs)', () => {
         expect((await env.import('/m.ts')).v).toBe(2);
 
         host.close();
+    });
+
+    describe('fs-relative id scheme (the editor: OPFS ids like `src/index.ts`, no leading slash)', () => {
+        const realCwd = process.cwd;
+        afterEach(() => {
+            process.cwd = realCwd;
+        });
+
+        // The editor's opfsFs: ids are fs-relative, and a leading slash on a resolver candidate is
+        // stripped, so `/src/index.ts` and `src/index.ts` both read the same file.
+        function editorFs(files: Record<string, string>): Fs {
+            const norm = (id: string) => id.replace(/^\/+/, '');
+            return { read: async (id) => files[norm(id)] ?? null, exists: async (id) => norm(id) in files };
+        }
+
+        const project = {
+            'node_modules/pkg/package.json': '{ "name": "pkg", "type": "module", "main": "index.js" }',
+            'node_modules/pkg/index.js': 'export const state = { fromEntry: false };',
+            // the user entry: mutates the package singleton, the way `use(blocks)` registers into
+            // the engine's module-scope registry.
+            'src/index.ts': "import { state } from 'pkg';\nstate.fromEntry = true;",
+        };
+
+        it('a bare entry and a bare package share ONE module instance even when the resolver cwd is `/`', async () => {
+            // In a browser shakeup's resolver cwd defaults to `/`; the host must not let that leak a
+            // second, slash-prefixed id family into the graph.
+            process.cwd = () => '/';
+            const host = createShakeupBundlerHost({ fs: editorFs(project), jsx: false, isUserModule: () => false });
+            const [bp, rp] = portPair();
+            host.connectRealm('client', bp);
+            const env = connectRealmPort(rp, { name: 'client', evaluator: browserEvaluator, prepare: ensureProcessShim });
+
+            // the realm's boot order: the user entry first, then the engine reaching the same package
+            // by its bare name (bongle/os/apps/client importing bongle/engine-client).
+            await env.import('src/index.ts');
+            const pkg = await env.import('pkg');
+
+            expect(pkg.state).toEqual({ fromEntry: true }); // one instance: the entry's write is visible
+            expect(host.server.moduleIds().filter((id) => id.startsWith('/'))).toEqual([]);
+            expect(host.server.moduleIds()).toContain('src/index.ts');
+            expect(host.server.moduleIds()).toContain('node_modules/pkg/index.js');
+            host.close();
+        });
+
+        it('an fs-relative edit path matches the graph key, so a save reaches the realm', async () => {
+            process.cwd = () => '/';
+            const files = { ...project };
+            const host = createShakeupBundlerHost({ fs: editorFs(files), jsx: false, isUserModule: () => false });
+            const [bp, rp] = portPair();
+            host.connectRealm('client', bp);
+            const env = connectRealmPort(rp, { name: 'client', evaluator: browserEvaluator, prepare: ensureProcessShim });
+            await env.import('src/index.ts');
+
+            files['src/index.ts'] = "import { state } from 'pkg';\nstate.fromEntry = 'edited';";
+            const updates = await host.server.handleChange('src/index.ts'); // what onFsChange fans
+            expect(updates.length).toBeGreaterThan(0); // the graph knew the module under this key
+            host.close();
+        });
     });
 });
