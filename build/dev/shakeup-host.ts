@@ -43,14 +43,10 @@ const NODE_MODULES = /(^|\/)node_modules\//;
  *  its own imports are relative and the browser resolves them. Left alone: unresolvable specifiers
  *  (surface as today), plugin-virtual ids (`\0...`), and anything outside node_modules. */
 function nativeModulesPlugin(moduleUrl: (path: string) => string): Plugin {
-    // The nested `this.resolve` re-runs every resolveId hook including this one (the dev server's
-    // ctx does not skip the caller), so the inner call is tagged through `custom` and declined here.
-    const SELF = 'bongle:native-modules';
     return {
-        name: SELF,
+        name: 'bongle:native-modules',
         async resolveId(spec, importer, extra) {
-            if (extra.custom?.[SELF]) return null;
-            const r = await this.resolve(spec, importer, { kind: extra.kind, isEntry: extra.isEntry, custom: { [SELF]: true } });
+            const r = await this.resolve(spec, importer, { kind: extra.kind, isEntry: extra.isEntry });
             if (r === null || r.external || r.id.startsWith('\0') || !NODE_MODULES.test(r.id)) return r;
             return { id: moduleUrl(r.id), external: true };
         },

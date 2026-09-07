@@ -91,7 +91,7 @@ importers:
         version: 19.2.4(react@19.2.4)
       shakeup:
         specifier: github:isaac-mason/shakeup#main
-        version: https://codeload.github.com/isaac-mason/shakeup/tar.gz/224520e3d63556713381ee966a023a0c964f2832
+        version: https://codeload.github.com/isaac-mason/shakeup/tar.gz/71c7d9580cd9c8703ca8cfa2836ad20ebcf1036d
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
@@ -1988,8 +1988,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/224520e3d63556713381ee966a023a0c964f2832:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/shakeup/tar.gz/224520e3d63556713381ee966a023a0c964f2832}
+  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/71c7d9580cd9c8703ca8cfa2836ad20ebcf1036d:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/shakeup/tar.gz/71c7d9580cd9c8703ca8cfa2836ad20ebcf1036d}
     version: 0.0.0
 
   sharp@0.34.5:
@@ -3733,7 +3733,7 @@ snapshots:
 
   semver@7.8.5: {}
 
-  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/224520e3d63556713381ee966a023a0c964f2832: {}
+  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/71c7d9580cd9c8703ca8cfa2836ad20ebcf1036d: {}
 
   sharp@0.34.5:
     dependencies:
