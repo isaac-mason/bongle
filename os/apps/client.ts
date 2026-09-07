@@ -1,6 +1,7 @@
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
 import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface';
 import { createNetSim } from '../../build/dev/net-sim';
+import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, EditorSession, Filesystem, Runner } from '../interface';
 
@@ -73,6 +74,8 @@ export type ClientBootCaps = {
  *  transport + the debug net-sim, run the frame loop, and refresh on fs edits. */
 export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
     const { fs, runner, surface, user, log, err, progress } = caps;
+    const mark = bootMarks('client');
+    mark('realm up');
     try {
         // the client's own surface aesthetic (a black canvas backdrop) — the host
         // frame stays app-agnostic, so the app dresses its own surface.
@@ -100,6 +103,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         await runner.import(caps.entry ?? 'src/index.ts');
         const { EngineClient } = await runner.import('bongle/engine-client');
         const EngineClientEditor = await runner.import('bongle/engine-client-editor');
+        mark('engine + user entry imported');
 
         const driver: ClientDriver = {
             matchmake() {},
@@ -125,6 +129,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
 
         progress('booting');
         await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs) });
+        mark('editor ui mounted');
         // Everything from here reads bake outputs: the generated barrels (baked bin paths on the
         // model handles, scene payloads) and the atlases `load` fetches. The client is spawned
         // while the first bake runs, so this is where it waits for it; the engine import, init
@@ -132,6 +137,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         if (caps.bakeReady) {
             progress('waiting for bake');
             await caps.bakeReady;
+            mark('bake ready');
         }
         await runner.import('src/generated/models.ts');
         await runner.import('src/generated/scenes.ts');
@@ -139,6 +145,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         // closed by the driver's `started` from inside it.
         caps.graphics?.handshakeStarted();
         await EngineClient.load(state);
+        mark('loaded (device handshake + resources)');
         EngineClientEditor.watchRegistry(state);
         caps.onDispose?.(() => EngineClient.dispose(state));
 
@@ -169,6 +176,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         // isn't dropped before the handler exists.
         progress('joining game');
         game = await caps.connectGame((bytes) => netSim.receive(bytes, performance.now()));
+        mark('joined game');
 
         // frame loop: advance, drain the outbox onto the game transport.
         //
@@ -180,10 +188,12 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         let last = performance.now();
         let lastFrameError = '';
         let repeatedFrameErrors = 0;
+        let framesRun = 0;
         const frame = (now: number) => {
             requestAnimationFrame(frame);
             const dt = (now - last) / 1000;
             last = now;
+            if (framesRun++ === 1) mark('first frame rendered'); // the first call only schedules and runs frame 0's update
             try {
                 netSim.pump(now);
                 EngineClient.update(state, dt);
