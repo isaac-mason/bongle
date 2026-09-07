@@ -25,9 +25,9 @@ function opusHead(preskip: number): Uint8Array {
 }
 
 /** Encode mono s16 PCM (already at OPUS_SAMPLE_RATE) → WebM-Opus bytes. */
-export async function encodeOpusAtlasWebm(pcm: Int16Array, bitrate: number): Promise<Uint8Array> {
+export async function encodeOpusAtlasWebm(pcm: Int16Array, bitrate: number, complexity: number): Promise<Uint8Array> {
     await initOpus();
-    const { packets, preskip, totalSamples } = encodeOpusMono(pcm, bitrate);
+    const { packets, preskip, totalSamples } = encodeOpusMono(pcm, bitrate, complexity);
 
     const target = new BufferTarget();
     const output = new Output({ format: new WebMOutputFormat(), target });

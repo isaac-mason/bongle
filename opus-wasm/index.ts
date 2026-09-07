@@ -9,8 +9,8 @@ import createOpusModule from './dist/opus.mjs';
 type OpusModule = {
     _malloc(n: number): number;
     _free(p: number): void;
-    /** create a mono/48k VBR encoder at `bitrate`; returns the pre-skip (lookahead) or -1. */
-    _oe_init(bitrate: number): number;
+    /** create a mono/48k VBR encoder at `bitrate` and `complexity`; returns the pre-skip (lookahead) or -1. */
+    _oe_init(bitrate: number, complexity: number): number;
     /** encode one frame; returns the packet byte length (>=0) or a negative error. */
     _oe_encode(pcmPtr: number, frameSize: number, outPtr: number, cap: number): number;
     _oe_free(): void;
@@ -18,12 +18,13 @@ type OpusModule = {
     HEAP16: Int16Array;
 };
 
-/** 20ms mono frame @ 48k — Opus's standard frame size. */
+/** 20ms mono frame @ 48k — Opus's standard frame size. (60ms frames measured ~0.5%
+ *  smaller on SFX: not worth a format change.) */
 export const OPUS_FRAME_SIZE = 960;
 export const OPUS_SAMPLE_RATE = 48000;
 
 export type OpusEncoded = {
-    /** raw Opus packets, one per 20ms frame, in order — hand to the container muxer. */
+    /** raw Opus packets, one per frame, in order — hand to the container muxer. */
     packets: Uint8Array[];
     /** encoder lookahead in samples; goes in the WebM/OpusHead CodecPrivate so the
      *  decoder trims it (→ decoded length is exactly `totalSamples`). */
@@ -44,10 +45,10 @@ export async function initOpus(): Promise<void> {
 /** Encode mono s16 PCM (already at 48kHz) to Opus packets. Pads the tail so the
  *  container's end-trim decodes back to exactly `pcm.length` samples — keeping the
  *  atlas's per-clip offsets sample-accurate. Requires `initOpus()` first. */
-export function encodeOpusMono(pcm: Int16Array, bitrate = 96000): OpusEncoded {
+export function encodeOpusMono(pcm: Int16Array, bitrate: number, complexity: number): OpusEncoded {
     const m = mod;
     if (!m) throw new Error('[opus-wasm] not initialized — await initOpus() first');
-    const preskip = m._oe_init(bitrate);
+    const preskip = m._oe_init(bitrate, complexity);
     if (preskip < 0) throw new Error('[opus-wasm] encoder init failed');
 
     const N = pcm.length;

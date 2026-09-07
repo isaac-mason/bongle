@@ -57,13 +57,18 @@ const SAMPLE_RATE = 48000;
 const STANDALONE_BITRATE_KBPS = 128;
 /** atlas Opus bitrate (VBR). 96k is ~4x smaller than the old FLAC atlas and
  *  transparent for SFX; the atlas ships to every player, so size wins. */
-const ATLAS_OPUS_BITRATE = 96_000;
+// Mono SFX is near-transparent around 48-64 kbps; 96k was a stereo-music number that
+// doubled the atlas for nothing audible. Complexity 8 keeps nearly all of libopus's
+// quality-per-bit at a fraction of complexity 10's encode time (the default, and the
+// whole bake's critical path before this).
+const ATLAS_OPUS_BITRATE = 48_000;
+const ATLAS_OPUS_COMPLEXITY = 8;
 
 // folded into atlasHash so that a builder-format change invalidates any
 // on-disk atlas + manifest without the user having to nuke their cache.
 // bump this when the encode pipeline changes in a way that affects manifest
 // offsets or the atlas byte layout.
-const ATLAS_FORMAT_VERSION = 'v8-opus-webm';
+const ATLAS_FORMAT_VERSION = 'v9-opus-webm-48k';
 
 export type BuildAudioOptions = {
     /** the editor project filesystem the atlas/standalone/manifest/barrel
@@ -342,12 +347,20 @@ async function buildAtlas(decodeAudio: DecodeAudio, sources: LoadedSource[], fs:
     // Decodes fan out (WebCodecs in the browser, native in node — both hand off and return a
     // promise), but the ORDER of the result is load-bearing: the concatenation below is what each
     // clip's atlas offset is derived from. mapConcurrent keeps input order.
+    const tDecode = performance.now();
     const pcmChunks = await mapConcurrent(sources, BAKE_CONCURRENCY, async (s) =>
         downmixMono((await decodeAudio(s.bytes, SAMPLE_RATE)).channels),
     );
     const sampleCounts = pcmChunks.map((mono) => mono.length);
+    const pcm = concatInt16(pcmChunks);
 
-    const atlasBytes = await encodeOpusAtlasWebm(concatInt16(pcmChunks), ATLAS_OPUS_BITRATE);
+    const tEncode = performance.now();
+    const atlasBytes = await encodeOpusAtlasWebm(pcm, ATLAS_OPUS_BITRATE, ATLAS_OPUS_COMPLEXITY);
+    const tDone = performance.now();
+    console.log(
+        `[bongle] audio atlas: ${sources.length} clips, ${(pcm.length / SAMPLE_RATE).toFixed(1)}s, ` +
+            `decode ${(tEncode - tDecode).toFixed(0)}ms, encode ${(tDone - tEncode).toFixed(0)}ms, ${(atlasBytes.length / 1024).toFixed(0)}KB`,
+    );
     await fs.write(ATLAS_PATH, atlasBytes);
 
     const entries: AudioManifestAtlasEntry[] = [];

@@ -32,15 +32,23 @@ if [ ! -d opus ]; then
     mv "opus-$OPUS_VER" opus
 fi
 
+# No wasm SIMD: libopus has no wasm intrinsics paths (its SIMD is SSE/NEON, hence
+# --disable-intrinsics), and -msimd128 autovectorization measured no encode speedup
+# while adding ~48KB to the module.
+OPUS_CFLAGS="-O3"
+
 echo "building libopus.a (wasm)…"
 cd opus
-if [ ! -f .libs/libopus.a ]; then
+# rebuild when the flags change: the stamp records what .libs/libopus.a was built with.
+if [ ! -f .libs/libopus.a ] || [ "$(cat .buildflags 2>/dev/null)" != "$OPUS_CFLAGS" ]; then
+    [ -f Makefile ] && emmake make distclean >/dev/null 2>&1
     # --host forces autoconf into cross-compile mode (don't try to RUN wasm test
     # programs natively — the "cannot run C compiled programs" error otherwise).
     emconfigure ./configure --host=wasm32-unknown-emscripten \
         --disable-shared --disable-doc --disable-extra-programs \
-        --disable-stack-protector --disable-intrinsics CFLAGS="-O3" >/dev/null
+        --disable-stack-protector --disable-intrinsics CFLAGS="$OPUS_CFLAGS" >/dev/null
     emmake make -j4 >/dev/null
+    printf '%s' "$OPUS_CFLAGS" > .buildflags
 fi
 cd "$HERE"
 
