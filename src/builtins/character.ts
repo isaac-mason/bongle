@@ -74,6 +74,49 @@ type CharacterState = {
      *  consumers gate on `state.modelId` instead. */
     modelDef: ModelDef | null;
     breathPhase: number;
+    /** eased turn lean (rad, Z roll on the waist). tracks the body's yaw
+     *  rate; see `TURN_BANK_PER_RAD_S`. */
+    turnBank: number;
+    /** previous frame's visual body yaw (rad), the differencing input for
+     *  `turnBank`. `turnBankInit` gates the first frame, whose delta would
+     *  otherwise be a full-circle spike against the 0 default. */
+    previousVisualYaw: number;
+    turnBankInit: boolean;
+    /** peak downward speed (m/s) since the character last left the ground,
+     *  the landing reaction's strength input. Consumed and reset on
+     *  touchdown. Read off `cc.state.velocity`, which is the owner's own
+     *  integration and the synced value on a remote, so both sides react. */
+    fallSpeedPeak: number;
+    /** landing compression: 1 is a full-strength impact, negative is the
+     *  spring's rebound past rest (hips lift, legs stretch, feet stay put).
+     *  Spring position, integrated against `landingSpringVelocity`. */
+    landingSquash: number;
+    landingSpringVelocity: number;
+    /** decaying visual offset absorbing the sim's `bobPhase` re-anchors;
+     *  see `BOB_PHASE_CATCHUP_RATE`. Wrapped to ±π. */
+    bobPhaseCatchUp: number;
+    /** previous frame's raw `cc.state.bobPhase`, the differencing input that
+     *  spots those re-anchors. */
+    previousRawBobPhase: number;
+    /** the two idle head-drift clocks (rad); see `IDLE_DRIFT_YAW_RATE`. */
+    idleDriftYawPhase: number;
+    idleDriftPitchPhase: number;
+    /** seconds until this character's next idle weight shift. Counts down
+     *  only while idle, and is re-rolled per shift so characters stay out
+     *  of step with each other. */
+    idleBreakDelay: number;
+    /** progress through the current weight shift, 0 → 1; 1 means none is
+     *  running. */
+    idleBreakProgress: number;
+    /** which hip the next shift moves onto, ±1, alternating. */
+    idleBreakSide: number;
+    /** idle head drift, written by `updateIdleLife` and added by
+     *  `updateHeadOrientation`. Read a frame later than written (the head
+     *  is posed before the locomotion pass), which at these rates is
+     *  invisible, and stays 0 when `config.animation` is off since nothing
+     *  advances it. */
+    headDriftYaw: number;
+    headDriftPitch: number;
     landingCooldownRemaining: number;
     /** screen-door dither contribution from the "loading" placeholder
      *  state (intent.modelId not yet hydrated → placeholder mounted).
@@ -144,7 +187,14 @@ import {
 import { isOwner, onDispose, onFrame, onInit, query, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { dirty, sync, type TraitType, trait } from '../api/traits';
-import { getVisualWorldQuaternion, getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
+import {
+    getVisualWorldQuaternion,
+    getWorldPosition,
+    setPosition,
+    setQuaternion,
+    setScale,
+    setTransform,
+} from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import type { ModelDef } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
@@ -224,6 +274,142 @@ const LEG_SWING_MAX_RAD = degreesToRadians(55);
 const ARM_SWING_MAX_RAD = degreesToRadians(35);
 const SWING_SPEED_REF = 5.0;
 
+// weight-shift on the waist, both terms on the same `sin(bobPhase)` clock
+// as the limb swing. vertical is a dip only, never a rise: 0 at the top of
+// the bob and -WAIST_BOB_DROP at the trough (`sin(bobPhase) = −1`, the same
+// one the camera bob and the footstep detector use), so the torso settles
+// onto each step instead of floating. roll rocks the upper body toward the
+// leading leg, deepest exactly where the settle is.
+const WAIST_BOB_DROP = 0.03;
+const WAIST_STRIDE_ROLL_RAD = degreesToRadians(1);
+
+// stride reach at speed. `amp` saturates at `SWING_SPEED_REF`, which the
+// default walk already hits, so without this a sprint is a walk cycle
+// played faster: same reach, and the legs read as sliding rather than
+// driving. Scales the limb swing (not the waist terms) from 1 at walk
+// speed to this at sprint speed, so a run covers more ground per step.
+const SPRINT_SWING_BOOST = 1.15;
+
+// hip drop, the one vertical currency the crouch, the gait settle and the
+// landing reaction all pay into. The waist sinks by it and each leg both
+// sinks by it and scales its Y by `(hip - drop) / hip`, so the leg (pivoted
+// at the hip, geometry hanging to y=0) still exactly reaches the ground:
+// hips down, feet planted, leg visibly compressed. That's the squat the
+// 6bone rig can't get from a knee joint it doesn't have.
+//
+// Clamped per leg to a fraction of that leg's own rest hip height, so
+// stacking crouch + a hard landing can't invert the leg or fold the
+// character into the floor. A rig whose leg pivot isn't the hip (origin at
+// or below the foot, no length to compress) is posed by rotation alone.
+const MAX_HIP_DROP_FRACTION = 0.5;
+const MIN_HIP_HEIGHT = 0.05;
+
+// chest, on the `body` bone. Its siblings under the waist are the head and
+// the arms, so this leans the torso alone: the face keeps aiming true (no
+// head-look compensation needed, unlike the waist's crouch pitch) and the
+// arms keep swinging from the shoulders. Negative X pitches forward.
+//   - lean: grows with speed, walk baseline widening toward the run value.
+//   - heave: pitch oscillation at step rate, lagging the legs slightly so
+//     the torso reads as following the stride rather than driving it.
+//   - fold: extra forward pitch under the landing reaction, the torso
+//     absorbing the impact.
+const CHEST_WALK_LEAN_RAD = degreesToRadians(3);
+const CHEST_RUN_LEAN_RAD = degreesToRadians(9);
+const CHEST_HEAVE_RAD = degreesToRadians(4);
+const CHEST_HEAVE_PHASE_LAG = 0.5;
+const CHEST_LANDING_FOLD_RAD = degreesToRadians(14);
+// arms swing forward under the same impact (positive X swings a hanging arm
+// toward -Z, the facing direction), so the landing reads as a whole-body
+// absorb instead of the hips dipping under a rigid upper body.
+const LANDING_ARM_RAISE_RAD = degreesToRadians(16);
+
+// landing reaction. Impact strength is the peak fall speed since takeoff,
+// ramped from MIN (below it, stepping off a slab does nothing) to REF (a
+// full-strength compression). The floor is low on purpose: every jump bobs,
+// including a hop on the spot, which lands at about `jumpSpeed` = 7 m/s and
+// so reads at ~0.7. MIN is there to keep stepping off a slab from twitching,
+// not to reserve the reaction for real falls; anything from height saturates.
+//
+// Strength enters the damped spring as a *velocity impulse*, not a position:
+// the hips travel down over ~0.1s, bottom out, and swing back up, which is
+// the bob a body actually does. Setting the position instead would put the
+// character at full compression on the impact frame and animate only the
+// recovery, reading as a teleport. The rebound carries slightly past rest,
+// where the legs stretch rather than lift because the feet stay pinned.
+// IMPULSE is scaled so full strength peaks at ~1: for x'' = −kx − cx' the
+// peak of an impulse response is v0·0.046 at this stiffness and damping.
+// The spring step's delta is capped: a long frame would integrate to
+// nonsense at this stiffness.
+const LANDING_MIN_SPEED = 2;
+const LANDING_REF_SPEED = 9;
+const LANDING_DROP = 0.22;
+const LANDING_SPRING_STIFFNESS = 120;
+const LANDING_SPRING_DAMPING = 13;
+const LANDING_SPRING_IMPULSE = 22;
+const LANDING_SPRING_MAX_VELOCITY = 33;
+const LANDING_REBOUND_LIMIT = -0.35;
+const LANDING_SPRING_MAX_STEP = 1 / 30;
+
+// `bobPhase` is re-anchored hard by the controller (jammed to FOOT_PHASE on
+// landing / liquid entry, to 0 when you stop) to keep the footstep cadence
+// exact. Presentation can't take that as a step: a phase jump teleports the
+// legs mid-swing. So any implausible jump in the sim phase is absorbed into
+// a decaying visual offset, wrapped to ±π since the swing is 2π-periodic,
+// and the legs glide into the new cadence over ~150ms. The sim phase and
+// therefore the footstep bucket detector are untouched.
+const BOB_PHASE_MAX_ADVANCE_PER_S = 25;
+const BOB_PHASE_CATCHUP_RATE = 9;
+
+// idle life. Standing still is where a character most reads as a prop, so
+// three things run only there: the breath (already driving the arm tilt)
+// also lifts the waist and expands the chest, the head drifts on two slow
+// non-harmonic clocks so it wanders instead of ticking, and every few
+// seconds the character shifts its weight onto one hip.
+//
+// All of it scales by `idle`, 1 when stationary and 0 by IDLE_SPEED_REF, so
+// it fades out the instant you walk rather than fighting the gait, and is
+// off entirely in the air. The weight-shift timer only counts down while
+// idle, otherwise a long walk would burn through the delay and fire a shift
+// the moment you stopped.
+const IDLE_SPEED_REF = 0.6;
+const IDLE_BREATH_RISE = 0.009;
+const IDLE_BREATH_CHEST_RAD = degreesToRadians(1.2);
+// two clocks rather than one, at a deliberately non-harmonic ratio: the
+// head traces a slow open path instead of retracing one line. Each wraps at
+// its own 2π, so neither jumps when the other does.
+const IDLE_DRIFT_YAW_RATE = 0.55;
+const IDLE_DRIFT_PITCH_RATE = 0.34;
+const IDLE_HEAD_DRIFT_YAW_RAD = degreesToRadians(3);
+const IDLE_HEAD_DRIFT_PITCH_RAD = degreesToRadians(1.5);
+// weight shift: waist rolls and slides onto one hip, alternating sides,
+// eased 0 → 1 → 0 across the move. The delay is per character and random,
+// so a crowd doesn't shift in unison; it's client-local and unsynced,
+// nobody can tell that two viewers see the same character shift at
+// different moments.
+const IDLE_BREAK_MIN_DELAY = 4;
+const IDLE_BREAK_MAX_DELAY = 9;
+const IDLE_BREAK_DURATION = 1.6;
+const IDLE_SHIFT_ROLL_RAD = degreesToRadians(2.5);
+const IDLE_SHIFT_LATERAL = 0.02;
+
+/** scratch for `updateIdleLife`'s four outputs; one struct reused per call
+ *  rather than an allocation per character per frame. */
+const _idlePose = { rise: 0, chestPitch: 0, roll: 0, lateral: 0 };
+
+function nextIdleBreakDelay(): number {
+    return IDLE_BREAK_MIN_DELAY + Math.random() * (IDLE_BREAK_MAX_DELAY - IDLE_BREAK_MIN_DELAY);
+}
+
+// turn bank. body yaw rate (rad/s) → outward-to-inward lean, like a
+// bike: turning left rolls the torso left. derived from the *visual*
+// body yaw rather than `cc.state.bodyYaw` so owner and remote read the
+// same interpolated signal. scaled by the swing amp so a mouse flick
+// while standing still doesn't lean the body, and eased so the lean
+// builds and releases instead of tracking per-frame yaw jitter.
+const TURN_BANK_PER_RAD_S = 0.1;
+const TURN_BANK_MAX_RAD = degreesToRadians(10);
+const TURN_BANK_RESPONSE_RATE = 8;
+
 // arm outward tilt (Z roll), minecraft-style. small baseline + slow
 // sine on top of it (~breathing). idle stays subtle; sprinting widens
 // both the baseline and the breathing oscillation.
@@ -254,6 +440,8 @@ const CROUCH_WAIST_DROP = 0.15;
 const CROUCH_WAIST_BACK = 0.1;
 
 const _waistPos: Vec3 = [0, 0, 0];
+const _legPos: Vec3 = [0, 0, 0];
+const _legScale: Vec3 = [1, 1, 1];
 
 // rotation axes for limb decomposition, X is the forward/back swing
 // axis (pitch), Z is the outward-tilt axis (roll). compose as `Qx · Qz`
@@ -324,6 +512,23 @@ export const CharacterTrait = trait(
             modelId: null,
             modelDef: null,
             breathPhase: 0,
+            turnBank: 0,
+            previousVisualYaw: 0,
+            turnBankInit: false,
+            fallSpeedPeak: 0,
+            landingSquash: 0,
+            landingSpringVelocity: 0,
+            bobPhaseCatchUp: 0,
+            previousRawBobPhase: 0,
+            // random from frame zero, so characters that spawn together
+            // don't shift their weight in lockstep on the first cycle.
+            idleDriftYawPhase: Math.random() * TAU,
+            idleDriftPitchPhase: Math.random() * TAU,
+            idleBreakDelay: nextIdleBreakDelay(),
+            idleBreakProgress: 1,
+            idleBreakSide: 1,
+            headDriftYaw: 0,
+            headDriftPitch: 0,
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: null,
@@ -520,10 +725,10 @@ script(
                 // from the synced `cc.input.look` + the synced player
                 // transform yaw. independent of `t.config.animation`; head
                 // tracking is a controller affordance, not a swing clip.
-                updateHeadOrientation(t.state.nodes, cc, transform);
+                updateHeadOrientation(t, cc, transform);
 
                 // arm/leg swing. per-character opt-out via `t.config.animation`.
-                if (t.config.animation) driveProceduralLocomotion(t, cc, delta);
+                if (t.config.animation) driveProceduralLocomotion(t, cc, transform, delta);
 
                 // ── footstep sfx + dust vfx ────────────────────────────
                 if (t.state.landingCooldownRemaining > 0) {
@@ -609,8 +814,8 @@ script(
  *  pitch so the face still aims at the world look direction. Small-angle
  *  approximation, pitch and head yaw don't commute, but at ±28°/±60° the
  *  visual error is below the threshold of notice. */
-function updateHeadOrientation(nodes: RigNodes, cc: CharacterControllerTrait, transform: TransformTrait): void {
-    const headBone = nodes.head;
+function updateHeadOrientation(t: CharacterTrait, cc: CharacterControllerTrait, transform: TransformTrait): void {
+    const headBone = t.state.nodes.head;
     if (!headBone) return;
     const headTransform = getTrait(headBone, TransformTrait);
     if (!headTransform) return;
@@ -619,8 +824,10 @@ function updateHeadOrientation(nodes: RigNodes, cc: CharacterControllerTrait, tr
     // alpha-sampled yaw, and composing against the sim yaw leaves a residual
     // that wobbles by up to one tick of body yaw between fixed ticks.
     const bodyYaw = bodyYawFromQuat(getVisualWorldQuaternion(transform));
-    const headYaw = wrapPi(cc.input.look[1] - bodyYaw);
-    let pitch = cc.input.look[2] - Math.PI / 2 - cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD;
+    // idle drift is added to the *visual* head only; `cc.view` (the aim ray)
+    // is unmoved, so a drifting head can't nudge where the character shoots.
+    const headYaw = wrapPi(cc.input.look[1] - bodyYaw) + t.state.headDriftYaw;
+    let pitch = cc.input.look[2] - Math.PI / 2 - cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD + t.state.headDriftPitch;
     if (pitch < -HEAD_PITCH_LIMIT_RAD) pitch = -HEAD_PITCH_LIMIT_RAD;
     else if (pitch > HEAD_PITCH_LIMIT_RAD) pitch = HEAD_PITCH_LIMIT_RAD;
 
@@ -1015,13 +1222,16 @@ function unmountRig(playerNode: Node): void {
  * Per-frame procedural locomotion. Writes arm/leg bone rotations as a
  * composition of two small rotations:
  *
- *   - X swing (fore/aft): `sin(bobPhase + offset) * amp * MAX`. one leg
+ *   - X swing (fore/aft): `sin(bobPhase) * reach * MAX`. one leg
  *     cycle per foot-plant (2π of bobPhase). gait-correct alternation
  *     would want `bobPhase * 0.5` (one stride pair per cycle), but the
  *     faster scissor reads more energetic at the tradeoff that both
  *     legs return to the same position each plant.
- *     `amp = clamp(horizSpeed / SWING_SPEED_REF, 0, 1)` so a walk swings
- *     less than a sprint and a stationary character sits at rest.
+ *     `reach` is `amp = clamp(horizSpeed / SWING_SPEED_REF, 0, 1)`
+ *     (so a stationary character sits at rest) scaled up toward
+ *     `SPRINT_SWING_BOOST` as speed passes walk, since `amp` alone
+ *     saturates at the default walk speed and leaves a sprint no
+ *     further reach than a walk.
  *     opposing legs are π out of phase; arms counter-swing so the
  *     same-side arm and leg move opposite (matches real gait).
  *
@@ -1032,35 +1242,260 @@ function unmountRig(playerNode: Node): void {
  *     (`ARM_BREATH_RATE`) so it doesn't stall when the character is
  *     standing still and doesn't beat against gait frequencies.
  *
+ *   - waist weight-shift: a dip-only vertical settle plus a side-to-side
+ *     roll, both on the swing's own `sin(bobPhase)` clock and scaled by
+ *     `amp`, plus an eased lean into turns driven by the body's yaw
+ *     rate. All three ride the waist, which carries body + head + arms
+ *     while the legs stay rooted at the feet.
+ *
+ *   - hip drop (`MAX_HIP_DROP_FRACTION`): the crouch squat, the gait
+ *     settle and the landing spring sum into one sink that the waist and
+ *     both legs share, the legs compressing their Y to keep the feet on
+ *     the ground.
+ *
+ *   - chest (`CHEST_HEAVE_RAD`): speed lean + a per-step heave + a fold
+ *     under impact, on `body` so the head and arms stay out of it.
+ *
+ *   - idle life (`IDLE_SPEED_REF`): breathing, a slow head drift and a
+ *     periodic weight shift onto one hip, all fading out as soon as the
+ *     character moves.
+ *
  * Assumes canonical arm/leg bones are authored with identity rotation
  * (hanging at rest). If a future avatar bakes a non-identity rest into
  * its limbs, add a rest-quaternion compose step here.
  */
-function driveProceduralLocomotion(t: CharacterTrait, cc: CharacterControllerTrait, delta: number): void {
+function driveProceduralLocomotion(
+    t: CharacterTrait,
+    cc: CharacterControllerTrait,
+    transform: TransformTrait,
+    delta: number,
+): void {
     const nodes = t.state.nodes;
     const vx = cc.state.velocity[0];
     const vz = cc.state.velocity[2];
     const horizSpeed = Math.sqrt(vx * vx + vz * vz);
     const amp = Math.min(horizSpeed / SWING_SPEED_REF, 1);
 
-    const swing = Math.sin(cc.state.bobPhase) * amp;
+    // reach grows past walk speed even though `amp` is already saturated
+    // there; `sprintSpeed <= walkSpeed` (a game that disables sprint) makes
+    // the excess 0 rather than dividing by zero.
+    const speedRange = cc.config.sprintSpeed - cc.config.walkSpeed;
+    const sprintExcess = speedRange > 0 ? Math.min(Math.max((horizSpeed - cc.config.walkSpeed) / speedRange, 0), 1) : 0;
+    const reach = amp * (1 + (SPRINT_SWING_BOOST - 1) * sprintExcess);
+
+    const bobPhase = updateVisualBobPhase(t, cc, delta);
+    const bobSine = Math.sin(bobPhase);
+    const swing = bobSine * reach;
+
+    // breath advances on its own clock (it must not stall when the character
+    // stands still) and feeds both the idle pose below and the arm tilt.
+    t.state.breathPhase = (t.state.breathPhase + delta * ARM_BREATH_RATE) % TAU;
+    const idle = cc.state.grounded ? 1 - Math.min(horizSpeed / IDLE_SPEED_REF, 1) : 0;
+    updateIdleLife(t, delta, idle);
+
+    // vertical settle: 0 at the top of the bob, full drop at the trough.
+    const bobDrop = WAIST_BOB_DROP * amp * (1 - bobSine) * 0.5;
+    const strideRoll = bobSine * WAIST_STRIDE_ROLL_RAD * amp;
+    const turnBank = updateTurnBank(t, transform, amp, delta);
+    const landing = updateLandingSpring(t, cc, delta);
+
+    const crouchAmount = cc.state.crouchAmount;
+    // the breath lifts, so it comes off the drop.
+    const hipDrop = crouchAmount * CROUCH_WAIST_DROP + landing * LANDING_DROP + bobDrop - _idlePose.rise;
 
     // crouch lean rides `waist`, it carries body + head + arms in the flat rig,
     // so one tilt leans the whole upper body while the legs (separate roots) stay
     // planted. head-look cancels this same pitch so the face keeps aiming true.
-    applyLimb(nodes.waist, cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
-    applyWaistCrouchDrop(t, cc.state.crouchAmount);
+    applyLimb(nodes.waist, crouchAmount * CROUCH_BODY_PITCH_RAD, strideRoll + turnBank + _idlePose.roll);
+    applyWaistOffset(t, crouchAmount, hipDrop, _idlePose.lateral);
 
-    t.state.breathPhase = (t.state.breathPhase + delta * ARM_BREATH_RATE) % TAU;
+    // chest, on `body`, under the leaning waist and beside the head/arms.
+    const chestLean = CHEST_WALK_LEAN_RAD + (CHEST_RUN_LEAN_RAD - CHEST_WALK_LEAN_RAD) * sprintExcess;
+    const chestPitch =
+        -chestLean * amp +
+        Math.sin(bobPhase - CHEST_HEAVE_PHASE_LAG) * CHEST_HEAVE_RAD * amp -
+        landing * CHEST_LANDING_FOLD_RAD +
+        _idlePose.chestPitch;
+    applyLimb(nodes.body, chestPitch, 0);
+
     const baselineTilt = ARM_IDLE_TILT_RAD + (ARM_RUN_TILT_RAD - ARM_IDLE_TILT_RAD) * amp;
     const breathAmp = ARM_IDLE_BREATH_RAD + (ARM_RUN_BREATH_RAD - ARM_IDLE_BREATH_RAD) * amp;
     const tiltOut = baselineTilt + Math.sin(t.state.breathPhase) * breathAmp;
 
-    applyLimb(nodes.leg_left, swing * LEG_SWING_MAX_RAD, 0);
-    applyLimb(nodes.leg_right, -swing * LEG_SWING_MAX_RAD, 0);
+    // legs carry the hip drop themselves (position + Y scale) so the squat
+    // compresses instead of the torso sinking through them.
+    const restNodes = t.state.modelDef?.nodes;
+    applyLegPose(nodes.leg_left, restNodes?.leg_left, hipDrop, swing * LEG_SWING_MAX_RAD);
+    applyLegPose(nodes.leg_right, restNodes?.leg_right, hipDrop, -swing * LEG_SWING_MAX_RAD);
     // arms counter-swing fore/aft; tilt outward, opposite Z sign per side.
-    applyLimb(nodes.arm_left, -swing * ARM_SWING_MAX_RAD, -tiltOut);
-    applyLimb(nodes.arm_right, swing * ARM_SWING_MAX_RAD, tiltOut);
+    // the landing raise is symmetric, so it rides on top of the swing.
+    const armRaise = landing * LANDING_ARM_RAISE_RAD;
+    applyLimb(nodes.arm_left, -swing * ARM_SWING_MAX_RAD + armRaise, -tiltOut);
+    applyLimb(nodes.arm_right, swing * ARM_SWING_MAX_RAD + armRaise, tiltOut);
+}
+
+/** Advance and return the eased turn lean (rad, positive = lean left).
+ *
+ *  Yaw rate comes from differencing the *visual* body yaw frame to frame,
+ *  the same signal `updateHeadOrientation` composes against, so an owner
+ *  (yaw written by the controller) and a remote (yaw interpolated toward
+ *  the synced transform) lean off one source. `amp` gates it on actual
+ *  movement: standing still, body yaw follows the look direction, and a
+ *  mouse flick should not roll the torso. */
+function updateTurnBank(t: CharacterTrait, transform: TransformTrait, amp: number, delta: number): number {
+    const state = t.state;
+    const visualYaw = bodyYawFromQuat(getVisualWorldQuaternion(transform));
+
+    let target = 0;
+    if (state.turnBankInit && delta > 0) {
+        const yawRate = wrapPi(visualYaw - state.previousVisualYaw) / delta;
+        target = yawRate * TURN_BANK_PER_RAD_S * amp;
+        if (target > TURN_BANK_MAX_RAD) target = TURN_BANK_MAX_RAD;
+        else if (target < -TURN_BANK_MAX_RAD) target = -TURN_BANK_MAX_RAD;
+    }
+    state.previousVisualYaw = visualYaw;
+    state.turnBankInit = true;
+
+    state.turnBank += (target - state.turnBank) * (1 - Math.exp(-TURN_BANK_RESPONSE_RATE * delta));
+    return state.turnBank;
+}
+
+/** Advance and return the *visual* bob phase: the sim phase plus a decaying
+ *  offset that absorbs the controller's hard re-anchors (see
+ *  `BOB_PHASE_CATCHUP_RATE`).
+ *
+ *  A re-anchor is spotted generically, as an advance that runs backwards or
+ *  faster than any real gait could, rather than by re-deriving the specific
+ *  edges the controller anchors on. That covers the landing jam, the liquid
+ *  jam and the idle reset with one test, and a frame-hitch false positive is
+ *  harmless: it smooths a leg jump that would have been ugly anyway. */
+function updateVisualBobPhase(t: CharacterTrait, cc: CharacterControllerTrait, delta: number): number {
+    const state = t.state;
+    const rawPhase = cc.state.bobPhase;
+    const advance = rawPhase - state.previousRawBobPhase;
+    if (advance < 0 || advance > BOB_PHASE_MAX_ADVANCE_PER_S * delta) {
+        // hold the visual phase exactly where it was this frame, then let the
+        // offset decay to 0; wrapped because the swing can't tell 2π apart.
+        state.bobPhaseCatchUp = wrapPi(state.previousRawBobPhase + state.bobPhaseCatchUp - rawPhase);
+    }
+    state.previousRawBobPhase = rawPhase;
+    state.bobPhaseCatchUp *= Math.exp(-BOB_PHASE_CATCHUP_RATE * delta);
+    return rawPhase + state.bobPhaseCatchUp;
+}
+
+/** Advance the idle clocks and fill `_idlePose` with this frame's breathing,
+ *  weight shift and head drift, all scaled by `idle`.
+ *
+ *  Breathing reuses `breathPhase`, the clock already driving the arm tilt, so
+ *  the chest, the waist and the arms inhale together instead of on three
+ *  unrelated sines. The weight shift is a one-shot eased 0 → 1 → 0 arc on its
+ *  own timer; the timer only advances while idle, so a character that walks
+ *  for a minute doesn't bank a shift and fire it the instant it stops. */
+function updateIdleLife(t: CharacterTrait, delta: number, idle: number): void {
+    const state = t.state;
+
+    state.idleDriftYawPhase = (state.idleDriftYawPhase + delta * IDLE_DRIFT_YAW_RATE) % TAU;
+    state.idleDriftPitchPhase = (state.idleDriftPitchPhase + delta * IDLE_DRIFT_PITCH_RATE) % TAU;
+
+    if (idle > 0 && state.idleBreakProgress >= 1) {
+        state.idleBreakDelay -= delta * idle;
+        if (state.idleBreakDelay <= 0) {
+            state.idleBreakProgress = 0;
+            state.idleBreakSide = -state.idleBreakSide;
+            state.idleBreakDelay = nextIdleBreakDelay();
+        }
+    }
+    if (state.idleBreakProgress < 1) {
+        const advanced = state.idleBreakProgress + delta / IDLE_BREAK_DURATION;
+        state.idleBreakProgress = advanced < 1 ? advanced : 1;
+    }
+
+    const breath = Math.sin(state.breathPhase);
+    const shift = Math.sin(state.idleBreakProgress * Math.PI) * state.idleBreakSide * idle;
+
+    _idlePose.rise = breath * IDLE_BREATH_RISE * idle;
+    _idlePose.chestPitch = breath * IDLE_BREATH_CHEST_RAD * idle;
+    _idlePose.roll = shift * IDLE_SHIFT_ROLL_RAD;
+    _idlePose.lateral = shift * IDLE_SHIFT_LATERAL;
+
+    state.headDriftYaw = Math.sin(state.idleDriftYawPhase) * IDLE_HEAD_DRIFT_YAW_RAD * idle;
+    state.headDriftPitch = Math.sin(state.idleDriftPitchPhase) * IDLE_HEAD_DRIFT_PITCH_RAD * idle;
+}
+
+/** Track the fall, then spring on touchdown. Returns the compression: 1 at a
+ *  full-strength impact, negative on the rebound past rest.
+ *
+ *  Strength is the peak fall speed since takeoff rather than the velocity at
+ *  the moment of contact, which the solver has already clamped to 0 by the
+ *  time `grounded` flips. The landing edge is `cc.state`'s own
+ *  grounded/previousGrounded pair, the same one the footstep thud reads, so
+ *  the visual reaction and the impact sound can't disagree about what a
+ *  landing is. */
+function updateLandingSpring(t: CharacterTrait, cc: CharacterControllerTrait, delta: number): number {
+    const state = t.state;
+
+    if (cc.state.grounded) {
+        if (!cc.state.previousGrounded && state.fallSpeedPeak > LANDING_MIN_SPEED) {
+            const strength = Math.min((state.fallSpeedPeak - LANDING_MIN_SPEED) / (LANDING_REF_SPEED - LANDING_MIN_SPEED), 1);
+            // impulses add, so a landing mid-recovery deepens the bob instead
+            // of restarting it; capped so repeated touchdowns (a stair run,
+            // a flickering ground contact) can't stack into a fold.
+            state.landingSpringVelocity += strength * LANDING_SPRING_IMPULSE;
+            if (state.landingSpringVelocity > LANDING_SPRING_MAX_VELOCITY) {
+                state.landingSpringVelocity = LANDING_SPRING_MAX_VELOCITY;
+            }
+        }
+        state.fallSpeedPeak = 0;
+    } else {
+        const fallSpeed = -cc.state.velocity[1];
+        if (fallSpeed > state.fallSpeedPeak) state.fallSpeedPeak = fallSpeed;
+    }
+
+    const step = delta < LANDING_SPRING_MAX_STEP ? delta : LANDING_SPRING_MAX_STEP;
+    const accel = -LANDING_SPRING_STIFFNESS * state.landingSquash - LANDING_SPRING_DAMPING * state.landingSpringVelocity;
+    state.landingSpringVelocity += accel * step;
+    state.landingSquash += state.landingSpringVelocity * step;
+    if (state.landingSquash < LANDING_REBOUND_LIMIT) {
+        state.landingSquash = LANDING_REBOUND_LIMIT;
+        state.landingSpringVelocity = 0;
+    }
+    return state.landingSquash;
+}
+
+/** Pose one leg: rotation, plus the hip drop as a position sink and a
+ *  matching Y compression.
+ *
+ *  The leg pivots at the hip and its geometry hangs to y=0, so sinking the
+ *  node by `drop` and scaling Y by `(hip − drop) / hip` puts the foot back
+ *  exactly on the ground: the leg shortens by precisely the distance the
+ *  hips fell. Rest TRS comes from `modelDef.nodes` (the shared template) and
+ *  every frame writes from it, so nothing accumulates.
+ *
+ *  Rigs whose leg pivot isn't the hip have no length to work with; they get
+ *  the rotation and keep their rest position. */
+function applyLegPose(bone: Node | null, restBone: Node | undefined, hipDrop: number, xAngle: number): void {
+    applyLimb(bone, xAngle, 0);
+    if (!bone) return;
+    const transform = getTrait(bone, TransformTrait);
+    if (!transform) return;
+
+    const restTransform = restBone ? getTrait(restBone, TransformTrait) : null;
+    if (!restTransform) return;
+    const hipHeight = restTransform.position[1];
+    if (hipHeight <= MIN_HIP_HEIGHT) return;
+
+    const maxDrop = hipHeight * MAX_HIP_DROP_FRACTION;
+    const drop = hipDrop < maxDrop ? hipDrop : maxDrop;
+
+    _legPos[0] = restTransform.position[0];
+    _legPos[1] = hipHeight - drop;
+    _legPos[2] = restTransform.position[2];
+    setPosition(transform, _legPos);
+
+    _legScale[0] = restTransform.scale[0];
+    _legScale[1] = restTransform.scale[1] * ((hipHeight - drop) / hipHeight);
+    _legScale[2] = restTransform.scale[2];
+    setScale(transform, _legScale);
 }
 
 function applyLimb(bone: Node | null, xAngle: number, zAngle: number): void {
@@ -1073,14 +1508,17 @@ function applyLimb(bone: Node | null, xAngle: number, zAngle: number): void {
     setQuaternion(transform, _qLimbOut);
 }
 
-/** Sink + shift-back the `waist` bone by `crouchAmount · CROUCH_WAIST_DROP`
- *  in Y and `crouchAmount · CROUCH_WAIST_BACK` in +Z (avatars face -Z),
- *  relative to its rest position. Both halves are indexed lookups off the two parallel
+/** Sink the `waist` bone by `hipDrop` in Y, slide it by `lateral` in X (the
+ *  idle weight shift) and shift it back by `crouchAmount · CROUCH_WAIST_BACK`
+ *  in +Z (avatars face -Z), relative to its rest position. One writer for the waist's position, so the crouch
+ *  pose, the walk settle and the landing spring add through a single
+ *  `hipDrop` rather than fighting over the bone; the legs sink by the same
+ *  amount in `applyLegPose`. Both halves are indexed lookups off the two parallel
  *  maps: rest from `modelDef.nodes` (the shared asset's template) and the live bone
  *  from `state.nodes` (this character's own), neither of which searches the tree.
  *  Caller guarantees `state.modelId !== null` (skipped at the iteration
  *  guard), but the handle can still be null transiently, bail. */
-function applyWaistCrouchDrop(t: CharacterTrait, crouchAmount: number): void {
+function applyWaistOffset(t: CharacterTrait, crouchAmount: number, hipDrop: number, lateral: number): void {
     if (!t.state.modelDef) return;
     const restWaist = t.state.modelDef.nodes.waist;
     if (!restWaist) return;
@@ -1092,8 +1530,12 @@ function applyWaistCrouchDrop(t: CharacterTrait, crouchAmount: number): void {
     const waistTransform = getTrait(waistBone, TransformTrait);
     if (!waistTransform) return;
 
-    _waistPos[0] = restTransform.position[0];
-    _waistPos[1] = restTransform.position[1] - crouchAmount * CROUCH_WAIST_DROP;
+    // same ceiling the legs clamp to, off the waist's own rest height, so the
+    // pelvis can't sink past the legs that are carrying it.
+    const restHeight = restTransform.position[1];
+    const maxDrop = restHeight > 0 ? restHeight * MAX_HIP_DROP_FRACTION : hipDrop;
+    _waistPos[0] = restTransform.position[0] + lateral;
+    _waistPos[1] = restHeight - (hipDrop < maxDrop ? hipDrop : maxDrop);
     // avatars are authored facing -Z, so backward in local frame is +Z.
     _waistPos[2] = restTransform.position[2] + crouchAmount * CROUCH_WAIST_BACK;
     setPosition(waistTransform, _waistPos);
