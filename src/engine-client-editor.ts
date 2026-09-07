@@ -33,8 +33,9 @@ export { useEditor } from './editor/editor-store';
 // separate artifacts with separate bakes, so they invalidate separately.
 export { invalidatePrefabIcons, reloadBlockIconAtlas } from './editor/index';
 
-export async function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): Promise<void> {
+export async function setup(state: EngineClient, opts?: { sceneSource?: SceneSource; autoplay?: boolean }): Promise<void> {
     setSceneSource(opts?.sceneSource ?? null);
+    Editor.setAutoplay(opts?.autoplay ?? false);
     Editor.registerClient(state);
     mountEditUI(state.domElement);
     const g = window as unknown as { _state: EngineClient; _api: typeof api };

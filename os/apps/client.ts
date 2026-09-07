@@ -79,7 +79,7 @@ const client: App<AppInit> = async (env) => {
         });
 
         progress('booting');
-        await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs) });
+        await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs), autoplay: env.init.autoplay });
         mark('editor ui mounted');
         // Everything from here reads bake outputs: the generated barrels (baked bin paths on the
         // model handles, scene payloads) and the atlases `load` fetches. The client is spawned

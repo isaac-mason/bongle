@@ -503,6 +503,14 @@ script(
         const nodeBodies = NodeBodies.init(store);
         useEditor.getState().registerEditRoomStore(room, store);
 
+        // Hand off to the play room. Here because the trait attaching IS the event
+        // "this room's editor is live" — no watcher, and no once-guard to maintain:
+        // the body runs once per edit room and the flag is consumed.
+        if (autoplayPending && room.roomMode === 'edit') {
+            autoplayPending = false;
+            store.getState().play();
+        }
+
         // per-room stroke state for the brush-family tools (active flag,
         // last centre, accumulating ops, preview keys). lives here rather
         // than module scope so two joined edit rooms keep independent strokes.
@@ -1452,6 +1460,18 @@ export function invalidatePrefabIcons(ids?: readonly string[]): void {
         dropped = true;
     }
     if (dropped) useEditor.setState({ prefabIconUrls: next });
+}
+
+/** A session that opened to be PLAYED (the public play+peek sandbox) hands off to
+ *  its play room the moment the edit room's editor comes alive, so the visitor lands
+ *  in the game rather than an editor viewport with a button to find.
+ *
+ *  Read-and-cleared, because it describes the session's OPENING room: the edit room
+ *  stays alive underneath and Tab back to it has to stick. */
+let autoplayPending = false;
+
+export function setAutoplay(on: boolean): void {
+    autoplayPending = on;
 }
 
 export function registerClient(state: EngineClient): void {
