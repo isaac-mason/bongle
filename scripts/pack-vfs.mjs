@@ -48,13 +48,6 @@ const addTree = (zipPrefix, absDir, keep) => {
 // import/types → dist). avatars/ ships raw too (matches the published package's
 // `files`; the node-only sample-avatar fallback reads them off disk).
 addTree('bongle/dist', join(ROOT, 'dist'));
-addTree('bongle/avatars', join(ROOT, 'avatars'), (abs) => !abs.endsWith('.DS_Store'));
-if (existsSync(join(ROOT, 'README.md'))) addFile('bongle/README.md', join(ROOT, 'README.md'));
-// engine docs (the generated reader-facing markdown) → node_modules/bongle/docs,
-// so the in-editor markdown viewer can open them.
-for (const md of ['docs.md', 'api.md']) {
-    if (existsSync(join(ROOT, 'docs', md))) addFile(`bongle/docs/${md}`, join(ROOT, 'docs', md));
-}
 
 const real = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 // seed the real exports, minus the `source` condition (src isn't in the seed).
@@ -67,6 +60,57 @@ for (const [key, val] of Object.entries(real.exports)) {
         exportsForSeed[key] = rest;
     }
 }
+
+// ── the seed is the import CLOSURE of the exports, not the contents of dist/ ───
+// `build:incremental` (the dev.sh watcher) never empties dist, so every rebuild leaves its
+// predecessor's hashed chunks behind (`core-<hash>.js` ...). Packing the directory shipped all
+// of them: dozens of dead megabyte chunks written into OPFS on every boot. Walk the relative
+// imports from each export target instead and drop every dist js nothing reaches.
+await initLexer;
+{
+    const decoder = new TextDecoder();
+    const exportTargets = Object.values(exportsForSeed)
+        .map((t) => (typeof t === 'string' ? t : (t.import ?? t.default)))
+        .filter((t) => typeof t === 'string' && t.endsWith('.js'))
+        // `./kit/*` patterns name `./dist/kit-*.js`; expand against what dist holds.
+        .flatMap((t) => {
+            if (!t.includes('*')) return [`bongle/${t.replace(/^\.\//, '')}`];
+            const re = new RegExp(`^bongle/${t.replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`);
+            return Object.keys(files).filter((f) => re.test(f));
+        });
+    const reachable = new Set();
+    const pending = [...exportTargets];
+    while (pending.length > 0) {
+        const path = pending.pop();
+        if (reachable.has(path)) continue;
+        const bytes = files[path];
+        if (bytes === undefined) throw new Error(`pack-vfs: export target '${path}' is not in dist`);
+        reachable.add(path);
+        const [imports] = parseModule(decoder.decode(bytes), path);
+        for (const imp of imports) {
+            if (imp.n === undefined || imp.d === -2 || !imp.n.startsWith('.')) continue;
+            const dir = path.slice(0, path.lastIndexOf('/'));
+            const target = new URL(imp.n, `file:///${dir}/`).pathname.slice(1);
+            if (target.endsWith('.js')) pending.push(target);
+        }
+    }
+    let dropped = 0;
+    for (const path of Object.keys(files)) {
+        if (path.startsWith('bongle/dist/') && path.endsWith('.js') && !reachable.has(path)) {
+            delete files[path];
+            dropped++;
+        }
+    }
+    console.log(`bongle dist: ${reachable.size} modules reachable from the exports, ${dropped} unreachable chunk(s) dropped`);
+}
+addTree('bongle/avatars', join(ROOT, 'avatars'), (abs) => !abs.endsWith('.DS_Store'));
+if (existsSync(join(ROOT, 'README.md'))) addFile('bongle/README.md', join(ROOT, 'README.md'));
+// engine docs (the generated reader-facing markdown) → node_modules/bongle/docs,
+// so the in-editor markdown viewer can open them.
+for (const md of ['docs.md', 'api.md']) {
+    if (existsSync(join(ROOT, 'docs', md))) addFile(`bongle/docs/${md}`, join(ROOT, 'docs', md));
+}
+
 // `sideEffects` for the SEEDED manifest, which ships dist/ ONLY. The real package.json's array is
 // SRC-relative (`src/builtins/**`, `src/index.ts`, …) and matches nothing under dist/, so copying it
 // verbatim would declare the whole engine side-effect-free and let a game build drop the builtin
