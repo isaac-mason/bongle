@@ -230,6 +230,7 @@
         "@typescript/native-preview": "7.0.0-dev.20260421.2",
         "@webgpu/types": "^0.1.71",
         "dts-bundle-generator": "^9.5.1",
+        "es-module-lexer": "2.2.0",
         "happy-dom": "^20.8.9",
         "rolldown": "^1.1.2",
         "rolldown-plugin-dts": "^0.27.1",

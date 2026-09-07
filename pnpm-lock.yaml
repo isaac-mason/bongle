@@ -144,6 +144,9 @@ importers:
       dts-bundle-generator:
         specifier: ^9.5.1
         version: 9.5.1
+      es-module-lexer:
+        specifier: 2.2.0
+        version: 2.2.0
       happy-dom:
         specifier: ^20.8.9
         version: 20.8.9
