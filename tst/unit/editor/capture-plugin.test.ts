@@ -1,19 +1,23 @@
-import { compilePipeline, type PluginCtx, runTransform } from 'shakeup';
+import type { PluginCtx } from 'shakeup';
 import { describe, expect, it } from 'vitest';
 import { capturePlugin } from '../../../build/capture/capture-plugin';
 
-// Drive the capture plugin through shakeup's real plugin pipeline (compilePipeline + runTransform),
-// with a minimal ctx that only implements the `resolve` the plugin uses. One pipeline instance per
-// scenario = one shared registry, so modules run in order populate it for cross-module resolution.
-function makeRunner(resolveMap: Record<string, string> = {}) {
-    const pipeline = compilePipeline([capturePlugin()]);
-    const ctx = { resolve: async (spec: string) => ({ id: resolveMap[spec] ?? spec }) } as unknown as PluginCtx;
-    return async (id: string, code: string): Promise<string> => (await runTransform(pipeline, ctx, code, id)).code;
+// Drive the capture plugin's transform hook directly with a minimal ctx. The hook is pure
+// (parse + rewrite, no `this.resolve`), so a pipeline instance would add nothing here; the
+// dev-server composition is covered by capture-devserver.test.ts.
+function makeRunner() {
+    const hook = capturePlugin().transform;
+    const transform = typeof hook === 'function' ? hook : hook!.handler;
+    const ctx = {} as PluginCtx;
+    return async (id: string, code: string): Promise<string> => {
+        const out = await transform.call(ctx, code, id);
+        return typeof out === 'string' ? out : (out as { code: string }).code;
+    };
 }
 
 const L = (...lines: string[]) => lines.join('\n');
 
-describe('capturePlugin (through shakeup pipeline)', () => {
+describe('capturePlugin', () => {
     it('wraps a same-module script consumer', async () => {
         const run = makeRunner();
         const out = await run(

@@ -64,7 +64,7 @@ importers:
         version: 0.30.21
       math:
         specifier: canary
-        version: 1.0.0-canary-5e890142-20260816
+        version: 1.0.0-canary-70592f44-20260907
       mediabunny:
         specifier: ^1.50.8
         version: 1.50.8
@@ -91,7 +91,7 @@ importers:
         version: 19.2.4(react@19.2.4)
       shakeup:
         specifier: github:isaac-mason/shakeup#main
-        version: https://codeload.github.com/isaac-mason/shakeup/tar.gz/15654bdb312b1d02e42d82716699c9081ae15484
+        version: https://codeload.github.com/isaac-mason/shakeup/tar.gz/435ff5d42ff3304411eb755f89d7a7f9330b83c3
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
@@ -1775,11 +1775,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  math@1.0.0-canary-5e890142-20260816:
-    resolution: {integrity: sha512-NgU6UdqeRPnE0e9rbVsYCyPU1pwP3fiBq0V/oRl+HZK4syuB5y19fXvMhLGLow3My4UAkfwlVHL2A92xnp0n2w==}
-
-  math@1.0.0-canary-dbc0c0c5-20260823:
-    resolution: {integrity: sha512-4jnPsuc9Y8+NXviArjI8QZPZbzhQvCn2a/B5JeZsFhoe1pwzMcWBHHeeWcNzD2Wbp7YTRXsMkktp4UCqYBE2mg==}
+  math@1.0.0-canary-70592f44-20260907:
+    resolution: {integrity: sha512-PP8e7lEiq22AqqzLHdIe9I9mVU66c8AfqA1CGPE6u6MeDZk0nHVpoD1IZjNm75a7KJ7b4vFxmyxzKTWpuoNAKA==}
 
   mediabunny@1.50.8:
     resolution: {integrity: sha512-LgykLyQzhdpo0V2yw3UXmOpj+b4JAGdpHBwsPE6kjSt8Za0d1VllD+FV7EGHBcdV4+oHUAo+yrqbVAWxNSDCPQ==}
@@ -1988,8 +1985,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/15654bdb312b1d02e42d82716699c9081ae15484:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/shakeup/tar.gz/15654bdb312b1d02e42d82716699c9081ae15484}
+  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/435ff5d42ff3304411eb755f89d7a7f9330b83c3:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/shakeup/tar.gz/435ff5d42ff3304411eb755f89d7a7f9330b83c3}
     version: 0.0.0
 
   sharp@0.34.5:
@@ -3240,7 +3237,7 @@ snapshots:
 
   crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/fa50632cef4ac40cfc74e279b9f10f74e1120871:
     dependencies:
-      math: 1.0.0-canary-5e890142-20260816
+      math: 1.0.0-canary-70592f44-20260907
 
   crc-32@1.2.2: {}
 
@@ -3410,7 +3407,7 @@ snapshots:
 
   gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/bd06a8a7cbf8505bc0859853df18f0d31a1bc0b4:
     dependencies:
-      math: 1.0.0-canary-dbc0c0c5-20260823
+      math: 1.0.0-canary-70592f44-20260907
 
   graceful-fs@4.2.11: {}
 
@@ -3528,9 +3525,7 @@ snapshots:
 
   marked@14.0.0: {}
 
-  math@1.0.0-canary-5e890142-20260816: {}
-
-  math@1.0.0-canary-dbc0c0c5-20260823: {}
+  math@1.0.0-canary-70592f44-20260907: {}
 
   mediabunny@1.50.8:
     dependencies:
@@ -3735,7 +3730,7 @@ snapshots:
 
   semver@7.8.5: {}
 
-  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/15654bdb312b1d02e42d82716699c9081ae15484: {}
+  shakeup@https://codeload.github.com/isaac-mason/shakeup/tar.gz/435ff5d42ff3304411eb755f89d7a7f9330b83c3: {}
 
   sharp@0.34.5:
     dependencies:

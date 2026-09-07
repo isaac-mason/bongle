@@ -23,7 +23,7 @@
 // `'bongle'` — a user's own `function script(){}` never false-positives.
 
 import MagicString from 'magic-string';
-import { N, type Node, parse, walk } from 'shakeup';
+import { N, type Node, parse, walk } from 'shakeup/ast';
 
 const BONGLE_PACKAGE = 'bongle';
 
