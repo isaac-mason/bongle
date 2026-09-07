@@ -181,21 +181,57 @@ export const slimeTransparent = blockTexture('kit:slime_transparent', {
     src: asset('./assets/textures/slime_transparent.png', import.meta.url),
 });
 
-// multiply-tint a shared grayscale/near-white base to a target color at bake
-// time via `draw()`. one source image yields a whole color family (wool,
-// concrete) instead of a hand-drawn PNG per color: the base's luminance texture
-// (weave, grain) survives the multiply, only the hue changes. `r`/`g`/`b` are
-// the 0..255 target color.
-const multiplyTintedTexture = (id: string, baseHref: string, r: number, g: number, b: number) =>
+// How much surface contrast a tinted family keeps, in luminance levels, after
+// being tinted to any colour.
+//
+// A plain multiply cannot hold this at the dark end: black wool is tinted by
+// 48/255, so the base's contrast arrives divided by five and the block renders
+// as a flat dark square. The tint below adds back enough of each pixel's
+// deviation from the mean to reach the target again.
+//
+// The two families want very different numbers. Wool is cloth and should show
+// its weave. Concrete is poured and should not: Minecraft's own concrete spans
+// three luminance levels across a whole tile, so anything above single figures
+// reads as grain on what is meant to be a smooth slab.
+const WOOL_WEAVE = 30;
+const CONCRETE_WEAVE = 5;
+
+const multiplyTintedTexture = (id: string, baseHref: string, r: number, g: number, b: number, minWeave: number) =>
     blockTexture(id, {
         src: draw(
             (ctx, { base }, params) => {
                 ctx.drawImage(base, 0, 0);
-                ctx.globalCompositeOperation = 'multiply';
-                ctx.fillStyle = `rgb(${params.r}, ${params.g}, ${params.b})`;
-                ctx.fillRect(0, 0, 16, 16);
+                const image = ctx.getImageData(0, 0, 16, 16);
+                const px = image.data;
+                const luminance = (i: number) => 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+
+                let mean = 0;
+                let lowest = 255;
+                let highest = 0;
+                for (let i = 0; i < px.length; i += 4) {
+                    const value = luminance(i);
+                    mean += value;
+                    lowest = Math.min(lowest, value);
+                    highest = Math.max(highest, value);
+                }
+                mean /= px.length / 4;
+                const baseSpread = Math.max(1, highest - lowest);
+
+                // Add back exactly enough of the base's own contrast to reach the
+                // family's target, given how much the multiply already left.
+                const tintLuminance = 0.299 * params.r + 0.587 * params.g + 0.114 * params.b;
+                const afterMultiply = baseSpread * (tintLuminance / 255);
+                const gain = Math.max(0, params.minWeave - afterMultiply) / baseSpread;
+
+                for (let i = 0; i < px.length; i += 4) {
+                    const boost = (luminance(i) - mean) * gain;
+                    px[i] = Math.max(0, Math.min(255, (px[i] * params.r) / 255 + boost));
+                    px[i + 1] = Math.max(0, Math.min(255, (px[i + 1] * params.g) / 255 + boost));
+                    px[i + 2] = Math.max(0, Math.min(255, (px[i + 2] * params.b) / 255 + boost));
+                }
+                ctx.putImageData(image, 0, 0);
             },
-            { size: [16, 16], inputs: { base: baseHref }, params: { r, g, b } },
+            { size: [16, 16], inputs: { base: baseHref }, params: { r, g, b, minWeave } },
         ),
     });
 
@@ -205,28 +241,32 @@ const multiplyTintedTexture = (id: string, baseHref: string, r: number, g: numbe
 // values are Minecraft's per-color wool averages.
 const WOOL_BASE = asset('./assets/textures/wool_white.png', import.meta.url);
 export const woolWhite = blockTexture('kit:wool_white', { src: WOOL_BASE });
-export const woolLightGray = multiplyTintedTexture('kit:wool_light_gray', WOOL_BASE, 142, 142, 134);
-export const woolGray = multiplyTintedTexture('kit:wool_gray', WOOL_BASE, 62, 68, 71);
-export const woolBlack = multiplyTintedTexture('kit:wool_black', WOOL_BASE, 20, 21, 25);
-export const woolBrown = multiplyTintedTexture('kit:wool_brown', WOOL_BASE, 114, 71, 40);
-export const woolRed = multiplyTintedTexture('kit:wool_red', WOOL_BASE, 160, 39, 34);
-export const woolOrange = multiplyTintedTexture('kit:wool_orange', WOOL_BASE, 240, 118, 19);
-export const woolYellow = multiplyTintedTexture('kit:wool_yellow', WOOL_BASE, 248, 198, 39);
-export const woolLime = multiplyTintedTexture('kit:wool_lime', WOOL_BASE, 112, 185, 25);
-export const woolGreen = multiplyTintedTexture('kit:wool_green', WOOL_BASE, 84, 109, 27);
-export const woolCyan = multiplyTintedTexture('kit:wool_cyan', WOOL_BASE, 21, 137, 145);
-export const woolLightBlue = multiplyTintedTexture('kit:wool_light_blue', WOOL_BASE, 58, 175, 217);
-export const woolBlue = multiplyTintedTexture('kit:wool_blue', WOOL_BASE, 53, 57, 157);
-export const woolPurple = multiplyTintedTexture('kit:wool_purple', WOOL_BASE, 121, 42, 172);
-export const woolMagenta = multiplyTintedTexture('kit:wool_magenta', WOOL_BASE, 189, 68, 179);
-export const woolPink = multiplyTintedTexture('kit:wool_pink', WOOL_BASE, 237, 141, 172);
+export const woolLightGray = multiplyTintedTexture('kit:wool_light_gray', WOOL_BASE, 142, 142, 134, WOOL_WEAVE);
+export const woolGray = multiplyTintedTexture('kit:wool_gray', WOOL_BASE, 62, 68, 71, WOOL_WEAVE);
+// lifted well above Minecraft's own black wool average (20,21,25). That value
+// is honest to their texture but reads as a flat black hole in a build; this
+// sits as a very dark charcoal, still clearly below `woolGray`.
+export const woolBlack = multiplyTintedTexture('kit:wool_black', WOOL_BASE, 48, 49, 56, WOOL_WEAVE);
+export const woolBrown = multiplyTintedTexture('kit:wool_brown', WOOL_BASE, 114, 71, 40, WOOL_WEAVE);
+export const woolRed = multiplyTintedTexture('kit:wool_red', WOOL_BASE, 160, 39, 34, WOOL_WEAVE);
+export const woolOrange = multiplyTintedTexture('kit:wool_orange', WOOL_BASE, 240, 118, 19, WOOL_WEAVE);
+export const woolYellow = multiplyTintedTexture('kit:wool_yellow', WOOL_BASE, 248, 198, 39, WOOL_WEAVE);
+export const woolLime = multiplyTintedTexture('kit:wool_lime', WOOL_BASE, 112, 185, 25, WOOL_WEAVE);
+export const woolGreen = multiplyTintedTexture('kit:wool_green', WOOL_BASE, 84, 109, 27, WOOL_WEAVE);
+export const woolCyan = multiplyTintedTexture('kit:wool_cyan', WOOL_BASE, 21, 137, 145, WOOL_WEAVE);
+export const woolLightBlue = multiplyTintedTexture('kit:wool_light_blue', WOOL_BASE, 58, 175, 217, WOOL_WEAVE);
+export const woolBlue = multiplyTintedTexture('kit:wool_blue', WOOL_BASE, 53, 57, 157, WOOL_WEAVE);
+export const woolPurple = multiplyTintedTexture('kit:wool_purple', WOOL_BASE, 121, 42, 172, WOOL_WEAVE);
+export const woolMagenta = multiplyTintedTexture('kit:wool_magenta', WOOL_BASE, 189, 68, 179, WOOL_WEAVE);
+export const woolPink = multiplyTintedTexture('kit:wool_pink', WOOL_BASE, 237, 141, 172, WOOL_WEAVE);
 
 // concrete, all 16 dye colors, tinted from one shared near-white grain base
 // (`concrete_base.png`) the same way as wool above. the base sits near white, so
 // multiplying by the target leaves the color intact with only the faint grain
 // showing through. RGB values are Minecraft's per-color concrete averages.
 const CONCRETE_BASE = asset('./assets/textures/concrete_base.png', import.meta.url);
-const concreteTexture = (id: string, r: number, g: number, b: number) => multiplyTintedTexture(id, CONCRETE_BASE, r, g, b);
+const concreteTexture = (id: string, r: number, g: number, b: number) =>
+    multiplyTintedTexture(id, CONCRETE_BASE, r, g, b, CONCRETE_WEAVE);
 
 export const concreteWhite = concreteTexture('kit:concrete_white', 207, 213, 214);
 export const concreteLightGray = concreteTexture('kit:concrete_light_gray', 125, 125, 115);
