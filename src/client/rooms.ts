@@ -1097,6 +1097,26 @@ export function resolveRoomCamera(camera: PerspectiveCamera, room: ClientRoom): 
 /** set the active Player and update the editor store. The renderer isn't touched
  *  here — it reconciles its visuals to `state.activePlayerId` on the next
  *  `updateFrame` (build/mount/flush on entry, teardown on exit). */
+/** Which room this client session opens in. Session config, set once at setup (see
+ *  EngineClientEditor) and never mutated: "have we opened yet" is read off the world
+ *  below, not tracked alongside it. */
+let opensIn: 'edit' | 'play' = 'edit';
+
+export function setOpeningRoom(mode: 'edit' | 'play'): void {
+    opensIn = mode;
+}
+
+export function opensInPlay(): boolean {
+    return opensIn === 'play';
+}
+
+/** True while a play-opening session has nothing on screen yet. The edit room is
+ *  joined and live either way; this only decides what the visitor SEES first, so it
+ *  stops being true the moment any room is active. */
+export function holdsOpeningActivation(state: Rooms, roomMode: 'edit' | 'play'): boolean {
+    return opensIn === 'play' && roomMode === 'edit' && state.activePlayerId === null;
+}
+
 export function setActivePlayer(state: Rooms, net: Net.ClientNet, playerId: PlayerId): void {
     state.activePlayerId = playerId;
     useClient.getState().setActivePlayerId(playerId);

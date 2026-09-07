@@ -19,7 +19,14 @@ import { installEditorClientListeners } from '../client/editor';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
-import { LOCAL_ROOM_PREFIX, resolveRoomCamera, setActivePlayer, stopLocalRoom } from '../client/rooms';
+import {
+    LOCAL_ROOM_PREFIX,
+    opensInPlay,
+    resolveRoomCamera,
+    setActivePlayer,
+    setOpeningRoom,
+    stopLocalRoom,
+} from '../client/rooms';
 import { useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -503,11 +510,10 @@ script(
         const nodeBodies = NodeBodies.init(store);
         useEditor.getState().registerEditRoomStore(room, store);
 
-        // Hand off to the play room. Here because the trait attaching IS the event
-        // "this room's editor is live" — no watcher, and no once-guard to maintain:
-        // the body runs once per edit room and the flag is consumed.
-        if (autoplayPending && room.roomMode === 'edit') {
-            autoplayPending = false;
+        // Open in the play room. Here because the trait attaching IS the event "this
+        // room's editor is live" — no watcher, no race. Once-ness is the world's:
+        // nothing is active yet precisely because the opening activation was held.
+        if (opensInPlay() && room.roomMode === 'edit' && client.state!.rooms.activePlayerId === null) {
             store.getState().play();
         }
 
@@ -1462,16 +1468,11 @@ export function invalidatePrefabIcons(ids?: readonly string[]): void {
     if (dropped) useEditor.setState({ prefabIconUrls: next });
 }
 
-/** A session that opened to be PLAYED (the public play+peek sandbox) hands off to
- *  its play room the moment the edit room's editor comes alive, so the visitor lands
- *  in the game rather than an editor viewport with a button to find.
- *
- *  Read-and-cleared, because it describes the session's OPENING room: the edit room
- *  stays alive underneath and Tab back to it has to stick. */
-let autoplayPending = false;
-
+/** Open this session in the play room instead of the edit room: the public play+peek
+ *  sandbox, where the visitor followed a link to a sketch to play it. The policy lives
+ *  with room activation (client/rooms), which is what has to honour it. */
 export function setAutoplay(on: boolean): void {
-    autoplayPending = on;
+    setOpeningRoom(on ? 'play' : 'edit');
 }
 
 export function registerClient(state: EngineClient): void {
