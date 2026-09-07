@@ -30,6 +30,11 @@ export type ClientBootCaps = {
     /** open the game transport: register the inbound handler, get `send` back.
      *  host = env.connect('game'); guest = the transferred game port. */
     connectGame: (onReceive: (bytes: Uint8Array) => void) => Promise<{ send: (bytes: Uint8Array) => void }>;
+    /** resolves once the baked resources under resources/client/ are real (the pipeline's first
+     *  bake). Reads of those paths wait on it, so a client spawned while the bake runs boots as
+     *  far as the GPU handshake and parks at its first atlas read. Absent where the resources
+     *  are known to exist already (a guest reads the host's finished tree). */
+    bakeReady?: Promise<void>;
     log: (...parts: unknown[]) => void;
     err: (...parts: unknown[]) => void;
     /** structured boot status for the task manager (host + guest debugging). */
@@ -116,7 +121,7 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
         const state = EngineClient.init({
             mode: 'edit',
             driver,
-            resourceLoader: clientResourceLoader(fs),
+            resourceLoader: clientResourceLoader(fs, caps.bakeReady),
             domElement: surface,
         });
 
@@ -260,11 +265,15 @@ const client: App = async (env) => {
         surface: env.surface!.root,
         user: sessionUser(session),
         entry: session.entry,
-        // join the sim; a crashed/absent server surfaces an error instead of hanging.
+        // join the sim. Parks until 'game' is served: the client is spawned while the stack is
+        // still coming up, and a server that arrives later (a fixed src/ + restart) is joined
+        // then. A crashed server is reported by the boot supervisor, not by a timeout here.
         connectGame: async (onReceive) => {
-            const chan = await env.connect('game', (data) => onReceive(toU8(data)), { signal: AbortSignal.timeout(10_000) });
+            const chan = await env.connect('game', (data) => onReceive(toU8(data)));
             return { send: (bytes) => chan.send(bytes) };
         },
+        // the pipeline serves once its first bake is done; the loader waits on this for baked paths.
+        bakeReady: env.connect('pipeline', () => {}).then((chan) => chan.close()),
         // 'platform' is served by the shell when something is embedding the
         // editor. One dial per request: send the ask, take the single answer,
         // hang up. Nothing serving it (a bare OS) means nowhere to send the
@@ -339,7 +348,7 @@ export function sessionUser(session: EditorSession): ClientUser {
 
 /** load bytes from the project fs (baked client resources under resources/client/,
  *  builtin engine assets under file:///node_modules/…, runtime avatar urls). */
-function clientResourceLoader(fs: Filesystem) {
+function clientResourceLoader(fs: Filesystem, bakeReady?: Promise<void>) {
     return {
         loadBytes: async (url: string): Promise<Uint8Array> => {
             if (url.startsWith('http:') || url.startsWith('https:')) {
@@ -348,6 +357,7 @@ function clientResourceLoader(fs: Filesystem) {
                 return new Uint8Array(await r.arrayBuffer());
             }
             if (url.startsWith('file:')) return fs.read(new URL(url).pathname.replace(/^\/+/, ''));
+            if (bakeReady) await bakeReady; // baked output: real only after the pipeline's first bake
             return fs.read(`resources/client/${url.replace(/^\//, '')}`);
         },
     };
