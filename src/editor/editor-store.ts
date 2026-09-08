@@ -23,6 +23,7 @@ import type { PlayerMode } from '../core/protocol';
 import type { Resources } from '../core/resources';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { defaultHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
+import type { Lens } from './lens';
 import { hasStoredHotbar, loadHotbar, saveHotbar } from './preferences';
 
 /** Slim record of a Player held by the client, for store/UI consumption. */
@@ -98,6 +99,10 @@ export type EditorStore = {
     // Tabs in the toolbar subscribe here; click handlers in lens.ts call
     // `setRoomView` after running the imperative POV swap.
     playerToView: Map<PlayerId, 'edit' | 'play'>;
+    /** the local editor lens on each play-mode player's room (lens.ts), keyed by
+     *  player. entries come and go with enter/exitLocalEditorView and are dropped
+     *  with the room; the toolbar keys its lens tabs on this map's identity. */
+    lenses: Map<PlayerId, Lens>;
 
     /* ── network latency simulation (editor dev only) ──
      * When enabled, edit-client's RAF loop holds outbound + inbound WS
@@ -145,6 +150,7 @@ export type EditorStore = {
     setJoinedPlayers: (players: JoinedPlayer[]) => void;
     setRoomView: (playerId: PlayerId, view: 'edit' | 'play') => void;
     clearRoomView: (playerId: PlayerId) => void;
+    setLens: (playerId: PlayerId, lens: Lens | null) => void;
 
     /* ── hotbar ── */
     setHotbarSlot: (index: number, item: HotbarSlot) => void;
@@ -207,6 +213,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     prefabIconUrls: {},
 
     playerToView: new Map(),
+    lenses: new Map(),
 
     netSimEnabled: false,
     netSimRttMs: 100,
@@ -287,6 +294,14 @@ export const useEditor = create<EditorStore>((set, _get) => ({
             next.delete(playerId);
             return { playerToView: next };
         }),
+    setLens: (playerId, lens) =>
+        set((s) => {
+            if ((s.lenses.get(playerId) ?? null) === lens) return {};
+            const next = new Map(s.lenses);
+            if (lens === null) next.delete(playerId);
+            else next.set(playerId, lens);
+            return { lenses: next };
+        }),
 
     setHotbarSlot: (index, item) =>
         set((s) => {
@@ -325,6 +340,11 @@ function applyClientRooms(rooms: Map<PlayerId, ClientRoom>, activePlayerId: Play
     const players: JoinedPlayer[] = [];
     for (const room of rooms.values()) players.push({ playerId: room.playerId, roomId: room.roomId, mode: room.playerMode });
     editor.setJoinedPlayers(players);
+
+    // per-player editor state for a room the client no longer holds goes with it:
+    // the lens nodes died with the scene, the POV choice has nothing to apply to.
+    for (const playerId of editor.lenses.keys()) if (!rooms.has(playerId)) editor.setLens(playerId, null);
+    for (const playerId of editor.playerToView.keys()) if (!rooms.has(playerId)) editor.clearRoomView(playerId);
 
     // `room.playerId` keys the active per-player store for useEditRoom (which
     // derives from `playerEditStores[room.playerId]`).

@@ -25,12 +25,40 @@ import {
 import type { ClientRoom } from '../client/rooms';
 import { registry } from '../core/registry';
 import * as Rpc from '../core/rpc';
+import type { Node } from '../core/scene/scene-tree';
 import * as SceneTree from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { AddTraitCommand, RemoveTraitCommand } from './commands';
 import { activeEditRoomStore } from './edit-room-store';
 import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
+
+/**
+ * A local editor lens on a play room: the client-only nodes the editor looks
+ * through. The lens's subject + camera become `client.subject` / `client.camera`
+ * while it is active. Held in `useEditor.lenses` keyed by player; `lensOf(room)`
+ * is the lookup. (In an edit room there is no lens: the player node is the
+ * editor's subject and the server seeds EditorTrait on it.)
+ */
+export type Lens = {
+    /** stable opaque id for this editor view, so the UI can address the editor
+     *  POV separately from the player POV even though both belong to the same
+     *  ClientRoom. */
+    id: string;
+    /** the node representing the editor actor. becomes `client.subject` while
+     *  the lens is active. */
+    subject: Node;
+    /** lens-private camera node, `realm: 'client'` with TransformTrait +
+     *  CameraTrait. becomes `client.camera` while the lens is active, so the
+     *  lens's pose is preserved across play/edit tab toggles, independently of
+     *  `room.cameraNode` (which the player controller drives while in play
+     *  view). torn down with the lens. */
+    camera: Node;
+};
+
+export function lensOf(room: ClientRoom): Lens | null {
+    return useEditor.getState().lenses.get(room.playerId) ?? null;
+}
 
 /**
  * Toggle the editor for `room`. The mechanism depends on room type:
@@ -45,8 +73,8 @@ import { EditorTrait } from './editor-trait';
  */
 export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): void {
     if (room.playerMode === 'play') {
-        if (enabled && !room.editor) enterLocalEditorView(room);
-        else if (!enabled && room.editor) exitLocalEditorView(room);
+        if (enabled && !lensOf(room)) enterLocalEditorView(room);
+        else if (!enabled && lensOf(room)) exitLocalEditorView(room);
         return;
     }
     const { rpc, roomId } = room.context;
@@ -83,7 +111,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
  * plus a lens-private camera node, point the client state's subject + active
  * camera at them, seed the lens camera from the outgoing view, attach
  * FlyControllerTrait and EditorTrait (the trait is what activates the editor
- * script), and set `room.editor`. The editor's controller-swap reconcile (in
+ * script), and publish the lens. The editor's controller-swap reconcile (in
  * editor/client.ts) may swap to the user's chosen control mode on its next
  * tick. No-op when a lens is already up.
  *
@@ -93,7 +121,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
  * the editor was last flown to.
  */
 export function enterLocalEditorView(room: ClientRoom): void {
-    if (room.editor) return;
+    if (lensOf(room)) return;
 
     // snapshot the outgoing view pose BEFORE swapping, so the lens starts where
     // the play camera was and entry is seamless. Read the active camera node's
@@ -123,11 +151,11 @@ export function enterLocalEditorView(room: ClientRoom): void {
     const editorNode = SceneTree.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });
     SceneTree.addChild(room.scene.root, editorNode);
 
-    // publish the lens pointer *before* attaching EditorTrait, addTrait fires
-    // the editor script synchronously, and its ownership gate checks
-    // `room.editor.subject === ctx.node` to recognise the client-local lens
+    // publish the lens *before* attaching EditorTrait, addTrait fires the editor
+    // script synchronously, and its ownership gate checks
+    // `lensOf(room)?.subject === ctx.node` to recognise the client-local lens
     // (lens nodes have no owner, so isOwner() always fails for them).
-    room.editor = { id: crypto.randomUUID(), subject: editorNode, camera: cameraNode };
+    useEditor.getState().setLens(room.playerId, { id: crypto.randomUUID(), subject: editorNode, camera: cameraNode });
 
     // point the client state at the lens: subject = editorNode, active camera =
     // the lens camera. do this BEFORE adding the fly controller so it captures
@@ -142,15 +170,15 @@ export function enterLocalEditorView(room: ClientRoom): void {
     useEditor.getState().setRoomView(room.playerId, 'edit');
 }
 
-/** Tear down the local editor lens, restore the default subject/camera, destroy lens nodes, clear room.editor. */
+/** Tear down the local editor lens: restore the default subject/camera, destroy the lens nodes, drop the lens. */
 export function exitLocalEditorView(room: ClientRoom): void {
-    const lens = room.editor;
+    const lens = lensOf(room);
     if (!lens) return;
     room.client.subject = room.client.defaultSubject;
     room.client.camera = room.client.defaultCamera;
     SceneTree.destroyNode(room.scene, lens.subject);
     SceneTree.destroyNode(room.scene, lens.camera);
-    room.editor = null;
+    useEditor.getState().setLens(room.playerId, null);
     useEditor.getState().clearRoomView(room.playerId);
 }
 
@@ -161,7 +189,7 @@ export function exitLocalEditorView(room: ClientRoom): void {
  * rooms (lens doesn't apply, player node already is the editor camera).
  */
 export function setRoomView(room: ClientRoom, view: 'edit' | 'play'): void {
-    const lens = room.editor;
+    const lens = lensOf(room);
     if (!lens) return;
     if (view === 'edit') {
         if (room.client.subject === lens.subject) return;

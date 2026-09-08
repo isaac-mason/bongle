@@ -18,7 +18,7 @@ import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import { applySceneSyncUpdate, unpackSceneTree } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
-import type { ClientContext, EditRoomState, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
+import type { ClientContext, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
 import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import * as RenderCamera from '../render/camera';
@@ -139,17 +139,6 @@ export type ClientRoom = {
      * `setSubject` / `setCamera`. no boxing, no duplicated pointers, one object.
      */
     client: ClientContext;
-
-    /**
-     * editor lens state, null when no editor lens is up. when present, it's
-     * either a real edit room (editorNode === playerNode) or a local-only
-     * peek into a play room (editorNode is a `realm: 'client'` node).
-     *
-     * `editor: true` scripts read this lens via `ctx.client.room?.editor`.
-     * swapping the pointer (null ↔ object) is exclusively driven by the
-     * editor lens lifecycle (enter/exit local editor view).
-     */
-    editor: EditRoomState | null;
 
     /** locally measured client-side metrics (tick, mesh, physics, net) */
     clientMetrics: Debug.Metrics;
@@ -773,10 +762,6 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
     room.client.camera = room.cameraNode;
     room.client.defaultSubject = playerNode;
     room.client.defaultCamera = room.cameraNode;
-    // any local editor lens is invalidated by the scene graph rebuild,
-    // editorNode was a `realm: 'client'` node, gone with the wind. caller
-    // re-enters via enterLocalEditorView if they want it back.
-    room.editor = null;
 }
 
 /**

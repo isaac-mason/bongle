@@ -20,6 +20,7 @@ import type { EditRoomStoreApi } from '../edit-room-store';
 import { INSPECT_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { isInputFocused } from '../input';
+import { lensOf } from '../lens';
 import type { NodeBodies } from '../node-bodies';
 import type { PointerState } from '../pointer-state';
 import { pointerFlush, pointerHeld, pointerJustDown, pointerJustUp } from '../pointer-state';
@@ -113,7 +114,7 @@ export function openViewportContextMenu(
     );
 
     const playerNode = room.playerNode;
-    const editorNode = room.editor?.subject;
+    const editorNode = lensOf(room)?.subject;
     const nodeHit = hits.find(
         (h): h is Selector.NodeHit =>
             h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
@@ -292,7 +293,7 @@ export function updateInspect(
                 MAX_RAY_DIST,
             );
             const playerNode = room.playerNode;
-            const editorNode = room.editor?.subject;
+            const editorNode = lensOf(room)?.subject;
             const nodeHit = hits.find(
                 (h): h is Selector.NodeHit =>
                     h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
@@ -355,7 +356,7 @@ export function updateInspect(
 
         // exclude the local player node + descendants, and the editor lens node.
         const playerNode = room.playerNode;
-        const editorNode = room.editor?.subject;
+        const editorNode = lensOf(room)?.subject;
 
         // find the nearest node hit (excluding player) and nearest voxel hit.
         // hits are distance-sorted, use the nearest of each type, then let

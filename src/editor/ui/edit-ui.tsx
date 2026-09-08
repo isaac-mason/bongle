@@ -149,7 +149,7 @@ function EditUI() {
         // player POV *is* the editor POV. with a lens, only the 'edit' POV
         // exposes the UI; switching to 'play' POV keeps the lens warm but
         // hides editor chrome.
-        if (!s.room.editor) return true;
+        if (!s.lenses.get(s.room.playerId)) return true;
         return s.playerToView.get(s.room.playerId) === 'edit';
     });
     const showOrientationCube = useEditor((s) => s.showOrientationCube);
@@ -224,10 +224,10 @@ function EditUI() {
 
             if (e.key === '`' && e.shiftKey) {
                 e.preventDefault();
-                const { room, playerEditStores, playerToView } = useEditor.getState();
+                const { room, playerEditStores, playerToView, lenses } = useEditor.getState();
                 if (!room) return;
                 const scriptAlive = !!playerEditStores[room.playerId];
-                const editPov = !room.editor || playerToView.get(room.playerId) === 'edit';
+                const editPov = !lenses.get(room.playerId) || playerToView.get(room.playerId) === 'edit';
                 setEditorEnabledForRoom(room, !(scriptAlive && editPov));
                 return;
             }

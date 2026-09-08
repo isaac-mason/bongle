@@ -32,42 +32,6 @@ import type { TraitBase, TraitHandle } from './traits';
 export type Unsubscribe = () => void;
 
 /**
- * client-side editor lens. when present, this client is in some flavor of
- * edit mode, either a real edit room (server-authoritative, `subject` ===
- * playerNode) or a local-only peek into a play room (`subject` is a
- * `realm: 'client'` node carrying EditorTrait + CameraTrait).
- *
- * the existence of `room.editor` is the on/off switch for the editor lens.
- * scripts declared with `{ editor: true }` also run in edit mode and read
- * the lens via `ctx.client.room?.editor`.
- *
- * grows over time with selection / hover / gizmo state. today: the lens's
- * subject + camera nodes. while the lens is active `client.subject` /
- * `client.camera` point at these.
- */
-export type EditRoomState = {
-    /** stable opaque id for this editor view, so the UI can address the editor
-     *  POV separately from the player POV even though both belong to the same
-     *  ClientRoom. */
-    id: string;
-
-    /**
-     * the node representing the editor actor. becomes `client.subject` while
-     * the lens is active.
-     */
-    subject: SceneTree.Node;
-
-    /**
-     * lens-private camera node, `realm: 'client'` with TransformTrait +
-     * CameraTrait. becomes `client.camera` while the lens is active, so the
-     * lens's pose is preserved across play/edit tab toggles, independently of
-     * `room.cameraNode` (which the player controller drives while in play
-     * view). torn down with the lens.
-     */
-    camera: SceneTree.Node;
-};
-
-/**
  * client-side debug state, reachable from scripts as `ctx.client.debug`. a
  * plain state bag (no methods) — ergonomics live in the `debug.*` api helpers.
  */
@@ -1091,8 +1055,7 @@ export function createScriptInstance(
     // instantiate (the room object doesn't exist yet at this point), so hold
     // the reference directly, a copy here would freeze those fields as
     // `undefined` forever, breaking isOwner / playMono / getSubject for
-    // editor:true world systems. The editor lens is reachable via
-    // `ctx.client.room?.editor`.
+    // editor:true world systems.
     const client = runtime.client;
 
     instance._ctx = {

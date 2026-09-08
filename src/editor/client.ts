@@ -39,6 +39,7 @@ import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
 import { isInputFocused } from './input';
 import { activeBlockKeyOf } from './inventory';
+import { lensOf } from './lens';
 import * as NodeBodies from './node-bodies';
 import { createPointerState, disposePointerState, pointerFlush } from './pointer-state';
 import { parsePattern } from './scene/pattern';
@@ -83,7 +84,7 @@ let _brushCornerB: [number, number, number] | null = null;
 // per-player editor activation. EditorTrait attaches to:
 //   - a player's server-owned `room.playerNode` in an edit room (server-
 //     seeded on join, replicated to the owning client)
-//   - the client-local `room.editor.subject` lens spawned by Shift+`
+//   - the client-local lens node (lens.ts) spawned by Shift+`
 //     into a play room (enterLocalEditorView)
 //
 // the trait's *presence* is the on/off switch, no parallel reactive flag,
@@ -102,9 +103,10 @@ script(
         // otherwise inspect-server would spin up the editor on the play
         // client too, registering under the wrong playerId. For lens-spawned
         // EditorTrait (Shift+`), the lens node is client-local with no
-        // owner, so isOwner returns false; allow that path via the local
-        // ClientRoom's lens pointer.
-        const lensActivation = ctx.client?.room?.editor?.subject === ctx.node;
+        // owner, so isOwner returns false; allow that path via the editor's
+        // lens for this player.
+        const lensRoom = ctx.client?.room;
+        const lensActivation = lensRoom !== undefined && lensOf(lensRoom)?.subject === ctx.node;
         if (!lensActivation && !isOwner(ctx, ctx.node)) return;
 
         // wire up scene-list cold-fetch + HMR. idempotent, first room
@@ -332,7 +334,7 @@ script(
             // mirror the fly controller's speed off its trait for the indicator. the
             // first read seeds silently; a later change (wheel, inspector) re-arms the
             // indicator's show timer.
-            const fly = getTrait(room.editor?.subject ?? room.playerNode, FlyControllerTrait);
+            const fly = getTrait(lensOf(room)?.subject ?? room.playerNode, FlyControllerTrait);
             if (fly && fly.speed !== store.getState().flySpeed) {
                 const seeded = store.getState().flySpeed !== null;
                 store.setState({ flySpeed: fly.speed, flySpeedShownAt: seeded ? performance.now() : 0 });
@@ -344,7 +346,8 @@ script(
             // is the lens). for edit rooms, the player node IS the editor
             // camera. when not active, force-hide every editor visual so
             // they don't leak into the player view, and short-circuit.
-            const editorViewActive = room.playerMode === 'edit' || (!!room.editor && room.client.subject === room.editor.subject);
+            const lens = lensOf(room);
+            const editorViewActive = room.playerMode === 'edit' || (lens !== null && room.client.subject === lens.subject);
 
             // tear down any armed placement the moment we're not actively placing
             // in the transform tool with the editor view focused. this runs BEFORE
@@ -805,7 +808,7 @@ script(
             out[2] = -(1 - 2 * (qx * qx + qy * qy));
         };
         onTick(ctx, () => {
-            const node = room.editor?.subject ?? room.playerNode;
+            const node = lensOf(room)?.subject ?? room.playerNode;
             const desiredMode = store.getState().controlMode;
 
             let activeMode: ControlMode | null = null;
@@ -888,6 +891,9 @@ script(
         onDispose(ctx, () => {
             for (const u of unsubs) u();
             useEditor.getState().registerEditRoomStore(room, null);
+            // a lens whose node died under a scene rebuild (a resync) is gone with
+            // it; exitLocalEditorView already dropped it on the explicit path.
+            if (lensActivation) useEditor.getState().setLens(room.playerId, null);
 
             // clean up node bodies
             NodeBodies.dispose(nodeBodies, room.physics);

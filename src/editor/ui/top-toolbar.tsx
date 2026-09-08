@@ -3,10 +3,11 @@ import * as Icons from '../../../icons';
 import { type ClientRoom, LOCAL_ROOM_PREFIX } from '../../client/rooms';
 import { Button } from '../../client/ui/components';
 import { useClient } from '../../client/ui/stores/client-store';
+import type { PlayerId } from '../../core/client';
 import type { PlayerMode, RoomInfo } from '../../core/protocol';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
-import { setEditorEnabledForRoom, setRoomView } from '../lens';
+import { type Lens, setEditorEnabledForRoom, setRoomView } from '../lens';
 import { joinRoom, leaveRoom, stopRoom, switchRoom } from '../session';
 import { useEngineClient } from './engine-client-context';
 
@@ -351,7 +352,11 @@ function RoomTab({
 
 type Pov = Pick<Tab, 'id' | 'room' | 'mode' | 'lens'>;
 
-function buildGroups(roomList: RoomInfo[], rooms: Iterable<ClientRoom>): { namespace: string; tabs: Tab[] }[] {
+function buildGroups(
+    roomList: RoomInfo[],
+    rooms: Iterable<ClientRoom>,
+    lenses: ReadonlyMap<PlayerId, Lens>,
+): { namespace: string; tabs: Tab[] }[] {
     // one POV per ClientRoom, indexed by roomId so each RoomInfo joins against
     // the POVs on the same room. a play room with the editor lens up yields a
     // second POV for the editor.
@@ -363,7 +368,8 @@ function buildGroups(roomList: RoomInfo[], rooms: Iterable<ClientRoom>): { names
             povsByRoomId.set(room.roomId, list);
         }
         list.push({ id: String(room.playerId), room, mode: room.playerMode, lens: false });
-        if (room.editor) list.push({ id: room.editor.id, room, mode: 'edit', lens: true });
+        const lens = lenses.get(room.playerId);
+        if (lens) list.push({ id: lens.id, room, mode: 'edit', lens: true });
     }
 
     const out: { namespace: string; tabs: Tab[] }[] = [];
@@ -396,9 +402,7 @@ function buildGroups(roomList: RoomInfo[], rooms: Iterable<ClientRoom>): { names
 function RoomTabs() {
     const roomList = useClient((s) => s.roomList);
     const rooms = useClient((s) => s.rooms);
-    // a lens coming up or down sets `room.editor` in place (no `rooms` identity
-    // change); the same path writes `playerToView`, so that is the re-render key.
-    const playerToView = useEditor((s) => s.playerToView);
+    const lenses = useEditor((s) => s.lenses);
 
     const [menu, setMenu] = useState<TabContextMenu | null>(null);
     const closeMenu = useCallback(() => setMenu(null), []);
@@ -407,8 +411,7 @@ function RoomTabs() {
         [],
     );
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: playerToView keys the lens enter/exit recompute
-    const groups = useMemo(() => buildGroups(roomList, rooms.values()), [roomList, rooms, playerToView]);
+    const groups = useMemo(() => buildGroups(roomList, rooms.values(), lenses), [roomList, rooms, lenses]);
 
     return (
         <div className="flex items-center gap-4">

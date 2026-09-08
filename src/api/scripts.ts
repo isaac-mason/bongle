@@ -43,7 +43,6 @@ export type { QueryMatch, QueryMatches } from '../core/scene/scene-tree';
 export type {
     ClientContext,
     EditorPlayData,
-    EditRoomState,
     FrameArgs,
     JoinArgs,
     LeaveArgs,
