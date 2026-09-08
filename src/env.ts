@@ -14,10 +14,9 @@
  * The asset pipeline does NOT use a flag, it's a separate engine entry
  * (`EngineAssetPipeline`), not a headless variant of the client. Its realm runs
  * NEUTRAL: all three flags stay false. Declarations register ungated, so the bake
- * sees the whole registry either way, and a neutral realm keeps gameplay guarded
- * with `if (!env.server) return` from running against the bake's headless rooms.
- * A script that must run there (assembling visuals for a prefab capture) simply
- * doesn't guard.
+ * sees the whole registry either way. The bake runs no behaviour: its icon rooms
+ * instantiate no scripts and no systems, so a prefab icon shows only what its
+ * apply places up front.
  *
  * Note: there is no `env.edit` or `env.play`. Mode is per-room and
  * available on the script context as `ctx.mode`.

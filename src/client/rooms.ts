@@ -312,7 +312,11 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         roomMode: 'play',
         authority: false,
     });
-    nodes.context = context;
+    // no behaviour: the tree keeps no context, so addTrait / registerSubtree never
+    // instantiate scripts, and no WorldTrait means no systems. An icon shows only
+    // what a prefab's apply places up front (MeshTrait, voxels); anything a script
+    // or system assembles later is not rendered. `context` still reaches Prefab.tick
+    // by argument for its roomMode read.
 
     const scene = new Scene();
     const envResources = deps.environmentResources;
@@ -322,9 +326,6 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const visibility = Visibility.init();
     const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
     const envVisuals = Environment.initEnvVisuals(scene, envResources, deps.cloudResources);
-
-    // host trait at the root; its env onInit no-ops with no live scene init.
-    attachWorldTrait(nodes.root);
 
     return {
         scene: nodes,
