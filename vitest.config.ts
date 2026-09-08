@@ -7,6 +7,9 @@ export default defineConfig({
         server: { deps: { inline: [/shakeup/] } },
         projects: [
             {
+                // self-imports (`bongle`, `bongle/env`) resolve to src, not dist, so a test and
+                // the module it drives share one env + registry instance (as the e2e project).
+                resolve: { conditions: ['source'] },
                 test: {
                     name: 'unit',
                     include: ['tst/unit/**/*.test.ts'],
@@ -18,6 +21,9 @@ export default defineConfig({
                 },
             },
             {
+                // self-imports (`bongle`, `bongle/env`) resolve to src, not dist, so a test and
+                // the module it drives share one env + registry instance (as the e2e project).
+                resolve: { conditions: ['source'] },
                 test: {
                     name: 'integration',
                     include: ['tst/integration/**/*.test.ts'],

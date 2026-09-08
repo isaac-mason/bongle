@@ -289,8 +289,8 @@ export const SyncUpdate = pack.object({
 /**
  * User-defined network command between client and server. always scoped to
  * a room, room-less editor lifecycle ops live as first-class messages
- * (open_scene / play / stop_room / leave_room / join_room_as /
- * rename_scene / delete_scene) rather than going through this channel.
+ * (play / stop_room / leave_room / join_room_as) rather than going through this
+ * channel; the editor's scene verbs are editor RPC commands.
  *
  * `commandIndex` is a position into the wire-index table both sides
  * compute locally from `commandsRegistry`, see
@@ -330,12 +330,6 @@ export type ChatInput = pack.SchemaType<typeof ChatInput>;
  * `play` message is dual-purpose: editor "Play" button + game-runtime
  * `client.matchmake` (works in non-editor builds too).
  */
-
-export const OpenScene = pack.object({
-    type: pack.literal('open_scene'),
-    sceneId: pack.string(),
-});
-export type OpenScene = pack.SchemaType<typeof OpenScene>;
 
 /**
  * Dual-purpose. Editor "Play" button passes `sceneId` + `sourceRoomId`
@@ -380,19 +374,6 @@ export const JoinRoomAs = pack.object({
     mode: pack.enumeration(['edit', 'play'] as const),
 });
 export type JoinRoomAs = pack.SchemaType<typeof JoinRoomAs>;
-
-export const RenameScene = pack.object({
-    type: pack.literal('rename_scene'),
-    oldSceneId: pack.string(),
-    newSceneId: pack.string(),
-});
-export type RenameScene = pack.SchemaType<typeof RenameScene>;
-
-export const DeleteScene = pack.object({
-    type: pack.literal('delete_scene'),
-    sceneId: pack.string(),
-});
-export type DeleteScene = pack.SchemaType<typeof DeleteScene>;
 
 /**
  * Sent by either peer after an HMR flush that may have changed its
@@ -533,13 +514,10 @@ export const ClientMessage = pack.union('type', [
     SyncUpdate,
     NetMessage,
     WireTable,
-    OpenScene,
     Play,
     StopRoom,
     LeaveRoom,
     JoinRoomAs,
-    RenameScene,
-    DeleteScene,
     ChatInput,
     VoxelAck,
 ]);

@@ -130,10 +130,9 @@ export type EditorStore = {
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
 
     /* ── room registry actions ── */
-    /** register the per-player edit store on a ClientRoom. Mirrors the store
-     *  onto `room.editorStore` (for non-React script consumers) and into the
-     *  `playerEditStores` map (for the `useEditRoom` React hook). Keyed by
-     *  `room.playerId`. Pass `null` on dispose. */
+    /** register the per-player edit store for a ClientRoom into `playerEditStores`
+     *  (the `useEditRoom` React hook + the page-level listeners read it there).
+     *  Keyed by `room.playerId`. Pass `null` on dispose. */
     registerEditRoomStore: (room: ClientRoom, store: EditRoomStoreApi | null) => void;
 
     /* ── setters ── */
@@ -224,7 +223,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     /* ── room registry ── */
     registerEditRoomStore: (room, store) => {
-        room.editorStore = store;
         set((s) => {
             const next = { ...s.playerEditStores };
             if (store === null) delete next[room.playerId];

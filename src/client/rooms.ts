@@ -21,8 +21,6 @@ import * as SceneTree from '../core/scene/scene-tree';
 import type { ClientContext, EditRoomState, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
 import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
-import type { ClipboardHandlers } from '../editor/clipboard';
-import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import * as RenderCamera from '../render/camera';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
@@ -210,23 +208,6 @@ export type ClientRoom = {
      * joystick / button roots here. removed with the viewport on dispose.
      */
     touchOverlay: HTMLDivElement;
-
-    /**
-     * per-room editor store. Populated by the editor script on init (only
-     * for `roomMode === 'edit'`), cleared on dispose. Non-React script
-     * callers (fly controller, tools, ...) read it directly. Null on play-only
-     * rooms.
-     */
-    editorStore: EditRoomStoreApi | null;
-
-    /**
-     * clipboard handlers, set when this room's editor is active, cleared on
-     * deactivate. Page-level `document` listeners (installed once in
-     * mountEditUI) dispatch copy/cut/paste/keydown to the editor store's
-     * active room; rooms whose editor is enabled but not
-     * focused hold their handlers without firing.
-     */
-    editorClipboard: ClipboardHandlers | null;
 };
 
 /* ── Rooms registry ─────────────────────────────────────────────── */
@@ -744,8 +725,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         input,
         viewport,
         touchOverlay,
-        editorStore: null,
-        editorClipboard: null,
     };
 
     // the room's GPU visuals (voxel/model/sprite/.../domUi) are backend-owned and

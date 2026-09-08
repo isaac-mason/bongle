@@ -237,7 +237,7 @@ function EditUI() {
                 if (!room) return;
                 e.preventDefault();
                 if (roomMode === 'edit') {
-                    room.editorStore?.getState().play();
+                    activeEditRoomStore().getState().play();
                 } else if (roomMode === 'play') {
                     stopRoom(engine, room.roomId);
                 }

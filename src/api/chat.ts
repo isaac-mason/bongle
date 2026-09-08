@@ -19,7 +19,6 @@
  * implied by *where* listen is called; no explicit flag.
  */
 
-import { env } from 'bongle';
 import type { MessageHandler } from '../client/chat';
 import * as ClientChat from '../client/chat';
 import type {
@@ -33,6 +32,7 @@ import type {
 } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
 import type { ScriptContext } from '../core/scene/scripts';
+import { env } from '../env';
 import * as ServerChat from '../server/chat';
 
 export type { ArgType, CommandHandle, CommandInvocation, CommandSpec, MessageHandler, ParseResult, Suggestion };

@@ -28,6 +28,7 @@ import * as Rpc from '../core/rpc';
 import * as SceneTree from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { AddTraitCommand, RemoveTraitCommand } from './commands';
+import { activeEditRoomStore } from './edit-room-store';
 import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
 
@@ -181,20 +182,9 @@ export function setRoomView(room: ClientRoom, view: 'edit' | 'play'): void {
  * but not active hold their handlers without firing here.
  */
 export function installEditorClientListeners(): void {
-    document.addEventListener('copy', (e) => {
-        useEditor.getState().room?.editorClipboard?.onCopy(e);
-    });
-    document.addEventListener('cut', (e) => {
-        useEditor.getState().room?.editorClipboard?.onCut(e);
-    });
-    document.addEventListener('paste', (e) => {
-        useEditor.getState().room?.editorClipboard?.onPaste(e);
-    });
-    document.addEventListener(
-        'keydown',
-        (e) => {
-            useEditor.getState().room?.editorClipboard?.onKeyDown(e);
-        },
-        true,
-    );
+    const clipboard = () => activeEditRoomStore().getState().clipboard;
+    document.addEventListener('copy', (e) => clipboard()?.onCopy(e));
+    document.addEventListener('cut', (e) => clipboard()?.onCut(e));
+    document.addEventListener('paste', (e) => clipboard()?.onPaste(e));
+    document.addEventListener('keydown', (e) => clipboard()?.onKeyDown(e), true);
 }

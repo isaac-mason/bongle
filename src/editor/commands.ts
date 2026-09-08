@@ -110,6 +110,20 @@ export const VoxelEditCommand = command(
     }),
 );
 
+/* ── scenes ── */
+
+/** open (find or create) the edit room for `sceneId` and join the sender to it. */
+export const OpenSceneCommand = command('editor.open_scene', CLIENT_TO_SERVER, pack.object({ sceneId: pack.string() }));
+
+export const RenameSceneCommand = command(
+    'editor.rename_scene',
+    CLIENT_TO_SERVER,
+    pack.object({ oldSceneId: pack.string(), newSceneId: pack.string() }),
+);
+
+/** delete the scene file and stop every room on it. */
+export const DeleteSceneCommand = command('editor.delete_scene', CLIENT_TO_SERVER, pack.object({ sceneId: pack.string() }));
+
 /* ── persistence ── */
 
 /** explicit save of every open edit room on `sceneId` (Ctrl+S, the tab menu). the

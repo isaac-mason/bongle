@@ -34,12 +34,17 @@ import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';
 import { env } from '../env';
 import * as Discovery from '../server/discovery';
+import * as Net from '../server/net';
+import * as Rooms from '../server/rooms';
 import { setTraitProps } from './actions';
 import {
     AddTraitCommand,
     CreateNodeCommand,
+    DeleteSceneCommand,
     DestroyNodeCommand,
+    OpenSceneCommand,
     RemoveTraitCommand,
+    RenameSceneCommand,
     ReorderCommand,
     ReparentCommand,
     SaveBlueprintCommand,
@@ -134,6 +139,31 @@ script(
             ctx,
             SaveSceneCommand,
             editGated(({ sceneId }) => Persist.flushScene(sceneId)),
+        );
+
+        // scene verbs. open: the edit room for a scene is found or created (edit
+        // rooms share the 'editor' namespace) and the sender joins it as an editor;
+        // the runtime's activate_room makes it their focused room. rename/delete
+        // go through the runtime helpers that keep live rooms consistent with the
+        // content change (room.sceneId follows a rename; a delete stops the rooms).
+        listen(
+            ctx,
+            OpenSceneCommand,
+            editGated(({ sceneId }, client) => {
+                const target = Rooms.findOrCreateEditRoom(state, sceneId);
+                const player = Rooms.addClientToRoom(state, client, target, 'edit');
+                Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
+            }),
+        );
+        listen(
+            ctx,
+            RenameSceneCommand,
+            editGated(({ oldSceneId, newSceneId }) => Rooms.renameScene(state, oldSceneId, newSceneId)),
+        );
+        listen(
+            ctx,
+            DeleteSceneCommand,
+            editGated(({ sceneId }) => Rooms.deleteScene(state, sceneId)),
         );
 
         // voxel edit ops from clients

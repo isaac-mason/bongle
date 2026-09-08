@@ -1,4 +1,4 @@
-import type { Client, Filesystem, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
+import type { Channel, Client, Filesystem, JsonValue, ResolvedAvatar, ServerDriver, ServerInitOptions, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
 import { serverMaxPlayers } from '../core/config';
 import * as Content from '../core/content';
@@ -75,6 +75,10 @@ export type InitOptions = {
      * point so a missing driver would only manifest at first call.
      */
     driver: ServerDriver;
+    /** channels the host pumps; every frame rides `Channel.reliable` today. */
+    channels: Channel[];
+    /** the host's outbound sink, called from inside `update` for every framed batch. */
+    send: ServerInitOptions['send'];
     /**
      * Notified when a queued scene persist (write/delete) rejects, so the host can
      * surface it to the user — the edit did NOT reach disk. Edit mode only (play is
@@ -134,6 +138,8 @@ export function init(opts: InitOptions) {
         mode: opts.mode,
         fs: opts.fs,
         driver: opts.driver,
+        channels: opts.channels,
+        send: opts.send,
         net,
         clients,
         rooms,
@@ -248,8 +254,19 @@ export function onClientLeave(state: EngineServer, clientId: Client) {
     Discovery.removeClient(state.discovery, clientId);
     Discovery.invalidateRoomList(state.discovery);
     Telemetry.dropClient(state.telemetry, clientId);
-    // drop any partial reassembly buffer held for this client.
+    // drop queued frames and any partial reassembly buffer held for this client.
+    state.net.inbox.delete(clientId);
     state.net.reassemblers.delete(clientId);
+}
+
+/** one inbound frame from the host. Queues until the next update. */
+export function receive(state: EngineServer, client: Client, channel: Channel, bytes: Uint8Array): void {
+    let channels = state.net.inbox.get(client);
+    if (!channels) {
+        channels = [[], []];
+        state.net.inbox.set(client, channels);
+    }
+    channels[channel].push(bytes);
 }
 
 /**
@@ -358,22 +375,23 @@ export function processInbox(state: EngineServer) {
     // process inbox, count ingress bytes
     const inbox = state.net.inbox;
 
-    for (const [client, frames] of inbox) {
+    for (const [client, channels] of inbox) {
         // decode frames back into message batches; fragments of a big batch may
-        // span ticks, so the reassembler persists per client.
-        let reassembler = state.net.reassemblers.get(client);
-        if (!reassembler) {
-            reassembler = createReassembler();
-            state.net.reassemblers.set(client, reassembler);
+        // span ticks, so the reassemblers persist per client and channel.
+        let reassemblers = state.net.reassemblers.get(client);
+        if (!reassemblers) {
+            reassemblers = [createReassembler(), createReassembler()];
+            state.net.reassemblers.set(client, reassemblers);
         }
-        for (const frame of frames) {
+        for (let channel = 0; channel < channels.length; channel++) {
+          const frames = channels[channel];
+          for (const frame of frames) {
             let messages: Uint8Array[] | null;
             try {
-                messages = acceptFrame(reassembler, frame);
+                messages = acceptFrame(reassemblers[channel], frame);
             } catch (err) {
                 console.error(`[bongle] inbound framing error from client ${String(client)}:`, err);
-                reassembler = createReassembler();
-                state.net.reassemblers.set(client, reassembler);
+                reassemblers[channel] = createReassembler();
                 continue;
             }
             if (!messages) continue;
@@ -440,16 +458,6 @@ export function processInbox(state: EngineServer) {
                         Rooms.applyOwnerSync(state, client, message);
                         break;
 
-                    case 'open_scene': {
-                        // editor edit rooms all share the 'editor' namespace; reuse
-                        // existing room when the scene is already open, otherwise mint
-                        // a new one.
-                        const room = Rooms.findOrCreateEditRoom(state, message.sceneId);
-                        const player = Rooms.addClientToRoom(state, client, room, 'edit');
-                        Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
-                        break;
-                    }
-
                     case 'play':
                         Rooms.joinPlay(state, client, message);
                         break;
@@ -474,16 +482,6 @@ export function processInbox(state: EngineServer) {
                         break;
                     }
 
-                    case 'rename_scene': {
-                        Rooms.renameScene(state, message.oldSceneId, message.newSceneId);
-                        break;
-                    }
-
-                    case 'delete_scene': {
-                        Rooms.deleteScene(state, message.sceneId);
-                        break;
-                    }
-
                     case 'chat_input': {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
@@ -492,10 +490,10 @@ export function processInbox(state: EngineServer) {
                     }
                 }
             }
+          }
+          frames.length = 0;
         }
     }
-
-    inbox.clear();
 }
 
 export function update(state: EngineServer, delta: number) {
@@ -635,7 +633,7 @@ export function update(state: EngineServer, delta: number) {
 
     // pack typed outbox messages into Uint8Array packets for the runtime
     Debug.begin(state.metrics, 'netflush');
-    Net.flush(state.net);
+    Net.flush(state.net, state.send);
     Debug.end(state.metrics, 'netflush');
 
     // net throughput per room (global bytes split evenly across rooms) + process

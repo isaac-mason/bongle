@@ -3,19 +3,21 @@
 // session.ts, the lens in lens.ts, the UI mount in ui/edit-ui.tsx. The server
 // half is editor/server.ts; nothing here reaches server modules.
 
-import {
-    CharacterControllerTrait,
-    env,
-    FlyControllerTrait,
-    OrbitControllerTrait,
-    PlayerControllerTrait,
-    resetInterpolation,
-    TransformTrait,
-} from 'bongle';
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import type { Quat, Spherical, Vec3 } from 'math';
 import { spherical, vec3 } from 'math';
-import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
+import { CharacterControllerTrait } from '../builtins/character-controller';
+import { FlyControllerTrait } from '../builtins/fly-controller';
+import { OrbitControllerTrait } from '../builtins/orbit-controller';
+import { PlayerControllerTrait } from '../builtins/player-controller';
+import {
+    getWorldPosition,
+    getWorldQuaternion,
+    resetInterpolation,
+    setWorldPosition,
+    setWorldQuaternion,
+    TransformTrait,
+} from '../builtins/transform';
 import * as ClientChat from '../client/chat';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import { resolveRoomCamera } from '../client/rooms';
@@ -24,6 +26,7 @@ import { addTrait, getNodeById, getTrait, hasTrait, removeTrait } from '../core/
 import { isOwner, onDispose, onFrame, onInput, onPostPhysicsStep, onPrePhysicsStep, onTick, script } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
+import { env } from '../env';
 import { initBlueprints } from './blueprints';
 import { readNudgeDelta } from './camera';
 import { installEditorChatCommands } from './chat-commands';
@@ -151,9 +154,9 @@ script(
         const prefabVisuals = PrefabVisuals.init();
 
         // ── clipboard: copy / paste via system clipboard ──
-        // page-level listeners (installed by mountEditUI) dispatch to
-        // useEditor's active room via room.editorClipboard.
-        room.editorClipboard = createClipboardHandlers(store, ctx, room, transformToolState);
+        // page-level listeners (installed by mountEditUI) dispatch to the active
+        // room's handlers through its edit store.
+        store.setState({ clipboard: createClipboardHandlers(store, ctx, room, transformToolState) });
 
         // ── external-resource teardowns ──
         // on* hooks auto-clean with the script; this array is only for
@@ -325,6 +328,15 @@ script(
             // inspector re-derive off it; nothing announces a mutation by hand.
             const sceneRevision = room.scene.replication.versionCounter;
             if (sceneRevision !== store.getState().sceneRevision) store.setState({ sceneRevision });
+
+            // mirror the fly controller's speed off its trait for the indicator. the
+            // first read seeds silently; a later change (wheel, inspector) re-arms the
+            // indicator's show timer.
+            const fly = getTrait(room.editor?.subject ?? room.playerNode, FlyControllerTrait);
+            if (fly && fly.speed !== store.getState().flySpeed) {
+                const seeded = store.getState().flySpeed !== null;
+                store.setState({ flySpeed: fly.speed, flySpeedShownAt: seeded ? performance.now() : 0 });
+            }
 
             // editor visuals + tool dispatch only run when POV is the
             // editor's camera. for play rooms, that means the lens is up
@@ -876,7 +888,6 @@ script(
         onDispose(ctx, () => {
             for (const u of unsubs) u();
             useEditor.getState().registerEditRoomStore(room, null);
-            room.editorClipboard = null;
 
             // clean up node bodies
             NodeBodies.dispose(nodeBodies, room.physics);

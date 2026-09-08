@@ -146,7 +146,6 @@ script(
         if (!env.client) return;
 
         const client = ctx.client!;
-        const room = client.room!;
         const { input } = client;
 
         // ── camera: the active camera node on the client state
@@ -284,9 +283,6 @@ script(
                 } else {
                     fly.speed = Math.max(fly.minSpeed, fly.speed / fly.speedScrollFactor);
                 }
-                // flySpeedShownAt is per-room editor state. play rooms have no
-                // edit-room store registered, the write silently no-ops there.
-                room.editorStore?.setState({ flySpeedShownAt: performance.now() });
             }
 
             // ── compose target world-quat from base + yaw + pitch ──
@@ -352,13 +348,6 @@ script(
             }
 
             quat.copy(lastQuaternion, _qOut);
-
-            // sync speed back to store if it changed (UI indicator).
-            // covers both wheel-adjust and inspector edits.
-            const editorStore = room.editorStore;
-            if (editorStore && fly.speed !== editorStore.getState().flySpeed) {
-                editorStore.setState({ flySpeed: fly.speed });
-            }
         });
     },
     { editor: true },

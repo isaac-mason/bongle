@@ -1,6 +1,6 @@
-import { env } from 'bongle';
 import * as Debug from '../core/debug';
 import * as Protocol from '../core/protocol';
+import { env } from '../env';
 import type { EngineClient } from './client';
 import type { NetStats } from './net';
 import * as Net from './net';

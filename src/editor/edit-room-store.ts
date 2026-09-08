@@ -33,8 +33,8 @@ import * as Selection from '../core/scene/selection';
 import * as Actions from './actions';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
-import { copySelectionToSystemClipboard } from './clipboard';
-import { SaveBlueprintCommand, SaveSceneCommand } from './commands';
+import { type ClipboardHandlers, copySelectionToSystemClipboard } from './clipboard';
+import { DeleteSceneCommand, OpenSceneCommand, RenameSceneCommand, SaveBlueprintCommand, SaveSceneCommand } from './commands';
 import { useEditor } from './editor-store';
 import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
@@ -315,6 +315,9 @@ export type EditRoomState = {
     controlMode: ControlMode;
     flySpeed: number | null;
     flySpeedShownAt: number;
+    /** copy/cut/paste handlers for this room's editor. the page-level listeners
+     *  (lens.ts) dispatch to the active room's. */
+    clipboard: ClipboardHandlers | null;
 
     /* ── undo / redo ── */
     undoStack: Action[];
@@ -547,6 +550,7 @@ function initialFields() {
         controlMode: 'fly' as ControlMode,
         flySpeed: null as number | null,
         flySpeedShownAt: 0,
+        clipboard: null,
 
         undoStack: [] as Action[],
         redoStack: [] as Action[],
@@ -614,18 +618,9 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 joinData: JSON.stringify(joinData),
             });
         },
-        openScene: (sceneId) => {
-            const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'open_scene', sceneId });
-        },
-        renameScene: (oldSceneId, newSceneId) => {
-            const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'rename_scene', oldSceneId, newSceneId });
-        },
-        deleteScene: (sceneId) => {
-            const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'delete_scene', sceneId });
-        },
+        openScene: (sceneId) => send(ctx, OpenSceneCommand, { sceneId }),
+        renameScene: (oldSceneId, newSceneId) => send(ctx, RenameSceneCommand, { oldSceneId, newSceneId }),
+        deleteScene: (sceneId) => send(ctx, DeleteSceneCommand, { sceneId }),
         save: (sceneId) => send(ctx, SaveSceneCommand, { sceneId }),
         undo: () => {
             const stack = get().undoStack;
@@ -938,9 +933,7 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
 /**
  * Resolve the per-room store API for the active edit room. Returns the
  * FALLBACK_STORE when no edit room is currently active so callers don't
- * have to null-check. (Script-side callers should prefer
- * `ctx.client.room.editorStore`, this helper is for the cross-room
- * action shortcuts wired into `useEditor`.)
+ * have to null-check.
  */
 export function activeEditRoomStore(): EditRoomStoreApi {
     const { room, playerEditStores } = useEditor.getState();
