@@ -24,15 +24,11 @@ export type Node = {
     /** ordered list of child nodes */
     children: Node[];
 
-    /** @internal position in `parent.children`. A hint, not a guarantee — read it through
-     *  `childIndexOf`, which re-derives and repairs when it doesn't match. */
-    _childIndex: number;
+    /** our index in the parent, or */
+    childIndex: number;
 
     /** the scene tree this node belongs to, or null if detached */
     scene: SceneTree | null;
-    /** @internal the tree whose `dirtyNodes` list currently holds this node, or null. Holds
-     *  the tree rather than a bool so a node that moves between trees is filed in each. */
-    _dirtyIn: SceneTree | null;
 
     /**
      * which Player owns this node. null = server-owned (default).
@@ -64,23 +60,17 @@ export type Node = {
      */
     realm: Realm;
 
-    /** @internal trait instances indexed by trait slot; holes for slots the node doesn't carry. */
-    _traits: Array<TraitBase | undefined>;
+    /** trait instances indexed by trait slot; holes for slots the node doesn't carry. */
+    traits: Array<TraitBase | undefined>;
 
-    /** @internal node-level replication version (send-path early-out gate). */
-    _sync: NodeSyncState;
+    /** traits whose def isn't in the registry, keyed by trait id  */
+    unresolved: Map<string, Record<string, unknown> | undefined> | null;
 
-    /** @internal bitset for fast trait query matching */
-    _bitset: Bitset;
+    /** bitset for trait query matching */
+    bitset: Bitset;
 
-    /**
-     * @internal traits whose definitions weren't in the registry at load time.
-     * keyed by trait string id. preserves raw data so it round-trips through
-     * pack/unpack and save/load without silent data loss.
-     * hot-reload's serialize→deserialize cycle naturally reconciles these
-     * when the def becomes available again.
-     */
-    _unresolvedTraits: Map<string, { binary?: Uint8Array; json?: Record<string, unknown> }> | null;
+    /** bumped on structural changes to the node */
+    version: number;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -88,12 +78,6 @@ export type Node = {
      * is persisted, children have persist: false.
      */
     prefab: PrefabConfig | null;
-
-    /**
-     * @internal runtime-only prefab instantiation state.
-     * not serialized, not replicated, reconstructed on instantiation.
-     */
-    _prefabState: PrefabState | null;
 };
 ```
 
@@ -348,467 +332,10 @@ export function destroyNode(node: Node): void;
  */
 export function findByName(from: Node, name: string): Node | null;
 ```
-#### `TRANSFORM_DIRTY_WORLD_MATRIX`
-
-```ts
-export const TRANSFORM_DIRTY_WORLD_MATRIX;
-```
-
-#### `TRANSFORM_DIRTY_WORLD_TRS`
-
-```ts
-export const TRANSFORM_DIRTY_WORLD_TRS;
-```
-
-#### `TRANSFORM_DIRTY_INTERPOLATED_TRS`
-
-```ts
-export const TRANSFORM_DIRTY_INTERPOLATED_TRS;
-```
-
-#### `TRANSFORM_DIRTY_INTERPOLATED_MATRIX`
-
-```ts
-export const TRANSFORM_DIRTY_INTERPOLATED_MATRIX;
-```
-
-#### `TRANSFORM_DIRTY_WORLD_CHUNK`
-
-```ts
-export const TRANSFORM_DIRTY_WORLD_CHUNK;
-```
-
-#### `TRANSFORM_DIRTY_ALL`
-
-```ts
-export const TRANSFORM_DIRTY_ALL;
-```
-
-#### `ensureInterpolatedPose`
-
-```ts
-/** allocate the visual pose. Every path that sets `_interpolated = 1` calls this, which is what
- *  lets the readers behind that flag treat the four fields as present. */
-export function ensureInterpolatedPose(transform: TransformTrait): void;
-```
-
 #### `TransformTrait`
 
 ```ts
 export const TransformTrait;
-```
-
-#### `RemoteInterpolation`
-
-```ts
-export type RemoteInterpolation = {
-    /** eased render pose (`current`) and the ease's start pose (`old`) per channel. */
-    positionOld: Vec3;
-    positionCurrent: Vec3;
-    quaternionOld: Quat;
-    quaternionCurrent: Quat;
-    /** ease duration (seconds), an EWMA of the observed send interval, per channel. */
-    positionEaseDuration: number;
-    quaternionEaseDuration: number;
-    /** seconds elapsed into the current ease segment, per channel. */
-    positionElapsed: number;
-    quaternionElapsed: number;
-    /** server stamp of the target the current segment is easing toward, per channel;
-     *  0 until the first sync. the gap to `*PendingStamp` is the learned cadence. */
-    positionStamp: number;
-    quaternionStamp: number;
-    /** server stamp carried by the most recent unpack, per channel (read on retarget). */
-    positionPendingStamp: number;
-    quaternionPendingStamp: number;
-    /** unpack-bumped sequence vs the last one the render side retargeted on. a
-     *  mismatch means a fresh pose landed and the ease should restart. */
-    positionSequence: number;
-    positionSeen: number;
-    quaternionSequence: number;
-    quaternionSeen: number;
-    /** 0 until `current` has been seeded from a real pose (first frame / teleport). */
-    initialized: 0 | 1;
-};
-```
-
-#### `ensureRemoteInterpolation`
-
-```ts
-/** lazily allocate the translator on the first remote pose. owner/local/static nodes
- *  never call this, so they carry a null field and pay nothing. */
-export function ensureRemoteInterpolation(t: TransformTrait): RemoteInterpolation;
-```
-
-#### `noteRemotePosition`
-
-```ts
-/** record a freshly-unpacked remote position: stash the stamp and bump the sequence so
- *  the render side restarts its ease toward the new `t.position` target. */
-export function noteRemotePosition(t: TransformTrait, time: number): void;
-```
-
-#### `noteRemoteQuaternion`
-
-```ts
-/** record a freshly-unpacked remote quaternion (see `noteRemotePosition`). */
-export function noteRemoteQuaternion(t: TransformTrait, time: number): void;
-```
-
-#### `parentTransform`
-
-```ts
-/** the transform `transform` composes against: the nearest one strictly above its node. */
-export function parentTransform(transform: TransformTrait): TransformTrait | null;
-```
-
-#### `markTransformDirty`
-
-```ts
-export function markTransformDirty(transform: TransformTrait): void;
-```
-
-#### `markWorldDirty`
-
-```ts
-/**
- * mark world transform caches dirty without triggering the snapshot
- * enqueue or replication-dirty flags. used by the buffered (remote-
- * driven) pose unpack: `position`/`quaternion` changed so any consumer
- * of world values (physics queries, audio, GPU upload, descendant
- * compose) needs the same invalidation `markTransformDirty` does, but
- * NOT the `_transformDirty` enqueue (which would copy position→prev on
- * the next snapshot and stomp the buffered path's irrelevant prev) and
- * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
- */
-export function markWorldDirty(transform: TransformTrait): void;
-```
-
-#### `releaseTransform`
-
-```ts
-/** drop a transform that is leaving the tree, so nothing keeps walking or ticking it. */
-export function releaseTransform(sceneTree: SceneTree | null, transform: TransformTrait): void;
-```
-
-#### `invalidateTransformAncestry`
-
-```ts
-/**
- * `node`'s ancestry changed (attach, detach, reparent). `movedFrom` is the old parent of an
- * already-live node: when it contracted to the same transform, nothing inside the subtree
- * composes differently, so two climbs replace a whole descent.
- */
-export function invalidateTransformAncestry(node: Node, movedFrom?: Node | null): void;
-```
-
-#### `invalidateTransformChildren`
-
-```ts
-/** a transform was added to or removed from `node` itself, so its descendants compose anew. */
-export function invalidateTransformChildren(node: Node): void;
-```
-
-#### `composeWorldMatrix`
-
-```ts
-/**
- * compose one node's worldMatrix from its current local TRS and the
- * (assumed-fresh) parent.worldMatrix. clears TRANSFORM_DIRTY_WORLD_MATRIX;
- * the root branch also clears TRANSFORM_DIRTY_WORLD_TRS since worldP/Q/S
- * are seeded directly. caller must ensure parent.worldMatrix is fresh.
- *
- * the per-node compose is hand-inlined: quat→matrix expansion and
- * parent*local multiply are written directly here rather than calling
- * mat4.fromRotationTranslationScale + mat4.multiply, which:
- *   - eliminates the intermediate `_localMat` scratch
- *   - exploits the affine invariant (bottom row [0 0 0 1]) so the multiply
- *     touches 12 of 16 result cells with 36 mults instead of 64
- *   - is a hot path during skeleton compose and per-frame model rendering
- *
- * called by both `updateWorldTransform`'s lazy walk-up-then-down loop and
- * the animator's eager forward-DFS compose at the end of `tickAnimator`.
- */
-export function composeWorldMatrix(transform: TransformTrait): void;
-```
-
-#### `composeInterpolatedWorldMatrix`
-
-```ts
-/**
- * compose one node's interpolatedWorldMatrix from its current local TRS and the
- * (assumed-fresh) parent.interpolatedWorldMatrix. clears
- * TRANSFORM_DIRTY_INTERPOLATED_MATRIX; the root branch also clears
- * TRANSFORM_DIRTY_INTERPOLATED_TRS since interpolatedWorld P/Q/S are seeded directly.
- * caller must ensure parent.interpolatedWorldMatrix is fresh.
- */
-export function composeInterpolatedWorldMatrix(transform: TransformTrait): void;
-```
-
-#### `updateInterpolatedWorldTransform`
-
-```ts
-/**
- * ensure interpolatedWorld values are up to date, mirror of
- * `updateWorldTransform`, using the visual dirty bit and visual chain.
- *
- * walks up only through interpolated ancestors; stops at the first clean
- * interpolated ancestor OR the first non-interpolated ancestor. when the
- * boundary parent is non-interpolated, refreshes its worldMatrix so the
- * compose-down loop can source from it (see `composeInterpolatedWorldMatrix`
- * nested branch).
- *
- * caller (the getters) guarantees `t._interpolated === 1`, so the topmost
- * stacked node is always an Interp participant.
- */
-export function updateInterpolatedWorldTransform(transform: TransformTrait): void;
-```
-
-#### `markInterpolatedDescendantsDirty`
-
-```ts
-/**
- * mark `node`'s descendant TransformTraits visual-dirty and flag them as
- * participating in interpolation. used by `interpolate()`: when an Interp
- * ancestor's interpolatedWorldMatrix is written, descendants need to recompose
- * visually on next read AND need their `_interpolated` bit set so reader
- * short-circuits flip to the visual chain.
- *
- * does NOT touch the world dirty bits, sim-side worldMatrix chain is
- * independent and stays valid.
- *
- * unlike `markDescendants`, this walk has no "already dirty" early-out:
- * newly-attached subtrees may already be dirty (from creation) but their
- * `_interpolated` bit hasn't been set yet, so we must keep recursing.
- * descendant counts under Interp roots are small (player rigs, attached
- * props), the unconditional walk is fine.
- */
-export function markInterpolatedDescendantsDirty(node: Node): void;
-```
-
-#### `setInterpolation`
-
-```ts
-/**
- * enroll/unenroll a node in the per-frame interpolation pass. mirrors
- * godot's `set_physics_interpolated`.
- *
- * on enable: flips `interpolate` flag, seeds prev pose from the current
- * local pose, and adds the transform to the per-room `_interpolating` set,
- * which the per-frame `interpolate()` loop in `render/interpolation.ts`
- * iterates.
- *
- * on disable: flips the flag off, clears `_interpolated` (so visual getters
- * fall back to the world chain), and removes from the set.
- *
- * idempotent: re-enabling a node that is already on is a no-op; same for
- * disabling. nodes without TransformTrait are silently ignored.
- *
- * server-safe: `_interpolating` exists on both sides but is never iterated
- * server-side. calling this from shared script code (onInit/onDispose) is
- * fine.
- */
-export function setInterpolation(node: Node, on: boolean): void;
-```
-
-#### `resetInterpolation`
-
-```ts
-/**
- * re-seed prev pose from the node's current local TRS. mirrors godot's
- * `reset_physics_interpolation`, call after a hard snap / teleport /
- * authoritative state load where the prev pose would otherwise cause a
- * visual rubber-band on the next interpolate frame.
- *
- * no-op for nodes that aren't enrolled in interpolation.
- */
-export function resetInterpolation(node: Node): void;
-```
-
-#### `setPosition`
-
-```ts
-/** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(transform: TransformTrait, position: Vec3): void;
-```
-
-#### `setQuaternion`
-
-```ts
-/** set local quaternion and mark dirty. only the quaternion slice replicates. */
-export function setQuaternion(transform: TransformTrait, quaternion: Quat): void;
-```
-
-#### `setScale`
-
-```ts
-/** set local scale and mark dirty. only the scale slice replicates. */
-export function setScale(transform: TransformTrait, scale: Vec3): void;
-```
-
-#### `setTransform`
-
-```ts
-/** set all local transform fields and mark dirty (single dirty pass). */
-export function setTransform(transform: TransformTrait, position: Vec3, quaternion: Quat, scale: Vec3): void;
-```
-
-#### `getWorldPosition`
-
-```ts
-/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
-export function getWorldPosition(transform: TransformTrait): Vec3;
-```
-
-#### `getWorldChunk`
-
-```ts
-/**
- * get the integer chunk coord (cx,cy,cz) containing this transform's world
- * position. lazy: recomputes from worldPosition only when the WORLD_CHUNK bit
- * is set (every world-transform invalidation re-flags it), so a stationary
- * transform computes it once and a never-queried transform never computes it
- * at all. the returned Vec3 is the cached instance, do not mutate.
- */
-export function getWorldChunk(transform: TransformTrait): Vec3;
-```
-
-#### `getWorldQuaternion`
-
-```ts
-/** get world-space quaternion, decomposing from worldMatrix if needed. */
-export function getWorldQuaternion(transform: TransformTrait): Quat;
-```
-
-#### `getWorldScale`
-
-```ts
-/** get world-space scale, decomposing from worldMatrix if needed. */
-export function getWorldScale(transform: TransformTrait): Vec3;
-```
-
-#### `getWorldMatrix`
-
-```ts
-/** get world matrix, recomputing if dirty. */
-export function getWorldMatrix(transform: TransformTrait): Mat4;
-```
-
-#### `getVisualWorldMatrix`
-
-```ts
-/** get the world matrix to render with, visual chain if interpolated, world otherwise. */
-export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
-```
-
-#### `getVisualWorldPosition`
-
-```ts
-/** visual world-space position, read from the matrix translation. */
-export function getVisualWorldPosition(transform: TransformTrait): Vec3;
-```
-
-#### `getVisualWorldQuaternion`
-
-```ts
-/** get visual world-space quaternion, lazy-decomposing if deferred. */
-export function getVisualWorldQuaternion(transform: TransformTrait): Quat;
-```
-
-#### `getVisualWorldScale`
-
-```ts
-/** get visual world-space scale, lazy-decomposing if deferred. */
-export function getVisualWorldScale(transform: TransformTrait): Vec3;
-```
-
-#### `computeWorldTransforms`
-
-```ts
-/**
- * walk the scene graph parent-first and clear all dirty flags by
- * recomputing world-space transforms. useful as a safety-net at
- * tick boundaries to guarantee everything is clean before interpolation.
- *
- * with lazy recompute in place, most world values will already be clean
- * (read during the tick). this just catches anything that was dirtied
- * but never read.
- */
-export function computeWorldTransforms(nodes: SceneTree): void;
-```
-
-#### `worldToLocalPosition`
-
-```ts
-/**
- * convert a world-space position to local-space for a node.
- * fast path: if no transformed parent, world === local, just copies.
- */
-export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3;
-```
-
-#### `worldToLocalQuaternion`
-
-```ts
-/**
- * convert a world-space quaternion to local-space for a node.
- * fast path: if no transformed parent, world === local, just copies.
- */
-export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat;
-```
-
-#### `setWorldPosition`
-
-```ts
-/**
- * set a node's local position such that its world position matches worldPos.
- * fast path when no transformed parent, just copies into t.position.
- * marks dirty after writing.
- */
-export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3): void;
-```
-
-#### `setWorldQuaternion`
-
-```ts
-/**
- * set a node's local quaternion such that its world rotation matches worldQuat.
- * fast path when no transformed parent, just copies into t.quaternion.
- * marks dirty after writing.
- */
-export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void;
-```
-
-#### `hasTransformedParent`
-
-```ts
-/**
- * returns true if this node has a transformed parent (parent transform pointer is set).
- * used as a fast path check, if false, local === world and no conversion is needed.
- */
-export function hasTransformedParent(transform: TransformTrait): boolean;
-```
-
-#### `collapseTransformIntoChildren`
-
-```ts
-/**
- * compose `anchor.local` into each direct-child subtree's first-encountered
- * TransformTrait. used by the play-mode prefab bake to drop the anchor's
- * transform: after this call, each affected descendant's world pose is
- * unchanged, and the anchor's TransformTrait can be safely removed.
- *
- * for each direct child of `anchor`, DFS until a TransformTrait is found
- * and compose:
- *   newLocal = anchor.local ∘ childLocal
- *
- * subtrees with no TransformTrait are left untouched, they inherit the
- * anchor's parent transform once the anchor's transform is removed.
- *
- * callers are responsible for `removeTrait(anchor, TransformTrait)` and
- * any downstream sync (markAncestryChanged on descendants happens
- * automatically via removeTrait's child-pointer update).
- */
-export function collapseTransformIntoChildren(anchor: Node): void;
 ```
 #### `WorldTrait`
 
@@ -887,12 +414,6 @@ export function getWorldQuaternion(transform: TransformTrait): Quat;
 export function getWorldScale(transform: TransformTrait): Vec3;
 ```
 
-#### `markDirty`
-
-```ts
-export function markDirty(transform: TransformTrait): void;
-```
-
 #### `resetInterpolation`
 
 ```ts
@@ -915,7 +436,7 @@ export function resetInterpolation(node: Node): void;
  * godot's `set_physics_interpolated`.
  *
  * on enable: flips `interpolate` flag, seeds prev pose from the current
- * local pose, and adds the transform to the per-room `_interpolating` set,
+ * local pose, and adds the transform to the per-room `interpolating` set,
  * which the per-frame `interpolate()` loop in `render/interpolation.ts`
  * iterates.
  *
@@ -925,7 +446,7 @@ export function resetInterpolation(node: Node): void;
  * idempotent: re-enabling a node that is already on is a no-op; same for
  * disabling. nodes without TransformTrait are silently ignored.
  *
- * server-safe: `_interpolating` exists on both sides but is never iterated
+ * server-safe: `interpolating` exists on both sides but is never iterated
  * server-side. calling this from shared script code (onInit/onDispose) is
  * fine.
  */
@@ -980,6 +501,26 @@ export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3)
  * marks dirty after writing.
  */
 export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void;
+```
+
+#### `worldToLocalPosition`
+
+```ts
+/**
+ * convert a world-space position to local-space for a node.
+ * fast path: if no transformed parent, world === local, just copies.
+ */
+export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3;
+```
+
+#### `worldToLocalQuaternion`
+
+```ts
+/**
+ * convert a world-space quaternion to local-space for a node.
+ * fast path: if no transformed parent, world === local, just copies.
+ */
+export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat;
 ```
 
 ## Traits & schemas
@@ -1108,60 +649,24 @@ export type TraitBody = Record<string, unknown>;
 #### `TraitDef`
 
 ```ts
+/** The authored data for one trait. Everything DERIVED from it — the compiled
+ *  constructor, the codec memos, the by-id indexes, the wire index — lives on the
+ *  handle, so this stays pure data: hashable, serializable, no back-references. */
 export type TraitDef = {
     id: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
-    /**
-     * runtime slot, see `TraitHandle._slot`. Distinct from any wire index;
-     * `node._traits` is keyed by `slot`, while the wire encoding uses a
-     * sort-by-id position computed fresh per flush at the rpc/replication layer.
-     */
-    slot: number;
     /** raw body of the trait, literals + factories, indexed by field name. */
     body: Record<string, unknown>;
     /** whether instances of this trait are saved to scene files. default true. */
     persist: boolean;
-
-    /** control registrations in registration order. */
+    /** appended by this module's `control()` calls, right after `trait()` returns. */
     controls: ControlDef[];
-    /** lookup by control id. */
-    controlsById: Map<string, { reg: ControlDef; index: number }>;
-
-    /** sync registrations in registration order. position in this array is
-     *  the trait-local sync key used in wire packing (`${wireIndex}:${syncPos}`). */
+    /** appended by this module's `sync()` calls. */
     sync: SyncDef[];
-    /** lookup by sync id. */
-    syncById: Map<string, { reg: SyncDef; index: number }>;
-    /** script registrations in registration order. one ScriptInstance per
-     *  script per attached trait, instantiated when the trait attaches to a
-     *  live node. */
+    /** appended by this module's `script()` calls. */
     scripts: ScriptDef[];
-    /** lookup by script id (user-supplied, within this trait). */
-    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
-
-    /** compiled instance constructor, built with the def. Lives here rather than in a side map so an
-     *  HMR re-eval, which mints a fresh def, gets a fresh one for free. */
-    construct: () => TraitBase;
-
-    /** this trait's sort-by-id position in the protocol table, stamped by `reindexRegistry`
-     *  whenever that table is rebuilt. `undefined` until the first reindex. */
-    netIndex: number | undefined;
-
-    /** @internal packcat codecs, built on first use. See `packcat-bridge`. */
-    _syncCodecs?: SyncCodec[] | null;
-    _controlCodecs?: ControlCodec[] | null;
-    /**
-     * canonical handle for this def. populated by `trait()` immediately
-     * after the def is constructed, so any registry lookup yields the
-     * same handle the original `trait()` call returned. Used for
-     * by-id attach paths (e.g. optional/conditionally-loaded traits like
-     * the editor trait) where the call site cannot import the handle
-     * directly. Forms a `def.handle._def === def` cycle, fine for GC,
-     * but means TraitDef must never be JSON.stringify'd.
-     */
-    handle: TraitHandle;
 };
 ```
 
@@ -1174,18 +679,36 @@ export type TraitDef = {
  * inference; it does not exist at runtime.
  */
 export type TraitHandle<T extends TraitBase = TraitBase> = {
-    readonly _id: string;
+    /** the declared id (identity, never changes). */
+    readonly id: string;
     /**
      * runtime slot, stable integer identity assigned the first time `trait(id, ...)`
      * runs, cached in `traitSlots[id]` for the process lifetime. Used as the key
      * in `node._traits: Map<number, TraitBase>` and anywhere runtime code indexes
-     * a trait. Distinct from the *wire index* (sort-by-id position computed at flush,
-     * lives only on the rpc/replication layer).
+     * a trait. Distinct from the *wire index* (`netIndex`, recomputed per flush).
      */
-    readonly _slot: number;
-    readonly _def: TraitDef;
+    readonly slot: number;
     /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'traits'; id: string };
+    /** the authored data. re-pointed on every re-declaration. */
+    def: TraitDef;
+
+    // ── derived from `def`; rebuilt by `mintHandle` on every declaration ──
+
+    /** compiled instance constructor, built from `def.body`. */
+    construct: () => TraitBase;
+    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. */
+    netIndex: number | undefined;
+    /** `controlId` → its registration + slot index, over `def.controls`. */
+    controlsById: Map<string, { reg: ControlDef; index: number }>;
+    /** `syncId` → its registration + slot index, over `def.sync`. */
+    syncById: Map<string, { reg: SyncDef; index: number }>;
+    /** `scriptId` → its registration + slot index, over `def.scripts`. */
+    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
+    /** memoised packcat codecs; null until first built, dropped on re-declaration. */
+    syncCodecs: SyncCodec[] | null;
+    controlCodecs: ControlCodec[] | null;
+
     /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
 };
@@ -1560,9 +1083,9 @@ export type EditorPlayData = {
  * `client.camera` point at these.
  */
 export type EditRoomState = {
-    /** stable opaque id for this editor view; surfaces as RoomViewId so the
-     *  UI can address the editor POV separately from the player POV
-     *  even though both belong to the same ClientRoom. */
+    /** stable opaque id for this editor view, so the UI can address the editor
+     *  POV separately from the player POV even though both belong to the same
+     *  ClientRoom. */
     id: string;
 
     /**
@@ -1656,7 +1179,12 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry, flat lookup tables for block type/state info */
+    /** block registry, flat lookup tables for block type/state info.
+     *  DERIVED from `voxels.registry` (a getter at the construction site), never a
+     *  captured copy: `registry-dispatch.refreshBlockResources` repoints
+     *  `voxels.registry` and re-resolves every chunk palette to the new state ids on
+     *  an HMR block change. A second cached `Blocks` misses that swap and then indexes
+     *  new state ids into the old, shorter typed arrays. */
     blocks: Blocks;
 
     /** client information, safe to ! bang if env.client is true */
@@ -2015,7 +1543,7 @@ export function query<const Args extends ConditionArgs[]>(ctx: ScriptContext, co
  * factory runs at attach time with `ctx.trait` typed for the handle.
  *
  * `id` is a stable user-supplied string (without trait prefix). the runtime
- * identifier becomes `${trait._id}.${id}`, used as the instance map key,
+ * identifier becomes `${trait.id}.${id}`, used as the instance map key,
  * DepGraph dependency key, and error message label.
  *
  * @example
@@ -2157,7 +1685,7 @@ export function asset(rel: string, base: string): string;
  * so a non-null result keeps the same object reference across HMR /
  * re-registrations of the same id.
  */
-export function getModel(ctx: ScriptContext, id: string): ModelHandle | null;
+export function getModel(ctx: ScriptContext, id: string): ModelDef | null;
 ```
 
 #### `ensureModel`
@@ -2211,7 +1739,7 @@ export type LoadModelOptions = {
  * then, transient failures retry in the background and the promise stays
  * pending, the load self-drives its own retries while awaited.
  */
-export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelHandle>;
+export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelDef>;
 ```
 
 #### `releaseModel`
@@ -2224,17 +1752,17 @@ export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOpti
  */
 export function releaseModel(ctx: ScriptContext, id: string): void;
 ```
-#### `SoundHandle`
+#### `SoundDef`
 
 ```ts
-export type SoundHandle = {
+/** The declared + codegen'd data for one sound. Pure data: hashed for change
+ *  detection, swapped wholesale when the barrel re-registers (see `declare`). */
+export type SoundDef = {
     readonly soundId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `soundId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'sounds'; id: string };
     readonly src: string;
     readonly long: boolean;
     /**
@@ -2246,6 +1774,20 @@ export type SoundHandle = {
     readonly duration: number;
     /** bumped on HMR via registry.touch(). */
     version: number;
+};
+```
+
+#### `SoundHandle`
+
+```ts
+/** Stable wrapper around a `SoundDef`; identity plus the live def. */
+export type SoundHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'sounds'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SoundDef;
 };
 ```
 
@@ -2326,22 +1868,14 @@ export function sound<const Id extends string>(id: Id, options: SoundOptions): I
 #### `SpriteHandle`
 
 ```ts
+/** Stable wrapper around a `SpriteDef`; identity plus the live def. */
 export type SpriteHandle = {
-    /** sprite string id (e.g. 'sword'). */
-    spriteId: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `spriteId` when the author didn't supply one, so
-     *  readers can show `handle.name` unconditionally. */
-    name: string;
-    /** DepGraph dependency. */
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'sprites'; id: string };
-    /** source declarations, post-URL-normalization. uv rects + sizes
-     *  live in the atlas JSON sidecar, fetched at runtime. */
-    src: NormalizedImageSource | NormalizedImageSource[];
-    /** atlas padding (gutter pixels). */
-    padding: number;
-    /** mip generation flag. */
-    mipmap: boolean;
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SpriteDef;
 };
 ```
 
@@ -2551,6 +2085,23 @@ export function _registerScenePayload(id: string, payload: ScenePayload): void;
 ```
 
 Also exported: `SceneHandle`, `SceneOptions`.
+#### `PrefabHandle`
+
+```ts
+/** Stable wrapper around a `PrefabDef`. Carries identity plus the live def; the
+ *  data itself is read through `.def` rather than copied out (see `declare`). */
+export type PrefabHandle<Args = unknown> = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'prefabs'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: PrefabDef;
+    /** phantom, carries the args type for inference. not present at runtime. */
+    readonly __args: Args;
+};
+```
+
 #### `PrefabType`
 
 ```ts
@@ -2578,25 +2129,6 @@ export type PrefabDef<Args = unknown> = {
     defaultArgs: Args;
     node?: { realm?: Realm };
     apply: (ctx: PrefabApplyContext, args: Args) => void;
-};
-```
-
-#### `PrefabHandle`
-
-```ts
-export type PrefabHandle<Args = unknown> = {
-    readonly id: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `id` when the author didn't supply one. */
-    readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'prefabs'; id: string };
-    readonly type: PrefabType;
-    readonly argsSchema: Schema;
-    /** default args value, read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
-    readonly defaultArgs: Args;
-    readonly node: { realm?: Realm } | undefined;
-    readonly __args: Args;
 };
 ```
 
@@ -2738,30 +2270,17 @@ export type MeshId = {
 };
 ```
 
-#### `ModelHandle`
+#### `ModelDef`
 
 ```ts
-/**
- * Static handle for a single model. Codegen'd into `<basename>.glb.generated.ts`,
- * never constructed at runtime.
- *
- * Fully typed against the source gltf:
- *   - NodeNames: union of all named gltf nodes (mesh-bearing or not)
- *   - MeshNames: union of all mesh names
- *   - ClipNames: union of all animation clip names
- */
-export type ModelHandle<
-    NodeNames extends string = string,
-    MeshNames extends string = string,
-    ClipNames extends string = string,
-> = {
+/** The codegen'd data for one model. Pure data: hashed for change detection and
+ *  swapped wholesale when the barrel re-registers (see `declare`). */
+export type ModelDef<NodeNames extends string = string, MeshNames extends string = string, ClipNames extends string = string> = {
     /** User-chosen id from `model('wizard', { src })`. Stable handle. */
     readonly modelId: string;
     /** human-readable display name for editor UIs. always set,
      *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'models'; id: string };
     /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
     /**
@@ -2814,6 +2333,46 @@ export type ModelHandle<
      * user code treats it as read-only.
      */
     version: number;
+};
+```
+
+#### `ModelHandle`
+
+```ts
+/** Stable wrapper around a `ModelDef`; identity plus the live def. The barrel
+ *  re-points `def` on every codegen pass, so a user-held handle stays current. */
+export type ModelHandle<D extends ModelDef = ModelDef> = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'models'; id: string };
+    /** the codegen'd data. re-pointed on every re-registration. */
+    def: D;
+
+    // ── scripting-API convenience ────────────────────────────────────
+    //
+    // Forwarding accessors, not stored copies: the def is re-pointed whenever
+    // codegen re-registers, so a copy would go stale. These exist because the
+    // documented model API is field access — `wizard.nodes.Body`,
+    // `wizard.meshes.Head`, `wizard.animations.idle` — and game code reads it at
+    // spawn/setup. The ENGINE never comes through here: it takes a `ModelDef`
+    // from `Resources.modelDef()` or `CharacterTrait.state.modelDef`, so the
+    // per-frame paths are plain field loads and pay nothing for these.
+
+    /** @see ModelDef.name */
+    readonly name: string;
+    /** @see ModelDef.src */
+    readonly src: string;
+    /** @see ModelDef.scene */
+    readonly scene: D['scene'];
+    /** @see ModelDef.aabb */
+    readonly aabb: D['aabb'];
+    /** @see ModelDef.nodes */
+    readonly nodes: D['nodes'];
+    /** @see ModelDef.meshes */
+    readonly meshes: D['meshes'];
+    /** @see ModelDef.animations */
+    readonly animations: D['animations'];
 };
 ```
 
@@ -3295,6 +2854,15 @@ export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lig
 };
 ```
 
+#### `blockPreset.CropPresetOptions`
+
+```ts
+export type CropPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one texture per growth stage, youngest first. */
+    textures: TextureRef[];
+};
+```
+
 #### `blockPreset.LadderPresetOptions`
 
 ```ts
@@ -3389,6 +2957,25 @@ export function slab(id: string, {
 export function plant(id: string, {
     textures: texture, ...options;
 }: PlantPresetOptions);
+```
+
+#### `blockPreset.CropHandle`
+
+```ts
+export type CropHandle = BlockHandle & {
+    /** state key for a growth stage (1..stages). */
+    stage(n: number): string;
+    /** state key for the final stage. */
+    ripe(): string;
+};
+```
+
+#### `blockPreset.crop`
+
+```ts
+export function crop(id: string, {
+    textures, ...options;
+}: CropPresetOptions): CropHandle;
 ```
 
 #### `blockPreset.leaves`
@@ -4151,32 +3738,23 @@ export function create<const P extends PropsDef>(props: P): BlockStateDef<P>;
 #### `BlockHandle`
 
 ```ts
+/** Stable wrapper around a `BlockDef`; identity, the live def, and the state-id
+ *  helpers gameplay code calls. The three `_`-prefixed slots are stamped by
+ *  `buildBlockRegistry` at freeze time and are NOT declared data, which is why
+ *  they live here rather than on the def (hashing them would make every rebuild
+ *  look like a content change). */
 export type BlockHandle<P extends PropsDef = PropsDef> = {
-    /** block string id (e.g. 'oak_log') */
+    /** the declared id (identity, never changes). */
     readonly id: string;
-
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `id` when the author didn't supply one. */
-    readonly name: string;
-
-    /** DepGraph dependency, see SceneHandle.dependency. */
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'blocks'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: BlockDef<P>;
 
-    /** the block's state schema */
-    readonly states: BlockStateDef<P>;
-
-    /** the block def */
-    readonly _def: BlockDef<P>;
-
-    /** dense block type index. set by registry builder at freeze time. */
+    /** dense block type index. set by the registry builder at freeze time. */
     _index: number;
-
-    /** first global state id. set by registry builder at freeze time. */
+    /** first global state id. set by the registry builder at freeze time. */
     _baseStateId: number;
-
-    /** total number of states for this block. */
-    readonly totalStates: number;
-
     /**
      * bitmask of hooks this block has (intrinsic + any observer handlers
      * registered at module scope). populated by the registry builder at
@@ -4582,12 +4160,13 @@ export type BlockSoundConfig = {
 #### `BlockTextureDef`
 
 ```ts
+/** The declared data for one block texture. Pure: hashed wholesale, swapped
+ *  wholesale on re-declaration (see `declare`). */
 export type BlockTextureDef = {
     /** texture string id (e.g. 'lava') */
     id: string;
 
     /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'blockTextures'; id: string };
 
     /** source declarations, post-URL-normalization. each entry is either
      *  a path string or a `DrawSource` descriptor; the asset-pipeline
@@ -4670,7 +4249,7 @@ export type CustomModel = {
 #### `TextureRef`
 
 ```ts
-export type TextureRef = BlockTextureDef | string;
+export type TextureRef = BlockTextureHandle | string;
 ```
 
 #### `block`
@@ -4701,7 +4280,7 @@ export function block<const P extends PropsDef = {
  *
  * returns a handle that can be passed to block model definitions.
  */
-export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureDef;
+export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureHandle;
 ```
 
 #### `resolveTextureRef`
@@ -5397,6 +4976,17 @@ export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: Bloc
  *  stub first so a direct write can't corrupt the singleton. for tier-1 raw
  *  fills: grab this, write/`.fill()` slots into it, then call invalidateChunk. */
 export function chunkData(chunk: Chunk): Uint16Array;
+```
+
+#### `chunkLight`
+
+```ts
+/** Writable light for a chunk, copy-on-write off `EMPTY_LIGHT` — the twin of
+ *  `chunkData`, and the enforcement of the aliasing contract above. Every empty
+ *  stub the server ships aliases that one buffer, so a write straight through
+ *  `chunk.light` does not darken one chunk, it darkens EVERY empty chunk in the
+ *  world at once (and stays wrong until real light arrives for each). */
+export function chunkLight(chunk: Chunk): Uint16Array;
 ```
 
 #### `setChunkBlock`
@@ -6167,27 +5757,14 @@ export const particleUpdate: {
 #### `ParticleHandle`
 
 ```ts
+/** Stable wrapper around a `ParticleDef`; identity plus the live def. */
 export type ParticleHandle = {
-    /** particle type string id (e.g. 'smoke', '_block-dust/grass'). */
-    typeId: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `typeId` when the author didn't supply one. */
-    name: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'particles'; id: string };
-    /** sprite ref (frame timeline source). */
-    sprite: SpriteHandle;
-    /** playback mode. */
-    playback: ParticlePlayback;
-    /** fps for `'loop'` / `'once'`. defaults to 0 (degenerate frame-0)
-     *  for `'stretch'` and single-frame sprites. */
-    fps: number;
-    /** per-particle update fn. */
-    update: ParticleUpdateFn;
-    /** resolved spawn-time default for glow [0,1]. */
-    glow: number;
-    /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */
-    tint: [r: number, g: number, b: number, a: number];
+    /** the declared data. re-pointed on every re-declaration. */
+    def: ParticleDef;
 };
 ```
 
@@ -6390,7 +5967,7 @@ export const modelIdSync;
 
 ```ts
 /**
- * Synchronously mount the placeholder (baseAvatar) rig on `node` if it has no
+ * Synchronously mount the placeholder (baseAvatar.def) rig on `node` if it has no
  * rig yet, so code running before the reconciler's first frame sees the bones.
  *
  * The reconciler builds the rig in `onFrame`, which runs *after* the server's
@@ -8115,14 +7692,15 @@ RPC, matchmaking, room management, and chat.
 #### `CommandHandle`
 
 ```ts
-/** a command handle returned by command(). */
+/** Stable wrapper around a `CommandDef`. Identity plus the live def; the schema
+ *  and codec are read through `.def` rather than copied out (see `declare`). */
 export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
+    /** the declared id (identity, never changes). */
     readonly id: string;
-    /** DepGraph dependency, see SceneHandle.dependency. */
+    /** DepGraph dependency + the brand `isHandle` tests. */
     dependency: { registry: 'commands'; id: string };
-    readonly direction: D;
-    readonly schema: S;
-    readonly serdes: ReturnType<typeof pack.build<S>>;
+    /** the declared data. re-pointed on every re-declaration. */
+    def: CommandDef & { direction: D; schema: S; serdes: ReturnType<typeof pack.build<S>> };
 };
 ```
 
