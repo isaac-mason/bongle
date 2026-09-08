@@ -1,14 +1,18 @@
 // editor/server.ts, the server half of the editor module: the room-level editor
-// script (EditorServerTrait) that owns the authoritative scene + voxel mutation
-// listeners and the /relight command. Imported only by engine-server-editor.
+// system (a WorldTrait script, so it instantiates on every room root without the
+// runtime knowing it exists) that owns the authoritative scene + voxel mutation
+// listeners, the /relight command, and the per-player EditorTrait seed. Imported
+// only by engine-server-editor.
 
 import { env } from 'bongle';
 import type { Client } from 'bongle/interface';
 import * as chat from '../api/chat';
+import { WorldTrait } from '../builtins/world';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
 import {
     addChild,
+    addTrait,
     addTraitBySlot,
     bumpNodeVersion,
     createNode,
@@ -25,7 +29,7 @@ import {
     setPrefab,
     setRealm,
 } from '../core/scene/scene-tree';
-import { listen, script } from '../core/scene/scripts';
+import { listen, onJoin, script } from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';
@@ -48,18 +52,26 @@ import {
     SetTraitCommand,
     VoxelEditCommand,
 } from './commands';
-import { EditorServerTrait } from './editor-trait';
+import { EditorTrait } from './editor-trait';
 
-// server-side editor concerns. attached to the room root by the server
-// when an edit room is created (in dev / env.editor builds). holds the
-// authoritative voxel/scene mutation listeners and the /relight command.
-// no client side, replicated to clients only as a marker, the script
-// body early-returns there.
+// the room-level editor system. hosted on WorldTrait like any other system, so it
+// runs once per room root on both sides; the client-side instance early-returns.
+// holds the authoritative voxel/scene mutation listeners and the /relight command,
+// and seeds the per-player EditorTrait on join.
 script(
-    EditorServerTrait,
-    'editor-server',
+    WorldTrait,
+    'editor',
     (ctx) => {
         if (!env.server) return;
+
+        // per-player editor activation follows the player's mode, not the room's:
+        // an edit-mode player gets EditorTrait on its player node (also when
+        // inspecting a play room), and replication delivers it to the owning
+        // client, whose script runs there. play-mode players use a client-local
+        // lens instead (lens.ts), so nothing is seeded for them.
+        onJoin(ctx, ({ playerNode, mode }) => {
+            if (mode === 'edit') addTrait(playerNode, EditorTrait);
+        });
 
         // //relight, full recompute of sky + rgb light for the room. only
         // the server has authoritative light state, so the listener lives

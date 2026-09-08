@@ -4,8 +4,8 @@
 // after a registry-change invalidation clears the cache.
 
 import { useEffect } from 'react';
-import { ensurePrefabIcon } from '../client';
 import { useEditor } from '../editor-store';
+import { ensurePrefabIcon } from '../icons';
 
 /** Object URL for `prefabId`'s in-browser icon, or undefined until it lands.
  *  Triggers the render on first use and after invalidation. */

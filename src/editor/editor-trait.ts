@@ -15,14 +15,3 @@ import { type TraitType, trait } from '../core/scene/traits';
 export const EditorTrait = trait('editor.state', {}, { persist: false });
 
 export type EditorTrait = TraitType<typeof EditorTrait>;
-
-/**
- * server-side editor marker, attached to the room root of edit rooms.
- * carries the server command listeners (voxel edits, node mutations,
- * blueprint save) and the `/relight` chat command. paired with EditorTrait
- * (per-player), this one owns room-wide server concerns, EditorTrait owns
- * per-player client activation.
- */
-export const EditorServerTrait = trait('editor.server', {}, { persist: false });
-
-export type EditorServerTrait = TraitType<typeof EditorServerTrait>;

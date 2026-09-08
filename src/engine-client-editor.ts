@@ -16,7 +16,7 @@ import type { EngineClient } from './client/client';
 import { applyRegistryChanges } from './client/registry-dispatch';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import { type SceneSource, setSceneSource } from './editor/blueprints';
-import * as Editor from './editor/client';
+import './editor/client';
 import { mountEditUI } from './editor/ui/edit-ui';
 
 // Maps a baked prefab-icon path back to its prefab id, so the edit client's fs
@@ -25,18 +25,17 @@ export { prefabIdFromIconPath } from './client/prefab-icons';
 // Blueprint scene-source wiring for embedders that read scenes from a project fs
 // (the browser editor). refreshBlueprints re-lists; reloadBlueprint re-reads one.
 export { refreshBlueprints, reloadBlueprint, type SceneSource } from './editor/blueprints';
-// Reload the pipeline-baked voxel icons. The edit client calls these when a baked
-// icon file changes on the fs: the block atlas and per-prefab thumbnails are
-// separate artifacts with separate bakes, so they invalidate separately.
-export { invalidatePrefabIcons, reloadBlockIconAtlas } from './editor/client';
 // The editor UI store. Re-exported here because engine-client-editor is the editor's
 // public surface, the edit client reads it for the net-sim toggle.
 export { useEditor } from './editor/editor-store';
+// Reload the pipeline-baked voxel icons. The edit client calls these when a baked
+// icon file changes on the fs: the block atlas and per-prefab thumbnails are
+// separate artifacts with separate bakes, so they invalidate separately.
+export { invalidatePrefabIcons, reloadBlockIconAtlas } from './editor/icons';
 
 export async function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): Promise<void> {
     setSceneSource(opts?.sceneSource ?? null);
-    Editor.registerClient(state);
-    mountEditUI(state.domElement);
+    mountEditUI(state);
     const g = window as unknown as { _state: EngineClient; _api: typeof api };
     g._state = state;
     g._api = api;

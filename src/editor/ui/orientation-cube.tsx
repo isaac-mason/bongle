@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { resolveRoomCamera } from '../../client/rooms';
-import { getEditorClient } from '../client';
 import { useEditor } from '../editor-store';
+import { useEngineClient } from './engine-client-context';
 
 const CUBE_PX = 165;
 const GIZMO_PX = 145;
@@ -154,9 +154,12 @@ const AXES: Axis[] = [
 
 export function OrientationCube() {
     const room = useEditor((s) => s.room);
+    const engine = useEngineClient();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const roomRef = useRef(room);
     roomRef.current = room;
+    const engineRef = useRef(engine);
+    engineRef.current = engine;
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -173,8 +176,7 @@ export function OrientationCube() {
 
         const tick = () => {
             const r = roomRef.current;
-            const rc = getEditorClient();
-            const camera = r && rc ? resolveRoomCamera(rc.renderer.camera, r) : null;
+            const camera = r ? resolveRoomCamera(engineRef.current.renderer.camera, r) : null;
             if (camera) {
                 const m = camera.matrixWorldInverse;
                 const a0 = m[0],

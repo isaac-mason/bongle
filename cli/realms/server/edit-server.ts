@@ -6,6 +6,7 @@
 // with the user code (userEntry).
 
 import type { Server as HttpServer } from 'node:http';
+import * as api from 'bongle';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import * as EngineServerEditor from 'bongle/engine-server-editor';
 import { env } from 'bongle/env';
@@ -56,10 +57,12 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         driver: { storage: createInMemoryStorageDriver(), avatars },
     });
 
-    // register the editor's server commands BEFORE load (mirrors the client's
-    // EngineClientEditor.setup), then load, then watch the registry for HMR
-    // re-declares + the initial apply.
-    await EngineServerEditor.setup(state);
+    // importing bongle/engine-server-editor registered the editor's server
+    // declarations; load builds the derived indexes over them. expose state + api
+    // on globalThis for ad-hoc inspection via `bun --inspect` / devtools.
+    const g = globalThis as unknown as { _state: ServerState; _api: typeof api };
+    g._state = state;
+    g._api = api;
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
     EngineServerEditor.watchRegistry(state);

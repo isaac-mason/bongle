@@ -7,6 +7,8 @@ import type { PlayerMode, RoomInfo } from '../../core/protocol';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { setEditorEnabledForRoom, setRoomView } from '../lens';
+import { joinRoom, leaveRoom, stopRoom, switchRoom } from '../session';
+import { useEngineClient } from './engine-client-context';
 
 /* ── Room tabs ──────────────────────────────────────────────────── */
 
@@ -54,10 +56,7 @@ function MenuItem({
 
 function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: () => void }) {
     const ref = useRef<HTMLDivElement>(null);
-    const switchRoom = useEditor((s) => s.switchRoom);
-    const joinRoom = useEditor((s) => s.joinRoom);
-    const leaveRoom = useEditor((s) => s.leaveRoom);
-    const stopRoom = useEditor((s) => s.stopRoom);
+    const engine = useEngineClient();
     const joinedPlayers = useEditor((s) => s.joinedPlayers);
     const playerToView = useEditor((s) => s.playerToView);
 
@@ -91,7 +90,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                 label="Activate"
                 disabled={!isJoinedThisMode}
                 onClose={onClose}
-                onClick={() => switchRoom?.(info.id, tabMode)}
+                onClick={() => switchRoom(engine, info.id, tabMode)}
             />
             {tabMode === 'edit' && (
                 <MenuItem
@@ -120,8 +119,8 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                         label={inspectServerOn ? 'Stop inspecting server' : 'Inspect server'}
                         onClose={onClose}
                         onClick={() => {
-                            if (inspectServerOn) leaveRoom?.(info.id, 'edit');
-                            else joinRoom?.(info.id, 'edit');
+                            if (inspectServerOn) leaveRoom(engine, info.id, 'edit');
+                            else joinRoom(engine, info.id, 'edit');
                         }}
                     />
                 </>
@@ -132,9 +131,15 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                 danger
                 disabled={!isJoinedThisMode || isMainEdit}
                 onClose={onClose}
-                onClick={() => leaveRoom?.(info.id, tabMode)}
+                onClick={() => leaveRoom(engine, info.id, tabMode)}
             />
-            <MenuItem label="Stop room" danger disabled={isMainEdit} onClose={onClose} onClick={() => stopRoom?.(info.id)} />
+            <MenuItem
+                label="Stop room"
+                danger
+                disabled={isMainEdit}
+                onClose={onClose}
+                onClick={() => stopRoom(engine, info.id)}
+            />
         </div>
     );
 }
@@ -188,10 +193,7 @@ function RoomTab({
     const activeRoomId = useEditor((s) => s.roomId);
     const activeMode = useEditor((s) => s.mode);
     const playerToView = useEditor((s) => s.playerToView);
-    const switchRoom = useEditor((s) => s.switchRoom);
-    const joinRoom = useEditor((s) => s.joinRoom);
-    const leaveRoom = useEditor((s) => s.leaveRoom);
-    const stopRoom = useEditor((s) => s.stopRoom);
+    const engine = useEngineClient();
 
     const isPlay = tabMode === 'play';
     // a local (client-only, in-tab) room vs a server-backed remote room. local room
@@ -217,13 +219,13 @@ function RoomTab({
 
     const onActivate = (): void => {
         if (!room) {
-            joinRoom?.(info.id, info.roomMode);
+            joinRoom(engine, info.id, info.roomMode);
             return;
         }
         if (lensBacked) {
             // editor POV on a play room: ensure play active + lens up + POV=edit
             if (room.roomId !== activeRoomId || activeMode !== 'play') {
-                switchRoom?.(room.roomId, 'play');
+                switchRoom(engine, room.roomId, 'play');
             }
             setEditorEnabledForRoom(room, true);
             setRoomView(room, 'edit');
@@ -231,7 +233,7 @@ function RoomTab({
         }
         if (tabMode === 'play') {
             if (room.roomId !== activeRoomId || activeMode !== 'play') {
-                switchRoom?.(room.roomId, 'play');
+                switchRoom(engine, room.roomId, 'play');
             }
             // if lens was up, swap POV back to player and hide editor (but
             // keep the lens alive, full teardown lives on the lens pill's X).
@@ -242,7 +244,7 @@ function RoomTab({
         }
         // sibling edit ClientRoom
         if (room.roomId !== activeRoomId || activeMode !== 'edit') {
-            switchRoom?.(room.roomId, 'edit');
+            switchRoom(engine, room.roomId, 'edit');
         }
     };
 
@@ -250,7 +252,7 @@ function RoomTab({
         e.stopPropagation();
         if (!room) {
             // ghost, only server-side stop applies.
-            stopRoom?.(info.id);
+            stopRoom(engine, info.id);
             return;
         }
         if (lensBacked) {
@@ -258,10 +260,10 @@ function RoomTab({
             return;
         }
         if (tabMode === 'play') {
-            stopRoom?.(room.roomId);
+            stopRoom(engine, room.roomId);
             return;
         }
-        leaveRoom?.(room.roomId, 'edit');
+        leaveRoom(engine, room.roomId, 'edit');
     };
 
     const onContextMenu = (e: React.MouseEvent): void => {
@@ -427,7 +429,7 @@ function RoomTabs() {
 
 function PlaySection() {
     const roomMode = useEditor((s) => s.roomMode);
-    const stopRoom = useEditor((s) => s.stopRoom);
+    const engine = useEngineClient();
     const roomId = useEditor((s) => s.roomId);
     const playPending = useEditor((s) => s.playPending);
     const play = useEditRoom((s) => s.play);
@@ -440,7 +442,7 @@ function PlaySection() {
             <Button
                 tone="danger"
                 onClick={() => {
-                    if (roomId) stopRoom?.(roomId);
+                    if (roomId) stopRoom(engine, roomId);
                 }}
             >
                 <Icons.Square size={12} />

@@ -37,6 +37,8 @@ import { MaterialType } from '../../core/voxels/blocks';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
+import { switchRoom } from '../session';
+import { useEngineClient } from './engine-client-context';
 import { InventoryItemIcon } from './inventory-icon';
 import { Kbd } from './kbd';
 
@@ -422,7 +424,7 @@ function ScenesTab() {
     const deleteScene = useEditRoom((s) => s.deleteScene);
     const roomList = useClient((s) => s.roomList);
     const joinedPlayers = useEditor((s) => s.joinedPlayers);
-    const switchRoom = useEditor((s) => s.switchRoom);
+    const engine = useEngineClient();
     const [newScene, setNewScene] = useState('');
 
     const sortedScenes = [...sceneList].sort((a, b) => a.localeCompare(b));
@@ -447,12 +449,12 @@ function ScenesTab() {
                     joinedPlayers.some((p) => p.roomId === r.id && p.mode === 'edit'),
             );
             if (existing) {
-                switchRoom(existing.id, 'edit');
+                switchRoom(engine, existing.id, 'edit');
             } else {
                 openScene(sceneId);
             }
         },
-        [roomList, joinedPlayers, switchRoom, openScene],
+        [roomList, joinedPlayers, engine, openScene],
     );
 
     const handleCreate = useCallback(() => {

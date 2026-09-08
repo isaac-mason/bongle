@@ -762,6 +762,9 @@ export type JoinArgs = {
     playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
+    /** the mode the player joined in: 'edit' for an editor (including one
+     *  inspecting a play room), 'play' otherwise. */
+    mode: PlayerMode;
     /** Model id the player renders with, resolved upstream (matchmaker /
      *  builtin) and already stamped onto `playerNode`'s CharacterTrait
      *  before this fires. */
@@ -1236,6 +1239,7 @@ export function fireJoinHooks(
     client: ClientId,
     user: User,
     joinData: Record<string, JsonValue>,
+    mode: PlayerMode,
     playerNode: SceneTree.Node,
     avatar: Avatar,
 ): void {
@@ -1244,6 +1248,7 @@ export function fireJoinHooks(
         playerNode,
         user,
         joinData,
+        mode,
         characterModelId: avatar.modelId,
         rigType: avatar.rigType,
     };

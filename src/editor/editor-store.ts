@@ -59,6 +59,8 @@ export type EditorStore = {
     playerEditStores: Record<PlayerId, EditRoomStoreApi>;
 
     /* ── shared resources ── */
+    /** the engine's resource bag, bound by `loadEditorAssets` (icons.ts); the icon
+     *  loaders read the byte loader off it. */
     resources: Resources | null;
 
     /* ── blueprints (editor-only) ──
@@ -133,12 +135,6 @@ export type EditorStore = {
      *  `playerEditStores` map (for the `useEditRoom` React hook). Keyed by
      *  `room.playerId`. Pass `null` on dispose. */
     registerEditRoomStore: (room: ClientRoom, store: EditRoomStoreApi | null) => void;
-
-    /* ── room-management actions (bound once at registerClient, never re-wired) ── */
-    switchRoom: (roomId: string, mode: PlayerMode) => void;
-    joinRoom: (roomId: string, mode: PlayerMode) => void;
-    leaveRoom: (roomId: string, mode: PlayerMode) => void;
-    stopRoom: (roomId: string) => void;
 
     /* ── setters ── */
     setMode: (mode: 'edit' | 'play') => void;
@@ -236,12 +232,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
             return { playerEditStores: next };
         });
     },
-
-    /* ── room-management actions, bound by registerClient (engine-client.ts). ── */
-    switchRoom: () => {},
-    joinRoom: () => {},
-    leaveRoom: () => {},
-    stopRoom: () => {},
 
     /* ── setters ── */
     setMode: (mode) => set({ mode }),

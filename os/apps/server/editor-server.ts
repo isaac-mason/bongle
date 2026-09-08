@@ -112,10 +112,8 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
             log(`persist ${op} "${sceneId}" failed, edit not saved to disk: ${err instanceof Error ? err.message : String(err)}`),
     });
 
-    // register the editor's server commands BEFORE load (mirrors the client's
-    // EngineClientEditor.setup) so they're in the registry when load builds the
-    // derived indexes.
-    await EngineServerEditor.setup(state);
+    // the editor's server declarations registered when the realm imported
+    // bongle/engine-server-editor; load builds the derived indexes over them.
     await EngineServer.load(state);
     log('server loaded');
 

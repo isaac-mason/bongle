@@ -2,7 +2,7 @@
 // debug view toggles + the ws-latency sim. All global editor state (useEditor),
 // bound via get/set accessors; `listen` reflects external changes, `show` reveals
 // the sim sliders only while latency sim is on. Registered through
-// `extendDebugDashboard` by registerClient.
+// `extendDebugDashboard` by mountEditUI.
 
 import type { TabGroup } from 'dashcat';
 import { useClient } from '../client/ui/stores/client-store';

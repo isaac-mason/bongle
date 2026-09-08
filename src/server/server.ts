@@ -301,9 +301,7 @@ export async function load(state: EngineServer) {
         applyScenePayload(state, sceneId, handle._payload);
     }
 
-    // create the default room. editor scripts (if env.editor) attach
-    // automatically when the first edit-mode client joins, driven by
-    // edit-membership refcount in Rooms.joinRoom.
+    // create the default room.
     const defaultRoom =
         mode === 'edit' ? Rooms.findOrCreateEditRoom(state, DEFAULT_SCENE_ID) : Rooms.createPlayRoom(state, DEFAULT_SCENE_ID);
     state.defaultRoomId = defaultRoom.id;

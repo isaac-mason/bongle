@@ -15,14 +15,12 @@ import * as Animation from '../core/scene/animation';
 import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import {
     addChild,
-    addTrait,
     bumpNodeVersion,
     createNode,
     createSceneTree,
     destroyNode,
     generateUuid,
     getNodeById,
-    hasTrait,
     loadSceneTree,
     type Node,
     type SceneTree,
@@ -336,8 +334,8 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
 
     state.rooms.set(id, room);
 
-    // NOTE: the WorldTrait (system host) + editor trait are attached in
-    // initializeRoom, NOT here. Attaching them here fires their scripts' onInit
+    // NOTE: the WorldTrait (system host) is attached in initializeRoom, NOT
+    // here. Attaching it here fires its systems' onInit
     // while context.server is still undefined (it's wired at the top of
     // initializeRoom) — a system's onInit reaching for ctx.server would blow up.
     // Every createRoom caller runs initializeRoom immediately after, so nothing
@@ -405,37 +403,6 @@ export function destroyRoom(state: Rooms, roomId: string): void {
 }
 
 /* ── Client membership ──────────────────────────────────────────── */
-
-/**
- * Editor traits are looked up by id from the global trait registry (registered
- * by the editor module at import time). When env.editor is false the editor
- * module never loads, so these handles resolve to undefined and the helpers
- * no-op, keeping rooms.ts free of any editor/* import.
- *
- * Both traits are non-persisted (`persist: false`) so they never reach scene
- * files. The scripts bound to them run automatically as the trait attaches:
- *   - 'editor.server' (EditorServerTrait) on the room root → server-side
- *     command listeners + /relight
- *   - 'editor.state' (EditorTrait) on a player node → per-player client
- *     editor activation (replication delivers the trait to the owning
- *     client; the script body env.client-gates server-side replicas)
- */
-const EDITOR_SERVER_TRAIT_ID = 'editor.server';
-const EDITOR_STATE_TRAIT_ID = 'editor.state';
-
-function attachEditorServerTrait(room: Room): void {
-    const handle = registry.traits.handles.get(EDITOR_SERVER_TRAIT_ID);
-    if (!handle) return;
-    if (hasTrait(room.scene.root, handle)) return;
-    addTrait(room.scene.root, handle);
-}
-
-function attachEditorStateTrait(node: Node): void {
-    const handle = registry.traits.handles.get(EDITOR_STATE_TRAIT_ID);
-    if (!handle) return;
-    if (hasTrait(node, handle)) return;
-    addTrait(node, handle);
-}
 
 /**
  * Find an existing Player for (client, roomId, mode). Linear scan over the
@@ -729,12 +696,11 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const physMs = performance.now() - physT0;
     room.context.physics = room.physics;
 
-    // Attach the WorldTrait (system host) + editor trait HERE — the single point,
+    // Attach the WorldTrait (system host) HERE — the single point,
     // reached after context.server is wired (top of this fn) and after
     // loadSceneTree. So each system's factory + onInit fires exactly once, with
     // ctx.server live. (loadSceneTree wouldn't carry these anyway: persist: false.)
     attachWorldTrait(room.scene.root);
-    attachEditorServerTrait(room);
 
     Discovery.invalidateRoomList(state.discovery);
 
@@ -786,7 +752,15 @@ export function addClientToRoom(
     Avatars.enqueuePlayer(state, room, player);
     const avatarMs = performance.now() - avatarT0;
     const joinHooksT0 = performance.now();
-    Scripts.fireJoinHooks(room.context, client, user, joinData ?? {}, playerNode, Avatars.clientAvatarIdentity(clientState));
+    Scripts.fireJoinHooks(
+        room.context,
+        client,
+        user,
+        joinData ?? {},
+        player.mode,
+        playerNode,
+        Avatars.clientAvatarIdentity(clientState),
+    );
     const joinHooksMs = performance.now() - joinHooksT0;
     Chat.broadcast(room.chat, {
         from: 'system',
@@ -976,7 +950,7 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
                 const playerNode = createPlayerNode(state, def, fp);
                 // stamp avatar before join hooks (see addClientToRoom)
                 Avatars.enqueuePlayer(state, def, fp);
-                Scripts.fireJoinHooks(def.context, client, user, {}, playerNode, Avatars.clientAvatarIdentity(cs));
+                Scripts.fireJoinHooks(def.context, client, user, {}, fp.mode, playerNode, Avatars.clientAvatarIdentity(cs));
                 Chat.broadcast(def.chat, {
                     from: 'system',
                     text: `${user.username || 'anon'} joined`,
@@ -1058,11 +1032,6 @@ export function createPlayerNode(state: EngineServer, room: Room, player: Player
         userId: cs?.user.id,
         username: cs?.user.username,
     });
-    // per-player editor activation follows the player's mode, not the room's
-    // auth mode: an 'edit' player joining a play room (inspect-server) gets
-    // the editor too. play-mode players use a client-local lens node instead
-    // (enterLocalEditorView), so no server-side attach for those.
-    if (player.mode === 'edit') attachEditorStateTrait(node);
     bumpNodeVersion(sg, node);
     room.playerNodes.set(player.id, node);
     return node;

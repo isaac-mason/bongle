@@ -12,8 +12,8 @@
 // pipeline was restarted by hand.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { registerClient, reloadBlockIconAtlas } from '../../../src/editor/client';
 import { useEditor } from '../../../src/editor/editor-store';
+import { loadEditorAssets, reloadBlockIconAtlas } from '../../../src/editor/icons';
 
 type Icons = { coords: Record<string, [number, number]>; cols: number; rows: number; iconPx: number };
 
@@ -51,7 +51,7 @@ describe('reloadBlockIconAtlas', () => {
         const twoBlocks: Icons = { coords: { 'game/stone': [0, 0], 'game/copper': [1, 0] }, cols: 2, rows: 1, iconPx: 128 };
         const disk = { icons: oneBlock };
         const reads: string[] = [];
-        registerClient(fakeClient(disk, reads) as never);
+        loadEditorAssets(fakeClient(disk, reads) as never);
         await vi.waitFor(() => expect(useEditor.getState().blockIconCoords).toHaveProperty('game/stone'));
 
         // the png notification: the load starts against the OLD sidecar, exactly as

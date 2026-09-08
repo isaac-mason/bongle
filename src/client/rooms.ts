@@ -222,7 +222,7 @@ export type ClientRoom = {
     /**
      * clipboard handlers, set when this room's editor is active, cleared on
      * deactivate. Page-level `document` listeners (installed once in
-     * registerClient) dispatch copy/cut/paste/keydown to the editor store's
+     * mountEditUI) dispatch copy/cut/paste/keydown to the editor store's
      * active room; rooms whose editor is enabled but not
      * focused hold their handlers without firing.
      */
@@ -963,7 +963,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     // resolved avatar (already stamped onto the CharacterTrait above) carries the
     // modelId/rigType into JoinArgs, like the server's clientAvatarIdentity.
     const joinData = {};
-    fireJoinHooks(context, clientId, state.driver.user, joinData, playerNode, resolvedAvatar);
+    fireJoinHooks(context, clientId, state.driver.user, joinData, room.playerMode, playerNode, resolvedAvatar);
 
     // append a synthetic RoomInfo so this local room participates in
     // roomList alongside server-driven rooms (tabs, debug, etc.).

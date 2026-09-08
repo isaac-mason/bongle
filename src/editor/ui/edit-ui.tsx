@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import * as Icons from '../../../icons';
+import type { EngineClient } from '../../client/client';
+import { extendDebugDashboard } from '../../client/ui/dashboard';
 import { useClient } from '../../client/ui/stores/client-store';
 import '../../client/ui/editor.css';
 import { ChatPanel, useChatPanel } from '../../client/ui/chat/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
+import { addEditorDebugOptions } from '../debug-options';
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
-import { setEditorEnabledForRoom } from '../lens';
+import { loadEditorAssets } from '../icons';
+import { installEditorClientListeners, setEditorEnabledForRoom } from '../lens';
+import { stopRoom } from '../session';
 import { ControlHints } from './control-hints';
+import { EngineClientContext, useEngineClient } from './engine-client-context';
 import { FlySpeedIndicator } from './fly-speed-indicator';
 import { Hotbar } from './hotbar';
 import { InventoryItemIcon } from './inventory-icon';
@@ -135,6 +141,7 @@ const RIGHT_PANEL_MAX = 600;
 const RIGHT_PANEL_DEFAULT = 350;
 
 function EditUI() {
+    const engine = useEngineClient();
     const editorEnabled = useEditor((s) => {
         if (!s.room) return false;
         if (!s.playerEditStores[s.room.playerId]) return false;
@@ -226,13 +233,13 @@ function EditUI() {
             }
 
             if (e.key === 'Tab') {
-                const { room, roomMode, stopRoom } = useEditor.getState();
+                const { room, roomMode } = useEditor.getState();
                 if (!room) return;
                 e.preventDefault();
                 if (roomMode === 'edit') {
                     room.editorStore?.getState().play();
                 } else if (roomMode === 'play') {
-                    stopRoom(room.roomId);
+                    stopRoom(engine, room.roomId);
                 }
             }
 
@@ -248,7 +255,7 @@ function EditUI() {
         }
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, []);
+    }, [engine]);
 
     return (
         // color-scheme: dark makes native scrollbars (and form controls)
@@ -360,13 +367,22 @@ function CarriedItemCursor() {
 }
 
 /**
- * Mount the editor UI shell into `container`. Called from
+ * Mount the editor UI shell into the engine's DOM root and wire the page-level
+ * editor pieces that live with the UI: the baked icon loaders, the document
+ * clipboard listeners, and the editor's tab on the debug dashboard. Called from
  * `bongle/engine-client-editor`'s `setup(state)`, which only the edit-mode boot
  * template imports, so this chunk only ships in editor builds.
  */
-export function mountEditUI(container: HTMLElement): Root {
-    const root = createRoot(container);
-    root.render(<EditUI />);
+export function mountEditUI(state: EngineClient): Root {
+    loadEditorAssets(state);
+    installEditorClientListeners();
+    extendDebugDashboard(addEditorDebugOptions);
+    const root = createRoot(state.domElement);
+    root.render(
+        <EngineClientContext.Provider value={state}>
+            <EditUI />
+        </EngineClientContext.Provider>,
+    );
     return root;
 }
 
