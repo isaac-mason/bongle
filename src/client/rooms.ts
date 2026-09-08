@@ -699,10 +699,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         playerNode,
         cameraNode,
         client,
-        // editor lens is opt-in; populated by enterLocalEditorView (or the
-        // edit-room flow). seeding null here keeps fresh rooms inert until
-        // the user explicitly enters editor view.
-        editor: null,
         clientMetrics,
         serverMetrics,
         clientLogs,
