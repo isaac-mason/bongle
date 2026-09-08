@@ -4,7 +4,7 @@
 // pointer events, so mouse, pen and touch all drive the tools. all tools consume
 // this instead of each registering their own event listeners.
 //
-// the hover raycast runs once per frame in editor/index.ts and writes
+// the hover raycast runs once per frame in editor/client.ts and writes
 // editor.hoverVoxel, tools read that for hit voxel position.
 
 import type { Input } from '../client/input';

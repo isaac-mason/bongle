@@ -1,0 +1,358 @@
+// editor/server.ts, the server half of the editor module: the room-level editor
+// script (EditorServerTrait) that owns the authoritative scene + voxel mutation
+// listeners and the /relight command. Imported only by engine-server-editor.
+
+import { env } from 'bongle';
+import type { Client } from 'bongle/interface';
+import * as chat from '../api/chat';
+import type { ScenePayload } from '../core/content/scene-store';
+import { registry } from '../core/registry';
+import {
+    addChild,
+    addTraitBySlot,
+    bumpNodeVersion,
+    createNode,
+    deserializeNode,
+    destroyNode,
+    getNodeById,
+    isAncestorOf,
+    type Realm,
+    removeTraitBySlot,
+    reorderChild,
+    reparent,
+    type SerializedNode,
+    setNodePersist,
+    setPrefab,
+    setRealm,
+} from '../core/scene/scene-tree';
+import { listen, script } from '../core/scene/scripts';
+import { SetBlockFlags } from '../core/voxels/block-flags';
+import { propagateAllLight } from '../core/voxels/light';
+import { setBlock } from '../core/voxels/voxels';
+import * as Blueprints from '../server/blueprints';
+import * as Discovery from '../server/discovery';
+import * as Rooms from '../server/rooms';
+import { setTraitProps } from './actions';
+import {
+    AddTraitCommand,
+    CreateNodeCommand,
+    DestroyNodeCommand,
+    RemoveTraitCommand,
+    ReorderCommand,
+    ReparentCommand,
+    SaveBlueprintCommand,
+    SetNameCommand,
+    SetNodePersistCommand,
+    SetPrefabCommand,
+    SetRealmCommand,
+    SetTraitCommand,
+    VoxelEditCommand,
+} from './commands';
+import { EditorServerTrait } from './editor-trait';
+
+// server-side editor concerns. attached to the room root by the server
+// when an edit room is created (in dev / env.editor builds). holds the
+// authoritative voxel/scene mutation listeners and the /relight command.
+// no client side, replicated to clients only as a marker, the script
+// body early-returns there.
+script(
+    EditorServerTrait,
+    'editor-server',
+    (ctx) => {
+        if (!env.server) return;
+
+        // //relight, full recompute of sky + rgb light for the room. only
+        // the server has authoritative light state, so the listener lives
+        // here. clients without the editor enabled never see the spec; play
+        // clients with /relight typed fall through to plain-chat, which the
+        // server ignores for slash inputs.
+        const relightCmd = chat.command(ctx, {
+            name: '/relight',
+            description: 'recompute all light propagation in this room',
+            args: [],
+        });
+        chat.listen(ctx, relightCmd, () => {
+            if (!env.editor) return;
+            const t0 = performance.now();
+            propagateAllLight(ctx.voxels);
+            const ms = (performance.now() - t0).toFixed(1);
+            chat.message(ctx, `light repropagated in ${ms}ms`);
+        });
+
+        // capability gate, does this client have permission to mutate scene
+        // state in this room? Today the only signal is `env.editor` (dev builds
+        // grant edit to any connected client; prod builds grant to no one).
+        // Future: real auth, project owner, role, etc. Decoupled from player
+        // mode so a play-mode client with editor toggled on can still issue
+        // edit RPCs.
+        const canEdit = (_client: Client) => env.editor;
+        const editGated =
+            <T>(fn: (args: T, client: Client) => void) =>
+            (args: T, client: Client) => {
+                if (!canEdit(client)) return;
+                fn(args, client);
+            };
+
+        // editGated; on a body that actually mutated (returns true, guard
+        // early-returns don't), flag the room dirty (broadcast to clients via the
+        // room list). wraps the mutating listeners below.
+        const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
+            editGated<T>((args, client) => {
+                if (!fn(args, client)) return;
+                const { room } = ctx.server!;
+                Rooms.setRoomDirty(room, true);
+            });
+
+        // voxel edit ops from clients
+        listen(
+            ctx,
+            VoxelEditCommand,
+            editMutate(({ ops }) => {
+                // BULK: authoring edits settle their block-def hooks inline (each
+                // write drains only its own op + chained recomputes) but fire no
+                // script observers. no explicit end-of-brush drain needed.
+                for (const op of ops) {
+                    setBlock(ctx.voxels, op.wx, op.wy, op.wz, op.key, SetBlockFlags.BULK);
+                }
+                return true;
+            }),
+        );
+
+        // save-as-blueprint, client extracts the ScenePayload from its
+        // local selection and ships it here as JSON; server validates the
+        // name (or allocates one), then writes a scene file under
+        // `content/scenes/blueprints/<name>.scene.json`.
+        listen(
+            ctx,
+            SaveBlueprintCommand,
+            editGated((args) => {
+                const { state } = ctx.server!;
+                let payload: ScenePayload;
+                try {
+                    payload = JSON.parse(args.payload) as ScenePayload;
+                } catch {
+                    chat.message(ctx, '[blueprint] invalid payload (json parse failed)');
+                    return;
+                }
+                const name =
+                    args.name && args.name.length > 0 ? args.name : Blueprints.allocateBlueprintName(state.contentManager);
+                const result = Blueprints.saveBlueprint(state.contentManager, name, payload);
+                if (!result.ok) {
+                    chat.message(ctx, `[blueprint] ${result.error}`);
+                    return;
+                }
+                // disk write → the `bongle:scenes` file watcher fires →
+                // `bongle:scene-list` emission catches up the editor.
+                chat.message(
+                    ctx,
+                    result.overwritten ? `[blueprint] overwrote ${result.sceneId}` : `[blueprint] saved ${result.sceneId}`,
+                );
+            }),
+        );
+
+        // scene mutation handlers
+        listen(
+            ctx,
+            CreateNodeCommand,
+            editMutate((args, _client) => {
+                const { room } = ctx.server!;
+                const sceneTree = room.scene;
+                const parent = getNodeById(sceneTree, args.parentId);
+                if (!parent) return;
+                const node = createNode({
+                    id: args.id,
+                    name: args.name,
+                    persist: args.persist,
+                });
+                if (args.prefab) {
+                    try {
+                        node.prefab = JSON.parse(args.prefab);
+                    } catch {
+                        /* fall through with no prefab */
+                    }
+                }
+                addChild(parent, node);
+                const traits: Array<{ id: string; controls?: Record<string, unknown> }> = JSON.parse(args.traits);
+                for (const st of traits) {
+                    const handle = registry.traits.handles.get(st.id);
+                    if (!handle) {
+                        if (node.unresolved === null) node.unresolved = new Map();
+                        node.unresolved.set(st.id, st.controls);
+                        continue;
+                    }
+                    addTraitBySlot(node, handle.slot, st.controls);
+                }
+                if (args.children) {
+                    const children: SerializedNode[] = JSON.parse(args.children);
+                    for (const cdata of children) {
+                        addChild(node, deserializeNode(cdata));
+                    }
+                }
+                reorderChild(parent, node, args.index);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            DestroyNodeCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const node = getNodeById(room.scene, args.id);
+                if (!node) return;
+                if (node === room.scene.root) return;
+                Discovery.forgetNode(state.discovery, state.rooms, client, room.id, args.id);
+                destroyNode(room.scene, node);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            SetNameCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const node = getNodeById(room.scene, args.id);
+                if (!node) return;
+                node.name = args.name ?? undefined;
+                bumpNodeVersion(room.scene, node);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            SetRealmCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const node = getNodeById(room.scene, args.id);
+                if (!node) return;
+                if (node === room.scene.root) return;
+                // setRealm marks the affected subtree dirty so discovery re-evaluates
+                // descendants' visibility (matters for play viewers in mixed rooms).
+                setRealm(node, args.realm as Realm);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            ReparentCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node) return;
+                if (node === sceneTree.root) return;
+                const newParent = getNodeById(sceneTree, args.parentId);
+                if (!newParent) return;
+                if (node === newParent || isAncestorOf(node, newParent)) return;
+                reparent(node, newParent);
+                reorderChild(newParent, node, args.index);
+                bumpNodeVersion(sceneTree, node);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            ReorderCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node?.parent) return;
+                reorderChild(node.parent, node, args.index);
+                bumpNodeVersion(sceneTree, node);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            SetTraitCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const node = getNodeById(room.scene, args.id);
+                if (!node) return;
+                setTraitProps(room.scene, node, args.traitId, JSON.parse(args.props));
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            AddTraitCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node) return;
+                const handle = registry.traits.handles.get(args.traitId);
+                if (!handle) {
+                    if (node.unresolved === null) node.unresolved = new Map();
+                    node.unresolved.set(args.traitId, args.props ? JSON.parse(args.props) : undefined);
+                    bumpNodeVersion(sceneTree, node);
+                } else {
+                    addTraitBySlot(node, handle.slot, args.props ? JSON.parse(args.props) : undefined);
+                }
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            RemoveTraitCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node) return;
+                const handle = registry.traits.handles.get(args.traitId);
+                if (!handle) {
+                    node.unresolved?.delete(args.traitId);
+                    bumpNodeVersion(sceneTree, node);
+                } else {
+                    removeTraitBySlot(node, handle.slot);
+                }
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            SetPrefabCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node) return;
+                if (args.prefab) {
+                    try {
+                        setPrefab(node, JSON.parse(args.prefab));
+                    } catch {
+                        return;
+                    }
+                } else {
+                    setPrefab(node, null);
+                }
+                bumpNodeVersion(sceneTree, node);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+        listen(
+            ctx,
+            SetNodePersistCommand,
+            editMutate((args, client) => {
+                const { state, room } = ctx.server!;
+                const sceneTree = room.scene;
+                const node = getNodeById(sceneTree, args.id);
+                if (!node) return;
+                setNodePersist(node, args.persist);
+                bumpNodeVersion(sceneTree, node);
+                Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
+                return true;
+            }),
+        );
+    },
+    { editor: true },
+);

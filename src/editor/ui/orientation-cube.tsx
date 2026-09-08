@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { resolveRoomCamera } from '../../client/rooms';
+import { getEditorClient } from '../client';
 import { useEditor } from '../editor-store';
-import { getEditorClient } from '../index';
 
 const CUBE_PX = 165;
 const GIZMO_PX = 145;

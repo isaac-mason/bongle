@@ -1,6 +1,6 @@
 // clipboard.ts, system clipboard copy/cut/paste handlers for the editor.
 //
-// extracts the clipboard event logic from index.ts so that onInit stays thin.
+// extracts the clipboard event logic from client.ts so that onInit stays thin.
 // handlers are created once on init and registered via document.addEventListener.
 
 import type { ClientRoom } from '../client/rooms';

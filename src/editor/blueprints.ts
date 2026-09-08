@@ -86,7 +86,7 @@ async function fetchSceneList(): Promise<void> {
 let initialized = false;
 
 /** wires up the scene-list cold-read + the sceneList subscription. client-only,
- *  called from the editor's client activation path in editor/index.ts.
+ *  called from the editor's client activation path in editor/client.ts.
  *  idempotent across HMR reloads of the editor module. */
 export function initBlueprints(): void {
     if (initialized) return;

@@ -885,7 +885,7 @@ const sceneHash = (s: SceneDef) => structuralHash(s);
  * own per-kind stores (registry.controls / registry.sync / registry.scripts).
  * if those collections were folded into traitHash, every script edit on a
  * trait would also fire a wholesale "trait changed" event, drowning the
- * granular per-kind dispatch and producing spurious editor toasts.
+ * granular per-kind dispatch.
  */
 // NOT wholesale, unlike the other kinds: `controls` / `sync` / `scripts` have their
 // own per-id stores precisely so a single control edit fires there rather than

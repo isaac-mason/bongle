@@ -38,16 +38,14 @@
  * preserves opt-in state across the swap.
  */
 
-import { env } from 'bongle';
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, logPendingChanges, type RegistryStore, registry, reindexRegistry } from '../core/registry';
+import { bumpVersion, logPendingChanges, registry, reindexRegistry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { loadAtlasMetadata } from '../core/sprites/atlas';
 import { resolveAllChunks } from '../core/voxels/voxels';
-import { useEditor } from '../editor/editor-store';
 import * as Audio from './audio/audio';
 import type { EngineClient } from './client';
 
@@ -86,12 +84,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         dirtyScriptIds.add(ch.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.payload);
     }
-
-    // editor HMR toasts, one per kind with pending changes, plus one
-    // for script-instance swaps reaching via DepGraph (when trait body
-    // didn't change but a producer did). gated on env.editor so shipped
-    // builds skip the store churn.
-    if (env.editor) pushHmrToasts(allStores as readonly RegistryStore<unknown>[], dirtyScriptIds);
 
     // registrations already landed in the stores at module (re)eval; rebuild
     // the derived index fields so this flush's reactions read fresh
@@ -320,55 +312,4 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
  */
 export async function refreshAudioResources(state: EngineClient): Promise<void> {
     await Audio.refreshResources(state.audioResources, state.resources.loader);
-}
-
-// per-kind toast labels. singular when one id changed, plural for many.
-// missing entries fall back to the raw store name.
-const TOAST_LABELS: Record<string, [singular: string, plural: string]> = {
-    blocks: ['block', 'blocks'],
-    blockTextures: ['block texture', 'block textures'],
-    models: ['model', 'models'],
-    prefabs: ['prefab', 'prefabs'],
-    scenes: ['scene', 'scenes'],
-    traits: ['trait', 'traits'],
-    controls: ['control', 'controls'],
-    sync: ['sync', 'syncs'],
-    scripts: ['script', 'scripts'],
-    commands: ['command', 'commands'],
-    config: ['config', 'config'],
-    sounds: ['sound', 'sounds'],
-    sprites: ['sprite', 'sprites'],
-    particles: ['particle emitter', 'particle emitters'],
-};
-
-function pushHmrToasts(stores: ReadonlyArray<RegistryStore<unknown>>, dirtyScriptIds: ReadonlySet<string>): void {
-    const ed = useEditor.getState();
-    for (const store of stores) {
-        if (store.pendingChanges.length === 0) continue;
-        const ids = store.pendingChanges.map((ch) => ch.id);
-        const allSame = store.pendingChanges.every((ch) => ch.kind === store.pendingChanges[0]!.kind);
-        const verb = !allSame
-            ? 'updated'
-            : store.pendingChanges[0]!.kind === 'added'
-              ? 'added'
-              : store.pendingChanges[0]!.kind === 'removed'
-                ? 'removed'
-                : 'updated';
-        const [singular, plural] = TOAST_LABELS[store.name] ?? [store.name, store.name];
-        const message = ids.length === 1 ? `${singular} '${ids[0]}' ${verb}` : `${ids.length} ${plural} ${verb}`;
-        ed.pushToast({ kind: store.name, message });
-    }
-    // script-instance swaps via DepGraph (producer-only change reaching
-    // `scripts:<id>` whose body itself didn't move). suppressed when the
-    // trait body OR the script body itself changed, those already
-    // toasted under `traits` / `scripts` above.
-    const directScriptIds = new Set(registry.scripts.pendingChanges.map((ch) => ch.id));
-    const propagatedScriptIds = [...dirtyScriptIds].filter((id) => !directScriptIds.has(id));
-    if (propagatedScriptIds.length > 0 && registry.traits.pendingChanges.length === 0) {
-        const n = propagatedScriptIds.length;
-        ed.pushToast({
-            kind: 'scripts',
-            message: `${n} script instance${n === 1 ? '' : 's'} updated via deps`,
-        });
-    }
 }

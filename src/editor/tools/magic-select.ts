@@ -7,7 +7,7 @@
 //
 // called each frame from EditorScript.onFrame (client only).
 // uses the shared PointerState for click detection and editor.hoverVoxel
-// for the seed voxel (raycast runs once per frame in editor/index.ts).
+// for the seed voxel (raycast runs once per frame in editor/client.ts).
 
 import type { Input } from '../../client/input';
 import { isKeyDown } from '../../client/input';

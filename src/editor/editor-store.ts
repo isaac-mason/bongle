@@ -15,34 +15,15 @@
  */
 
 import { create } from 'zustand';
-import type { ClientRoom, RoomView, RoomViewId } from '../client/rooms';
+import type { ClientRoom } from '../client/rooms';
+import { useClient } from '../client/ui/stores/client-store';
 import type { PlayerId } from '../core/client';
 import type { ScenePayload } from '../core/content/scene-store';
-import type { PlayerMode, RoomInfo } from '../core/protocol';
+import type { PlayerMode } from '../core/protocol';
 import type { Resources } from '../core/resources';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { defaultHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
 import { hasStoredHotbar, loadHotbar, saveHotbar } from './preferences';
-
-/** Transient HMR / status notification shown briefly in the top-left of
- *  the viewport, in both edit and play POV. Pushed from
- *  `applyRegistryChanges` for each registry kind that had pending changes;
- *  auto-dismissed by the row. */
-export type Toast = {
-    id: string;
-    /** registry kind or other source label. one live row per kind, a repeat
-     *  push refreshes that row instead of stacking a new one. */
-    kind: string;
-    message: string;
-    /** bumped on every push, the row re-times its dismissal off this. */
-    createdAt: number;
-    /** how many pushes this row has collapsed, 1 for a fresh toast. */
-    repeats: number;
-};
-
-/** rows past this are dropped oldest-first, a burst of edits touching many
- *  registries can't grow the stack without bound. */
-const MAX_TOASTS = 4;
 
 /** Slim record of a Player held by the client, for store/UI consumption. */
 export type JoinedPlayer = {
@@ -68,17 +49,9 @@ export type EditorStore = {
     room: ClientRoom | null;
 
     /* ── room registries ── */
-    roomList: RoomInfo[];
+    /** one entry per ClientRoom the client holds; derived from `useClient.rooms`
+     *  by the subscription at the bottom of this file. */
     joinedPlayers: JoinedPlayer[];
-    /** every ClientRoom the client holds, kept in sync with engine state.
-     *  used by the debug panel to show per-room metrics. */
-    allRooms: ClientRoom[];
-    /** addressable RoomViews keyed by RoomViewId. one entry per ClientRoom's
-     *  player POV (id = String(playerId)), plus one extra entry per
-     *  `room.editor` (id = editor uuid). recomputed by `buildRoomViews` in
-     *  rooms.ts and pushed in via `setRoomViews` whenever the room set or
-     *  any room.editor pointer changes. */
-    roomViews: Map<RoomViewId, RoomView>;
     /** per-player edit stores, keyed by PlayerId. populated from
      *  EditorScript onInit; the active store is `playerEditStores[room.playerId]`.
      *  keyed by player so play- and edit-mode joins to the same roomId hold
@@ -120,12 +93,9 @@ export type EditorStore = {
     // which perspective the user is viewing the scene through. only present
     // while a play-mode player has a lens, entries are seeded by
     // enterLocalEditorView (writes 'edit') and cleared by exitLocalEditorView.
-    // Tabs in the toolbar subscribe here; click handlers in client/editor.ts
-    // call `setRoomView` after running the imperative POV swap.
+    // Tabs in the toolbar subscribe here; click handlers in lens.ts call
+    // `setRoomView` after running the imperative POV swap.
     playerToView: Map<PlayerId, 'edit' | 'play'>;
-
-    /* ── transient toasts (top-left HMR notifications) ── */
-    toasts: Toast[];
 
     /* ── network latency simulation (editor dev only) ──
      * When enabled, edit-client's RAF loop holds outbound + inbound WS
@@ -147,7 +117,7 @@ export type EditorStore = {
     netSimBurstChance: number;
 
     /* ── debug view toggles, global (shared across rooms). read by the editor's
-     *  per-room update loop (index.ts) + the orientation-cube overlay. per-session,
+     *  per-room update loop (client.ts) + the orientation-cube overlay. per-session,
      *  never persisted. ── */
     showPhysicsColliders: boolean;
     showGrid: boolean;
@@ -177,19 +147,12 @@ export type EditorStore = {
     setRoomId: (roomId: string | null) => void;
     setSceneId: (sceneId: string | null) => void;
     setRoom: (room: ClientRoom | null) => void;
-    setRoomList: (rooms: RoomInfo[]) => void;
     setJoinedPlayers: (players: JoinedPlayer[]) => void;
-    setAllRooms: (rooms: ClientRoom[]) => void;
-    setRoomViews: (m: Map<RoomViewId, RoomView>) => void;
     setRoomView: (playerId: PlayerId, view: 'edit' | 'play') => void;
     clearRoomView: (playerId: PlayerId) => void;
 
     /* ── hotbar ── */
     setHotbarSlot: (index: number, item: HotbarSlot) => void;
-
-    /* ── toasts ── */
-    pushToast: (toast: Omit<Toast, 'id' | 'createdAt' | 'repeats'>) => void;
-    dismissToast: (id: string) => void;
 
     /* ── net sim ── */
     setNetSimEnabled: (enabled: boolean) => void;
@@ -218,10 +181,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     sceneId: null,
     room: null,
 
-    roomList: [],
     joinedPlayers: [],
-    allRooms: [],
-    roomViews: new Map(),
     playerEditStores: {},
 
     resources: null,
@@ -252,8 +212,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     prefabIconUrls: {},
 
     playerToView: new Map(),
-
-    toasts: [],
 
     netSimEnabled: false,
     netSimRttMs: 100,
@@ -326,10 +284,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
         }
         set({ room });
     },
-    setRoomList: (roomList) => set({ roomList }),
     setJoinedPlayers: (joinedPlayers) => set({ joinedPlayers }),
-    setAllRooms: (allRooms) => set({ allRooms }),
-    setRoomViews: (roomViews) => set({ roomViews }),
     setRoomView: (playerId, view) =>
         set((s) => {
             if (s.playerToView.get(playerId) === view) return {};
@@ -353,25 +308,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
             return { hotbar };
         }),
 
-    pushToast: (toast) =>
-        set((s) => {
-            const now = performance.now();
-            const existing = s.toasts.find((t) => t.kind === toast.kind);
-            if (existing) {
-                // same source firing again (a save burst, a file saved twice):
-                // refresh the row in place so it re-times rather than stacking.
-                return {
-                    toasts: s.toasts.map((t) =>
-                        t === existing ? { ...t, ...toast, createdAt: now, repeats: t.repeats + 1 } : t,
-                    ),
-                };
-            }
-            const toasts = [...s.toasts, { ...toast, id: crypto.randomUUID(), createdAt: now, repeats: 1 }];
-            return { toasts: toasts.slice(-MAX_TOASTS) };
-        }),
-
-    dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-
     setNetSimEnabled: (netSimEnabled) => set({ netSimEnabled }),
     setNetSimRttMs: (netSimRttMs) => set({ netSimRttMs }),
     setNetSimJitterMs: (netSimJitterMs) => set({ netSimJitterMs }),
@@ -392,4 +328,32 @@ useEditor.subscribe((state) => {
         lastSavedHotbar = state.hotbar;
         saveHotbar(state.hotbar);
     }
+});
+
+// the engine writes the room set + active player into the client store; the
+// editor's active-room pointers and the joined-player list derive from those.
+function applyClientRooms(rooms: Map<PlayerId, ClientRoom>, activePlayerId: PlayerId | null): void {
+    const editor = useEditor.getState();
+    const players: JoinedPlayer[] = [];
+    for (const room of rooms.values()) players.push({ playerId: room.playerId, roomId: room.roomId, mode: room.playerMode });
+    editor.setJoinedPlayers(players);
+
+    // `room.playerId` keys the active per-player store for useEditRoom (which
+    // derives from `playerEditStores[room.playerId]`).
+    const room = activePlayerId != null ? (rooms.get(activePlayerId) ?? null) : null;
+    if (room) {
+        editor.setMode(room.playerMode);
+        editor.setRoomMode(room.roomMode);
+        editor.setRoomId(room.roomId);
+        editor.setSceneId(room.sceneId);
+        editor.setRoom(room);
+    } else if (editor.room) {
+        editor.setRoomId(null);
+        editor.setSceneId(null);
+        editor.setRoom(null);
+    }
+}
+useClient.subscribe((s, prev) => {
+    if (s.rooms === prev.rooms && s.activePlayerId === prev.activePlayerId) return;
+    applyClientRooms(s.rooms, s.activePlayerId);
 });

@@ -13,10 +13,10 @@
  * zustand selectors (`s.selection`, `s.lasso`, …) wake only their own
  * subscribers. No global tick.
  *
- * `sceneRevision` is a separate, narrow signal: bumped by `markDirty()`
- * (and the engine's scene_sync handler) to tell the inspector/hierarchy
- * "the scene tree changed externally, re-derive". It does NOT fire on
- * selection/hover/etc.
+ * `sceneRevision` is a separate, narrow signal: the editor script mirrors the
+ * runtime's `scene.replication.versionCounter` into it each frame, so the
+ * inspector/hierarchy re-derive whenever the scene tree changed, locally or
+ * over the wire. It does NOT fire on selection/hover/etc.
  */
 
 import type { JsonValue } from 'bongle/interface';
@@ -320,8 +320,8 @@ export type EditRoomState = {
     undoStack: Action[];
     redoStack: Action[];
 
-    /** bumped when the scene tree mutates externally (action runs, scene_sync
-     *  arrives). Subscribed by inspector/hierarchy to re-derive their views. */
+    /** mirror of `scene.replication.versionCounter`, projected each frame by the
+     *  editor script. Subscribed by inspector/hierarchy to re-derive their views. */
     sceneRevision: number;
 
     /* ── room cmds ── */
@@ -412,7 +412,6 @@ export type EditRoomState = {
     setPaintOptions: (opts: Partial<PaintOptions>) => void;
     setSmoothOptions: (opts: Partial<SmoothOptions>) => void;
     setElevationOptions: (opts: Partial<ElevationOptions>) => void;
-    markDirty: () => void;
 
     /* ── inventory + active slot ── */
     setActiveSlot: (index: number) => void;
@@ -627,9 +626,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         save: (sceneId) => {
             const net = ctx.client!.state!.net;
             Net.send(net, { type: 'save_scene', sceneId });
-            // explicit save (Ctrl+S / tab → Save) confirms with a toast; the
-            // interval auto-flush stays silent.
-            useEditor.getState().pushToast({ kind: 'save', message: 'Saved' });
         },
         undo: () => {
             const stack = get().undoStack;
@@ -670,7 +666,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         },
 
         /* ── scene mutation actions ── */
-        createNode: (parentId, index, name) => Actions.createNodeAction(get(), ctx, parentId, index, name),
+        createNode: (parentId, index, name) => Actions.createNodeAction(ctx, parentId, index, name),
         destroyNode: (nodeId) => Actions.destroyNodeAction(get(), ctx, nodeId),
         setName: (nodeId, name) => Actions.setNameAction(get(), ctx, nodeId, name),
         setRealm: (nodeId, realm) => Actions.setRealmAction(get(), ctx, nodeId, realm),
@@ -835,7 +831,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
         setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
         setElevationOptions: (opts) => set((s) => ({ elevationOptions: { ...s.elevationOptions, ...opts } })),
-        markDirty: () => set((s) => ({ sceneRevision: s.sceneRevision + 1 })),
 
         setActiveSlot: (index) =>
             set(() => {
@@ -923,7 +918,6 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
     setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
     setElevationOptions: (opts) => set((s) => ({ elevationOptions: { ...s.elevationOptions, ...opts } })),
-    markDirty: () => set((s) => ({ sceneRevision: s.sceneRevision + 1 })),
     setActiveSlot: (index) =>
         set(() => {
             if (index < 0 || index >= HOTBAR_SIZE) return {};

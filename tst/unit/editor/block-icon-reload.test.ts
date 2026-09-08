@@ -12,8 +12,8 @@
 // pipeline was restarted by hand.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerClient, reloadBlockIconAtlas } from '../../../src/editor/client';
 import { useEditor } from '../../../src/editor/editor-store';
-import { registerClient, reloadBlockIconAtlas } from '../../../src/editor/index';
 
 type Icons = { coords: Record<string, [number, number]>; cols: number; rows: number; iconPx: number };
 

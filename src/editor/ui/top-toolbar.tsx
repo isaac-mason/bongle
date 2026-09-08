@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
-import { setEditorEnabledForRoom, setRoomView } from '../../client/editor';
-import { LOCAL_ROOM_PREFIX, type RoomView, type RoomViewId } from '../../client/rooms';
+import { type ClientRoom, LOCAL_ROOM_PREFIX } from '../../client/rooms';
 import { Button } from '../../client/ui/components';
+import { useClient } from '../../client/ui/stores/client-store';
 import type { PlayerMode, RoomInfo } from '../../core/protocol';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { setEditorEnabledForRoom, setRoomView } from '../lens';
 
 /* ── Room tabs ──────────────────────────────────────────────────── */
 
@@ -109,9 +110,9 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                         label={inspectClientOn ? 'Stop inspecting client' : 'Inspect client'}
                         onClose={onClose}
                         onClick={() => {
-                            const clientRoom = useEditor
-                                .getState()
-                                .allRooms.find((r) => r.roomId === info.id && r.playerMode === 'play');
+                            const clientRoom = [...useClient.getState().rooms.values()].find(
+                                (r) => r.roomId === info.id && r.playerMode === 'play',
+                            );
                             if (clientRoom) setEditorEnabledForRoom(clientRoom, !inspectClientOn);
                         }}
                     />
@@ -143,17 +144,20 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
 type TabId = string;
 
 /**
- * One renderable tab. `view` is null for ghost (server room known, no
- * ClientRoom joined yet); otherwise it's the addressable RoomView for
- * either the player POV or, when `view.room.editor?.id === view.id`,
- * the editor POV layered on a play room.
+ * One renderable tab. `room` is null for a ghost (server room known, no
+ * ClientRoom joined yet); otherwise the tab is one POV on that room: the
+ * player POV, or (`lens`) the editor POV layered on a play room.
  *
  * `info` is always populated. For ghosts it's the only source of metadata;
- * for joined views it mirrors what `view.room` already exposes.
+ * for joined rooms it mirrors what `room` already exposes.
  */
 type Tab = {
     id: TabId;
-    view: RoomView | null;
+    room: ClientRoom | null;
+    /** the POV's mode; a ghost takes the room's authoritative mode. */
+    mode: PlayerMode;
+    /** the editor lens (Shift+backtick) layered on a play room. */
+    lens: boolean;
     info: RoomInfo;
     /** true when another tab in the same group is bound to the same underlying
      *  ClientRoom, e.g. play POV + editor lens, or sibling edit ClientRoom on
@@ -162,14 +166,10 @@ type Tab = {
     hasRoomSibling: boolean;
 };
 
-function isEditorLens(view: RoomView): boolean {
-    return view.room.editor?.id === view.id;
-}
-
-function orderRank(v: RoomView): number {
+function orderRank(t: Tab): number {
     // play POV first, then editor lens on play, then sibling edit ClientRoom
-    if (v.mode === 'play') return 0;
-    if (isEditorLens(v)) return 1;
+    if (t.mode === 'play') return 0;
+    if (t.lens) return 1;
     return 2;
 }
 
@@ -184,7 +184,7 @@ function RoomTab({
     inGroup: boolean;
     onOpenMenu: (info: RoomInfo, tabMode: PlayerMode, x: number, y: number) => void;
 }) {
-    const { view, info } = tab;
+    const { room, info, lens: lensBacked, mode: tabMode } = tab;
     const activeRoomId = useEditor((s) => s.roomId);
     const activeMode = useEditor((s) => s.mode);
     const playerToView = useEditor((s) => s.playerToView);
@@ -193,20 +193,18 @@ function RoomTab({
     const leaveRoom = useEditor((s) => s.leaveRoom);
     const stopRoom = useEditor((s) => s.stopRoom);
 
-    const lensBacked = view !== null && isEditorLens(view);
-    const tabMode: PlayerMode = view ? view.mode : info.roomMode;
     const isPlay = tabMode === 'play';
     // a local (client-only, in-tab) room vs a server-backed remote room. local room
     // ids are prefixed; see LOCAL_ROOM_PREFIX / startLocalRoom.
     const isLocal = info.id.startsWith(LOCAL_ROOM_PREFIX);
-    const showAsPill = view !== null && view.mode === 'edit' && inGroup;
+    const showAsPill = room !== null && tabMode === 'edit' && inGroup;
     const isMainEdit = !inGroup && tabMode === 'edit' && info.sceneId === 'main' && info.namespace === 'main';
 
     const isActive = (() => {
-        if (!view) return false;
-        if (view.room.roomId !== activeRoomId) return false;
-        if (lensBacked) return activeMode === 'play' && playerToView.get(view.room.playerId) === 'edit';
-        if (view.mode === 'play') return activeMode === 'play' && playerToView.get(view.room.playerId) !== 'edit';
+        if (!room) return false;
+        if (room.roomId !== activeRoomId) return false;
+        if (lensBacked) return activeMode === 'play' && playerToView.get(room.playerId) === 'edit';
+        if (tabMode === 'play') return activeMode === 'play' && playerToView.get(room.playerId) !== 'edit';
         // sibling edit ClientRoom
         return activeMode === 'edit';
     })();
@@ -218,52 +216,52 @@ function RoomTab({
     const canClose = !isMainEdit;
 
     const onActivate = (): void => {
-        if (!view) {
+        if (!room) {
             joinRoom?.(info.id, info.roomMode);
             return;
         }
         if (lensBacked) {
-            // editor POV on a play room: ensure play active + lens up + view=edit
-            if (view.room.roomId !== activeRoomId || activeMode !== 'play') {
-                switchRoom?.(view.room.roomId, 'play');
+            // editor POV on a play room: ensure play active + lens up + POV=edit
+            if (room.roomId !== activeRoomId || activeMode !== 'play') {
+                switchRoom?.(room.roomId, 'play');
             }
-            setEditorEnabledForRoom(view.room, true);
-            setRoomView(view.room, 'edit');
+            setEditorEnabledForRoom(room, true);
+            setRoomView(room, 'edit');
             return;
         }
-        if (view.mode === 'play') {
-            if (view.room.roomId !== activeRoomId || activeMode !== 'play') {
-                switchRoom?.(view.room.roomId, 'play');
+        if (tabMode === 'play') {
+            if (room.roomId !== activeRoomId || activeMode !== 'play') {
+                switchRoom?.(room.roomId, 'play');
             }
             // if lens was up, swap POV back to player and hide editor (but
             // keep the lens alive, full teardown lives on the lens pill's X).
-            if (playerToView.get(view.room.playerId) === 'edit') {
-                setRoomView(view.room, 'play');
+            if (playerToView.get(room.playerId) === 'edit') {
+                setRoomView(room, 'play');
             }
             return;
         }
         // sibling edit ClientRoom
-        if (view.room.roomId !== activeRoomId || activeMode !== 'edit') {
-            switchRoom?.(view.room.roomId, 'edit');
+        if (room.roomId !== activeRoomId || activeMode !== 'edit') {
+            switchRoom?.(room.roomId, 'edit');
         }
     };
 
     const onClose = (e: React.MouseEvent): void => {
         e.stopPropagation();
-        if (!view) {
+        if (!room) {
             // ghost, only server-side stop applies.
             stopRoom?.(info.id);
             return;
         }
         if (lensBacked) {
-            setEditorEnabledForRoom(view.room, false);
+            setEditorEnabledForRoom(room, false);
             return;
         }
-        if (view.mode === 'play') {
-            stopRoom?.(view.room.roomId);
+        if (tabMode === 'play') {
+            stopRoom?.(room.roomId);
             return;
         }
-        leaveRoom?.(view.room.roomId, 'edit');
+        leaveRoom?.(room.roomId, 'edit');
     };
 
     const onContextMenu = (e: React.MouseEvent): void => {
@@ -307,7 +305,7 @@ function RoomTab({
                     } ${
                         isActive
                             ? activeBg
-                            : view
+                            : room
                               ? 'bg-surface text-fg-muted border-border hover:bg-surface-muted'
                               : 'bg-surface text-fg-muted border-dashed border-border hover:text-fg hover:bg-surface-muted'
                     } ${canClose ? 'pl-2 pr-1.5 border-r-0' : 'px-2'}`}
@@ -331,16 +329,16 @@ function RoomTab({
                               : 'bg-surface text-fg-muted border-border hover:text-fg hover:bg-surface-muted'
                     }`}
                     title={
-                        !view
+                        !room
                             ? 'stop room'
                             : lensBacked
                               ? 'stop inspecting client'
-                              : view.mode === 'edit'
+                              : tabMode === 'edit'
                                 ? 'leave edit player'
                                 : 'stop room'
                     }
                 >
-                    {view && !isPlay ? <Icons.X size={10} /> : <Icons.Square size={10} />}
+                    {room && !isPlay ? <Icons.X size={10} /> : <Icons.Square size={10} />}
                 </button>
             )}
         </div>
@@ -349,14 +347,21 @@ function RoomTab({
 
 /* ── RoomTabs ───────────────────────────────────────────────────── */
 
-function buildGroups(roomList: RoomInfo[], roomViews: Map<RoomViewId, RoomView>): { namespace: string; tabs: Tab[] }[] {
-    // index views by their underlying ClientRoom.roomId so we can join
-    // each RoomInfo against the views on the same room.
-    const viewsByRoomId = new Map<string, RoomView[]>();
-    for (const view of roomViews.values()) {
-        const list = viewsByRoomId.get(view.room.roomId);
-        if (list) list.push(view);
-        else viewsByRoomId.set(view.room.roomId, [view]);
+type Pov = Pick<Tab, 'id' | 'room' | 'mode' | 'lens'>;
+
+function buildGroups(roomList: RoomInfo[], rooms: Iterable<ClientRoom>): { namespace: string; tabs: Tab[] }[] {
+    // one POV per ClientRoom, indexed by roomId so each RoomInfo joins against
+    // the POVs on the same room. a play room with the editor lens up yields a
+    // second POV for the editor.
+    const povsByRoomId = new Map<string, Pov[]>();
+    for (const room of rooms) {
+        let list = povsByRoomId.get(room.roomId);
+        if (!list) {
+            list = [];
+            povsByRoomId.set(room.roomId, list);
+        }
+        list.push({ id: String(room.playerId), room, mode: room.playerMode, lens: false });
+        if (room.editor) list.push({ id: room.editor.id, room, mode: 'edit', lens: true });
     }
 
     const out: { namespace: string; tabs: Tab[] }[] = [];
@@ -370,26 +375,28 @@ function buildGroups(roomList: RoomInfo[], roomViews: Map<RoomViewId, RoomView>)
             byNs.set(ns, bucket);
             out.push({ namespace: ns, tabs: bucket });
         }
-        const views = viewsByRoomId.get(info.id);
-        // multi-view rooms are the only source of room-siblings (play POV +
+        const povs = povsByRoomId.get(info.id);
+        // multi-POV rooms are the only source of room-siblings (play POV +
         // editor lens, sibling edit ClientRoom). solo edit rooms share the
         // 'editor' namespace bucket but never share a roomId.
-        const hasRoomSibling = (views?.length ?? 0) > 1;
-        if (!views || views.length === 0) {
-            bucket.push({ id: `ghost:${info.id}`, view: null, info, hasRoomSibling: false });
+        const hasRoomSibling = (povs?.length ?? 0) > 1;
+        if (!povs || povs.length === 0) {
+            bucket.push({ id: `ghost:${info.id}`, room: null, mode: info.roomMode, lens: false, info, hasRoomSibling: false });
         } else {
-            views.sort((a, b) => orderRank(a) - orderRank(b));
-            for (const view of views) {
-                bucket.push({ id: view.id, view, info, hasRoomSibling });
-            }
+            const tabs = povs.map((pov) => ({ ...pov, info, hasRoomSibling }));
+            tabs.sort((a, b) => orderRank(a) - orderRank(b));
+            bucket.push(...tabs);
         }
     }
     return out;
 }
 
 function RoomTabs() {
-    const roomList = useEditor((s) => s.roomList);
-    const roomViews = useEditor((s) => s.roomViews);
+    const roomList = useClient((s) => s.roomList);
+    const rooms = useClient((s) => s.rooms);
+    // a lens coming up or down sets `room.editor` in place (no `rooms` identity
+    // change); the same path writes `playerToView`, so that is the re-render key.
+    const playerToView = useEditor((s) => s.playerToView);
 
     const [menu, setMenu] = useState<TabContextMenu | null>(null);
     const closeMenu = useCallback(() => setMenu(null), []);
@@ -398,7 +405,8 @@ function RoomTabs() {
         [],
     );
 
-    const groups = useMemo(() => buildGroups(roomList, roomViews), [roomList, roomViews]);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: playerToView keys the lens enter/exit recompute
+    const groups = useMemo(() => buildGroups(roomList, rooms.values()), [roomList, rooms, playerToView]);
 
     return (
         <div className="flex items-center gap-4">

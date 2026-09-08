@@ -23,7 +23,6 @@ import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
-import { useEditor } from '../editor/editor-store';
 import * as RenderCamera from '../render/camera';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
@@ -215,16 +214,16 @@ export type ClientRoom = {
     /**
      * per-room editor store. Populated by the editor script on init (only
      * for `roomMode === 'edit'`), cleared on dispose. Non-React script
-     * callers (fly controller, tools, ...) read it directly, no useEditor
-     * import needed. Null on play-only rooms.
+     * callers (fly controller, tools, ...) read it directly. Null on play-only
+     * rooms.
      */
     editorStore: EditRoomStoreApi | null;
 
     /**
      * clipboard handlers, set when this room's editor is active, cleared on
      * deactivate. Page-level `document` listeners (installed once in
-     * registerClient) dispatch copy/cut/paste/keydown to the *active* room
-     * (`useEditor.getState().room`); rooms whose editor is enabled but not
+     * registerClient) dispatch copy/cut/paste/keydown to the editor store's
+     * active room; rooms whose editor is enabled but not
      * focused hold their handlers without firing.
      */
     editorClipboard: ClipboardHandlers | null;
@@ -355,54 +354,12 @@ export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void 
 /** prefix used for synthetic local-room ids, server roomIds never collide with this. */
 export const LOCAL_ROOM_PREFIX = 'local:';
 
-/* ── RoomView ───────────────────────────────────────────────────── */
-
-/**
- * Opaque id for a `RoomView`. Two flavours flow through the same channel:
- *  - `String(playerId)` for a ClientRoom's player POV
- *  - `room.editor.id` (uuid) for a play-mode ClientRoom's editor-node POV
- * Both are disjoint by construction; callers treat them as opaque.
- */
-export type RoomViewId = string;
-
-/**
- * Addressable presentation of a `ClientRoom`. Every ClientRoom yields one
- * RoomView for its player POV; play-mode ClientRooms with `room.editor`
- * set also yield a second RoomView for the editor POV. `mode` mirrors
- * the existing `setRoomView`/`playerToView` vocabulary so the toolbar
- * can dispatch on it directly.
- */
-export type RoomView = {
-    id: RoomViewId;
-    room: ClientRoom;
-    mode: PlayerMode;
-};
-
-/**
- * Snapshot every ClientRoom into a `RoomView` map. Computed (not stored)
- * so `Rooms` stays the source of truth for `room.editor` / `playerMode`.
- * `syncJoinedPlayers` calls this on the engine-wide rooms set; editor.ts
- * recomputes from `useEditor.allRooms` after enter/exit lens transitions.
- */
-export function buildRoomViews(rooms: Iterable<ClientRoom>): Map<RoomViewId, RoomView> {
-    const out = new Map<RoomViewId, RoomView>();
-    for (const room of rooms) {
-        const playerView: RoomView = { id: String(room.playerId), room, mode: room.playerMode };
-        out.set(playerView.id, playerView);
-        if (room.editor) {
-            const editorView: RoomView = { id: room.editor.id, room, mode: 'edit' };
-            out.set(editorView.id, editorView);
-        }
-    }
-    return out;
-}
-
 /* ── RoomInfo for local rooms ───────────────────────────────────── */
 
 /**
  * Synthesize a `RoomInfo` for a local-only ClientRoom. Local rooms never
  * appear in server room_list messages, so we manufacture their info from
- * the ClientRoom itself and merge it into `useEditor.roomList` at the
+ * the ClientRoom itself and merge it into `useClient.roomList` at the
  * startLocalRoom/stopLocalRoom edges, making local + server-driven rooms
  * indistinguishable to downstream consumers (tabs, debug, etc.).
  */
@@ -427,7 +384,7 @@ export function applyServerRoomList(state: Rooms, serverRooms: RoomInfo[]): void
     for (const room of state.rooms.values()) {
         if (room.local) merged.push(makeLocalRoomInfo(room));
     }
-    useEditor.getState().setRoomList(merged);
+    useClient.getState().setRoomList(merged);
 }
 
 /* ── Room lifecycle ─────────────────────────────────────────────── */
@@ -1009,9 +966,8 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
 
     // append a synthetic RoomInfo so this local room participates in
     // roomList alongside server-driven rooms (tabs, debug, etc.).
-    const store = useEditor.getState();
-    store.setRoomList([...store.roomList, makeLocalRoomInfo(room)]);
-    syncJoinedPlayers(rooms);
+    const client = useClient.getState();
+    client.setRoomList([...client.roomList, makeLocalRoomInfo(room)]);
     return room;
 }
 
@@ -1038,9 +994,8 @@ export function stopLocalRoom(state: EngineClient, roomId: string): void {
     useClient.getState().removeRoom(room.playerId);
     // mirror the registry: drop the synthetic RoomInfo we added in
     // startLocalRoom so this room disappears from roomList too.
-    const store = useEditor.getState();
-    store.setRoomList(store.roomList.filter((r) => r.id !== room.roomId));
-    syncJoinedPlayers(state.rooms);
+    const client = useClient.getState();
+    client.setRoomList(client.roomList.filter((r) => r.id !== room.roomId));
     if (state.rooms.activePlayerId === room.playerId) {
         state.rooms.activePlayerId = null;
         useClient.getState().setActivePlayerId(null);
@@ -1094,7 +1049,7 @@ export function resolveRoomCamera(camera: PerspectiveCamera, room: ClientRoom): 
     return RenderCamera.resolvePovCamera(camera, cameraTrait);
 }
 
-/** set the active Player and update the editor store. The renderer isn't touched
+/** set the active Player; `useClient` mirrors it for the UI. The renderer isn't touched
  *  here — it reconciles its visuals to `state.activePlayerId` on the next
  *  `updateFrame` (build/mount/flush on entry, teardown on exit). */
 export function setActivePlayer(state: Rooms, net: Net.ClientNet, playerId: PlayerId): void {
@@ -1117,15 +1072,6 @@ export function setActivePlayer(state: Rooms, net: Net.ClientNet, playerId: Play
         Input.setInputManagerTarget(engineState.inputManager, room.input);
     }
 
-    // useEditor.room.playerId keys the active per-player store for useEditRoom
-    // (which derives from useEditor.playerEditStores[room.playerId]).
-    const store = useEditor.getState();
-    store.setMode(room.playerMode);
-    store.setRoomMode(room.roomMode);
-    store.setRoomId(room.roomId);
-    store.setSceneId(room.sceneId);
-    store.setRoom(room);
-
     // notify server about active player (presence), local rooms have no
     // server peer, so suppress the ping.
     if (!room.local) {
@@ -1145,24 +1091,6 @@ export function* getRoomsByRoomId(state: Rooms, roomId: string): Generator<Clien
     }
 }
 
-/**
- * Push the list of joined Players into the editor store. The UI tests
- * joined-ness per Player; parallel ClientRooms may share a roomId but
- * differ in mode, each represented by a distinct PlayerId.
- */
-export function syncJoinedPlayers(state: Rooms): void {
-    const players = [];
-    const rooms: ClientRoom[] = [];
-    for (const room of state.rooms.values()) {
-        players.push({ playerId: room.playerId, roomId: room.roomId, mode: room.playerMode });
-        rooms.push(room);
-    }
-    const store = useEditor.getState();
-    store.setJoinedPlayers(players);
-    store.setAllRooms(rooms);
-    store.setRoomViews(buildRoomViews(state.rooms.values()));
-}
-
 export function applyJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void {
     if (message.roomId.startsWith(LOCAL_ROOM_PREFIX)) {
         console.error(
@@ -1179,7 +1107,6 @@ export function applyJoinRoom(state: EngineClient, message: Protocol.JoinRoom): 
         resyncRoom(existing, message, state.inbound);
         applyClientStreamRadius(existing, state.perf.profile);
         SceneTree.initSceneTree(existing.scene);
-        syncJoinedPlayers(state.rooms);
         return;
     }
 
@@ -1209,7 +1136,6 @@ export function applyJoinRoom(state: EngineClient, message: Protocol.JoinRoom): 
     // activate_room when this view should become the focused tab.
     state.rooms.rooms.set(message.playerId, room);
     useClient.getState().setRoom(message.playerId, room);
-    syncJoinedPlayers(state.rooms);
 }
 
 export function applyRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void {
@@ -1218,7 +1144,6 @@ export function applyRoomLeft(state: EngineClient, message: Protocol.RoomLeft): 
 
     state.rooms.rooms.delete(message.playerId);
     useClient.getState().removeRoom(message.playerId);
-    syncJoinedPlayers(state.rooms);
 
     if (state.rooms.activePlayerId !== message.playerId) return;
 
@@ -1243,8 +1168,5 @@ export function applySceneSync(state: EngineClient, message: Protocol.SceneSync)
     if (!room) return;
     for (const update of message.updates) {
         applySceneSyncUpdate(room.scene, room.context, update, state.inbound);
-    }
-    if (room.playerId === state.rooms.activePlayerId) {
-        room.editorStore?.getState().markDirty();
     }
 }

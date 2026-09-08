@@ -265,7 +265,7 @@ export function updateInspect(
 
     // grab mode: hold LMB on a node to grab; release/blur to drop. clicks on
     // empty space are no-ops. tool/mode switch force-release happens in
-    // editor/index.ts before this function runs.
+    // editor/client.ts before this function runs.
     if (inGrabMode) {
         if (TransformTool.isInGrab(transformToolState)) {
             if (pointerJustUp(pointer, client.input) || !pointerHeld(pointer, client.input)) {
@@ -445,6 +445,6 @@ export function updateInspect(
         }
     }
 
-    // (inspect mesh update is hoisted out, see editor/index.ts so the
+    // (inspect mesh update is hoisted out, see editor/client.ts so the
     // selection outline is drawn for every tool, not just inspect/transform.)
 }

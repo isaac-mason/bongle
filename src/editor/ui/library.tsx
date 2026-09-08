@@ -23,6 +23,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from '../../client/ui/components';
+import { useClient } from '../../client/ui/stores/client-store';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
 import {
@@ -419,7 +420,7 @@ function ScenesTab() {
     const openScene = useEditRoom((s) => s.openScene);
     const renameScene = useEditRoom((s) => s.renameScene);
     const deleteScene = useEditRoom((s) => s.deleteScene);
-    const roomList = useEditor((s) => s.roomList);
+    const roomList = useClient((s) => s.roomList);
     const joinedPlayers = useEditor((s) => s.joinedPlayers);
     const switchRoom = useEditor((s) => s.switchRoom);
     const [newScene, setNewScene] = useState('');

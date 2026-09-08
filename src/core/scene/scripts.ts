@@ -46,9 +46,9 @@ export type Unsubscribe = () => void;
  * `client.camera` point at these.
  */
 export type EditRoomState = {
-    /** stable opaque id for this editor view; surfaces as RoomViewId so the
-     *  UI can address the editor POV separately from the player POV
-     *  even though both belong to the same ClientRoom. */
+    /** stable opaque id for this editor view, so the UI can address the editor
+     *  POV separately from the player POV even though both belong to the same
+     *  ClientRoom. */
     id: string;
 
     /**

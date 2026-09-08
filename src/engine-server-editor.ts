@@ -1,9 +1,10 @@
 // engine-server-editor, server-side editor-mode boot composition.
 //
 // Imported only by the edit-mode server realm entries (the cli + editor edit servers).
-// `setup(state)` is called between `EngineServer.init` and `EngineServer.load` so the
-// editor's server commands upsert into the registry before `load` builds the derived
-// indexes. Pairs with `engine-client-editor` (the client-side counterpart).
+// Importing it registers the editor's server-side declarations (trait, script,
+// commands) into the registry, which the realm does before `EngineServer.load`
+// builds the derived indexes. `setup(state)` exposes the state for inspection.
+// Pairs with `engine-client-editor` (the client-side counterpart).
 //
 // Splitting this out of `engine-server.ts` keeps the runtime server entry free of the
 // `env.editor` branch — mirroring what `engine-client-editor` already does for the
@@ -12,13 +13,11 @@
 
 import * as api from 'bongle';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
-import * as Editor from './editor/index';
+import './editor/server';
 import { applyRegistryChanges } from './server/registry-dispatch';
 import type { EngineServer } from './server/server';
 
 export async function setup(state: EngineServer): Promise<void> {
-    // register the editor's server commands before load builds the derived indexes.
-    await Editor.registerServer(state);
     // expose state + api on globalThis for ad-hoc inspection via `bun --inspect` /
     // chrome devtools. `_state` is the full EngineServer; `_api` the same surface user
     // scripts import from 'bongle'.

@@ -12,7 +12,7 @@
 // metric set runs on an interval only while the dashboard is open;
 // dashcat's own ticker samples the monitors.
 
-import { type Container, type Dashboard, dashboard, type LogEntry } from 'dashcat';
+import { type Container, type Dashboard, dashboard, type LogEntry, type TabGroup } from 'dashcat';
 import { type Vec3, vec3 } from 'math';
 import { CharacterControllerTrait } from '../../builtins/character-controller';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
@@ -20,7 +20,6 @@ import * as Debug from '../../core/debug';
 import * as SceneTree from '../../core/scene/scene-tree';
 import { stateToBlock } from '../../core/voxels/block-registry';
 import { CHUNK_BITS } from '../../core/voxels/voxels';
-import { useEditor } from '../../editor/editor-store';
 import { env } from '../../env';
 import type { ClientRoom } from '../rooms';
 import { useClient } from './stores/client-store';
@@ -311,10 +310,21 @@ function addThroughput(c: Container, height: number, side?: 'client' | 'server')
 
 type DebugDashboard = {
     dash: Dashboard;
+    tabs: TabGroup;
     setOpen(open: boolean): void;
 };
 
 let instance: DebugDashboard | null = null;
+
+/** a tab a host adds to the debug panel (the editor's options tab). Registered
+ *  before the dashboard is built it lands in order; after, it appends. */
+type DashboardExtension = (tabs: TabGroup) => void;
+const extensions: DashboardExtension[] = [];
+
+export function extendDebugDashboard(extend: DashboardExtension): void {
+    extensions.push(extend);
+    if (instance) extend(instance.tabs);
+}
 
 function build(): DebugDashboard {
     // dashboard() manages floating panels on a full-cover layer that passes
@@ -325,7 +335,7 @@ function build(): DebugDashboard {
     dash.root.style.zIndex = String(UILayer.debug);
     dash.root.style.display = 'none'; // hidden until opened
 
-    // ── debug panel: overview / perf / cpu / physics / net (/ options / logs) tabs ──
+    // ── debug panel: overview / perf / cpu / physics / net (/ host tabs / logs) ──
     //
     // overview is position/info readouts; the rest is perf. frames go on stacked
     // areas (a band per phase, summing to frame time) with the 60fps budget as a
@@ -412,14 +422,6 @@ function build(): DebugDashboard {
     // physics is server-authoritative (the client runs interpolation, not the
     // solver), so every reading comes off serverMetrics.
     const physics = tabs.tab('physics');
-    // collider overlay toggle (editor-only, same state the options tab drives).
-    if (env.editor) {
-        const ed = () => useEditor.getState();
-        physics.add(
-            { get: () => ed().showPhysicsColliders, set: (v) => ed().setShowPhysicsColliders(v) },
-            { label: 'show colliders', listen: true },
-        );
-    }
     physics.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'physics', SMOOTH_TICK), {
         label: 'physics tick',
         unit: 'ms',
@@ -517,100 +519,9 @@ function build(): DebugDashboard {
         history: CHART_HISTORY,
     });
 
-    // ── options tab: editor debug toggles + ws-latency sim (editor-only) ──
-    //
-    // relocated from the right-sidebar DebugPane. all global editor state
-    // (useEditor), bound via get/set accessors; `listen` reflects external
-    // changes, `show` reveals the sim sliders only while latency sim is on.
-    if (env.editor) {
-        const options = tabs.tab('options');
-        const ed = () => useEditor.getState();
-        options.add(
-            { get: () => ed().showPhysicsColliders, set: (v) => ed().setShowPhysicsColliders(v) },
-            {
-                label: 'physics colliders',
-                listen: true,
-            },
-        );
-        options.add({ get: () => ed().showGrid, set: (v) => ed().setShowGrid(v) }, { label: 'grid', listen: true });
-        options.add(
-            { get: () => ed().showOrientationCube, set: (v) => ed().setShowOrientationCube(v) },
-            {
-                label: 'orientation cube',
-                listen: true,
-            },
-        );
-        options.add(
-            { get: () => ed().showChunkBoundaries, set: (v) => ed().setShowChunkBoundaries(v) },
-            {
-                label: 'chunk boundaries',
-                listen: true,
-            },
-        );
-        options.add(
-            {
-                get: () => useClient.getState().showGpucatInspector,
-                set: (v) => useClient.getState().setShowGpucatInspector(v),
-            },
-            {
-                label: 'gpucat inspector',
-                listen: true,
-            },
-        );
-
-        const simOn = () => useEditor.getState().netSimEnabled;
-        options.add(
-            { get: () => ed().netSimEnabled, set: (v) => ed().setNetSimEnabled(v) },
-            {
-                label: 'simulate ws latency',
-                listen: true,
-            },
-        );
-        options.add(
-            { get: () => ed().netSimRttMs, set: (v) => ed().setNetSimRttMs(v) },
-            {
-                label: 'rtt ms',
-                min: 0,
-                max: 500,
-                step: 10,
-                show: simOn,
-                listen: true,
-            },
-        );
-        options.add(
-            { get: () => ed().netSimJitterMs, set: (v) => ed().setNetSimJitterMs(v) },
-            {
-                label: 'jitter ms',
-                min: 0,
-                max: 300,
-                step: 10,
-                show: simOn,
-                listen: true,
-            },
-        );
-        options.add(
-            { get: () => ed().netSimBurstMs, set: (v) => ed().setNetSimBurstMs(v) },
-            {
-                label: 'burst ms',
-                min: 0,
-                max: 1000,
-                step: 10,
-                show: simOn,
-                listen: true,
-            },
-        );
-        options.add(
-            { get: () => ed().netSimBurstChance, set: (v) => ed().setNetSimBurstChance(v) },
-            {
-                label: 'burst pct',
-                min: 0,
-                max: 0.2,
-                step: 0.01,
-                show: simOn,
-                listen: true,
-            },
-        );
-    }
+    // host extensions: the editor's options tab lands here, before logs and
+    // before the active-tab reset below.
+    for (const extend of extensions) extend(tabs);
 
     // ── logs tab: client + server tail views (editor-only, matches the old tab) ──
     if (env.editor) {
@@ -629,6 +540,7 @@ function build(): DebugDashboard {
 
     return {
         dash,
+        tabs,
         setOpen(open) {
             dash.root.style.display = open ? '' : 'none';
         },

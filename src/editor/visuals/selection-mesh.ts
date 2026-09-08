@@ -972,7 +972,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
     // brush mesh: cell-based Selection most of the time, but for hovers on
     // sub-unit colliders (torches, fences, …) we synthesize a single-box
     // geometry at the collider AABB so the cyan visualization matches the
-    // actual shape. brush is set by editor/index.ts each frame from
+    // actual shape. brush is set by editor/client.ts each frame from
     // hoverVoxel (idle) or boxSelect.previewB (wip).
     //
     // signature folds brush ref + aabb-shape mode + aabb key so the brush

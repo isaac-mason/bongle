@@ -22,14 +22,14 @@ import {
     setWorldQuaternion,
     TransformTrait,
 } from '../builtins/transform';
+import type { ClientRoom } from '../client/rooms';
 import { registry } from '../core/registry';
 import * as Rpc from '../core/rpc';
 import * as SceneTree from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
-import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
-import { useEditor } from '../editor/editor-store';
-import { EditorTrait } from '../editor/editor-trait';
-import { buildRoomViews, type ClientRoom } from './rooms';
+import { AddTraitCommand, RemoveTraitCommand } from './commands';
+import { useEditor } from './editor-store';
+import { EditorTrait } from './editor-trait';
 
 /**
  * Toggle the editor for `room`. The mechanism depends on room type:
@@ -83,7 +83,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
  * camera at them, seed the lens camera from the outgoing view, attach
  * FlyControllerTrait and EditorTrait (the trait is what activates the editor
  * script), and set `room.editor`. The editor's controller-swap reconcile (in
- * editor/index.ts) may swap to the user's chosen control mode on its next
+ * editor/client.ts) may swap to the user's chosen control mode on its next
  * tick. No-op when a lens is already up.
  *
  * The lens camera is separate from `room.cameraNode` so the lens's pose
@@ -138,11 +138,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
     SceneTree.addTrait(editorNode, FlyControllerTrait);
     SceneTree.addTrait(editorNode, EditorTrait);
 
-    const store = useEditor.getState();
-    store.setRoomView(room.playerId, 'edit');
-    // editor POV now exists, refresh the RoomView snapshot so consumers
-    // (toolbar tabs) see the new addressable view.
-    store.setRoomViews(buildRoomViews(store.allRooms));
+    useEditor.getState().setRoomView(room.playerId, 'edit');
 }
 
 /** Tear down the local editor lens, restore the default subject/camera, destroy lens nodes, clear room.editor. */
@@ -154,10 +150,7 @@ export function exitLocalEditorView(room: ClientRoom): void {
     SceneTree.destroyNode(room.scene, lens.subject);
     SceneTree.destroyNode(room.scene, lens.camera);
     room.editor = null;
-    const store = useEditor.getState();
-    store.clearRoomView(room.playerId);
-    // editor POV gone, refresh the RoomView snapshot.
-    store.setRoomViews(buildRoomViews(store.allRooms));
+    useEditor.getState().clearRoomView(room.playerId);
 }
 
 /**

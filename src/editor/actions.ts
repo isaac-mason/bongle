@@ -187,7 +187,6 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
                     send(ctx, DestroyNodeCommand, { id: nid });
                 }
             }
-            state.markDirty();
         },
         undo() {
             if (reverseVoxelOps) sendVoxelOps(ctx, reverseVoxelOps);
@@ -216,7 +215,6 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
                     }
                 }
             }
-            state.markDirty();
         },
     });
     state.clearVoxelSelection();
@@ -487,7 +485,7 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
 
 /* ── scene actions ── */
 
-export function createNodeAction(state: EditRoomState, ctx: ScriptContext, parentId: number, index: number, name?: string): void {
+export function createNodeAction(ctx: ScriptContext, parentId: number, index: number, name?: string): void {
     send(ctx, CreateNodeCommand, {
         id: ctx.scene.nextServerId,
         parentId,
@@ -498,7 +496,6 @@ export function createNodeAction(state: EditRoomState, ctx: ScriptContext, paren
         children: undefined,
         prefab: undefined,
     });
-    state.markDirty();
 }
 
 export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
@@ -514,7 +511,6 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
             if (!n) return;
             destroyNode(ctx.scene, n);
             send(ctx, DestroyNodeCommand, { id: nodeId });
-            state.markDirty();
         },
         undo() {
             for (const args of createArgs) {
@@ -538,7 +534,6 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
                     prefab: args.prefab ? JSON.stringify(args.prefab) : undefined,
                 });
             }
-            state.markDirty();
         },
     });
 }
@@ -563,7 +558,6 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                 destroyNode(ctx.scene, n);
                 send(ctx, DestroyNodeCommand, { id });
             }
-            state.markDirty();
         },
         undo() {
             for (const args of createArgs) {
@@ -589,7 +583,6 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                     });
                 }
             }
-            state.markDirty();
         },
     });
 }
@@ -608,7 +601,6 @@ export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
             n.name = name;
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetNameCommand, { id: nodeId, name: name ?? null });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -616,7 +608,6 @@ export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
             n.name = prevName;
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetNameCommand, { id: nodeId, name: prevName ?? null });
-            state.markDirty();
         },
     });
 }
@@ -636,7 +627,6 @@ export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             n.realm = realm;
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetRealmCommand, { id: nodeId, realm });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -644,7 +634,6 @@ export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             n.realm = prevRealm;
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetRealmCommand, { id: nodeId, realm: prevRealm });
-            state.markDirty();
         },
     });
 }
@@ -669,7 +658,6 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             reorderChild(np, n, index);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId, index });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -679,7 +667,6 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             reorderChild(pp, n, prevIndex);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId: prevParentId, index: prevIndex });
-            state.markDirty();
         },
     });
 }
@@ -698,7 +685,6 @@ export function reorderAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
             reorderChild(n.parent, n, index);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReorderCommand, { id: nodeId, index });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -706,7 +692,6 @@ export function reorderAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
             reorderChild(n.parent, n, prevIndex);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReorderCommand, { id: nodeId, index: prevIndex });
-            state.markDirty();
         },
     });
 }
@@ -730,7 +715,6 @@ export function setTraitAction(
             if (!n) return;
             setTraitProps(ctx.scene, n, traitId, props);
             send(ctx, SetTraitCommand, { id: nodeId, traitId, props: JSON.stringify(props) });
-            state.markDirty();
         },
         undo() {
             if (!prevProps) return;
@@ -738,7 +722,6 @@ export function setTraitAction(
             if (!n) return;
             setTraitProps(ctx.scene, n, traitId, prevProps);
             send(ctx, SetTraitCommand, { id: nodeId, traitId, props: JSON.stringify(prevProps) });
-            state.markDirty();
         },
     });
 }
@@ -755,7 +738,6 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             const handle = registry.traits.handles.get(traitId);
             if (handle) addTraitBySlot(n, handle.slot);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: undefined });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -763,7 +745,6 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             const handle = registry.traits.handles.get(traitId);
             if (handle) removeTraitBySlot(n, handle.slot);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
-            state.markDirty();
         },
     });
 }
@@ -783,7 +764,6 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
             if (handle) removeTraitBySlot(n, handle.slot);
             else n.unresolved?.delete(traitId);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -791,7 +771,6 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
             const handle = registry.traits.handles.get(traitId);
             if (handle) addTraitBySlot(n, handle.slot, prevProps ?? undefined);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: prevProps ? JSON.stringify(prevProps) : undefined });
-            state.markDirty();
         },
     });
 }
@@ -885,7 +864,6 @@ export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId
             setPrefab(n, { ...config });
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(config) });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -893,7 +871,6 @@ export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId
             setPrefab(n, prevPrefab ? { ...prevPrefab } : null);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: prevPrefab ? JSON.stringify(prevPrefab) : undefined });
-            state.markDirty();
         },
     });
 }
@@ -912,7 +889,6 @@ export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, node
             setPrefab(n, null);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: undefined });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -920,7 +896,6 @@ export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, node
             setPrefab(n, { ...prevPrefab });
             bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(prevPrefab) });
-            state.markDirty();
         },
     });
 }
@@ -985,7 +960,6 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
                 send(ctx, SetNodePersistCommand, { id, persist: true });
             }
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: undefined });
-            state.markDirty();
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -999,7 +973,6 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
             }
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(prevPrefab) });
             if (reverseOps.length > 0) sendVoxelOps(ctx, reverseOps);
-            state.markDirty();
         },
     });
 }

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import * as Icons from '../../../icons';
-import { setEditorEnabledForRoom } from '../../client/editor';
 import { useClient } from '../../client/ui/stores/client-store';
 import '../../client/ui/editor.css';
 import { ChatPanel, useChatPanel } from '../../client/ui/chat/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { setEditorEnabledForRoom } from '../lens';
 import { ControlHints } from './control-hints';
 import { FlySpeedIndicator } from './fly-speed-indicator';
 import { Hotbar } from './hotbar';
@@ -16,7 +16,6 @@ import { LeftToolbar } from './left-toolbar';
 import { LibraryOverlay } from './library';
 import { OrientationCube } from './orientation-cube';
 import { RightPanel } from './right-panel';
-import { ToastStack } from './toast-stack';
 import { ToolActions } from './tool-actions';
 import { TopToolbar } from './top-toolbar';
 import { ViewportContextMenu } from './viewport-context-menu';
@@ -280,7 +279,7 @@ function EditUI() {
                             {/* right-click context menu over the viewport (opened from inspect tool) */}
                             <ViewportContextMenu />
 
-                            {/* tool-aware action buttons, top-left, under the toasts */}
+                            {/* tool-aware action buttons, top-left */}
                             <ToolActions />
 
                             {/* control mode widget, top-right */}
@@ -302,11 +301,6 @@ function EditUI() {
                             <LibraryOverlay />
                         </>
                     )}
-
-                    {/* HMR / status toasts, top-left, over ToolActions. outside
-                        the editorEnabled gate: a hot-reload matters just as
-                        much while playing as while editing. */}
-                    <ToastStack />
 
                     {/* chat / slash commands, bottom-left, opens on '/' or 't'.
                         rendered outside the editorEnabled gate so it works in

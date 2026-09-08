@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import type { PlayerId } from '../../../core/client';
 import type * as Debug from '../../../core/debug';
+import type { RoomInfo } from '../../../core/protocol';
 import type { InputManager } from '../../input';
 import type { ClientRoom } from '../../rooms';
 
@@ -64,6 +65,11 @@ export type ClientStore = {
     activePlayerId: PlayerId | null;
     setActivePlayerId: (id: PlayerId | null) => void;
 
+    /** every room the server knows about (its `room_list` broadcast) plus a
+     *  synthetic entry per client-only local room, so both kinds read alike. */
+    roomList: RoomInfo[];
+    setRoomList: (roomList: RoomInfo[]) => void;
+
     /** the client-level InputManager, so React overlays can free the cursor while
      *  open via `useReleasePointer`. Set at boot, cleared on teardown. */
     inputManager: InputManager | null;
@@ -109,6 +115,9 @@ export const useClient = create<ClientStore>((set) => ({
 
     activePlayerId: null,
     setActivePlayerId: (activePlayerId) => set({ activePlayerId }),
+
+    roomList: [],
+    setRoomList: (roomList) => set({ roomList }),
 
     inputManager: null,
     setInputManager: (inputManager) => set({ inputManager }),

@@ -1,3 +1,7 @@
+// editor/client.ts, the client half of the editor module: the per-player editor
+// script (EditorTrait), the baked icon loaders, and registerClient. The server
+// half lives in editor/server.ts; nothing here reaches server modules.
+
 import {
     CharacterControllerTrait,
     env,
@@ -7,90 +11,36 @@ import {
     resetInterpolation,
     TransformTrait,
 } from 'bongle';
-import type { Client } from 'bongle/interface';
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import type { Quat, Spherical, Vec3 } from 'math';
 import { spherical, vec3 } from 'math';
-import * as chat from '../api/chat';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import * as ClientChat from '../client/chat';
 import type { EngineClient } from '../client/client';
-import { installEditorClientListeners } from '../client/editor';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
 import { LOCAL_ROOM_PREFIX, resolveRoomCamera, setActivePlayer, stopLocalRoom } from '../client/rooms';
+import { extendDebugDashboard } from '../client/ui/dashboard';
 import { useClient } from '../client/ui/stores/client-store';
-import type { ScenePayload } from '../core/content/scene-store';
-import { registry } from '../core/registry';
-import {
-    addChild,
-    addTrait,
-    addTraitBySlot,
-    bumpNodeVersion,
-    createNode,
-    deserializeNode,
-    destroyNode,
-    getNodeById,
-    getTrait,
-    hasTrait,
-    isAncestorOf,
-    type Realm,
-    removeTrait,
-    removeTraitBySlot,
-    reorderChild,
-    reparent,
-    type SerializedNode,
-    setNodePersist,
-    setPrefab,
-    setRealm,
-} from '../core/scene/scene-tree';
-import {
-    isOwner,
-    listen,
-    onDispose,
-    onFrame,
-    onInput,
-    onPostPhysicsStep,
-    onPrePhysicsStep,
-    onTick,
-    script,
-} from '../core/scene/scripts';
+import { addTrait, getNodeById, getTrait, hasTrait, removeTrait } from '../core/scene/scene-tree';
+import { isOwner, onDispose, onFrame, onInput, onPostPhysicsStep, onPrePhysicsStep, onTick, script } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
-import { SetBlockFlags } from '../core/voxels/block-flags';
-import { propagateAllLight } from '../core/voxels/light';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
-import { setBlock } from '../core/voxels/voxels';
-import * as Blueprints from '../server/blueprints';
-import type { EngineServer } from '../server/server';
-import { setTraitProps } from './actions';
 import { initBlueprints } from './blueprints';
 import { readNudgeDelta } from './camera';
 import { installEditorChatCommands } from './chat-commands';
 import { installSelectionChatCommands } from './chat-selection';
 import { createClipboardHandlers } from './clipboard';
-import {
-    AddTraitCommand,
-    CreateNodeCommand,
-    DestroyNodeCommand,
-    RemoveTraitCommand,
-    ReorderCommand,
-    ReparentCommand,
-    SaveBlueprintCommand,
-    SetNameCommand,
-    SetNodePersistCommand,
-    SetPrefabCommand,
-    SetRealmCommand,
-    SetTraitCommand,
-    VoxelEditCommand,
-} from './commands';
+import { addEditorDebugOptions } from './debug-options';
 import type { ControlMode } from './edit-room-store';
 import { createEditRoomStore } from './edit-room-store';
 import { HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, type ToolCategoryId } from './editor-controls';
 import { useEditor } from './editor-store';
-import { EditorServerTrait, EditorTrait } from './editor-trait';
+import { EditorTrait } from './editor-trait';
 import { isInputFocused } from './input';
 import { activeBlockKeyOf } from './inventory';
+import { installEditorClientListeners } from './lens';
 import * as NodeBodies from './node-bodies';
 import { createPointerState, disposePointerState, pointerFlush } from './pointer-state';
 import { parsePattern } from './scene/pattern';
@@ -119,14 +69,6 @@ import {
     updateSelectionMeshes,
 } from './visuals/selection-mesh';
 
-/* ── server-only module refs, populated by registerServer before any script inits ── */
-
-type RoomsMod = typeof import('../server/rooms');
-type DiscoveryMod = typeof import('../server/discovery');
-
-let _Rooms: RoomsMod | undefined;
-let _Discovery: DiscoveryMod | undefined;
-
 /* ── voxel raycast scratch state ── */
 
 const MAX_RAY_DIST = 1024;
@@ -139,313 +81,6 @@ const _rayDir: Vec3 = [0, 0, 0];
 let _brushHoverKey = '';
 let _brushCornerA: [number, number, number] | null = null;
 let _brushCornerB: [number, number, number] | null = null;
-
-// server-side editor concerns. attached to the room root by the server
-// when an edit room is created (in dev / env.editor builds). holds the
-// authoritative voxel/scene mutation listeners and the /relight command.
-// no client side, replicated to clients only as a marker, the script
-// body early-returns there.
-script(
-    EditorServerTrait,
-    'editor-server',
-    (ctx) => {
-        if (!env.server) return;
-
-        // //relight, full recompute of sky + rgb light for the room. only
-        // the server has authoritative light state, so the listener lives
-        // here. clients without the editor enabled never see the spec; play
-        // clients with /relight typed fall through to plain-chat, which the
-        // server ignores for slash inputs.
-        const relightCmd = chat.command(ctx, {
-            name: '/relight',
-            description: 'recompute all light propagation in this room',
-            args: [],
-        });
-        chat.listen(ctx, relightCmd, () => {
-            if (!env.editor) return;
-            const t0 = performance.now();
-            propagateAllLight(ctx.voxels);
-            const ms = (performance.now() - t0).toFixed(1);
-            chat.message(ctx, `light repropagated in ${ms}ms`);
-        });
-
-        // capability gate, does this client have permission to mutate scene
-        // state in this room? Today the only signal is `env.editor` (dev builds
-        // grant edit to any connected client; prod builds grant to no one).
-        // Future: real auth, project owner, role, etc. Decoupled from player
-        // mode so a play-mode client with editor toggled on can still issue
-        // edit RPCs.
-        const canEdit = (_client: Client) => env.editor;
-        const editGated =
-            <T>(fn: (args: T, client: Client) => void) =>
-            (args: T, client: Client) => {
-                if (!canEdit(client)) return;
-                fn(args, client);
-            };
-
-        // editGated; on a body that actually mutated (returns true, guard
-        // early-returns don't), flag the room dirty (broadcast to clients via the
-        // room list). wraps the mutating listeners below.
-        const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
-            editGated<T>((args, client) => {
-                if (!fn(args, client)) return;
-                const { room } = ctx.server!;
-                _Rooms!.setRoomDirty(room, true);
-            });
-
-        // voxel edit ops from clients
-        listen(
-            ctx,
-            VoxelEditCommand,
-            editMutate(({ ops }) => {
-                // BULK: authoring edits settle their block-def hooks inline (each
-                // write drains only its own op + chained recomputes) but fire no
-                // script observers. no explicit end-of-brush drain needed.
-                for (const op of ops) {
-                    setBlock(ctx.voxels, op.wx, op.wy, op.wz, op.key, SetBlockFlags.BULK);
-                }
-                return true;
-            }),
-        );
-
-        // save-as-blueprint, client extracts the ScenePayload from its
-        // local selection and ships it here as JSON; server validates the
-        // name (or allocates one), then writes a scene file under
-        // `content/scenes/blueprints/<name>.scene.json`.
-        listen(
-            ctx,
-            SaveBlueprintCommand,
-            editGated((args) => {
-                const { state } = ctx.server!;
-                let payload: ScenePayload;
-                try {
-                    payload = JSON.parse(args.payload) as ScenePayload;
-                } catch {
-                    chat.message(ctx, '[blueprint] invalid payload (json parse failed)');
-                    return;
-                }
-                const name =
-                    args.name && args.name.length > 0 ? args.name : Blueprints.allocateBlueprintName(state.contentManager);
-                const result = Blueprints.saveBlueprint(state.contentManager, name, payload);
-                if (!result.ok) {
-                    chat.message(ctx, `[blueprint] ${result.error}`);
-                    return;
-                }
-                // disk write → the `bongle:scenes` file watcher fires →
-                // `bongle:scene-list` emission catches up the editor.
-                chat.message(
-                    ctx,
-                    result.overwritten ? `[blueprint] overwrote ${result.sceneId}` : `[blueprint] saved ${result.sceneId}`,
-                );
-            }),
-        );
-
-        // scene mutation handlers
-        listen(
-            ctx,
-            CreateNodeCommand,
-            editMutate((args, _client) => {
-                const { room } = ctx.server!;
-                const sceneTree = room.scene;
-                const parent = getNodeById(sceneTree, args.parentId);
-                if (!parent) return;
-                const node = createNode({
-                    id: args.id,
-                    name: args.name,
-                    persist: args.persist,
-                });
-                if (args.prefab) {
-                    try {
-                        node.prefab = JSON.parse(args.prefab);
-                    } catch {
-                        /* fall through with no prefab */
-                    }
-                }
-                addChild(parent, node);
-                const traits: Array<{ id: string; controls?: Record<string, unknown> }> = JSON.parse(args.traits);
-                for (const st of traits) {
-                    const handle = registry.traits.handles.get(st.id);
-                    if (!handle) {
-                        if (node.unresolved === null) node.unresolved = new Map();
-                        node.unresolved.set(st.id, st.controls);
-                        continue;
-                    }
-                    addTraitBySlot(node, handle.slot, st.controls);
-                }
-                if (args.children) {
-                    const children: SerializedNode[] = JSON.parse(args.children);
-                    for (const cdata of children) {
-                        addChild(node, deserializeNode(cdata));
-                    }
-                }
-                reorderChild(parent, node, args.index);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            DestroyNodeCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const node = getNodeById(room.scene, args.id);
-                if (!node) return;
-                if (node === room.scene.root) return;
-                _Discovery!.forgetNode(state.discovery, state.rooms, client, room.id, args.id);
-                destroyNode(room.scene, node);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            SetNameCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const node = getNodeById(room.scene, args.id);
-                if (!node) return;
-                node.name = args.name ?? undefined;
-                bumpNodeVersion(room.scene, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            SetRealmCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const node = getNodeById(room.scene, args.id);
-                if (!node) return;
-                if (node === room.scene.root) return;
-                // setRealm marks the affected subtree dirty so discovery re-evaluates
-                // descendants' visibility (matters for play viewers in mixed rooms).
-                setRealm(node, args.realm as Realm);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            ReparentCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node) return;
-                if (node === sceneTree.root) return;
-                const newParent = getNodeById(sceneTree, args.parentId);
-                if (!newParent) return;
-                if (node === newParent || isAncestorOf(node, newParent)) return;
-                reparent(node, newParent);
-                reorderChild(newParent, node, args.index);
-                bumpNodeVersion(sceneTree, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            ReorderCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node?.parent) return;
-                reorderChild(node.parent, node, args.index);
-                bumpNodeVersion(sceneTree, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            SetTraitCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const node = getNodeById(room.scene, args.id);
-                if (!node) return;
-                setTraitProps(room.scene, node, args.traitId, JSON.parse(args.props));
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            AddTraitCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node) return;
-                const handle = registry.traits.handles.get(args.traitId);
-                if (!handle) {
-                    if (node.unresolved === null) node.unresolved = new Map();
-                    node.unresolved.set(args.traitId, args.props ? JSON.parse(args.props) : undefined);
-                    bumpNodeVersion(sceneTree, node);
-                } else {
-                    addTraitBySlot(node, handle.slot, args.props ? JSON.parse(args.props) : undefined);
-                }
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            RemoveTraitCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node) return;
-                const handle = registry.traits.handles.get(args.traitId);
-                if (!handle) {
-                    node.unresolved?.delete(args.traitId);
-                    bumpNodeVersion(sceneTree, node);
-                } else {
-                    removeTraitBySlot(node, handle.slot);
-                }
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            SetPrefabCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node) return;
-                if (args.prefab) {
-                    try {
-                        setPrefab(node, JSON.parse(args.prefab));
-                    } catch {
-                        return;
-                    }
-                } else {
-                    setPrefab(node, null);
-                }
-                bumpNodeVersion(sceneTree, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-        listen(
-            ctx,
-            SetNodePersistCommand,
-            editMutate((args, client) => {
-                const { state, room } = ctx.server!;
-                const sceneTree = room.scene;
-                const node = getNodeById(sceneTree, args.id);
-                if (!node) return;
-                setNodePersist(node, args.persist);
-                bumpNodeVersion(sceneTree, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
-                return true;
-            }),
-        );
-    },
-    { editor: true },
-);
 
 // per-player editor activation. EditorTrait attaches to:
 //   - a player's server-owned `room.playerNode` in an edit room (server-
@@ -691,6 +326,11 @@ script(
 
         // ── per-frame voxel tool update ──
         onFrame(ctx, () => {
+            // mirror the runtime's scene revision into the store. the hierarchy and
+            // inspector re-derive off it; nothing announces a mutation by hand.
+            const sceneRevision = room.scene.replication.versionCounter;
+            if (sceneRevision !== store.getState().sceneRevision) store.setState({ sceneRevision });
+
             // editor visuals + tool dispatch only run when POV is the
             // editor's camera. for play rooms, that means the lens is up
             // AND the user is on the inspect-client sub-tab (client.subject
@@ -1263,10 +903,6 @@ script(
 
 /* ── registration ── */
 
-export async function registerServer(_state: EngineServer): Promise<void> {
-    [_Rooms, _Discovery] = await Promise.all([import('../server/rooms'), import('../server/discovery')]);
-}
-
 /**
  * fetch the pre-built block icon atlas (written by the offline renderer
  * during dev) into the global editor store. project-wide asset; loaded once
@@ -1458,6 +1094,7 @@ export function registerClient(state: EngineClient): void {
     editorClient = state;
     loadEditorAssets();
     installEditorClientListeners();
+    extendDebugDashboard(addEditorDebugOptions);
 
     useEditor.setState({
         resources: state.resources,

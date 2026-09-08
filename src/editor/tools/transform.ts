@@ -509,7 +509,6 @@ export function createTransformTool(
                         props: JSON.stringify(props),
                     });
                 }
-                state.store.getState().markDirty();
             },
             undo() {
                 for (const s of prevSnapshots) {
@@ -527,7 +526,6 @@ export function createTransformTool(
                         props: JSON.stringify(props),
                     });
                 }
-                state.store.getState().markDirty();
             },
         });
 
@@ -1196,7 +1194,6 @@ export function nudgeNodes(
                 props: JSON.stringify({ position: vec3.clone(e.position) }),
             });
         }
-        state.store.getState().markDirty();
     };
 
     state.store.getState().action({
@@ -1262,7 +1259,6 @@ export function rotateNodes(
                 props: JSON.stringify({ quaternion: quat.clone(e.quaternion) }),
             });
         }
-        state.store.getState().markDirty();
     };
 
     state.store.getState().action({
@@ -1309,7 +1305,6 @@ export function scaleNodes(state: TransformToolState, sceneTree: SceneTree, ctx:
                 props: JSON.stringify({ scale: vec3.clone(e.scale) }),
             });
         }
-        state.store.getState().markDirty();
     };
 
     state.store.getState().action({
@@ -1528,7 +1523,6 @@ export function commitPlacement(state: TransformToolState, sceneTree: SceneTree,
                     children: JSON.stringify([]),
                     prefab: JSON.stringify(sourcePrefab),
                 });
-                state.store.getState().markDirty();
                 return;
             }
             // apply voxels
@@ -1551,7 +1545,6 @@ export function commitPlacement(state: TransformToolState, sceneTree: SceneTree,
                     prefab: entry.prefab ? JSON.stringify(entry.prefab) : undefined,
                 });
             }
-            state.store.getState().markDirty();
         },
         undo() {
             // reverse voxels back
@@ -1568,7 +1561,6 @@ export function commitPlacement(state: TransformToolState, sceneTree: SceneTree,
                 if (n) destroyNode(sceneTree, n);
                 send(ctx, DestroyNodeCommand, { id });
             }
-            state.store.getState().markDirty();
         },
     });
 
@@ -1675,7 +1667,6 @@ export function commitPlaceSelection(state: TransformToolState, sceneTree: Scene
                 setTraitProps(sceneTree, n, 'transform', props);
                 send(ctx, SetTraitCommand, { id: f.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             }
-            state.store.getState().markDirty();
         },
         undo() {
             for (const s of prevSnapshots) {
@@ -1689,7 +1680,6 @@ export function commitPlaceSelection(state: TransformToolState, sceneTree: Scene
                 setTraitProps(sceneTree, n, 'transform', props);
                 send(ctx, SetTraitCommand, { id: s.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             }
-            state.store.getState().markDirty();
         },
     });
 }
@@ -2264,7 +2254,6 @@ export function exitGrab(state: TransformToolState, sceneTree: SceneTree, physic
             };
             setTraitProps(sceneTree, n, 'transform', props);
             send(ctx, SetTraitCommand, { id: grab.nodeId, traitId: 'transform', props: JSON.stringify(props) });
-            state.store.getState().markDirty();
         },
         undo() {
             const n = getNodeById(sceneTree, grab.nodeId);
@@ -2276,7 +2265,6 @@ export function exitGrab(state: TransformToolState, sceneTree: SceneTree, physic
             };
             setTraitProps(sceneTree, n, 'transform', props);
             send(ctx, SetTraitCommand, { id: grab.nodeId, traitId: 'transform', props: JSON.stringify(props) });
-            state.store.getState().markDirty();
         },
     });
 }
