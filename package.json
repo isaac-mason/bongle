@@ -12,6 +12,8 @@
         "src/engine-server.ts",
         "src/engine-client-editor.ts",
         "src/engine-server-editor.ts",
+        "src/editor/client.ts",
+        "src/editor/server.ts",
         "src/internal.ts",
         "src/builtins/**",
         "src/core/physics/crashcat.ts"
