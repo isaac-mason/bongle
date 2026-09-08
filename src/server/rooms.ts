@@ -676,14 +676,11 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     let snapshotMs = 0;
     if (env.editor && room.mode === 'play' && room.sourceRoomId) {
         const sourceRoom = getRoom(state.rooms, room.sourceRoomId);
-        // flush the source edit room so the play room boots from its live state,
-        // but only if it's actually dirty (clean editor → no disk write), and
-        // clear dirty after since this IS a save (no lingering false-dirty).
-        if (sourceRoom?.edit?.dirty) {
+        // flush the source edit room so the play room boots from its live state
+        // (dirty-gated: a clean editor costs no disk write).
+        if (sourceRoom) {
             const snapT0 = performance.now();
-            Save.saveRoom(state, sourceRoom);
-            setRoomDirty(sourceRoom, false);
-            snapshotMs = performance.now() - snapT0;
+            if (Save.flushRoom(state, sourceRoom)) snapshotMs = performance.now() - snapT0;
         }
     }
 
@@ -896,6 +893,8 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
         if (player) Discovery.notifyPlayerLeft(state.discovery, state.net, player);
     }
 
+    // an edit room dies with its unsaved edits on disk, not in the 3s autosave window.
+    Save.flushRoom(state, room);
     destroyRoom(state.rooms, roomId);
 
     // route any client whose active Player was here to a fallback Player
@@ -990,6 +989,8 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
     }
 
     if (room.mode === 'edit' && room.players.size === 0) {
+        // the last editor left: persist what they did before the room goes.
+        Save.flushRoom(state, room);
         destroyRoom(state.rooms, roomId);
     }
 

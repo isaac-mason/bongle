@@ -59,13 +59,20 @@ export function seedRoom(room: Rooms.Room, saved: SavedVoxels): void {
     if (room.edit) room.edit.voxelSaveCache = seedVoxelSaveCache(room.voxels, saved);
 }
 
+/** flush one edit room if it has unsaved edits + clear its flag. no-op on clean
+ *  and play rooms. the before-destroy path (stop_room, the last editor leaving)
+ *  and the play-fork snapshot, so a room never dies holding edits the interval
+ *  flush had not reached yet. */
+export function flushRoom(state: EngineServer, room: Rooms.Room): boolean {
+    if (!room.edit?.dirty) return false;
+    saveRoom(state, room);
+    Rooms.setRoomDirty(room, false);
+    return true;
+}
+
 /** flush every dirty edit room now + clear its flag. the before-exit path. */
 export function flushDirty(state: EngineServer): void {
-    for (const room of state.rooms.rooms.values()) {
-        if (!room.edit?.dirty) continue;
-        saveRoom(state, room);
-        Rooms.setRoomDirty(room, false);
-    }
+    for (const room of state.rooms.rooms.values()) flushRoom(state, room);
 }
 
 /** interval auto-flush, driven from the server tick. accumulates `delta` and
