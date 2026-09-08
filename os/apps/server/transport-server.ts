@@ -1,103 +1,83 @@
-// os/apps/server/transport-server.ts — the in-tab game transport, server side.
+// os/apps/server/transport-server.ts, the in-tab game transport, server side.
 //
 // Runs in the server app's realm. Where the deployed server accepts WS upgrades
 // (game-room) and the cli dev server accepts WS upgrades
-// (cli/realms/server/transport.ts), this accepts a MessagePort per connected
-// client. Each port is one client's bidirectional frame pipe:
-//   - inbound  : port.onmessage -> app.receive(state, clientId, channel, frame)
-//   - outbound : the engine's `send` (handed in at init) posts to the client's port
+// (cli/realms/server/transport.ts), this accepts an OS Channel per connected
+// client. Each channel is one client's bidirectional frame pipe:
+//   - inbound  : the receive fn acceptClient returns -> app.receive(state, clientId, channel, frame)
+//   - outbound : the engine's `send` (handed in at init) posts to the client's channel
 //
-// Multiple clients => multiple ports => multiple `Client`s on the one server —
-// that's multiplayer-in-a-tab (each window is another player). The caller
-// brokers the ports and tags each with a `connectionId` so leave can be
-// signalled without a referenceable port. The port map is created by the caller
-// (createPortMap) BEFORE the engine, because the engine's `send` closes over it.
+// Multiple clients => multiple channels => multiple `Client`s on the one server:
+// multiplayer-in-a-tab (each window is another player). The channel map is
+// created by the caller (createClientChannels) BEFORE the engine, because the
+// engine's `send` closes over it.
 
 import { Channel, type Client, type JsonValue, type ServerApp, type ServerInitOptions, type User } from 'bongle/interface';
+import type { Channel as OsChannel } from '../../interface';
 
 export type ClientMeta = { user: User; joinData: Record<string, JsonValue> };
 
-export type PortMap = {
-    ports: Map<Client, MessagePort>;
-    /** the engine's outbound sink: a client with no port (left, or never joined)
-     *  is a silent drop. structured clone copies the bytes — no transfer, because
-     *  a frame may be a view into a pooled buffer the engine reuses. */
+export type ClientChannels = {
+    channels: Map<Client, OsChannel>;
+    /** the engine's outbound sink: a client with no channel (left, or never joined)
+     *  is a silent drop. structured clone copies the bytes; no transfer, because a
+     *  frame may be a view into a pooled buffer the engine reuses. */
     send: ServerInitOptions['send'];
 };
 
-export function createPortMap(): PortMap {
-    const ports = new Map<Client, MessagePort>();
-    return { ports, send: (client, _channel, bytes) => ports.get(client)?.postMessage(bytes) };
+export function createClientChannels(): ClientChannels {
+    const channels = new Map<Client, OsChannel>();
+    return { channels, send: (client, _channel, bytes) => channels.get(client)?.send(bytes) };
 }
 
-export type PortTransport = {
-    /** A client connected: allocate a `Client`, fire onClientJoin, and start
-     *  delivering its frames to the engine. `connectionId` is the caller's handle
-     *  for this connection (for leaveClient). */
-    acceptClient(connectionId: number, port: MessagePort, meta: ClientMeta): void;
-    /** The caller dropped this connection (window closed / channel gone). */
-    leaveClient(connectionId: number): void;
-    /** Detach every client. Idempotent. */
+export type ChannelTransport = {
+    /** A client connected: allocate a `Client`, fire onClientJoin, and return the
+     *  inbound frame handler (what the OS listener hands back). The channel's
+     *  `closed` is the leave signal. */
+    acceptClient(conn: OsChannel, meta: ClientMeta): (frame: unknown) => void;
+    /** Detach every client without firing leave. Idempotent. */
     close(): void;
 };
 
-export function createPortTransport<S>(
+const toU8 = (frame: unknown): Uint8Array => (frame instanceof ArrayBuffer ? new Uint8Array(frame) : (frame as Uint8Array));
+
+export function createChannelTransport<S>(
     app: ServerApp<S>,
     state: S,
     resolveAvatar: () => Parameters<ServerApp<S>['onClientJoin']>[4],
-    { ports }: PortMap,
-): PortTransport {
-    const clientByConnection = new Map<number, Client>();
+    { channels }: ClientChannels,
+): ChannelTransport {
     let nextClientId: Client = 1;
 
-    function detach(clientId: Client) {
-        const port = ports.get(clientId);
-        if (port) {
-            port.onmessage = null;
-            port.close();
-        }
-        ports.delete(clientId);
-    }
-
     return {
-        acceptClient(connectionId, port, meta) {
+        acceptClient(conn, meta) {
             const clientId: Client = nextClientId++;
-            clientByConnection.set(connectionId, clientId);
-            ports.set(clientId, port);
-
+            channels.set(clientId, conn);
             try {
                 app.onClientJoin(state, clientId, meta.user, meta.joinData, resolveAvatar());
             } catch (err) {
                 console.error(`[editor-transport] onClientJoin threw for ${clientId}:`, err);
-                clientByConnection.delete(connectionId);
-                detach(clientId);
-                return;
+                channels.delete(clientId);
+                conn.close();
+                return () => {};
             }
-
-            // assigning onmessage implicitly starts the port; frames the client
-            // posted before now were queued and arrive in order here.
-            port.onmessage = (e: MessageEvent) => {
-                const data = e.data;
-                const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : (data as Uint8Array);
-                app.receive(state, clientId, Channel.RELIABLE, bytes);
-            };
-        },
-
-        leaveClient(connectionId) {
-            const clientId = clientByConnection.get(connectionId);
-            if (clientId === undefined) return;
-            clientByConnection.delete(connectionId);
-            detach(clientId);
-            try {
-                app.onClientLeave(state, clientId);
-            } catch (err) {
-                console.error(`[editor-transport] onClientLeave threw for ${clientId}:`, err);
-            }
+            // a channel closed by the transport's own close() is already out of the
+            // map: no leave for a shutdown, only for a client that went away.
+            void conn.closed.then(() => {
+                if (!channels.delete(clientId)) return;
+                try {
+                    app.onClientLeave(state, clientId);
+                } catch (err) {
+                    console.error(`[editor-transport] onClientLeave threw for ${clientId}:`, err);
+                }
+            });
+            return (frame) => app.receive(state, clientId, Channel.RELIABLE, toU8(frame));
         },
 
         close() {
-            for (const clientId of ports.keys()) detach(clientId);
-            clientByConnection.clear();
+            const open = [...channels.values()];
+            channels.clear();
+            for (const conn of open) conn.close();
         },
     };
 }

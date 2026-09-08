@@ -7,7 +7,7 @@ import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, AppInit } from '../interface';
 import { importEngine } from './engine';
-import { type ClientMeta, createPortMap, createPortTransport } from './server/transport-server';
+import { type ClientMeta, createChannelTransport, createClientChannels } from './server/transport-server';
 
 // The server app: the edit server inside its realm. Waits for the bake, boots
 // EngineServer through the runner, runs the 60Hz sim, and serves "game": each
@@ -76,17 +76,17 @@ const server: App<AppInit> = async (env) => {
     // file:// edited glb in OPFS or an http account avatar) via fs.read; the editor
     // writes scene files through the same handle. `fs` passes straight through.
     // (Cross-origin http avatar fetches need CORS on the avatar CDN under the
-    // realm's COEP.) The client port map exists before the engine: the engine's
-    // `send` closes over it.
+    // realm's COEP.) The client channel map exists before the engine: the
+    // engine's `send` closes over it.
     const avatars = createEditorAvatarsDriver();
-    const ports = createPortMap();
+    const clients = createClientChannels();
     const state = EngineServer.init({
         mode: 'edit',
         fs,
         zstd: { compress: zstdCompress },
         options: {},
         driver: { storage: createInMemoryStorageDriver(), avatars },
-        send: ports.send,
+        send: clients.send,
     });
     await EngineServer.load(state);
     env.log('server loaded');
@@ -101,7 +101,7 @@ const server: App<AppInit> = async (env) => {
     const app = EngineServer.app('edit');
     exposeDevtools('server', { fs, server: EngineServer, state, app, editor: EngineServerEditor });
 
-    const transport = createPortTransport(app, state, picker.resolve, ports);
+    const transport = createChannelTransport(app, state, picker.resolve, clients);
     const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ, { onError: (message) => env.err(message) });
 
     // graceful shutdown: stop the loop, drain the transport, dispose (the rooms'
@@ -131,25 +131,14 @@ const server: App<AppInit> = async (env) => {
     // clients join over "game". The account identity lives on the CLIENT (its
     // driver); the server sees the meta's user when the dialer carries one (a
     // relay guest) and a synthesized dev meta otherwise.
-    let nextConn = 1;
     mark('game served');
     env.listen('game', (conn, meta) => {
-        const connectionId = nextConn++;
         const clientMeta: ClientMeta = {
             user: meta.user ?? { id: `dev-${meta.pid}`, username: `guest-${meta.pid}` },
             joinData: {},
         };
-        // adapt the OS Channel to the MessagePort shape the transport drives; it
-        // uses postMessage + onmessage + close (the transport's detach closes it).
-        const port = {
-            postMessage: (data: unknown) => conn.send(data),
-            onmessage: null as ((e: { data: unknown }) => void) | null,
-            close: () => conn.close(),
-        };
-        transport.acceptClient(connectionId, port as unknown as MessagePort, clientMeta);
-        void conn.closed.then(() => transport.leaveClient(connectionId));
-        env.log(`client ${connectionId} joined`);
-        return (m) => port.onmessage?.({ data: m });
+        env.log(`client ${clientMeta.user.username} joined`);
+        return transport.acceptClient(conn, clientMeta);
     });
 
     env.log('game server up; listening on "game"');
