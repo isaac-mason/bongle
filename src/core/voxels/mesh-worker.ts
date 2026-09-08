@@ -22,13 +22,15 @@
 //   main -> worker
 //     { cmd: 'initRegistry', version: number, buf: ArrayBuffer }
 //         [transfer: buf]
-//     { cmd: 'meshTasks', packetBuf: ArrayBuffer, outBufs: ArrayBuffer[] }
+//     { cmd: 'meshTasks', epoch: number, packetBuf: ArrayBuffer, outBufs: ArrayBuffer[] }
 //         [transfer: packetBuf + every outBufs entry]
 //         (outBufs[i*3 + {0,1,2}] = opaque/transparent/translucent for task i)
+//         (epoch = main's world epoch at post time, echoed on the result so a
+//          batch that outlives an active-room swap is dropped on arrival)
 //     { cmd: 'clearCache' }   // active-room swap: drop the chunk cache
 //   worker -> main
 //     { cmd: 'initRegistryAck', version: number }
-//     { cmd: 'result', results: MeshWorkerResult[], workUs,
+//     { cmd: 'result', epoch: number, results: MeshWorkerResult[], workUs,
 //       recycle: { packetBuf, outBufs } }
 //         [transfer: packetBuf + every outBufs entry; each result's PassMesh.quads
 //          views point into its outBufs triple, so transferring the underlying
@@ -48,6 +50,8 @@ export type MeshWorkerInMsg =
     | { cmd: 'initRegistry'; version: number; buf: ArrayBuffer }
     | {
           cmd: 'meshTasks';
+          /** main's world epoch when the batch was posted; echoed on the result. */
+          epoch: number;
           // packcat MeshTasks: the batch's set/delete + K tasks, one buffer
           packetBuf: ArrayBuffer;
           // output quad buffers, flat: outBufs[i*3 + {0:opaque,1:transparent,2:translucent}]
@@ -65,6 +69,8 @@ export type MeshWorkerOutMsg =
     | { cmd: 'initRegistryAck'; version: number }
     | {
           cmd: 'result';
+          /** the `meshTasks` epoch this batch was posted under. */
+          epoch: number;
           /** one entry per task in the batch, in the same order. */
           results: MeshWorkerResult[];
           /** worker-side wall time for the whole batch (slab build + mesh), µs. */
@@ -154,7 +160,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
                 aabb: result ? result.aabb : null,
             });
         }
-        return { cmd: 'result', results, workUs: (performance.now() - t0) * 1000, recycle };
+        return { cmd: 'result', epoch: msg.epoch, results, workUs: (performance.now() - t0) * 1000, recycle };
     }
     return null;
 }

@@ -28,6 +28,7 @@ import {
     isInFlight,
     meshQueueStats,
     queueMesh,
+    resetMeshCaches,
     setMeshRegistry,
     type WorkerLike,
 } from '../../../../src/render/voxels/mesher';
@@ -598,6 +599,48 @@ describe('mesher', () => {
             expect(queueMesh(d, c0, 1)).toBe(true);
             // queue full (1 pending of depth 1) -> false
             expect(queueMesh(d, c1, 1)).toBe(false);
+            disposeMesher(d);
+        });
+    });
+
+    describe('active-room swap', () => {
+        it('drops a batch posted before resetMeshCaches when it lands after the swap', () => {
+            // room A and room B both hold a chunk at 0,0,0 at meshGen 1. A batch for
+            // room A is in flight when the active room swaps; its result must not be
+            // taken for room B's chunk (same key + gen), and must not clear room B's
+            // in-flight tracking for that chunk.
+            const reg = buildSmallRegistry();
+            const tw = createTestWorker();
+            const d = createMesher({ workerFactory: () => tw.worker, workerCount: 1, queueDepth: 3 });
+            setMeshRegistry(d, reg);
+            step([tw]); // ack
+
+            const roomA = makeChunkWithOneBlock(reg);
+            expect(queueMesh(d, roomA.chunk, 1)).toBe(true);
+            flushMeshQueue(d, roomA.voxels);
+            processWorker(tw); // room A's result is in the worker's outbox, not yet on main
+
+            resetMeshCaches(d); // active-room swap
+
+            const roomB = createVoxels(reg);
+            const chunkB = createChunk(0, 0, 0);
+            roomB.chunks.set('0,0,0', chunkB);
+            setChunkBlock(roomB, chunkB, 5, 5, 5, 'stone');
+            setChunkBlock(roomB, chunkB, 8, 8, 8, 'stone');
+            expect(queueMesh(d, chunkB, 1)).toBe(true);
+            flushMeshQueue(d, roomB);
+
+            deliverToMain(tw); // room A's late result lands
+            expect(d.results.length).toBe(0);
+            expect(isInFlight(d, '0,0,0')).toBe(true);
+
+            step([tw]); // room B's own result lands
+            expect(d.results.length).toBe(1);
+            expect(d.results[0]!.opaque!.quadCount).toBe(12);
+            expect(isInFlight(d, '0,0,0')).toBe(false);
+            // the swapped-out batch still returned its buffers to the pools.
+            expect(meshQueueStats(d).poolSize).toBe(1 * (3 + 2));
+            expect(d.packetPool.length).toBe(2);
             disposeMesher(d);
         });
     });

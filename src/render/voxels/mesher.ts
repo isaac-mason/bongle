@@ -8,6 +8,10 @@
 //
 // One world at a time. Caches key on bare chunk coordinate, so a room swap must
 // `resetMeshCaches` before the next world reuses the old world's coordinates.
+// Each reset bumps `epoch`; a posted batch carries it and the worker echoes it,
+// so a batch that outlives the swap is recycled but never surfaced (its results
+// share chunk keys + meshGens with the new world's chunks, and the caller's gen
+// guard cannot tell the two apart).
 //
 // How work flows:
 //   - Affinity: a chunk always routes to `hash(region) % N`, so its
@@ -123,6 +127,9 @@ export type Mesher = {
     queueDepth: number;
     /** chunk key -> owning slot, from enqueue through in-flight; for dedup and result lookup. */
     inFlightByChunk: Map<string, { slot: number; gen: number }>;
+    /** world epoch, bumped by `resetMeshCaches`. Rides each posted batch; a result
+     *  echoing an older epoch belongs to a swapped-out world and is dropped. */
+    epoch: number;
     /** finished meshes awaiting the caller. The caller drains this each frame and clears it. */
     results: MesherResult[];
     /** chunk keys lost to a worker crash, awaiting the caller. Drain each frame to re-dirty them,
@@ -173,6 +180,7 @@ export function createMesher(opts: MesherOpts): Mesher {
         slots,
         queueDepth: opts.queueDepth,
         inFlightByChunk: new Map(),
+        epoch: 0,
         results: [],
         lost: [],
         packetPool: [],
@@ -310,9 +318,12 @@ export function isInFlight(d: Mesher, key: string): boolean {
  *  worker — ordered after any in-flight `meshTasks` and before subsequent ones —
  *  and clears the main-side model + pending queues so the next flush re-sends the
  *  new world's neighbourhoods from scratch. Batches already in flight still land
- *  and recycle their buffers (`inFlightBatches` left intact); the cleared
- *  `inFlightByChunk` + the caller's gen guard drop their now-stale results. */
+ *  and recycle their buffers (`inFlightBatches` left intact), but they echo the
+ *  old `epoch`, so `handleWorkerMessage` drops their results outright: the new
+ *  world's chunks reuse the same keys and meshGens, so neither the cleared
+ *  `inFlightByChunk` nor the caller's gen guard could tell them apart. */
 export function resetMeshCaches(d: Mesher): void {
+    d.epoch++;
     for (const slot of d.slots) {
         slot.pendingUrgent.length = 0;
         slot.pending.length = 0;
@@ -542,7 +553,7 @@ function flushSlot(d: Mesher, slotIndex: number, voxels: Voxels): void {
     slot.inFlightBatches++;
 
     const tPost = performance.now();
-    slot.worker.postMessage({ cmd: 'meshTasks', packetBuf, outBufs }, [packetBuf, ...outBufs]);
+    slot.worker.postMessage({ cmd: 'meshTasks', epoch: d.epoch, packetBuf, outBufs }, [packetBuf, ...outBufs]);
     const tEnd = performance.now();
     d.perf.buildMs += tPost - tBuild;
     d.perf.postMs += tEnd - tPost;
@@ -574,6 +585,10 @@ function handleWorkerMessage(d: Mesher, slotIndex: number, msg: MeshWorkerOutMsg
         for (let i = 0; i < outBufs.length; i += 3) {
             d.outputPool.push({ opaqueBuf: outBufs[i]!, transparentBuf: outBufs[i + 1]!, translucentBuf: outBufs[i + 2]! });
         }
+
+        // a batch posted before the last `resetMeshCaches` meshed a world that is no
+        // longer active. Its buffers are recycled above; its results are not ours.
+        if (msg.epoch !== d.epoch) return;
 
         for (const result of msg.results) {
             // remove the matching in-flight entry + dedup record (splice by key,
