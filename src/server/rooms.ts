@@ -3,7 +3,6 @@ import { addPlayerTraits } from '../builtins/player-node';
 import { attachWorldTrait } from '../builtins/world';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
-import * as Content from '../core/content';
 import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type * as Protocol from '../core/protocol';
@@ -631,7 +630,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         sceneParseMs = performance.now() - parseT0;
         // seed dedupe cache so the first flush compares against real disk
         // bytes, see saveScene / engine-server boot loop for context.
-        ContentManager.seedLastWrittenRaw(state.contentManager, room.sceneId, sceneFile.raw);
+        ContentManager.putScene(state.contentManager, room.sceneId, sceneFile.raw);
     }
 
     const physT0 = performance.now();
@@ -916,33 +915,19 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
     Discovery.invalidateRoomList(state.discovery);
 }
 
-export function renameScene(state: EngineServer, oldSceneId: string, newSceneId: string): void {
-    if (!newSceneId.trim() || oldSceneId === newSceneId) return;
-
-    const ok = ContentManager.renameScene(state.contentManager, oldSceneId, newSceneId);
-    if (!ok) return;
-
+/** point every room on `oldSceneId` at `newSceneId`: the scene was renamed. */
+export function retargetScene(state: EngineServer, oldSceneId: string, newSceneId: string): void {
     for (const room of state.rooms.rooms.values()) {
         if (room.sceneId === oldSceneId) room.sceneId = newSceneId;
     }
-
     Discovery.invalidateRoomList(state.discovery);
 }
 
-export function deleteScene(state: EngineServer, sceneId: string): void {
-    if (!sceneId.trim()) return;
-
-    // stop all rooms that use this scene
+/** stop every room on `sceneId`: the scene is being deleted. */
+export function stopScene(state: EngineServer, sceneId: string): void {
     for (const room of [...state.rooms.rooms.values()]) {
-        if (room.sceneId === sceneId) {
-            stopRoom(state, room.id);
-        }
+        if (room.sceneId === sceneId) stopRoom(state, room.id);
     }
-
-    // clear the declared scene handle (no-op if not declared) + disk file
-    Content.clearScene(state.content, sceneId, 'server');
-    ContentManager.deleteScene(state.contentManager, sceneId);
-
     Discovery.invalidateRoomList(state.discovery);
 }
 

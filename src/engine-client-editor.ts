@@ -33,12 +33,26 @@ export { useEditor } from './editor/editor-store';
 // separate artifacts with separate bakes, so they invalidate separately.
 export { invalidatePrefabIcons, reloadBlockIconAtlas } from './editor/icons';
 
-export async function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): Promise<void> {
+/** the mounted editor: what `setup` hands back and the host disposes with the realm. */
+export type EditorClient = {
+    dispose(): void;
+};
+
+/** Mount the editor on an initialized (not yet loaded) engine client with the host's
+ *  caps: `sceneSource` lists and reads the project's scene files for the library.
+ *  Returns the mounted editor; dispose it before the engine. */
+export function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): EditorClient {
     setSceneSource(opts?.sceneSource ?? null);
-    mountEditUI(state);
+    const root = mountEditUI(state);
     const g = window as unknown as { _state: EngineClient; _api: typeof api };
     g._state = state;
     g._api = api;
+    return {
+        dispose: () => {
+            root.unmount();
+            setSceneSource(null);
+        },
+    };
 }
 
 /** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),

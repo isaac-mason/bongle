@@ -98,8 +98,9 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                     label="Save"
                     onClose={onClose}
                     onClick={() => {
-                        const { room, playerEditStores } = useEditor.getState();
-                        if (room) playerEditStores[room.playerId]?.getState().save(info.sceneId);
+                        // the room's own editor saves it; this tab may not be the active room.
+                        const editor = joinedPlayers.find((p) => p.roomId === info.id && p.mode === 'edit');
+                        if (editor) useEditor.getState().playerEditStores[editor.playerId]?.getState().save();
                     }}
                 />
             )}

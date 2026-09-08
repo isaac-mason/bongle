@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { system } from '../../../src/api/scripts';
 import { onDispose, onLeave } from '../../../src/core/scene/scripts';
 import { CreateNodeCommand } from '../../../src/editor/commands';
+import { drainWrites } from '../../../src/editor/persist/scenes';
 import { env } from '../../../src/env';
 import * as ContentManager from '../../../src/server/content-manager';
 import * as Rooms from '../../../src/server/rooms';
@@ -70,7 +71,7 @@ describe('edit room teardown', () => {
 
         expect(h.server.rooms.rooms.has(room.id)).toBe(false);
         expect(JSON.stringify(ContentManager.loadScene(h.server.contentManager, 'side'))).toContain('unsaved-in-side');
-        await EngineServer.drainPersist(h.server);
+        await drainWrites();
         expect(h.sceneOnDisk('side')).toContain('unsaved-in-side');
     });
 
@@ -82,7 +83,18 @@ describe('edit room teardown', () => {
         Rooms.leaveClientFromRoom(h.server, player.id);
 
         expect(h.server.rooms.rooms.has(room.id)).toBe(false);
-        await EngineServer.drainPersist(h.server);
+        await drainWrites();
+        expect(h.sceneOnDisk('side')).toContain('unsaved-in-side');
+    });
+
+    it('an editor still present at dispose lands its edits: the leave hook is the shutdown flush', async () => {
+        const room = Rooms.createRoomInNamespace(h.server, 'side', 'edit', 'editor');
+        Rooms.addClientToRoom(h.server, CLIENT, room, 'edit');
+        createNodeViaEditor(room, 'unsaved-in-side');
+
+        EngineServer.dispose(h.server);
+        await drainWrites();
+
         expect(h.sceneOnDisk('side')).toContain('unsaved-in-side');
     });
 
@@ -92,7 +104,7 @@ describe('edit room teardown', () => {
         const mtimeBefore = sideMtime();
 
         Rooms.stopRoom(h.server, room.id);
-        await EngineServer.drainPersist(h.server);
+        await drainWrites();
 
         expect(h.sceneOnDisk('side')).toBe(before);
         expect(sideMtime()).toBe(mtimeBefore);

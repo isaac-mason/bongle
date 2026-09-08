@@ -184,7 +184,7 @@ export function applyRegistryChanges(state: EngineServer): void {
                 );
                 continue;
             }
-            ContentManager.seedLastWrittenRaw(state.contentManager, sceneId, ContentManager.serializeScenePayload(payload));
+            ContentManager.putScene(state.contentManager, sceneId, ContentManager.serializeScenePayload(payload));
             Content.populateScene(state.content, registry.blockRegistry, sceneId, payload, 'server');
         }
         registry.scenes.pendingChanges.length = 0;

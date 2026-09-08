@@ -92,13 +92,12 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // Held so the avatar picker below can pre-fetch its sample pool.
     const avatars = createEditorAvatarsDriver();
 
-    // the engine issues scene persists (edit mode) via fs.write/remove and reads
-    // scenes + baked resources + the local player's avatar (a file:// edited glb in
-    // OPFS or an http account avatar) via fs.read. Persist completion, ordering, and
-    // errors are owned by content-manager's async queue now — stop() drains it, and
-    // onPersistError surfaces a failed save to the user — so `fs` passes straight
-    // through with no write tracking here. (Cross-origin http avatar fetches need CORS
-    // on the avatar CDN under the realm's COEP.)
+    // the engine reads scenes + baked resources + the local player's avatar (a
+    // file:// edited glb in OPFS or an http account avatar) via fs.read; the editor
+    // writes scene files through the same handle and owns ordering, errors (reported
+    // in the room's chat) and the drain stop() awaits. `fs` passes straight through.
+    // (Cross-origin http avatar fetches need CORS on the avatar CDN under the realm's
+    // COEP.)
     const state = EngineServer.init({
         mode: 'edit',
         fs,
@@ -108,8 +107,6 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
             storage: opts.storage,
             avatars,
         },
-        onPersistError: (op, sceneId, err) =>
-            log(`persist ${op} "${sceneId}" failed, edit not saved to disk: ${err instanceof Error ? err.message : String(err)}`),
     });
 
     // the editor's server declarations registered when the realm imported
@@ -129,7 +126,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         init: () => state,
         load: async () => {},
         update: (s, dt) => EngineServer.update(s, dt),
-        dispose: (s) => EngineServerEditor.dispose(s),
+        dispose: (s) => EngineServer.dispose(s),
         onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
             EngineServer.onClientJoin(s, client, user, joinData, avatar),
         onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
@@ -186,11 +183,11 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         reloadAvatar,
         stop: async () => {
             unregister();
-            // the editor's dispose lands the last unsaved edits on content-manager's
-            // async persist queue, then disposes the engine; drainPersist waits for
-            // those bytes to reach OPFS before we let the realm die and a fresh one reloads.
-            EngineServerEditor.dispose(state);
-            await EngineServer.drainPersist(state);
+            // disposing the engine destroys the rooms, which fires the leave hooks the
+            // editor flushes on; drainWrites then waits for those bytes to reach OPFS
+            // before we let the realm die and a fresh one reloads.
+            EngineServer.dispose(state);
+            await EngineServerEditor.drainWrites();
         },
     };
 }

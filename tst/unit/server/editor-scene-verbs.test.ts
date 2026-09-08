@@ -5,7 +5,8 @@
 // content change.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DeleteSceneCommand, OpenSceneCommand, RenameSceneCommand } from '../../../src/editor/commands';
+import { CreateNodeCommand, DeleteSceneCommand, OpenSceneCommand, RenameSceneCommand } from '../../../src/editor/commands';
+import { drainWrites } from '../../../src/editor/persist/scenes';
 import * as ContentManager from '../../../src/server/content-manager';
 import * as Rooms from '../../../src/server/rooms';
 import { bootEditServer, type EditServerHarness } from './edit-server-harness';
@@ -49,7 +50,7 @@ describe('editor scene verbs', () => {
         expect(room.sceneId).toBe('renamed');
         expect(ContentManager.loadScene(h.server.contentManager, 'renamed')).not.toBeNull();
         expect(ContentManager.loadScene(h.server.contentManager, 'side')).toBeNull();
-        await h.server.contentManager.persistChain;
+        await drainWrites();
         expect(h.sceneExistsOnDisk('renamed')).toBe(true);
         expect(h.sceneExistsOnDisk('side')).toBe(false);
     });
@@ -62,7 +63,32 @@ describe('editor scene verbs', () => {
 
         expect(h.server.rooms.rooms.has(room.id)).toBe(false);
         expect(ContentManager.loadScene(h.server.contentManager, 'side')).toBeNull();
-        await h.server.contentManager.persistChain;
+        await drainWrites();
+        expect(h.sceneExistsOnDisk('side')).toBe(false);
+    });
+
+    it('delete_scene after an unsaved edit leaves no file: the leave flush lands before the remove', async () => {
+        h.dispatch(homeRoom(), OpenSceneCommand, { sceneId: 'side' }, CLIENT);
+        const room = [...h.server.rooms.rooms.values()].find((r) => r.sceneId === 'side')!;
+        h.dispatch(
+            room,
+            CreateNodeCommand,
+            {
+                id: 424242,
+                parentId: room.scene.root.id,
+                index: 0,
+                name: 'doomed',
+                persist: undefined,
+                traits: '[]',
+                children: undefined,
+                prefab: undefined,
+            },
+            CLIENT,
+        );
+
+        h.dispatch(homeRoom(), DeleteSceneCommand, { sceneId: 'side' }, CLIENT);
+        await drainWrites();
+
         expect(h.sceneExistsOnDisk('side')).toBe(false);
     });
 });

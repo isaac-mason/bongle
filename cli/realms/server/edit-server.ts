@@ -107,7 +107,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         stop: () => {
             clearInterval(timer);
             transport.close();
-            EngineServerEditor.dispose(state);
+            EngineServer.dispose(state);
         },
     };
 }

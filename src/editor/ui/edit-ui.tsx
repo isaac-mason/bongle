@@ -202,10 +202,10 @@ function EditUI() {
                         else store.getState().undo();
                     }
                 } else if (key === 's') {
-                    const { room, roomMode, sceneId, playerEditStores } = useEditor.getState();
-                    if (roomMode === 'edit' && room && sceneId) {
+                    const { room, roomMode, playerEditStores } = useEditor.getState();
+                    if (roomMode === 'edit' && room) {
                         e.preventDefault();
-                        playerEditStores[room.playerId]?.getState().save(sceneId);
+                        playerEditStores[room.playerId]?.getState().save();
                     }
                 }
                 return;

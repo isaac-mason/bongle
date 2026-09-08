@@ -28,7 +28,7 @@ import {
     setPrefab,
     setRealm,
 } from '../core/scene/scene-tree';
-import { listen, onDispose, onJoin, onLeave, onTick, script } from '../core/scene/scripts';
+import { listen, onJoin, onLeave, onTick, script } from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';
@@ -59,6 +59,7 @@ import {
 import { EditorTrait } from './editor-trait';
 import * as Blueprints from './persist/blueprints';
 import * as Persist from './persist/save';
+import * as Scenes from './persist/scenes';
 
 // the room-level editor system. hosted on WorldTrait like any other system, so it
 // runs once per room root on both sides; the client-side instance early-returns.
@@ -76,11 +77,10 @@ script(
         // an editor leaving persists what they did (covers stop_room and the last
         // editor leaving, both of which destroy the room next, and disconnects); the
         // shutdown flush is engine-server-editor's `dispose`.
-        const persist = ctx.mode === 'edit' ? Persist.open(state, room) : null;
+        const persist = ctx.mode === 'edit' ? Persist.open(state, room, (message) => chat.message(ctx, message)) : null;
         if (persist) {
             onTick(ctx, ({ delta }) => Persist.tick(persist, delta));
             onLeave(ctx, () => Persist.flush(persist));
-            onDispose(ctx, () => Persist.close(persist));
         }
 
         // per-player editor activation follows the player's mode, not the room's:
@@ -133,19 +133,22 @@ script(
                 if (persist) Persist.markDirty(persist);
             });
 
-        // explicit save (Ctrl+S, the tab menu). every open edit room on the scene,
-        // dirty or not, so it answers "is it on disk" with a yes.
+        // explicit save (Ctrl+S, the tab menu): this room. the client names the
+        // scene it meant; a mismatch is dropped rather than saving the wrong room.
         listen(
             ctx,
             SaveSceneCommand,
-            editGated(({ sceneId }) => Persist.flushScene(sceneId)),
+            editGated(({ sceneId }) => {
+                if (persist && sceneId === room.sceneId) Persist.flush(persist);
+            }),
         );
 
         // scene verbs. open: the edit room for a scene is found or created (edit
         // rooms share the 'editor' namespace) and the sender joins it as an editor;
         // the runtime's activate_room makes it their focused room. rename/delete
-        // go through the runtime helpers that keep live rooms consistent with the
-        // content change (room.sceneId follows a rename; a delete stops the rooms).
+        // write through persist/scenes, which keeps live rooms consistent via the
+        // runtime's room helpers (room.sceneId follows a rename; a delete stops the
+        // rooms). a failed write is reported here, in the room's chat.
         listen(
             ctx,
             OpenSceneCommand,
@@ -158,12 +161,20 @@ script(
         listen(
             ctx,
             RenameSceneCommand,
-            editGated(({ oldSceneId, newSceneId }) => Rooms.renameScene(state, oldSceneId, newSceneId)),
+            editGated(({ oldSceneId, newSceneId }) => {
+                Scenes.renameScene(state, oldSceneId, newSceneId).catch((err) =>
+                    chat.message(ctx, `[scene] rename ${oldSceneId} did not reach disk: ${Scenes.errorMessage(err)}`),
+                );
+            }),
         );
         listen(
             ctx,
             DeleteSceneCommand,
-            editGated(({ sceneId }) => Rooms.deleteScene(state, sceneId)),
+            editGated(({ sceneId }) => {
+                Scenes.deleteScene(state, sceneId).catch((err) =>
+                    chat.message(ctx, `[scene] delete ${sceneId} did not reach disk: ${Scenes.errorMessage(err)}`),
+                );
+            }),
         );
 
         // voxel edit ops from clients
@@ -196,13 +207,15 @@ script(
                     chat.message(ctx, '[blueprint] invalid payload (json parse failed)');
                     return;
                 }
-                const name =
-                    args.name && args.name.length > 0 ? args.name : Blueprints.allocateBlueprintName(state.contentManager);
-                const result = Blueprints.saveBlueprint(state.contentManager, name, payload);
+                const name = args.name && args.name.length > 0 ? args.name : Blueprints.allocateBlueprintName(state);
+                const result = Blueprints.saveBlueprint(state, name, payload);
                 if (!result.ok) {
                     chat.message(ctx, `[blueprint] ${result.error}`);
                     return;
                 }
+                result.written?.catch((err) =>
+                    chat.message(ctx, `[blueprint] ${result.sceneId} did not reach disk: ${Scenes.errorMessage(err)}`),
+                );
                 // disk write → the `bongle:scenes` file watcher fires →
                 // `bongle:scene-list` emission catches up the editor.
                 chat.message(

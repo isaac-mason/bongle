@@ -1,4 +1,13 @@
-import type { Channel, Client, Filesystem, JsonValue, ResolvedAvatar, ServerDriver, ServerInitOptions, User } from 'bongle/interface';
+import type {
+    Channel,
+    Client,
+    Filesystem,
+    JsonValue,
+    ResolvedAvatar,
+    ServerDriver,
+    ServerInitOptions,
+    User,
+} from 'bongle/interface';
 import * as Clock from '../core/clock';
 import { serverMaxPlayers } from '../core/config';
 import * as Content from '../core/content';
@@ -75,16 +84,8 @@ export type InitOptions = {
      * point so a missing driver would only manifest at first call.
      */
     driver: ServerDriver;
-    /** channels the host pumps; every frame rides `Channel.reliable` today. */
-    channels: Channel[];
     /** the host's outbound sink, called from inside `update` for every framed batch. */
     send: ServerInitOptions['send'];
-    /**
-     * Notified when a queued scene persist (write/delete) rejects, so the host can
-     * surface it to the user — the edit did NOT reach disk. Edit mode only (play is
-     * read-only, no persist).
-     */
-    onPersistError?: (op: 'write' | 'delete', sceneId: string, err: unknown) => void;
 };
 
 // model bins: ModelHandle.bin.server is a path relative to resourcesDir, joined
@@ -114,19 +115,8 @@ export function init(opts: InitOptions) {
         Rooms.setNamespaceOptions(rooms, 'main', opts.options);
     }
 
-    // scene edits persist back through the project fs in edit mode; play/solo are
-    // read-only. the store is seeded async at load().
-    const sceneBytes = new TextEncoder();
-    const contentManager = ContentManager.init({
-        persist:
-            opts.mode === 'edit'
-                ? {
-                      write: (sceneId, content) => opts.fs.write(ContentManager.scenePath(sceneId), sceneBytes.encode(content)),
-                      delete: (sceneId) => opts.fs.remove(ContentManager.scenePath(sceneId)),
-                      onError: opts.onPersistError,
-                  }
-                : undefined,
-    });
+    // the authored-scene store, seeded async at load(). the runtime only reads it.
+    const contentManager = ContentManager.init();
     const resourceManager = ResourceManager.init({ resourcesDir: 'resources/server' });
     const content = Content.init();
     const resources = Resources.init(createResourceLoader(opts.fs, resourceManager), 'server');
@@ -138,7 +128,6 @@ export function init(opts: InitOptions) {
         mode: opts.mode,
         fs: opts.fs,
         driver: opts.driver,
-        channels: opts.channels,
         send: opts.send,
         net,
         clients,
@@ -285,7 +274,7 @@ export async function load(state: EngineServer) {
         if (entry.kind !== 'file') continue;
         const sceneId = ContentManager.sceneIdFromPath(entry.path);
         if (sceneId === null) continue;
-        ContentManager.seedLastWrittenRaw(state.contentManager, sceneId, sceneText.decode(await state.fs.read(entry.path)));
+        ContentManager.putScene(state.contentManager, sceneId, sceneText.decode(await state.fs.read(entry.path)));
     }
 
     // In edit mode the realm calls `engine-server-editor.setup(state)` BEFORE this
@@ -342,8 +331,8 @@ export async function load(state: EngineServer) {
 
 /**
  * apply an authored scene payload: stamp it onto the handle's `_payload`,
- * seed `ContentManager._lastWritten` so an identical flush is skipped (no
- * redundant write or dev-watcher echo), then `populateScene`. invoked by:
+ * store its json in the scene store so an identical editor save is a no-op
+ * (no redundant write or dev-watcher echo), then `populateScene`. invoked by:
  *   - `load()` at boot for every declared handle whose `_payload` was
  *     seeded by the codegen barrel.
  *   - the boot template's `bongle:scene-update` HMR listener for live
@@ -354,7 +343,7 @@ export function applyScenePayload(state: EngineServer, id: string, payload: Cont
     const handle = registry.scenes.byId.get(id);
     if (!handle) return;
     handle._payload = payload;
-    ContentManager.seedLastWrittenRaw(state.contentManager, id, ContentManager.serializeScenePayload(payload));
+    ContentManager.putScene(state.contentManager, id, ContentManager.serializeScenePayload(payload));
     Content.populateScene(state.content, registry.blockRegistry, id, payload, 'server');
     touch(registry.scenes, id);
 }
@@ -384,114 +373,114 @@ export function processInbox(state: EngineServer) {
             state.net.reassemblers.set(client, reassemblers);
         }
         for (let channel = 0; channel < channels.length; channel++) {
-          const frames = channels[channel];
-          for (const frame of frames) {
-            let messages: Uint8Array[] | null;
-            try {
-                messages = acceptFrame(reassemblers[channel], frame);
-            } catch (err) {
-                console.error(`[bongle] inbound framing error from client ${String(client)}:`, err);
-                reassemblers[channel] = createReassembler();
-                continue;
-            }
-            if (!messages) continue;
+            const frames = channels[channel];
+            for (const frame of frames) {
+                let messages: Uint8Array[] | null;
+                try {
+                    messages = acceptFrame(reassemblers[channel], frame);
+                } catch (err) {
+                    console.error(`[bongle] inbound framing error from client ${String(client)}:`, err);
+                    reassemblers[channel] = createReassembler();
+                    continue;
+                }
+                if (!messages) continue;
 
-            for (const messageBytes of messages) {
-                const message = Protocol.unpackClientMessage(messageBytes);
-                if (!message) continue;
-                // bill ingress per message.type using the original bytes
-                // view length, packcat decodes uint8Array as a subarray
-                // view into the source packet, so this is zero-copy.
-                state.net.bytesInByType.set(
-                    message.type,
-                    (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength,
-                );
+                for (const messageBytes of messages) {
+                    const message = Protocol.unpackClientMessage(messageBytes);
+                    if (!message) continue;
+                    // bill ingress per message.type using the original bytes
+                    // view length, packcat decodes uint8Array as a subarray
+                    // view into the source packet, so this is zero-copy.
+                    state.net.bytesInByType.set(
+                        message.type,
+                        (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength,
+                    );
 
-                switch (message.type) {
-                    case 'set_active_room': {
-                        // presence only, update which Player the client is focused on
-                        const player = Rooms.getPlayer(state.rooms, message.playerId);
-                        if (player && player.client === client) {
-                            Rooms.setActivePlayer(state.rooms, client, player.id);
+                    switch (message.type) {
+                        case 'set_active_room': {
+                            // presence only, update which Player the client is focused on
+                            const player = Rooms.getPlayer(state.rooms, message.playerId);
+                            if (player && player.client === client) {
+                                Rooms.setActivePlayer(state.rooms, client, player.id);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    case 'ping':
-                        Net.send(state.net, client, { type: 'pong' });
-                        break;
+                        case 'ping':
+                            Net.send(state.net, client, { type: 'pong' });
+                            break;
 
-                    case 'net_ping_ack': {
-                        // client echoed the latest net_ping.serverStamp — fold the round trip
-                        // into this connection's smoothed ping (server clock, so no offset).
-                        const cs = state.clients.connected.get(client);
-                        if (cs) Clients.recordPingAck(cs, message.serverStampAck, Math.round(state.netTimeMs) >>> 0);
-                        break;
-                    }
+                        case 'net_ping_ack': {
+                            // client echoed the latest net_ping.serverStamp — fold the round trip
+                            // into this connection's smoothed ping (server clock, so no offset).
+                            const cs = state.clients.connected.get(client);
+                            if (cs) Clients.recordPingAck(cs, message.serverStampAck, Math.round(state.netTimeMs) >>> 0);
+                            break;
+                        }
 
-                    case 'voxel_ack':
-                        Discovery.handleVoxelAck(state.discovery, client, message);
-                        break;
+                        case 'voxel_ack':
+                            Discovery.handleVoxelAck(state.discovery, client, message);
+                            break;
 
-                    case 'metrics_subscribe':
-                        Telemetry.subscribeMetrics(state.telemetry, client, message.enabled);
-                        break;
+                        case 'metrics_subscribe':
+                            Telemetry.subscribeMetrics(state.telemetry, client, message.enabled);
+                            break;
 
-                    case 'debug_subscribe':
-                        Telemetry.subscribeDebugLogs(state.telemetry, client, message.enabled);
-                        break;
+                        case 'debug_subscribe':
+                            Telemetry.subscribeDebugLogs(state.telemetry, client, message.enabled);
+                            break;
 
-                    case 'net_message': {
-                        const cs = state.clients.connected.get(client);
-                        if (!cs) break;
-                        Rpc.dispatchNetMessage(state.rpc, cs.inbound.commands, message, client);
-                        break;
-                    }
+                        case 'net_message': {
+                            const cs = state.clients.connected.get(client);
+                            if (!cs) break;
+                            Rpc.dispatchNetMessage(state.rpc, cs.inbound.commands, message, client);
+                            break;
+                        }
 
-                    case 'wire_table': {
-                        const cs = state.clients.connected.get(client);
-                        if (!cs) break;
-                        cs.inbound = buildInboundProtocol(message, registry);
-                        break;
-                    }
+                        case 'wire_table': {
+                            const cs = state.clients.connected.get(client);
+                            if (!cs) break;
+                            cs.inbound = buildInboundProtocol(message, registry);
+                            break;
+                        }
 
-                    case 'sync_update':
-                        Rooms.applyOwnerSync(state, client, message);
-                        break;
+                        case 'sync_update':
+                            Rooms.applyOwnerSync(state, client, message);
+                            break;
 
-                    case 'play':
-                        Rooms.joinPlay(state, client, message);
-                        break;
+                        case 'play':
+                            Rooms.joinPlay(state, client, message);
+                            break;
 
-                    case 'stop_room': {
-                        Rooms.stopRoom(state, message.roomId);
-                        break;
-                    }
+                        case 'stop_room': {
+                            Rooms.stopRoom(state, message.roomId);
+                            break;
+                        }
 
-                    case 'leave_room': {
-                        const player = Rooms.findPlayer(state.rooms, client, message.roomId, message.mode);
-                        if (!player) break;
-                        Rooms.leaveClientFromRoom(state, player.id);
-                        break;
-                    }
+                        case 'leave_room': {
+                            const player = Rooms.findPlayer(state.rooms, client, message.roomId, message.mode);
+                            if (!player) break;
+                            Rooms.leaveClientFromRoom(state, player.id);
+                            break;
+                        }
 
-                    case 'join_room_as': {
-                        const room = Rooms.getRoom(state.rooms, message.roomId);
-                        if (!room) break;
-                        const player = Rooms.addClientToRoom(state, client, room, message.mode);
-                        Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
-                        break;
-                    }
+                        case 'join_room_as': {
+                            const room = Rooms.getRoom(state.rooms, message.roomId);
+                            if (!room) break;
+                            const player = Rooms.addClientToRoom(state, client, room, message.mode);
+                            Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
+                            break;
+                        }
 
-                    case 'chat_input': {
-                        const room = Rooms.getRoom(state.rooms, message.roomId);
-                        if (!room) break;
-                        Chat.enqueueInput(room.chat, { line: message.line, from: client });
-                        break;
+                        case 'chat_input': {
+                            const room = Rooms.getRoom(state.rooms, message.roomId);
+                            if (!room) break;
+                            Chat.enqueueInput(room.chat, { line: message.line, from: client });
+                            break;
+                        }
                     }
                 }
             }
-          }
-          frames.length = 0;
+            frames.length = 0;
         }
     }
 }
@@ -658,11 +647,4 @@ export function dispose(state: EngineServer): void {
     }
 
     state.defaultRoomId = null;
-}
-
-/** await every in-flight scene persist. The host calls this AFTER `dispose()` on a
- *  graceful stop — dispose's final flush enqueues the last saves synchronously, so
- *  draining here guarantees the bytes reach disk before a fresh realm reloads. */
-export function drainPersist(state: EngineServer): Promise<void> {
-    return ContentManager.drainPersist(state.contentManager);
 }

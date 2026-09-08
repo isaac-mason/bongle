@@ -10,6 +10,7 @@ import { registry } from '../../../src/core/registry';
 import type { CommandHandle } from '../../../src/core/rpc';
 import * as Rpc from '../../../src/core/rpc';
 import { createNode, serializeNode } from '../../../src/core/scene/scene-tree';
+import { drainWrites } from '../../../src/editor/persist/scenes';
 import '../../../src/editor/server';
 import { env } from '../../../src/env';
 import { nodeZstd } from '../../../src/node/zstd';
@@ -20,6 +21,8 @@ import { createInMemoryStorageDriver } from '../../../src/server/storage-in-memo
 export type EditServerHarness = {
     server: EngineServer.EngineServer;
     tmpDir: string;
+    /** every frame the engine handed to the host's `send`, in order. */
+    sent: { client: number; channel: number; bytes: Uint8Array }[];
     writeScene(sceneId: string): void;
     sceneOnDisk(sceneId: string): string;
     sceneExistsOnDisk(sceneId: string): boolean;
@@ -47,17 +50,20 @@ export async function bootEditServer(scenes: string[]): Promise<EditServerHarnes
     };
     for (const sceneId of scenes) writeScene(sceneId);
 
+    const sent: EditServerHarness['sent'] = [];
     const server = EngineServer.init({
         mode: 'edit',
         fs: openNodeFs(tmpDir),
         zstd: nodeZstd,
         driver: { storage: createInMemoryStorageDriver(), avatars: { sample: async () => [] } },
+        send: (client, channel, bytes) => sent.push({ client, channel, bytes }),
     });
     await EngineServer.load(server);
 
     return {
         server,
         tmpDir,
+        sent,
         writeScene,
         sceneOnDisk: (sceneId) => fs.readFileSync(scenePath(sceneId), 'utf8'),
         sceneExistsOnDisk: (sceneId) => fs.existsSync(scenePath(sceneId)),
@@ -74,7 +80,7 @@ export async function bootEditServer(scenes: string[]): Promise<EditServerHarnes
         },
         dispose: async () => {
             EngineServer.dispose(server);
-            await EngineServer.drainPersist(server);
+            await drainWrites();
         },
     };
 }
