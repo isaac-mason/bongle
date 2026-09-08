@@ -10,7 +10,6 @@
 // Pairs with `engine-server-editor` (the server-side counterpart). The HMR re-apply
 // loop is `EngineClient.watchRegistry`, the same one every dev realm uses.
 
-import * as api from 'bongle';
 import type { EngineClient } from './client/client';
 import { type SceneSource, setSceneSource } from './editor/blueprints';
 import './editor/client';
@@ -41,9 +40,6 @@ export type EditorClient = {
 export function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): EditorClient {
     setSceneSource(opts?.sceneSource ?? null);
     const root = mountEditUI(state);
-    const g = window as unknown as { _state: EngineClient; _api: typeof api };
-    g._state = state;
-    g._api = api;
     return {
         dispose: () => {
             root.unmount();

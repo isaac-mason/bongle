@@ -2,17 +2,17 @@ import { RIG_TYPE_6BONE } from 'bongle/avatar';
 import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import type { ResolvedAvatar, ServerDriver } from 'bongle/interface';
 import { initZstd, zstdCompress } from 'bongle/zstd-wasm';
-import { avatarPicker, serverTick } from '../../build/dev/host';
+import { avatarPicker, closeClients, createClientTable, joinClient, serverTick } from '../../build/dev/host';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, AppInit } from '../interface';
 import { importEngine } from './engine';
-import { type ClientMeta, createChannelTransport, createClientChannels } from './server/transport-server';
 
 // The server app: the edit server inside its realm. Waits for the bake, boots
 // EngineServer through the runner, runs the 60Hz sim, and serves "game": each
-// connection is a client join. The transport (transport-server.ts) drives the
-// engine's own ServerApp exactly like the play room drives it over WS. Scene edits
+// connection is one client in the client table (build/dev/host.ts), which drives
+// the engine's own ServerApp exactly like the play room drives it over WS. Several
+// windows are several clients on the one server: multiplayer-in-a-tab. Scene edits
 // land on disk through the editor; the stop drains them (awaited) so the OS holds
 // teardown until the bytes are in OPFS.
 //
@@ -43,6 +43,8 @@ function createEditorAvatarsDriver(): ServerDriver['avatars'] {
     });
     return { sample: async () => batch };
 }
+
+const toU8 = (frame: unknown): Uint8Array => (frame instanceof ArrayBuffer ? new Uint8Array(frame) : (frame as Uint8Array));
 
 const server: App<AppInit> = async (env) => {
     const cfg = env.init;
@@ -76,10 +78,10 @@ const server: App<AppInit> = async (env) => {
     // file:// edited glb in OPFS or an http account avatar) via fs.read; the editor
     // writes scene files through the same handle. `fs` passes straight through.
     // (Cross-origin http avatar fetches need CORS on the avatar CDN under the
-    // realm's COEP.) The client channel map exists before the engine: the
-    // engine's `send` closes over it.
+    // realm's COEP.) The client table exists before the engine: the engine's
+    // `send` closes over it.
     const avatars = createEditorAvatarsDriver();
-    const clients = createClientChannels();
+    const clients = createClientTable();
     const state = EngineServer.init({
         mode: 'edit',
         fs,
@@ -101,7 +103,6 @@ const server: App<AppInit> = async (env) => {
     const app = EngineServer.app('edit');
     exposeDevtools('server', { fs, server: EngineServer, state, app, editor: EngineServerEditor });
 
-    const transport = createChannelTransport(app, state, picker.resolve, clients);
     const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ, { onError: (message) => env.err(message) });
 
     // graceful shutdown: stop the loop, drain the transport, dispose (the rooms'
@@ -110,7 +111,7 @@ const server: App<AppInit> = async (env) => {
     // holds teardown until the writes land.
     env.onDispose(async () => {
         stopTick();
-        transport.close();
+        closeClients(clients);
         unwatch();
         EngineServer.dispose(state);
         await EngineServerEditor.drainWrites();
@@ -133,12 +134,14 @@ const server: App<AppInit> = async (env) => {
     // relay guest) and a synthesized dev meta otherwise.
     mark('game served');
     env.listen('game', (conn, meta) => {
-        const clientMeta: ClientMeta = {
-            user: meta.user ?? { id: `dev-${meta.pid}`, username: `guest-${meta.pid}` },
-            joinData: {},
-        };
-        env.log(`client ${clientMeta.user.username} joined`);
-        return transport.acceptClient(conn, clientMeta);
+        const user = meta.user ?? { id: `dev-${meta.pid}`, username: `guest-${meta.pid}` };
+        const member = joinClient(clients, app, state, conn, user, {}, picker.resolve());
+        if (!member) return;
+        // the channel's `closed` is the leave signal. a channel closed by the shutdown
+        // above is already out of the table, so that fires no leave.
+        void conn.closed.then(member.leave);
+        env.log(`client ${member.clientId} joined`);
+        return (frame) => member.receive(toU8(frame));
     });
 
     env.log('game server up; listening on "game"');

@@ -16,16 +16,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import { unzipSync } from 'fflate';
-import { contentType } from '../build';
-import type { ResolvedAvatar, ServerApp } from '../interface/index';
+import { avatarPicker, contentType, createClientTable, serverTick } from '../build';
+import type { ServerApp } from '../interface/index';
 import { createFallbackAvatarsDriver, resolveSampleAvatarFile } from '../src/node/sample-avatars-driver';
 import { nodeZstd } from '../src/node/zstd';
 import { createInMemoryStorageDriver } from '../src/server/storage-in-memory';
 import { openNodeFs } from './node-fs';
-import { attachGameTransport, createSocketSink } from './realms/server/transport';
-
-const STEP_MS = 1000 / SERVER_TICK_HZ;
-const STEP_S = STEP_MS / 1000;
+import { attachGameTransport } from './realms/server/transport';
 
 /** Resolve the bundle arg to an unpacked directory containing bongle.json. A
  *  directory is used in place; a `.zip` is unpacked into `<cwd>/.bongle-run` (a
@@ -166,35 +163,32 @@ export async function startCommand(bundleArg: string, opts: { port?: number } = 
     const mod = (await import(pathToFileURL(serverEntry).href)) as { default: ServerApp<unknown> };
     const app = mod.default;
     const avatars = createFallbackAvatarsDriver();
-    // the socket map exists before the app: the engine's `send` closes over it.
-    const sink = createSocketSink();
+    // the client table exists before the app: the engine's `send` closes over it.
+    const clients = createClientTable();
     const state = app.init({
         options: {},
         fs: openNodeFs(path.join(root, 'server')),
         zstd: nodeZstd,
         driver: { storage: createInMemoryStorageDriver(), avatars },
-        send: sink.send,
+        send: clients.send,
     });
     await app.load(state);
     console.log('  · Server loaded');
 
-    // dress each joining client in a random sample avatar (absent ⇒ engine builtin).
-    const avatarBatch: ResolvedAvatar[] = await avatars.sample();
-    const resolveAvatar = () => (avatarBatch.length ? avatarBatch[Math.floor(Math.random() * avatarBatch.length)] : undefined);
+    // dress each joining client in a random sample avatar (absent: engine builtin).
+    const picker = await avatarPicker(avatars);
 
     const httpServer: HttpServer = createServer((req, res) => handleRequest(req, res, clientDir, html));
-    const transport = attachGameTransport({ httpServer, app, state, sink, resolveAvatar });
-
-    const timer = setInterval(() => {
-        app.update(state, STEP_S);
-    }, STEP_MS);
+    const transport = attachGameTransport({ httpServer, app, state, clients, resolveAvatar: picker.resolve });
+    // a fixed step, like the play fleet, not the measured dt the dev realms use.
+    const stopTick = serverTick(() => app.update(state, 1 / SERVER_TICK_HZ), SERVER_TICK_HZ);
 
     await new Promise<void>((resolve) => httpServer.listen(port, resolve));
     console.log(`\nbongle start → http://localhost:${port}`);
 
     const shutdown = () => {
         console.log('\n[bongle start] shutting down…');
-        clearInterval(timer);
+        stopTick();
         transport.close();
         app.dispose?.(state);
         httpServer.close(() => process.exit(0));

@@ -9,11 +9,11 @@
 import type { Server as HttpServer } from 'node:http';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import { env } from 'bongle/env';
-import { serverTick } from '../../../build';
+import { createClientTable, serverTick } from '../../../build';
 import type { ServerApp } from '../../../interface/index';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
-import { attachGameTransport, createSocketSink, type GameTransport } from './transport';
+import { attachGameTransport, type GameTransport } from './transport';
 
 export type StartServerOptions = {
     httpServer: HttpServer;
@@ -41,8 +41,8 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     await initZstd();
 
-    // the socket map exists before the engine: the engine's `send` closes over it.
-    const sink = createSocketSink();
+    // the client table exists before the engine: the engine's `send` closes over it.
+    const clients = createClientTable();
     const state = EngineServer.init({
         mode: 'play',
         fs: openNodeFs(projectDir),
@@ -50,14 +50,14 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         options: {},
         // node dev: no sample-avatar pool (joins get the builtin avatar).
         driver: { storage: createInMemoryStorageDriver(), avatars: { sample: async () => [] } },
-        send: sink.send,
+        send: clients.send,
     });
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
     EngineServer.watchRegistry(state);
 
     const app = EngineServer.app('play');
-    const transport = attachGameTransport({ httpServer, app, state, sink });
+    const transport = attachGameTransport({ httpServer, app, state, clients });
     const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ);
 
     return {

@@ -1,52 +1,29 @@
-// cli/realms/server/transport.ts — `/game` WS transport for `bongle dev`.
+// cli/realms/server/transport.ts, the `/game` WS transport for `bongle dev` and
+// `bongle start`.
 //
-// Mounts a `ws.WebSocketServer` in noServer mode and hooks Vite's HTTP server's
+// Mounts a `ws.WebSocketServer` in noServer mode and hooks the HTTP server's
 // `upgrade` event: `/game` upgrades handshake into a binary-frame WS; every other
-// path (Vite HMR, file requests) flows to Vite normally. Each connection is plumbed
-// through a `ServerApp<S>`: inbound frames go to `app.receive`, outbound frames come
-// out of the engine's `send`, which closes over the socket map created by
-// `createSocketSink` BEFORE the engine.
+// path (Vite HMR, file requests) flows on normally. Each socket joins the client
+// table (build/dev/host.ts), which owns the engine-side join / receive / leave;
+// this file only parses the upgrade and adapts the socket.
 
-import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import { URL } from 'node:url';
-import { type WebSocket, WebSocketServer } from 'ws';
-import {
-    Channel,
-    type Client,
-    type JsonValue,
-    type ResolvedAvatar,
-    type ServerApp,
-    type ServerInitOptions,
-    type User,
-} from '../../../interface/index';
-
-export type SocketSink = {
-    sockets: Map<Client, WebSocket>;
-    /** the engine's outbound sink: a client with no open socket is a silent drop. */
-    send: ServerInitOptions['send'];
-};
-
-export function createSocketSink(): SocketSink {
-    const sockets = new Map<Client, WebSocket>();
-    return {
-        sockets,
-        send: (client, _channel, bytes) => {
-            const ws = sockets.get(client);
-            if (ws && ws.readyState === ws.OPEN) ws.send(bytes, { binary: true });
-        },
-    };
-}
+import { WebSocketServer } from 'ws';
+import { type ClientTable, closeClients, joinClient } from '../../../build/dev/host';
+import type { JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 
 export type AttachGameTransportOptions<S> = {
     httpServer: HttpServer;
     app: ServerApp<S>;
     state: S;
-    sink: SocketSink;
+    /** created BEFORE the engine: its `send` is the engine's outbound sink. */
+    clients: ClientTable;
     /** URL pathname to claim. Defaults to `/game`. */
     path?: string;
-    /** per-join avatar pick (random from the sample pool) — passed to onClientJoin
-     *  so the client gets a real avatar instead of the engine's builtin fallback. */
+    /** per-join avatar pick, so the client wears a real avatar instead of the
+     *  engine's builtin fallback. */
     resolveAvatar?: () => ResolvedAvatar | undefined;
 };
 
@@ -56,60 +33,43 @@ export type GameTransport = {
 };
 
 export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): GameTransport {
-    const { httpServer, app, state, path = '/game' } = opts;
-    const { sockets } = opts.sink;
-
+    const { httpServer, app, state, clients, path = '/game' } = opts;
     const wss = new WebSocketServer({ noServer: true });
-    let nextClientId: Client = 1;
 
     const onUpgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
-        if (url.pathname !== path) return; // not ours — vite's HMR ws gets the rest
+        if (url.pathname !== path) return; // not ours: vite's HMR ws gets the rest
 
         wss.handleUpgrade(req, socket, head, (ws) => {
-            const clientId: Client = nextClientId++;
-            sockets.set(clientId, ws);
-
             const user: User = {
-                id: url.searchParams.get('userId') ?? `dev-${clientId}`,
-                username: url.searchParams.get('username') ?? `guest-${clientId}`,
+                id: url.searchParams.get('userId') ?? `dev-${clients.nextClientId}`,
+                username: url.searchParams.get('username') ?? `guest-${clients.nextClientId}`,
             };
             const joinData: Record<string, JsonValue> = {};
             for (const [k, v] of url.searchParams) {
                 if (k !== 'userId' && k !== 'username') joinData[k] = v;
             }
 
-            try {
-                app.onClientJoin(state, clientId, user, joinData, opts.resolveAvatar?.());
-            } catch (err) {
-                console.error(`[game-transport] onClientJoin threw for ${clientId}:`, err);
-                ws.close(1011, 'join failed');
-                sockets.delete(clientId);
-                return;
-            }
+            const conn = {
+                send: (bytes: Uint8Array) => {
+                    if (ws.readyState === ws.OPEN) ws.send(bytes, { binary: true });
+                },
+                close: () => ws.close(1001, 'closed by server'),
+            };
+            const member = joinClient(clients, app, state, conn, user, joinData, opts.resolveAvatar?.());
+            if (!member) return;
 
             ws.binaryType = 'nodebuffer';
             ws.on('message', (data, isBinary) => {
                 if (!isBinary) return;
-                let bytes: Uint8Array;
-                if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
-                else if (Array.isArray(data)) bytes = new Uint8Array(Buffer.concat(data));
-                else bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-                app.receive(state, clientId, Channel.RELIABLE, bytes);
+                if (data instanceof ArrayBuffer) member.receive(new Uint8Array(data));
+                else if (Array.isArray(data)) member.receive(new Uint8Array(Buffer.concat(data)));
+                else member.receive(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
             });
-
-            const handleClose = () => {
-                if (!sockets.delete(clientId)) return;
-                try {
-                    app.onClientLeave(state, clientId);
-                } catch (err) {
-                    console.error(`[game-transport] onClientLeave threw for ${clientId}:`, err);
-                }
-            };
-            ws.on('close', handleClose);
+            ws.on('close', member.leave);
             ws.on('error', (err) => {
-                console.warn(`[game-transport] socket error for ${clientId}:`, err);
-                handleClose();
+                console.warn(`[game-transport] socket error for ${member.clientId}:`, err);
+                member.leave();
             });
         });
     };
@@ -119,12 +79,7 @@ export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): Gam
     return {
         close() {
             httpServer.off('upgrade', onUpgrade);
-            for (const ws of sockets.values()) {
-                try {
-                    ws.close(1001, 'server shutting down');
-                } catch {}
-            }
-            sockets.clear();
+            closeClients(clients);
             wss.close();
         },
     };

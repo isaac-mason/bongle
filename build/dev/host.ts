@@ -5,7 +5,19 @@
 // static engine import here would be a second instance.
 
 import { RIG_TYPE_6BONE } from '../../avatar/index';
-import type { AvatarsServerDriver, ClientDriver, ClientUser, Platform, ResolvedAvatar } from '../../interface/index';
+import {
+    type AvatarsServerDriver,
+    Channel,
+    type Client,
+    type ClientDriver,
+    type ClientUser,
+    type JsonValue,
+    type Platform,
+    type ResolvedAvatar,
+    type ServerApp,
+    type ServerInitOptions,
+    type User,
+} from '../../interface/index';
 import { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './net-sim';
 
 /* ── loops ── */
@@ -160,4 +172,73 @@ export async function avatarPicker(avatars: AvatarsServerDriver, o?: { local?: s
             return current;
         },
     };
+}
+
+/* ── the client table ── */
+
+/** one connected client's pipe, as the host's socket presents it. */
+export type ClientConn = { send(bytes: Uint8Array): void; close(): void };
+
+/** the connected clients of one server: the map the engine's `send` closes over
+ *  (created BEFORE the engine) plus the id allocator. a client with no conn (left,
+ *  or never joined) is a silent drop. */
+export type ClientTable = {
+    conns: Map<Client, ClientConn>;
+    nextClientId: Client;
+    send: ServerInitOptions['send'];
+};
+
+export function createClientTable(): ClientTable {
+    const conns = new Map<Client, ClientConn>();
+    return { conns, nextClientId: 1, send: (client, _channel, bytes) => conns.get(client)?.send(bytes) };
+}
+
+export type ClientMember = {
+    clientId: Client;
+    /** an inbound frame for the engine. */
+    receive(bytes: Uint8Array): void;
+    /** the client went away: onClientLeave once, a second call is a no-op. */
+    leave(): void;
+};
+
+/** a connection became a client: allocate its id, onClientJoin, and hand back its
+ *  receive + leave. a join that throws closes the conn and returns null. */
+export function joinClient<S>(
+    table: ClientTable,
+    app: ServerApp<S>,
+    state: S,
+    conn: ClientConn,
+    user: User,
+    joinData: Record<string, JsonValue>,
+    avatar: ResolvedAvatar | undefined,
+): ClientMember | null {
+    const clientId: Client = table.nextClientId++;
+    table.conns.set(clientId, conn);
+    try {
+        app.onClientJoin(state, clientId, user, joinData, avatar);
+    } catch (err) {
+        console.error(`[game-transport] onClientJoin threw for ${clientId}:`, err);
+        table.conns.delete(clientId);
+        conn.close();
+        return null;
+    }
+    return {
+        clientId,
+        receive: (bytes) => app.receive(state, clientId, Channel.RELIABLE, bytes),
+        leave: () => {
+            if (!table.conns.delete(clientId)) return;
+            try {
+                app.onClientLeave(state, clientId);
+            } catch (err) {
+                console.error(`[game-transport] onClientLeave threw for ${clientId}:`, err);
+            }
+        },
+    };
+}
+
+/** shutdown: close every conn without a leave (the rooms are going away whole). */
+export function closeClients(table: ClientTable): void {
+    const open = [...table.conns.values()];
+    table.conns.clear();
+    for (const conn of open) conn.close();
 }
