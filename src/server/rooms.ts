@@ -1,4 +1,3 @@
-import { env } from 'bongle';
 import type { Client, JsonValue } from 'bongle/interface';
 import { addPlayerTraits } from '../builtins/player-node';
 import { attachWorldTrait } from '../builtins/world';
@@ -28,19 +27,15 @@ import {
 } from '../core/scene/scene-tree';
 import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Scripts from '../core/scene/scripts';
-import { SetBlockFlags } from '../core/voxels/block-flags';
-import { formatKey } from '../core/voxels/block-registry';
-import * as Light from '../core/voxels/light';
-import { loadVoxels, type VoxelSaveCache } from '../core/voxels/voxel-savefile';
+import { loadVoxels } from '../core/voxels/voxel-savefile';
 import type { Voxels } from '../core/voxels/voxels';
-import { createVoxels, createVoxelsAuthority, setBlock } from '../core/voxels/voxels';
+import { createVoxels, createVoxelsAuthority } from '../core/voxels/voxels';
 import * as Avatars from './avatars';
 import type { ChatServer } from './chat';
 import * as Chat from './chat';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
 import * as Net from './net';
-import * as Save from './save';
 import type { EngineServer } from './server';
 
 /* ── Errors ─────────────────────────────────────────────────────── */
@@ -56,17 +51,6 @@ export class RoomNotFoundError extends Error {
 
 export type { RoomMode as RoomKind } from '../core/protocol';
 
-/** server-side state only edit rooms carry. lives on `Room.edit`, which is null
- *  on play rooms, so the type forbids dirtying or persisting a runtime room. */
-export type RoomEditState = {
-    /** unsaved edits since the last flush, gates the interval auto-flush. */
-    dirty: boolean;
-    /** per-chunk serialized-byte cache for incremental voxel save: seeded on
-     *  load, refreshed on each flush, so `saveRoom` re-gzips only the chunks
-     *  whose data version moved. */
-    voxelSaveCache: VoxelSaveCache;
-};
-
 export type Room = {
     /** Unique runtime id (e.g. "room_1"). */
     id: string;
@@ -79,10 +63,6 @@ export type Room = {
 
     /** Players (per (client, mode)) currently in this room. */
     players: Set<PlayerId>;
-
-    /** edit-mode-only state (unsaved-edits flag + incremental-save cache). null
-     *  on play rooms, which never persist. */
-    edit: RoomEditState | null;
 
     /** Room mode. */
     mode: RoomMode;
@@ -297,7 +277,6 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         sceneId: opts.sceneId,
         scene: sceneGraph,
         players: new Set(),
-        edit: opts.kind === 'edit' ? { dirty: false, voxelSaveCache: new Map() } : null,
         mode: opts.kind,
         sourceRoomId: opts.sourceRoomId ?? null,
         playerNodes: new Map(),
@@ -349,13 +328,6 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
  * nodes + scene graph + physics, removes every Player belonging to this
  * room (across all clients/modes), and deletes it from the registry.
  */
-/** flip a room's unsaved-edits flag. purely server-side: it gates the interval
- *  auto-flush (see engine-server `update`). set true on edits, false on flush. */
-export function setRoomDirty(room: Room, value: boolean): void {
-    // no-op on play rooms (edit === null), they never persist.
-    if (room.edit) room.edit.dirty = value;
-}
-
 export function destroyRoom(state: Rooms, roomId: string): void {
     const room = state.rooms.get(roomId);
     if (!room) return;
@@ -371,6 +343,15 @@ export function destroyRoom(state: Rooms, roomId: string): void {
     const children = room.scene.root.children.slice();
     for (const child of children) {
         destroyNode(room.scene, child);
+    }
+
+    // the root's systems dispose last, after the entities they iterate: the same
+    // order loadSceneTree uses when it replaces a scene. (the root node itself is
+    // permanent, so destroyNode never reaches these.)
+    const rootInstances = room.scene.context?.instances.get(room.scene.root.id);
+    if (rootInstances) {
+        for (const instance of rootInstances.values()) Scripts.disposeScriptInstance(instance);
+        room.scene.context!.instances.delete(room.scene.root.id);
     }
 
     Physics.dispose(room.physics);
@@ -609,25 +590,6 @@ export function findRoomByNamespace(state: Rooms, namespace: string): Room | und
 
 /* ── higher-level room ops ─────────────────────────────────────── */
 
-/**
- * seed a brand-new edit-mode scene with a 3x3 floor of the first registered
- * user block, centered on origin at y=0. gives the user something to stand
- * on and click instead of facing a void. only runs when no voxel file
- * exists on disk; once we save, subsequent boots load from there.
- */
-function seedStarterFloor(room: Room): void {
-    const blockRegistry = registry.blockRegistry;
-    const firstUser = blockRegistry.defs.find((d) => d.id !== 'air');
-    if (!firstUser) return;
-    const key = formatKey(firstUser.id, firstUser.states, 0);
-    for (let x = -25; x <= 25; x++) {
-        for (let z = -25; z <= 25; z++) {
-            setBlock(room.voxels, x, 0, z, key, SetBlockFlags.BULK);
-        }
-    }
-    Light.propagateAllLight(room.voxels);
-}
-
 export function initializeRoom(state: EngineServer, room: Room): void {
     const t0 = performance.now();
     // wire server context before loading the scene so onInit handlers can
@@ -639,17 +601,6 @@ export function initializeRoom(state: EngineServer, room: Room): void {
             return state.rooms.namespaces.get(room.namespace)?.options ?? {};
         },
     };
-
-    let snapshotMs = 0;
-    if (env.editor && room.mode === 'play' && room.sourceRoomId) {
-        const sourceRoom = getRoom(state.rooms, room.sourceRoomId);
-        // flush the source edit room so the play room boots from its live state
-        // (dirty-gated: a clean editor costs no disk write).
-        if (sourceRoom) {
-            const snapT0 = performance.now();
-            if (Save.flushRoom(state, sourceRoom)) snapshotMs = performance.now() - snapT0;
-        }
-    }
 
     // dispose the placeholder physics from createRoom, re-init below.
     // The Jolt world from createRoom isn't explicitly destroyed (no
@@ -673,9 +624,6 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         if (sceneFile.data.voxels) {
             const desT0 = performance.now();
             loadVoxels(room.voxels, sceneFile.data.voxels, registry.blockRegistry);
-            // seed the incremental-save cache from the on-disk bytes so the
-            // first flush only re-gzips chunks edited since boot.
-            Save.seedRoom(room, sceneFile.data.voxels);
             voxDeserMs = performance.now() - desT0;
         }
         const parseT0 = performance.now();
@@ -684,11 +632,6 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         // seed dedupe cache so the first flush compares against real disk
         // bytes, see saveScene / engine-server boot loop for context.
         ContentManager.seedLastWrittenRaw(state.contentManager, room.sceneId, sceneFile.raw);
-    } else if (env.editor && room.mode === 'edit') {
-        seedStarterFloor(room);
-        // initial persist of a brand-new scene (empty cache → full serialize,
-        // then seeds the cache for subsequent incremental flushes).
-        Save.saveRoom(state, room);
     }
 
     const physT0 = performance.now();
@@ -709,7 +652,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const nodeCount = room.scene.nodes.size;
     console.log(
         `[room-start]   initializeRoom mode=${room.mode} chunks=${chunkCount} nodes=${nodeCount} ` +
-            `snapshot=${snapshotMs.toFixed(1)} dispose=${disposeMs.toFixed(1)} ` +
+            `dispose=${disposeMs.toFixed(1)} ` +
             `sceneLoad=${sceneLoadMs.toFixed(1)} voxDeser=${voxDeserMs.toFixed(1)} sceneParse=${sceneParseMs.toFixed(1)} ` +
             `physics=${physMs.toFixed(1)} total=${totalMs.toFixed(1)}ms`,
     );
@@ -862,13 +805,14 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
 
     for (const snap of playerSnapshots) {
         const player = state.rooms.players.get(snap.id);
+        // leave hooks fire while the player is still a member, as on disconnect.
+        const playerNode = room.playerNodes.get(snap.id);
+        if (playerNode) Scripts.fireLeaveHooks(room.context, snap.client, playerNode);
         leaveRoom(state.rooms, snap.id);
         destroyPlayerNode(room, snap.id);
         if (player) Discovery.notifyPlayerLeft(state.discovery, state.net, player);
     }
 
-    // an edit room dies with its unsaved edits on disk, not in the 3s autosave window.
-    Save.flushRoom(state, room);
     destroyRoom(state.rooms, roomId);
 
     // route any client whose active Player was here to a fallback Player
@@ -932,6 +876,9 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
         kind: 'system',
     });
 
+    // leave hooks fire while the player is still a member, as on disconnect.
+    const leavingNode = room.playerNodes.get(playerId);
+    if (leavingNode) Scripts.fireLeaveHooks(room.context, client, leavingNode);
     leaveRoom(state.rooms, playerId);
     destroyPlayerNode(room, playerId);
 
@@ -963,8 +910,6 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
     }
 
     if (room.mode === 'edit' && room.players.size === 0) {
-        // the last editor left: persist what they did before the room goes.
-        Save.flushRoom(state, room);
         destroyRoom(state.rooms, roomId);
     }
 

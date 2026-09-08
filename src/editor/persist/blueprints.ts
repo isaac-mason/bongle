@@ -1,4 +1,4 @@
-// server/blueprints.ts, server-side helpers for the blueprint inventory.
+// editor/persist/blueprints.ts, server-side helpers for the blueprint inventory.
 //
 // blueprints are scenes under the reserved `blueprints/` folder
 // (`content/scenes/blueprints/<name>.scene.json`). they're authored
@@ -9,8 +9,8 @@
 // can pick a free `blueprint-NNN`), name validation, and the
 // `ContentManager.saveScene` call site for blueprint writes.
 
-import type { ScenePayload } from '../core/content/scene-store';
-import * as ContentManager from './content-manager';
+import type { ScenePayload } from '../../core/content/scene-store';
+import * as ContentManager from '../../server/content-manager';
 
 const BLUEPRINT_PREFIX = 'blueprints/';
 const NAME_RE = /^[a-z0-9][a-z0-9\-_]*$/;

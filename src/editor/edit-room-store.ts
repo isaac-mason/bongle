@@ -34,7 +34,7 @@ import * as Actions from './actions';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
 import { copySelectionToSystemClipboard } from './clipboard';
-import { SaveBlueprintCommand } from './commands';
+import { SaveBlueprintCommand, SaveSceneCommand } from './commands';
 import { useEditor } from './editor-store';
 import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
@@ -603,6 +603,9 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                     quaternion: [q[0], q[1], q[2], q[3]],
                 };
             }
+            // the play room boots from the scene store, so land this room's unsaved
+            // edits there first. same socket, so the server saves before it forks.
+            send(ctx, SaveSceneCommand, { sceneId: room.sceneId });
             Net.send(net, {
                 type: 'play',
                 sceneId: room.sceneId,
@@ -623,10 +626,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const net = ctx.client!.state!.net;
             Net.send(net, { type: 'delete_scene', sceneId });
         },
-        save: (sceneId) => {
-            const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'save_scene', sceneId });
-        },
+        save: (sceneId) => send(ctx, SaveSceneCommand, { sceneId }),
         undo: () => {
             const stack = get().undoStack;
             const a = stack[stack.length - 1];

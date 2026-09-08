@@ -35,7 +35,6 @@ import { seedModels } from './registry-dispatch';
 import * as ResourceManager from './resource-manager';
 import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
-import * as Save from './save';
 import * as Telemetry from './telemetry';
 
 // runtime avatar swap (editor live preview — re-register the edited glb under a
@@ -150,7 +149,6 @@ export function init(opts: InitOptions) {
          *  is measured in (NOT performance.now). connection-level, so server-global. */
         netTimeMs: 0,
         telemetry: Telemetry.init(),
-        save: Save.init(),
     };
 }
 
@@ -486,11 +484,6 @@ export function processInbox(state: EngineServer) {
                         break;
                     }
 
-                    case 'save_scene': {
-                        Save.saveScene(state, message.sceneId);
-                        break;
-                    }
-
                     case 'chat_input': {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
@@ -655,19 +648,13 @@ export function update(state: EngineServer, delta: number) {
     Telemetry.recordProcessStats(state.metrics, delta);
 
     Debug.end(state.metrics, 'tick');
-
-    // auto-flush dirty edit rooms to disk on an interval (no-op when clean).
-    Save.tick(state, delta);
 }
 
 /* ── dispose ── */
 
-/** tear down the server: flush any unsaved edits, then destroy all rooms. */
+/** tear down the server: destroy all rooms. An edit host lands unsaved edits first
+ *  (engine-server-editor's `dispose`); the runtime knows nothing about saving. */
 export function dispose(state: EngineServer): void {
-    // final flush before exit so the last edits since the interval auto-flush
-    // aren't lost. dirty-gated + incremental, so it's a no-op when clean.
-    Save.flushDirty(state);
-
     for (const roomId of [...state.rooms.rooms.keys()]) {
         Rooms.destroyRoom(state.rooms, roomId);
     }

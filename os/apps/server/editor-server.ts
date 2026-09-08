@@ -129,7 +129,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         init: () => state,
         load: async () => {},
         update: (s, dt) => EngineServer.update(s, dt),
-        dispose: (s) => EngineServer.dispose(s),
+        dispose: (s) => EngineServerEditor.dispose(s),
         onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
             EngineServer.onClientJoin(s, client, user, joinData, avatar),
         onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
@@ -186,10 +186,10 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         reloadAvatar,
         stop: async () => {
             unregister();
-            // dispose runs the final flushDirty, which enqueues the last saves onto
-            // content-manager's async persist queue; drainPersist then waits for those
-            // bytes to reach OPFS before we let the realm die and a fresh one reloads.
-            EngineServer.dispose(state);
+            // the editor's dispose lands the last unsaved edits on content-manager's
+            // async persist queue, then disposes the engine; drainPersist waits for
+            // those bytes to reach OPFS before we let the realm die and a fresh one reloads.
+            EngineServerEditor.dispose(state);
             await EngineServer.drainPersist(state);
         },
     };

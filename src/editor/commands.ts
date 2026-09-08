@@ -109,3 +109,9 @@ export const VoxelEditCommand = command(
         ),
     }),
 );
+
+/* ── persistence ── */
+
+/** explicit save of every open edit room on `sceneId` (Ctrl+S, the tab menu). the
+ *  interval auto-flush needs no message. */
+export const SaveSceneCommand = command('editor.save_scene', CLIENT_TO_SERVER, pack.object({ sceneId: pack.string() }));

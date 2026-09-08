@@ -394,12 +394,6 @@ export const DeleteScene = pack.object({
 });
 export type DeleteScene = pack.SchemaType<typeof DeleteScene>;
 
-export const SaveScene = pack.object({
-    type: pack.literal('save_scene'),
-    sceneId: pack.string(),
-});
-export type SaveScene = pack.SchemaType<typeof SaveScene>;
-
 /**
  * Sent by either peer after an HMR flush that may have changed its
  * outbound wire-index tables. Carries the full sorted id lists for traits
@@ -546,7 +540,6 @@ export const ClientMessage = pack.union('type', [
     JoinRoomAs,
     RenameScene,
     DeleteScene,
-    SaveScene,
     ChatInput,
     VoxelAck,
 ]);

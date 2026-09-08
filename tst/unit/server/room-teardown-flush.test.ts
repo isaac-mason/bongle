@@ -1,21 +1,40 @@
 // ── an edit room persists its unsaved edits before it is destroyed ─────────
 //
-// The interval auto-flush runs every 3s. Before this, `stop_room` and the last
-// editor leaving destroyed the room straight away, so up to 3s of edits went
-// with it. Both paths now flush a dirty edit room first (`Save.flushRoom`).
+// Persistence is the editor's: its room system (editor/server.ts) flushes when an
+// editor leaves, which is what `stop_room` and the last editor leaving do to every
+// player before the room is destroyed. The runtime only guarantees the leave hooks
+// fire on those paths and that root systems are disposed with the room.
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openNodeFs } from '../../../cli/node-fs';
-import { addChild, createNode, serializeNode } from '../../../src/core/scene/scene-tree';
+import { system } from '../../../src/api/scripts';
+import { registry } from '../../../src/core/registry';
+import * as Rpc from '../../../src/core/rpc';
+import { createNode, serializeNode } from '../../../src/core/scene/scene-tree';
+import { onDispose, onLeave } from '../../../src/core/scene/scripts';
+import { CreateNodeCommand } from '../../../src/editor/commands';
+import '../../../src/editor/server';
 import { env } from '../../../src/env';
 import { nodeZstd } from '../../../src/node/zstd';
 import * as ContentManager from '../../../src/server/content-manager';
 import * as Rooms from '../../../src/server/rooms';
 import * as EngineServer from '../../../src/server/server';
 import { createInMemoryStorageDriver } from '../../../src/server/storage-in-memory';
+
+const CLIENT = 7;
+const probeLog: string[] = [];
+system(
+    'teardown-probe',
+    (ctx) => {
+        if (!env.server) return;
+        onLeave(ctx, ({ client }) => probeLog.push(`leave:${client}`));
+        onDispose(ctx, () => probeLog.push('dispose'));
+    },
+    { editor: true },
+);
 
 let tmpDir: string;
 let server: EngineServer.EngineServer;
@@ -32,15 +51,29 @@ function sceneOnDisk(sceneId: string): string {
     return fs.readFileSync(path.join(tmpDir, 'content', 'scenes', `${sceneId}.scene.json`), 'utf8');
 }
 
-/** open an edit room on `sceneId` and add a node the scene file does not have. */
-function openDirtyEditRoom(sceneId: string): Rooms.Room {
-    const room = Rooms.createRoomInNamespace(server, sceneId, 'edit', 'editor');
-    addChild(room.scene.root, createNode({ name: `unsaved-in-${sceneId}` }));
-    Rooms.setRoomDirty(room, true);
-    return room;
+/** drive the editor's create-node RPC into `room` the way the wire would. */
+function createNodeViaEditor(room: Rooms.Room, name: string): void {
+    const commandIndex = registry.protocol.commands.idToIndex.get(CreateNodeCommand.id);
+    if (commandIndex === undefined) throw new Error('editor commands not in the protocol');
+    const payload = CreateNodeCommand.def.serdes.pack({
+        id: 424242,
+        parentId: room.scene.root.id,
+        index: 0,
+        name,
+        persist: undefined,
+        traits: '[]',
+        children: undefined,
+        prefab: undefined,
+    });
+    Rpc.dispatchNetMessage(
+        server.rpc,
+        registry.protocol.commands,
+        { type: 'net_message', direction: 'to_server', roomId: room.id, commandIndex, payload },
+        CLIENT,
+    );
 }
 
-describe('edit room teardown flushes unsaved edits', () => {
+describe('edit room teardown', () => {
     beforeEach(async () => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bongle-teardown-'));
         fs.mkdirSync(path.join(tmpDir, 'content', 'scenes'), { recursive: true });
@@ -48,6 +81,7 @@ describe('edit room teardown flushes unsaved edits', () => {
         env.server = true;
         env.client = false;
         env.editor = true;
+        probeLog.length = 0;
         writeScene('main');
         writeScene('side');
         server = EngineServer.init({
@@ -64,8 +98,10 @@ describe('edit room teardown flushes unsaved edits', () => {
         await EngineServer.drainPersist(server);
     });
 
-    it('stop_room saves a dirty edit room before destroying it', async () => {
-        const room = openDirtyEditRoom('side');
+    it('stop_room saves an edited room before destroying it', async () => {
+        const room = Rooms.createRoomInNamespace(server, 'side', 'edit', 'editor');
+        Rooms.addClientToRoom(server, CLIENT, room, 'edit');
+        createNodeViaEditor(room, 'unsaved-in-side');
         expect(sceneOnDisk('side')).not.toContain('unsaved-in-side');
 
         Rooms.stopRoom(server, room.id);
@@ -77,8 +113,9 @@ describe('edit room teardown flushes unsaved edits', () => {
     });
 
     it('the last editor leaving saves the room it empties', async () => {
-        const room = openDirtyEditRoom('side');
-        const player = Rooms.addClientToRoom(server, 7, room, 'edit');
+        const room = Rooms.createRoomInNamespace(server, 'side', 'edit', 'editor');
+        const player = Rooms.addClientToRoom(server, CLIENT, room, 'edit');
+        createNodeViaEditor(room, 'unsaved-in-side');
 
         Rooms.leaveClientFromRoom(server, player.id);
 
@@ -97,5 +134,25 @@ describe('edit room teardown flushes unsaved edits', () => {
 
         expect(sceneOnDisk('side')).toBe(before);
         expect(fs.statSync(path.join(tmpDir, 'content', 'scenes', 'side.scene.json')).mtimeMs).toBe(mtimeBefore);
+    });
+
+    it('a system sees every player leave and is disposed with the room', () => {
+        const room = Rooms.createRoomInNamespace(server, 'side', 'edit', 'editor');
+        Rooms.addClientToRoom(server, CLIENT, room, 'edit');
+        probeLog.length = 0;
+
+        Rooms.stopRoom(server, room.id);
+
+        expect(probeLog).toEqual([`leave:${CLIENT}`, 'dispose']);
+    });
+
+    it('leave_room fires the leave hook for the leaving player', () => {
+        const room = Rooms.createRoomInNamespace(server, 'side', 'edit', 'editor');
+        const player = Rooms.addClientToRoom(server, CLIENT, room, 'edit');
+        probeLog.length = 0;
+
+        Rooms.leaveClientFromRoom(server, player.id);
+
+        expect(probeLog[0]).toBe(`leave:${CLIENT}`);
     });
 });

@@ -4,7 +4,6 @@
 // listeners, the /relight command, and the per-player EditorTrait seed. Imported
 // only by engine-server-editor.
 
-import { env } from 'bongle';
 import type { Client } from 'bongle/interface';
 import * as chat from '../api/chat';
 import { WorldTrait } from '../builtins/world';
@@ -29,13 +28,12 @@ import {
     setPrefab,
     setRealm,
 } from '../core/scene/scene-tree';
-import { listen, onJoin, script } from '../core/scene/scripts';
+import { listen, onDispose, onJoin, onLeave, onTick, script } from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';
-import * as Blueprints from '../server/blueprints';
+import { env } from '../env';
 import * as Discovery from '../server/discovery';
-import * as Rooms from '../server/rooms';
 import { setTraitProps } from './actions';
 import {
     AddTraitCommand,
@@ -45,6 +43,7 @@ import {
     ReorderCommand,
     ReparentCommand,
     SaveBlueprintCommand,
+    SaveSceneCommand,
     SetNameCommand,
     SetNodePersistCommand,
     SetPrefabCommand,
@@ -53,16 +52,31 @@ import {
     VoxelEditCommand,
 } from './commands';
 import { EditorTrait } from './editor-trait';
+import * as Blueprints from './persist/blueprints';
+import * as Persist from './persist/save';
 
 // the room-level editor system. hosted on WorldTrait like any other system, so it
 // runs once per room root on both sides; the client-side instance early-returns.
 // holds the authoritative voxel/scene mutation listeners and the /relight command,
-// and seeds the per-player EditorTrait on join.
+// seeds the per-player EditorTrait on join, and owns persistence for edit rooms.
 script(
     WorldTrait,
     'editor',
     (ctx) => {
         if (!env.server) return;
+        const { state, room } = ctx.server!;
+
+        // persistence, edit rooms only: play rooms never write scene files. opened
+        // here, after the runtime loaded the scene; the autosave clock rides onTick;
+        // an editor leaving persists what they did (covers stop_room and the last
+        // editor leaving, both of which destroy the room next, and disconnects); the
+        // shutdown flush is engine-server-editor's `dispose`.
+        const persist = ctx.mode === 'edit' ? Persist.open(state, room) : null;
+        if (persist) {
+            onTick(ctx, ({ delta }) => Persist.tick(persist, delta));
+            onLeave(ctx, () => Persist.flush(persist));
+            onDispose(ctx, () => Persist.close(persist));
+        }
 
         // per-player editor activation follows the player's mode, not the room's:
         // an edit-mode player gets EditorTrait on its player node (also when
@@ -106,14 +120,21 @@ script(
             };
 
         // editGated; on a body that actually mutated (returns true, guard
-        // early-returns don't), flag the room dirty (broadcast to clients via the
-        // room list). wraps the mutating listeners below.
+        // early-returns don't), flag the room dirty for the autosave. wraps the
+        // mutating listeners below.
         const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
             editGated<T>((args, client) => {
                 if (!fn(args, client)) return;
-                const { room } = ctx.server!;
-                Rooms.setRoomDirty(room, true);
+                if (persist) Persist.markDirty(persist);
             });
+
+        // explicit save (Ctrl+S, the tab menu). every open edit room on the scene,
+        // dirty or not, so it answers "is it on disk" with a yes.
+        listen(
+            ctx,
+            SaveSceneCommand,
+            editGated(({ sceneId }) => Persist.flushScene(sceneId)),
+        );
 
         // voxel edit ops from clients
         listen(
@@ -138,7 +159,6 @@ script(
             ctx,
             SaveBlueprintCommand,
             editGated((args) => {
-                const { state } = ctx.server!;
                 let payload: ScenePayload;
                 try {
                     payload = JSON.parse(args.payload) as ScenePayload;
@@ -167,7 +187,6 @@ script(
             ctx,
             CreateNodeCommand,
             editMutate((args, _client) => {
-                const { room } = ctx.server!;
                 const sceneTree = room.scene;
                 const parent = getNodeById(sceneTree, args.parentId);
                 if (!parent) return;
@@ -208,7 +227,6 @@ script(
             ctx,
             DestroyNodeCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 if (node === room.scene.root) return;
@@ -221,7 +239,6 @@ script(
             ctx,
             SetNameCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 node.name = args.name ?? undefined;
@@ -234,7 +251,6 @@ script(
             ctx,
             SetRealmCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 if (node === room.scene.root) return;
@@ -249,7 +265,6 @@ script(
             ctx,
             ReparentCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
@@ -268,7 +283,6 @@ script(
             ctx,
             ReorderCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node?.parent) return;
@@ -282,7 +296,6 @@ script(
             ctx,
             SetTraitCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 setTraitProps(room.scene, node, args.traitId, JSON.parse(args.props));
@@ -294,7 +307,6 @@ script(
             ctx,
             AddTraitCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
@@ -314,7 +326,6 @@ script(
             ctx,
             RemoveTraitCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
@@ -333,7 +344,6 @@ script(
             ctx,
             SetPrefabCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
@@ -355,7 +365,6 @@ script(
             ctx,
             SetNodePersistCommand,
             editMutate((args, client) => {
-                const { state, room } = ctx.server!;
                 const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
