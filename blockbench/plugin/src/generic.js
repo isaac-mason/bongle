@@ -37,6 +37,9 @@ import {
 	RIG_6BONE_MIN_HEIGHT_M,
 } from '../../../avatar/rig';
 
+// One merged mesh per canonical bone, baked into the .glb as it is compiled.
+import { collapseToRigBones } from './collapse';
+
 const PLUGIN_ID = 'bongle';
 
 const FORMAT_IDS = {
@@ -76,6 +79,10 @@ const OPTIONAL_SOCKETS = {
 	hand_right: 'arm_right',
 	back: 'body',
 };
+
+// The nodes that survive the mesh collapse: bones plus sockets, matching the
+// engine's RIG_6BONE_PERSISTENT_NODES (the set mountRig keeps by name).
+const PERSISTENT_NODES = [...REQUIRED_BONES, ...Object.keys(OPTIONAL_SOCKETS)];
 
 // Wrap the top-level bones under a single named root node. Off: the engine
 // re-parents canonical bones by name and wants no wrapper.
@@ -372,9 +379,13 @@ async function exportBongleGltf() {
 	const sceneName = sceneNameForActiveFormat();
 	const isBinary = BONGLE_EXPORT_OPTIONS.encoding === 'binary';
 	let content = await codec.compile(BONGLE_EXPORT_OPTIONS);
+	const collapseWarnings = [];
 	content = isBinary
-		? postProcessGlb(content, sceneName)
+		? postProcessGlb(await collapseCharacterMeshes(content, collapseWarnings), sceneName)
 		: postProcessGltfString(content, sceneName);
+	if (collapseWarnings.length) {
+		Blockbench.showQuickMessage(collapseWarnings.join('  |  '), 4000);
+	}
 
 	Blockbench.export(
 		{
@@ -657,17 +668,73 @@ function loadBbmodelIntoProject(bbmodel, name) {
 	updateSizeGuide();
 }
 
+/**
+ * Bake a character's cubes down to one mesh per canonical bone (collapse.js).
+ * Runs on every compile, so the .glb an embedder persists next to the .bbmodel
+ * is already in its final in-game form, and a test session sees exactly what
+ * ships.
+ *
+ * Characters only: a Bongle Model has no canonical bones, and its node names
+ * are the surface game code addresses meshes through.
+ *
+ * A collapse failure falls back to the uncollapsed compile rather than losing
+ * the save, matching how a failed glb export still commits the .bbmodel source.
+ */
+async function collapseCharacterMeshes(glb, warnings) {
+	if (!isCharacterFormat()) return glb;
+	try {
+		return await collapseToRigBones(glb, PERSISTENT_NODES, {
+			raster: BROWSER_RASTER,
+			// surfaced in the save dialog, not just devtools: an atlas that quietly
+			// declines looks exactly like the collapse not running at all.
+			onWarn: (reason) => warnings.push(reason),
+		});
+	} catch (err) {
+		warnings.push(`mesh collapse skipped: ${String((err && err.message) || err)}`);
+		console.warn('[bongle] mesh collapse skipped:', err);
+		return glb;
+	}
+}
+
+// Image codec for the collapse's texture atlasing (collapse.ts injects it,
+// because a test runner has neither of these APIs). `premultiplyAlpha` and
+// `colorSpaceConversion` off keep the round-trip lossless: a canvas would
+// otherwise premultiply on draw and colour-manage on decode, both of which
+// move pixels in a paint-exact sheet.
+const BROWSER_RASTER = {
+	async decode(bytes, mimeType) {
+		const bitmap = await createImageBitmap(new Blob([bytes], { type: mimeType }), {
+			premultiplyAlpha: 'none',
+			colorSpaceConversion: 'none',
+		});
+		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+		const context = canvas.getContext('2d', { willReadFrequently: true });
+		context.drawImage(bitmap, 0, 0);
+		const image = context.getImageData(0, 0, bitmap.width, bitmap.height);
+		bitmap.close();
+		return { width: image.width, height: image.height, data: new Uint8Array(image.data.buffer) };
+	},
+	async encode(image) {
+		const canvas = new OffscreenCanvas(image.width, image.height);
+		const context = canvas.getContext('2d');
+		context.putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0);
+		const blob = await canvas.convertToBlob({ type: 'image/png' });
+		return new Uint8Array(await blob.arrayBuffer());
+	},
+};
+
 /** Compile both artefacts an embedder uploads: the engine-ready .glb (same
  *  fixed options + post-process as the menu export) and the .bbmodel source.
  *  Returns the current rig warnings (characters only) and a display name. */
 async function compileBongleArtifacts() {
 	const sceneName = sceneNameForActiveFormat();
-	const glb = postProcessGlb(await Codecs.gltf.compile(BONGLE_EXPORT_OPTIONS), sceneName);
-	let bbmodel = Codecs.project.compile();
-	if (typeof bbmodel !== 'string') bbmodel = JSON.stringify(bbmodel);
 	// Height is surfaced as a warning here (the save still commits the source):
 	// the server build is the hard gate, matching how missing-bone errors flow.
 	const warnings = isCharacterFormat() ? validateRig().warnings : [];
+	const compiled = await Codecs.gltf.compile(BONGLE_EXPORT_OPTIONS);
+	const glb = postProcessGlb(await collapseCharacterMeshes(compiled, warnings), sceneName);
+	let bbmodel = Codecs.project.compile();
+	if (typeof bbmodel !== 'string') bbmodel = JSON.stringify(bbmodel);
 	if (isCharacterFormat()) {
 		const height = heightIssue();
 		if (height) warnings.push(height);
