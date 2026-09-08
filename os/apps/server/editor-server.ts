@@ -8,7 +8,16 @@
 // game-room composes around the WS transport.
 
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
-import type { Client, JsonValue, ResolvedAvatar, ServerApp, ServerDriver, User } from 'bongle/interface';
+import type {
+    Channel,
+    Client,
+    JsonValue,
+    ResolvedAvatar,
+    ServerApp,
+    ServerDriver,
+    ServerInitOptions,
+    User,
+} from 'bongle/interface';
 import { initZstd, zstdCompress } from 'bongle/zstd-wasm';
 import type { Filesystem } from '../../interface';
 
@@ -47,7 +56,7 @@ type ServerState = ReturnType<EngineServerApi['init']>;
 export type EditorServer = {
     state: ServerState;
     /** ServerApp adapter over the EngineServer module — the transport drives
-     *  join/leave/inbox/outbox/update through this, same contract game-room
+     *  join/leave/receive/update through this, same contract game-room
      *  and the cli dev transport use. */
     app: ServerApp<ServerState>;
     /** Synchronous per-join avatar pick (random from the sample pool), mirroring
@@ -74,6 +83,9 @@ export type StartEditorServerOptions = {
      *  (createInMemoryStorageDriver) — the app must not static-import engine
      *  runtime, and storage belongs to the realm's engine instance. */
     storage: ServerDriver['storage'];
+    /** the engine's outbound sink; the transport's port map, created before this
+     *  so the engine can hold it from init. */
+    send: ServerInitOptions['send'];
     log?: (msg: string) => void;
     /** a specific avatar for the local player (the edited avatar in avatar mode,
      *  or our account avatar when editing a game as ourselves). The URL feeds
@@ -107,6 +119,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
             storage: opts.storage,
             avatars,
         },
+        send: opts.send,
     });
 
     // the editor's server declarations registered when the realm imported
@@ -121,7 +134,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
 
     // ServerApp adapter — the transport (transport-server.ts) drives the engine
     // through this exactly like game-room/edit-server drive it through the WS
-    // transport. getInbox/getOutbox expose the per-Client frame maps.
+    // transport.
     const app: ServerApp<ServerState> = {
         init: () => state,
         load: async () => {},
@@ -130,9 +143,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
             EngineServer.onClientJoin(s, client, user, joinData, avatar),
         onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
-        getInbox: (s) => s.net.inbox,
-        getOutbox: (s) => s.net.outbox,
-        clearOutbox: (s) => s.net.outbox.clear(),
+        receive: (s, client: Client, channel: Channel, bytes: Uint8Array) => EngineServer.receive(s, client, channel, bytes),
     };
 
     // pre-fetch the sample pool once; picker yields a random avatar per join.

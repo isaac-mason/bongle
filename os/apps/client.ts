@@ -1,5 +1,5 @@
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
-import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface';
+import { Channel, type ClientDriver, type ClientUser, type ResolvedAvatar } from 'bongle/interface';
 import { createNetSim } from '../../build/dev/net-sim';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
@@ -69,6 +69,9 @@ const client: App<AppInit> = async (env) => {
                 started: (backend) => graphics.handshakeSucceeded(backend),
                 deviceLost: (backend) => graphics.deviceLost(backend),
             },
+            // outbound frames go through the net-sim delay line (below) before the
+            // game transport; the engine only calls this from inside update.
+            send: (_channel, bytes) => netSim.send(bytes, performance.now()),
         };
 
         const state = EngineClient.init({
@@ -104,7 +107,7 @@ const client: App<AppInit> = async (env) => {
         // console context.
         exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineClientEditor, runner });
 
-        // debug-pane latency sim between the game transport and the engine in/out box.
+        // debug-pane latency sim between the game transport and the engine.
         let game: { send: (bytes: Uint8Array) => void } = { send: () => {} };
         const netSim = createNetSim<Uint8Array, Uint8Array>(
             () => {
@@ -118,7 +121,7 @@ const client: App<AppInit> = async (env) => {
                 };
             },
             {
-                deliverInbound: (bytes) => state.net.inbox.push(bytes),
+                deliverInbound: (bytes) => EngineClient.receive(state, Channel.RELIABLE, bytes),
                 deliverOutbound: (bytes) => game.send(bytes),
             },
         );
@@ -133,7 +136,7 @@ const client: App<AppInit> = async (env) => {
         game = { send: (bytes) => gameChannel.send(bytes) };
         mark('joined game');
 
-        // frame loop: advance, drain the outbox onto the game transport.
+        // frame loop: release due inbound, advance (which sends), release due outbound.
         //
         // The next frame is scheduled BEFORE the work and the work is bracketed, so a
         // throw out of `update` (a bad block state, a script error) costs one frame
@@ -152,8 +155,6 @@ const client: App<AppInit> = async (env) => {
             try {
                 netSim.pump(now);
                 EngineClient.update(state, dt);
-                for (const bytes of state.net.outbox) netSim.send(bytes, now);
-                state.net.outbox.length = 0;
                 netSim.pump(now);
             } catch (frameErr) {
                 const message = String((frameErr as Error)?.stack ?? frameErr);
@@ -170,11 +171,14 @@ const client: App<AppInit> = async (env) => {
         progress('live');
 
         // react to fs edits: re-read the matching scene / baked resource. The change
-        // KIND matters (a deleted path isn't a refresh). Each refresh is a re-fetch
+        // KIND matters: a deleted scene file is a list change (nothing to re-read),
+        // any other deletion isn't a refresh. Each refresh is a re-fetch
         // plus a GPU/DOM rebuild and one bake writes several artifacts at once, so
         // the batch is folded into a set of refreshes FIRST and applied once — never
         // once per changed path.
         type FsRefresh = {
+            /** the scene set changed (a file went away); re-list without re-reading. */
+            sceneList: boolean;
             scenes: Set<string>;
             prefabIcons: Set<string>;
             blockIcons: boolean;
@@ -198,10 +202,8 @@ const client: App<AppInit> = async (env) => {
             // bins, scene barrels) is read on demand and needs no live refresh.
         };
         const applyFsRefresh = (refresh: FsRefresh) => {
-            if (refresh.scenes.size > 0) {
-                EngineClientEditor.refreshBlueprints();
-                for (const id of refresh.scenes) EngineClientEditor.reloadBlueprint(id);
-            }
+            if (refresh.sceneList || refresh.scenes.size > 0) EngineClientEditor.refreshBlueprints();
+            for (const id of refresh.scenes) EngineClientEditor.reloadBlueprint(id);
             if (refresh.blockIcons) EngineClientEditor.reloadBlockIconAtlas();
             if (refresh.prefabIcons.size > 0) EngineClientEditor.invalidatePrefabIcons([...refresh.prefabIcons]);
             if (refresh.blocks) EngineClient.refreshBlockResources(state).catch(console.error);
@@ -210,6 +212,7 @@ const client: App<AppInit> = async (env) => {
         };
         fs.watch((changes) => {
             const refresh: FsRefresh = {
+                sceneList: false,
                 scenes: new Set(),
                 prefabIcons: new Set(),
                 blockIcons: false,
@@ -217,7 +220,13 @@ const client: App<AppInit> = async (env) => {
                 sprites: false,
                 audio: false,
             };
-            for (const c of changes) if (c.type !== 'deleted') noteFsChange(refresh, c.path);
+            for (const c of changes) {
+                if (c.type === 'deleted') {
+                    if (c.path.startsWith('content/scenes/')) refresh.sceneList = true;
+                    continue;
+                }
+                noteFsChange(refresh, c.path);
+            }
             applyFsRefresh(refresh);
         });
 

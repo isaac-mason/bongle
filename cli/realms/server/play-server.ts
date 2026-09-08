@@ -10,10 +10,10 @@ import type { Server as HttpServer } from 'node:http';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
-import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
+import type { Channel, Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
-import { attachGameTransport, type GameTransport } from './transport';
+import { attachGameTransport, createSocketSink, type GameTransport } from './transport';
 
 export type StartServerOptions = {
     httpServer: HttpServer;
@@ -41,6 +41,8 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     await initZstd();
 
+    // the socket map exists before the engine: the engine's `send` closes over it.
+    const sink = createSocketSink();
     const state = EngineServer.init({
         mode: 'play',
         fs: openNodeFs(projectDir),
@@ -48,6 +50,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         options: {},
         // node dev: no sample-avatar pool (joins get the builtin avatar).
         driver: { storage: createInMemoryStorageDriver(), avatars: { sample: async () => [] } },
+        send: sink.send,
     });
 
     await EngineServer.load(state);
@@ -62,12 +65,10 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
             EngineServer.onClientJoin(s, client, user, joinData, avatar),
         onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
-        getInbox: (s) => s.net.inbox,
-        getOutbox: (s) => s.net.outbox,
-        clearOutbox: (s) => s.net.outbox.clear(),
+        receive: (s, client: Client, channel: Channel, bytes: Uint8Array) => EngineServer.receive(s, client, channel, bytes),
     };
 
-    const transport = attachGameTransport({ httpServer, app, state });
+    const transport = attachGameTransport({ httpServer, app, state, sink });
 
     let last = performance.now();
     const timer = setInterval(() => {
@@ -75,7 +76,6 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         const dt = (now - last) / 1000;
         last = now;
         EngineServer.update(state, dt);
-        transport.flush();
     }, 1000 / SERVER_TICK_HZ);
 
     __bongle.flush();

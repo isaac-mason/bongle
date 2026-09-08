@@ -242,7 +242,13 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
     const win = (globalThis as { window?: { happyDOM?: { setURL: (u: string) => void } } }).window;
     win?.happyDOM?.setURL(`http://localhost:${port}/`);
 
-    // ── 5. boot server ──────────────────────────────────────────
+    // ── 5. track clients ────────────────────────────────────────
+    let nextClientId = 1;
+    const clients: TestClient[] = [];
+
+    // ── 6. boot server ──────────────────────────────────────────
+    // the in-process wire: the server's `send` lands straight in the client's inbox
+    // and each client's `send` lands in the server's; both queue until the next update.
     const server = EngineServerModule.init({
         mode: 'play',
         fs: openNodeFs(tmpDir),
@@ -251,12 +257,12 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
             storage: createInMemoryStorageDriver(),
             avatars: createFallbackAvatarsDriver(),
         },
+        send: (client, channel, bytes) => {
+            const target = clients.find((c) => c.id === client);
+            if (target) EngineClientModule.receive(target.state, channel, bytes);
+        },
     });
     await EngineServerModule.load(server);
-
-    // ── 6. track clients ────────────────────────────────────────
-    let nextClientId = 1;
-    const clients: TestClient[] = [];
 
     const harness: TestHarness<D> = {
         server,
@@ -280,6 +286,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
                     transfer: async () => false,
                     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
                     user: { id: 'test', username: 'test', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
+                    send: (channel, bytes) => EngineServerModule.receive(server, clientId, channel, bytes),
                 },
                 domElement: document.body,
             });
@@ -315,30 +322,13 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
         },
 
         tick(dt = DEFAULT_DT) {
-            for (const client of clients) {
-                ClientNet.flush(client.state.net);
-                const packets = client.state.net.outbox.splice(0);
-                if (packets.length > 0) {
-                    let inbox = server.net.inbox.get(client.id);
-                    if (!inbox) {
-                        inbox = [];
-                        server.net.inbox.set(client.id, inbox);
-                    }
-                    inbox.push(...packets);
-                }
-            }
+            // anything a test queued on a client between ticks reaches the server before
+            // it steps; the clients' own updates flush again below.
+            for (const client of clients) ClientNet.flush(client.state.net, client.state.driver.send);
 
             env.server = true;
             env.client = false;
             EngineServerModule.update(server, dt);
-
-            for (const client of clients) {
-                const packets = server.net.outbox.get(client.id);
-                if (packets && packets.length > 0) {
-                    client.state.net.inbox.push(...packets);
-                }
-            }
-            server.net.outbox.clear();
 
             env.server = false;
             env.client = true;

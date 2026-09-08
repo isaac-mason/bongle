@@ -3,7 +3,7 @@ import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, AppInit } from '../interface';
 import { type EditorServer, startEditorServer } from './server/editor-server';
-import { type ClientMeta, createPortTransport } from './server/transport-server';
+import { type ClientMeta, createPortMap, createPortTransport } from './server/transport-server';
 
 // The server app. Waits for the bake, boots EngineServer through the runner,
 // runs the 60Hz sim, and serves "game": each connection is a client-join.
@@ -42,18 +42,21 @@ const server: App<AppInit> = async (env) => {
     env.progress('starting');
     await runner.import('src/generated/models.ts');
 
+    // the client port map exists before the engine: the engine's `send` closes over it.
+    const portMap = createPortMap();
     const srv: EditorServer = await startEditorServer({
         fs,
         log: (m: string) => env.log(m),
         EngineServer,
         EngineServerEditor,
         storage: engineServerModule.createInMemoryStorageDriver(),
+        send: portMap.send,
         localAvatarUrl: cfg.avatarUrl,
     });
     mark('server started');
     exposeDevtools('server', { fs, server: EngineServer, state: srv.state, app: srv.app, editor: EngineServerEditor });
 
-    const transport = createPortTransport(srv.app, srv.state, srv.resolveAvatar);
+    const transport = createPortTransport(srv.app, srv.state, srv.resolveAvatar, portMap);
 
     let last = performance.now();
     const timer = setInterval(() => {
@@ -62,7 +65,6 @@ const server: App<AppInit> = async (env) => {
         last = now;
         try {
             srv.app.update(srv.state, dt);
-            transport.flush();
         } catch (err) {
             env.err('tick error:', String((err as Error).message));
         }

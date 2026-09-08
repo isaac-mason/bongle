@@ -22,7 +22,7 @@ import { createFallbackAvatarsDriver, resolveSampleAvatarFile } from '../src/nod
 import { nodeZstd } from '../src/node/zstd';
 import { createInMemoryStorageDriver } from '../src/server/storage-in-memory';
 import { openNodeFs } from './node-fs';
-import { attachGameTransport } from './realms/server/transport';
+import { attachGameTransport, createSocketSink } from './realms/server/transport';
 
 const STEP_MS = 1000 / SERVER_TICK_HZ;
 const STEP_S = STEP_MS / 1000;
@@ -80,20 +80,23 @@ function shellHtml(hasStyles: boolean): string {
         <script type="module">
             import app from '/index.js';
 
+            // the socket exists before the app so the driver's send can close over it.
+            const ws = new WebSocket(\`ws://\${location.host}/game\`);
+            ws.binaryType = 'arraybuffer';
+
             // no host platform locally: matchmake is a no-op, transfers refuse,
             // platform verbs inert.
             const driver = {
                 matchmake() {},
                 transfer: async () => false,
                 platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+                // Uint8Array may be SAB-backed — send a plain-ArrayBuffer copy.
+                send: (channel, bytes) => ws.send(bytes.slice().buffer),
             };
             const state = app.init(driver);
 
-            // connect first so the server's initial frames buffer into the inbox
-            // while assets load, then advance once load resolves.
-            const ws = new WebSocket(\`ws://\${location.host}/game\`);
-            ws.binaryType = 'arraybuffer';
-            ws.addEventListener('message', (e) => app.getInbox(state).push(new Uint8Array(e.data)));
+            // the server's initial frames queue in the app while assets load.
+            ws.addEventListener('message', (e) => app.receive(state, 0, new Uint8Array(e.data)));
             await new Promise((res) => ws.addEventListener('open', () => res(), { once: true }));
 
             await app.load(state);
@@ -103,9 +106,6 @@ function shellHtml(hasStyles: boolean): string {
                 const dt = (now - last) / 1000;
                 last = now;
                 app.update(state, dt);
-                // Uint8Array may be SAB-backed — send a plain-ArrayBuffer copy.
-                for (const bytes of app.getOutbox(state)) ws.send(bytes.slice().buffer);
-                app.clearOutbox(state);
                 requestAnimationFrame(frame);
             }
             requestAnimationFrame(frame);
@@ -166,11 +166,14 @@ export async function startCommand(bundleArg: string, opts: { port?: number } = 
     const mod = (await import(pathToFileURL(serverEntry).href)) as { default: ServerApp<unknown> };
     const app = mod.default;
     const avatars = createFallbackAvatarsDriver();
+    // the socket map exists before the app: the engine's `send` closes over it.
+    const sink = createSocketSink();
     const state = app.init({
         options: {},
         fs: openNodeFs(path.join(root, 'server')),
         zstd: nodeZstd,
         driver: { storage: createInMemoryStorageDriver(), avatars },
+        send: sink.send,
     });
     await app.load(state);
     console.log('  · Server loaded');
@@ -180,11 +183,10 @@ export async function startCommand(bundleArg: string, opts: { port?: number } = 
     const resolveAvatar = () => (avatarBatch.length ? avatarBatch[Math.floor(Math.random() * avatarBatch.length)] : undefined);
 
     const httpServer: HttpServer = createServer((req, res) => handleRequest(req, res, clientDir, html));
-    const transport = attachGameTransport({ httpServer, app, state, resolveAvatar });
+    const transport = attachGameTransport({ httpServer, app, state, sink, resolveAvatar });
 
     const timer = setInterval(() => {
         app.update(state, STEP_S);
-        transport.flush();
     }, STEP_MS);
 
     await new Promise<void>((resolve) => httpServer.listen(port, resolve));

@@ -1,4 +1,5 @@
-import { createReassembler, frameOutbound } from '../core/net';
+import { Channel, type ClientDriver } from 'bongle/interface';
+import { createReassembler, frameOutbound, type Reassembler } from '../core/net';
 import type { ClientMessage } from '../core/protocol';
 import { packClientMessage } from '../core/protocol';
 
@@ -9,11 +10,14 @@ type OutboxEntry = {
 
 export function init() {
     return {
-        inbox: [] as Uint8Array[],
+        /** inbound frames awaiting the next tick, indexed by Channel. */
+        inbox: [[], []] as Uint8Array[][],
+        /** framed outbound batch, drained to the driver at the end of flush. */
         outbox: [] as Uint8Array[],
         /** reassembles inbound fragments back into a whole message batch (a big
-         *  batch is split across frames by the server's transport). */
-        reassembler: createReassembler(),
+         *  batch is split across frames by the server's transport). Fragments are
+         *  contiguous only within one channel, so one per channel. */
+        reassemblers: [createReassembler(), createReassembler()] as Reassembler[],
         outboxMessages: [] as OutboxEntry[],
         bytesInByType: new Map<string, number>(),
         bytesOutByType: new Map<string, number>(),
@@ -35,20 +39,22 @@ export function send(state: ClientNet, message: ClientMessage) {
 }
 
 /**
- * Frame the queued messages onto the outbox and clear the pending queue. The
- * batch is one atomic unit; `frameOutbound` packs it into a single wire frame,
- * splitting into fragments only when it would exceed WIRE_BUDGET. The transport
- * sends each frame opaquely; the server reassembles the batch whole.
+ * Frame the queued messages and hand each frame to the host. The batch is one
+ * atomic unit; `frameOutbound` packs it into a single wire frame, splitting into
+ * fragments only when it would exceed WIRE_BUDGET. The host sends each frame
+ * opaquely; the server reassembles the batch whole.
  */
-export function flush(state: ClientNet) {
+export function flush(state: ClientNet, send: ClientDriver['send']) {
     if (state.outboxMessages.length === 0) return;
 
     frameOutbound(
         state.outboxMessages.map((m) => m.bytes),
         state.outbox,
     );
-
     state.outboxMessages.length = 0;
+
+    for (const frame of state.outbox) send(Channel.RELIABLE, frame);
+    state.outbox.length = 0;
 }
 
 export type NetStats = {

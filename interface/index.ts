@@ -1,7 +1,7 @@
-export const INTERFACE_VERSION = '0.0.2';
+export const INTERFACE_VERSION = '0.0.3';
 
 export type { ClientApp, ClientDriver, ClientUser, JsonValue, Platform } from './client';
-export { client } from './client';
+export { Channel, client } from './client';
 export type {
     AvatarsServerDriver,
     Client,

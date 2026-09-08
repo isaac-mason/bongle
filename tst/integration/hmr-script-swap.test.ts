@@ -29,7 +29,7 @@ import { openNodeFs } from '../../cli/node-fs';
 import { registerFlushHandler } from '../../src/core/capture/flush';
 import { registry, reindexRegistry } from '../../src/core/registry';
 import { addTrait, createNode, serializeNode } from '../../src/core/scene/scene-tree';
-import { onSwap, onTick, script } from '../../src/core/scene/scripts';
+import { onDispose, onSwap, onTick, script } from '../../src/core/scene/scripts';
 import { trait } from '../../src/core/scene/traits';
 import { block } from '../../src/core/voxels/blocks';
 import { env } from '../../src/env';
@@ -43,7 +43,7 @@ import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory'
 const DT = 1 / 60;
 
 /** The engine surface a game module imports from 'bongle', bound to THIS registry instance. */
-const bongleApi = { trait, script, onTick, onSwap, block, env };
+const bongleApi = { trait, script, onTick, onSwap, onDispose, block, env };
 
 function portPair(): [RealmPort, RealmPort] {
     const a: RealmPort = { postMessage: (d) => queueMicrotask(() => b.onmessage?.({ data: d })), onmessage: null };
@@ -115,6 +115,7 @@ async function boot(files: Record<string, string>, log: string[], entry = '/game
         fs: openNodeFs(tmpDir),
         zstd: nodeZstd,
         driver: { storage: createInMemoryStorageDriver(), avatars: createFallbackAvatarsDriver() },
+        send: () => {},
     });
     await EngineServerModule.load(server);
 
@@ -261,5 +262,70 @@ script(T, 'tick', (ctx) => {
         // the module imports ./blocks for its side effect but the script body never touches Stone,
         // so there is no edge and nothing to swap.
         expect(log).toEqual([]);
+    });
+
+    it('a script() call deleted from source disposes its live instance and stops it ticking', async () => {
+        // trait and scripts in the same file: the trait re-declares with an empty scriptsById, so
+        // the surviving script() call is the only one re-registered and the swap disposes the rest.
+        const game = (ids: string[]) => `import { trait, script, onTick, onDispose } from 'bongle';
+export const T = trait('hmr-int/f');
+${ids
+    .map(
+        (id) => `script(T, '${id}', (ctx) => {
+    onTick(ctx, () => { import.meta.env.log.push('${id}'); });
+    onDispose(ctx, () => { import.meta.env.log.push('dispose:${id}'); });
+});`,
+    )
+    .join('\n')}`;
+        const log: string[] = [];
+        booted = await boot({ '/game.ts': game(['a', 'b']) }, log);
+        booted.tick();
+        expect(log).toEqual(['a', 'b']);
+
+        log.length = 0;
+        await booted.edit('/game.ts', game(['a']));
+        // the deleted script is disposed exactly once. the survivor's body did not change, so the
+        // registry stays silent for it and its live instance is left alone rather than swapped.
+        expect(log).toEqual(['dispose:b']);
+        log.length = 0;
+        booted.tick();
+        expect(log).toEqual(['a']);
+        expect(registry.traits.handles.get('hmr-int/f')?.def.scripts.map((s) => s.scriptId)).toEqual(['a']);
+    });
+
+    it('a script() deleted from a file OTHER than its trait is pruned from the surviving def', async () => {
+        // the system() shape: the trait def outlives the edited file (WorldTrait lives in the
+        // engine), so nothing re-declares it and only the registry's passive removal, mirrored into
+        // the def by pruneRemovedScript, can take the orphan off it. Without the prune the instance
+        // would be disposed but a later attach would resurrect the deleted script.
+        const traits = `import { trait } from 'bongle';
+export const T = trait('hmr-int/g');`;
+        const game = (ids: string[]) => `import { script, onTick, onDispose } from 'bongle';
+import { T } from './traits';
+export { T };
+${ids
+    .map(
+        (id) => `script(T, '${id}', (ctx) => {
+    onTick(ctx, () => { import.meta.env.log.push('${id}'); });
+    onDispose(ctx, () => { import.meta.env.log.push('dispose:${id}'); });
+});`,
+    )
+    .join('\n')}`;
+        const log: string[] = [];
+        booted = await boot({ '/traits.ts': traits, '/game.ts': game(['a', 'b']) }, log);
+        booted.tick();
+        expect(log).toEqual(['a', 'b']);
+
+        log.length = 0;
+        await booted.edit('/game.ts', game(['a']));
+        expect(log).toEqual(['dispose:b']);
+        log.length = 0;
+        booted.tick();
+        expect(log).toEqual(['a']);
+
+        const handle = registry.traits.handles.get('hmr-int/g');
+        expect(handle?.scriptsById.has('b')).toBe(false);
+        expect(handle?.def.scripts.map((s) => s.scriptId)).toEqual(['a']);
+        expect(registry.scripts.byId.has('hmr-int/g.b')).toBe(false);
     });
 });

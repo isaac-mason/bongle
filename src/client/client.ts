@@ -1,4 +1,4 @@
-import type { ClientDriver, JsonValue } from 'bongle/interface';
+import type { Channel, ClientDriver, JsonValue } from 'bongle/interface';
 import * as Clock from '../core/clock';
 import { isStandalone } from '../core/config';
 import * as Content from '../core/content';
@@ -300,42 +300,52 @@ export async function load(state: EngineClient) {
     ]);
 }
 
+/** one inbound frame from the host. Queues until the next update. */
+export function receive(state: EngineClient, channel: Channel, bytes: Uint8Array): void {
+    state.net.inbox[channel].push(bytes);
+}
+
 function processInbox(state: EngineClient): void {
-    for (const frame of state.net.inbox) {
-        // decode the frame back into a message batch; fragments of a big batch
-        // may span ticks, so the reassembler persists in net state.
-        let messages: Uint8Array[] | null;
-        try {
-            messages = acceptFrame(state.net.reassembler, frame);
-        } catch (err) {
-            console.error('[bongle] inbound framing error:', err);
-            state.net.reassembler = createReassembler();
-            continue;
-        }
-        if (!messages) continue;
-
-        for (const messageBytes of messages) {
-            const message = Protocol.unpackServerMessage(messageBytes);
-
-            if (!message) {
-                // TODO: warn
+    for (let channel = 0; channel < state.net.inbox.length; channel++) {
+        const frames = state.net.inbox[channel];
+        for (const frame of frames) {
+            // decode the frame back into a message batch; fragments of a big batch
+            // may span ticks, so the reassembler persists in net state.
+            let messages: Uint8Array[] | null;
+            try {
+                messages = acceptFrame(state.net.reassemblers[channel], frame);
+            } catch (err) {
+                console.error('[bongle] inbound framing error:', err);
+                state.net.reassemblers[channel] = createReassembler();
                 continue;
             }
+            if (!messages) continue;
 
-            state.net.bytesInByType.set(message.type, (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength);
+            for (const messageBytes of messages) {
+                const message = Protocol.unpackServerMessage(messageBytes);
 
-            // one malformed/unexpected message must never take down the whole
-            // tick loop (mirrors the framing-layer guard above). log it, skip
-            // that message, keep draining — rendering/input/net stay alive.
-            try {
-                dispatchInboundMessage(state, message);
-            } catch (err) {
-                console.error(`[bongle] error handling '${message.type}' message, skipping:`, err);
+                if (!message) {
+                    // TODO: warn
+                    continue;
+                }
+
+                state.net.bytesInByType.set(
+                    message.type,
+                    (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength,
+                );
+
+                // one malformed/unexpected message must never take down the whole
+                // tick loop (mirrors the framing-layer guard above). log it, skip
+                // that message, keep draining — rendering/input/net stay alive.
+                try {
+                    dispatchInboundMessage(state, message);
+                } catch (err) {
+                    console.error(`[bongle] error handling '${message.type}' message, skipping:`, err);
+                }
             }
         }
+        frames.length = 0;
     }
-
-    state.net.inbox.length = 0;
 
     VoxelNet.flushAcks(state.voxelNet, state.net);
 }
@@ -680,7 +690,7 @@ export function update(state: EngineClient, delta: number) {
     // echo the latest server ping-stamp so the server measures our RTT (Quake-style).
     Net.send(state.net, { type: 'net_ping_ack', serverStampAck: state.net.lastServerStamp });
 
-    Net.flush(state.net);
+    Net.flush(state.net, state.driver.send);
 
     Debug.end(state.metrics, 'tick');
 }

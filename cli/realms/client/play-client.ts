@@ -7,7 +7,7 @@
 import { EngineClient } from 'bongle/engine-client';
 import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
-import type { ClientDriver } from 'bongle/interface';
+import { Channel, type ClientDriver } from 'bongle/interface';
 import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
 
 export type StartClientOptions = {
@@ -22,6 +22,12 @@ export async function start(opts: StartClientOptions): Promise<void> {
     env.editor = false;
     await opts.userEntry();
 
+    // /game transport. Opened before the engine so the driver's `send` can close over
+    // it; frames the server sends before load are queued by `receive` until the
+    // first update.
+    const ws = new WebSocket(`ws://${location.host}/game`);
+    ws.binaryType = 'arraybuffer';
+
     // dev has no host platform: matchmake is a no-op, platform verbs inert.
     const driver: ClientDriver = {
         matchmake() {},
@@ -33,6 +39,8 @@ export async function start(opts: StartClientOptions): Promise<void> {
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         // dev play: a stand-in local identity + builtin avatar (no session/account).
         user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
+        // Uint8Array<ArrayBufferLike> (may be SAB-backed) → send a plain-ArrayBuffer copy.
+        send: (_channel, bytes) => ws.send(bytes.slice().buffer),
     };
 
     // baked client resources (atlas, model bins) are served by the dev server out
@@ -57,11 +65,7 @@ export async function start(opts: StartClientOptions): Promise<void> {
     __bongle.registerFlush(() => EngineClient.applyRegistryChanges(state));
     __bongle.flush();
 
-    // /game transport: inbound server frames → engine inbox; the frame loop
-    // advances then drains the outbox onto the socket.
-    const ws = new WebSocket(`ws://${location.host}/game`);
-    ws.binaryType = 'arraybuffer';
-    ws.addEventListener('message', (e) => state.net.inbox.push(new Uint8Array(e.data as ArrayBuffer)));
+    ws.addEventListener('message', (e) => EngineClient.receive(state, Channel.RELIABLE, new Uint8Array(e.data as ArrayBuffer)));
     await new Promise<void>((res) => ws.addEventListener('open', () => res(), { once: true }));
 
     let last = performance.now();
@@ -69,9 +73,6 @@ export async function start(opts: StartClientOptions): Promise<void> {
         const dt = (now - last) / 1000;
         last = now;
         EngineClient.update(state, dt);
-        // Uint8Array<ArrayBufferLike> (may be SAB-backed) → send a plain-ArrayBuffer copy.
-        for (const bytes of state.net.outbox) ws.send(bytes.slice().buffer);
-        state.net.outbox.length = 0;
         requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

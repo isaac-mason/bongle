@@ -37,13 +37,13 @@ export type PortLike = {
  *  guest's (impossible) shared-OPFS access with read-through RPC to the host;
  *  control carries join/leave/permission. One byte, room for growth. */
 export const Channel = {
-    control: 0,
+    CONTROL: 0,
     /** every OS connection for this guest, multiplexed by cid (game, bundler, …).
      *  Replaced the fixed `game`/`bundler` lanes: those carried per-client and
      *  per-process connections over singletons, so a second one silently stole the
      *  lane from the first. See llm/plan-guest-multiplayer-over-os.md. */
-    os: 1,
-    fsrpc: 3,
+    OS: 1,
+    FSRPC: 3,
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];
 
@@ -189,7 +189,7 @@ export function createRelayHostLink(socket: SocketLike, opts: RelayHostLinkOptio
         if (bytes.length < 2) return;
         const localId = (bytes[0] << 8) | bytes[1];
         const frame = decodeFrame(bytes.subarray(2));
-        if (frame.channel === Channel.control) {
+        if (frame.channel === Channel.CONTROL) {
             opts.onControl?.(localId, frame.data);
             return;
         }

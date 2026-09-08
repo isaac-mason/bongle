@@ -68,9 +68,7 @@ export default client({
     },
     update: (state, dt) => EngineClient.update(state, dt),
     dispose: (state) => EngineClient.dispose(state),
-    getInbox: (state) => state.net.inbox,
-    getOutbox: (state) => state.net.outbox,
-    clearOutbox: (state) => { state.net.outbox.length = 0; },
+    receive: (state, channel, bytes) => EngineClient.receive(state, channel, bytes),
 });
 `;
 
@@ -92,6 +90,7 @@ export default server({
             zstd: opts.zstd,
             options: opts.options,
             driver: opts.driver,
+            send: opts.send,
         });
     },
     load: async (state) => { await EngineServer.load(state); },
@@ -99,9 +98,7 @@ export default server({
     dispose: (state) => EngineServer.dispose(state),
     onClientJoin: (state, c, user, joinData, avatar) => EngineServer.onClientJoin(state, c, user, joinData, avatar),
     onClientLeave: (state, c) => EngineServer.onClientLeave(state, c),
-    getInbox: (state) => state.net.inbox,
-    getOutbox: (state) => state.net.outbox,
-    clearOutbox: (state) => { state.net.outbox.clear(); },
+    receive: (state, c, channel, bytes) => EngineServer.receive(state, c, channel, bytes),
 });
 `;
 

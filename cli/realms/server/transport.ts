@@ -3,18 +3,46 @@
 // Mounts a `ws.WebSocketServer` in noServer mode and hooks Vite's HTTP server's
 // `upgrade` event: `/game` upgrades handshake into a binary-frame WS; every other
 // path (Vite HMR, file requests) flows to Vite normally. Each connection is plumbed
-// through a `ServerApp<S>` (inbox push / outbox drain on flush).
+// through a `ServerApp<S>`: inbound frames go to `app.receive`, outbound frames come
+// out of the engine's `send`, which closes over the socket map created by
+// `createSocketSink` BEFORE the engine.
 
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { URL } from 'node:url';
 import { type WebSocket, WebSocketServer } from 'ws';
-import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
+import {
+    Channel,
+    type Client,
+    type JsonValue,
+    type ResolvedAvatar,
+    type ServerApp,
+    type ServerInitOptions,
+    type User,
+} from '../../../interface/index';
+
+export type SocketSink = {
+    sockets: Map<Client, WebSocket>;
+    /** the engine's outbound sink: a client with no open socket is a silent drop. */
+    send: ServerInitOptions['send'];
+};
+
+export function createSocketSink(): SocketSink {
+    const sockets = new Map<Client, WebSocket>();
+    return {
+        sockets,
+        send: (client, _channel, bytes) => {
+            const ws = sockets.get(client);
+            if (ws && ws.readyState === ws.OPEN) ws.send(bytes, { binary: true });
+        },
+    };
+}
 
 export type AttachGameTransportOptions<S> = {
     httpServer: HttpServer;
     app: ServerApp<S>;
     state: S;
+    sink: SocketSink;
     /** URL pathname to claim. Defaults to `/game`. */
     path?: string;
     /** per-join avatar pick (random from the sample pool) — passed to onClientJoin
@@ -23,17 +51,15 @@ export type AttachGameTransportOptions<S> = {
 };
 
 export type GameTransport = {
-    /** Drain `app.getOutbox(state)` to sockets + clear it. Call once per frame. */
-    flush(): void;
     /** Stop accepting upgrades; close every live socket. Idempotent. */
     close(): void;
 };
 
 export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): GameTransport {
     const { httpServer, app, state, path = '/game' } = opts;
+    const { sockets } = opts.sink;
 
     const wss = new WebSocketServer({ noServer: true });
-    const sockets = new Map<Client, WebSocket>();
     let nextClientId: Client = 1;
 
     const onUpgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
@@ -69,13 +95,7 @@ export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): Gam
                 if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
                 else if (Array.isArray(data)) bytes = new Uint8Array(Buffer.concat(data));
                 else bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-                const inbox = app.getInbox(state);
-                let q = inbox.get(clientId);
-                if (!q) {
-                    q = [];
-                    inbox.set(clientId, q);
-                }
-                q.push(bytes);
+                app.receive(state, clientId, Channel.RELIABLE, bytes);
             });
 
             const handleClose = () => {
@@ -97,15 +117,6 @@ export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): Gam
     httpServer.on('upgrade', onUpgrade);
 
     return {
-        flush() {
-            const outbox = app.getOutbox(state);
-            for (const [clientId, messages] of outbox) {
-                const ws = sockets.get(clientId);
-                if (!ws || ws.readyState !== ws.OPEN) continue;
-                for (const msg of messages) ws.send(msg, { binary: true });
-            }
-            app.clearOutbox(state);
-        },
         close() {
             httpServer.off('upgrade', onUpgrade);
             for (const ws of sockets.values()) {

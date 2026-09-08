@@ -9,7 +9,7 @@
 import { EngineClient } from 'bongle/engine-client';
 import * as EngineClientEditor from 'bongle/engine-client-editor';
 import { env } from 'bongle/env';
-import type { ClientDriver } from 'bongle/interface';
+import { Channel, type ClientDriver } from 'bongle/interface';
 import { createNetSim } from '../../../build';
 import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
 
@@ -39,6 +39,9 @@ export async function start(opts: StartClientOptions): Promise<void> {
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         // dev editor: a stand-in local identity + builtin avatar (no session/account).
         user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
+        // outbound frames go through the net-sim delay line (below) before the socket;
+        // the engine only calls this from inside update. SAB-backed views get copied.
+        send: (_channel, bytes) => netSim.send(bytes.slice().buffer, performance.now()),
     };
     const resourceLoader = {
         loadBytes: async (url: string): Promise<Uint8Array> => {
@@ -101,7 +104,7 @@ export async function start(opts: StartClientOptions): Promise<void> {
             };
         },
         {
-            deliverInbound: (bytes) => state.net.inbox.push(bytes),
+            deliverInbound: (bytes) => EngineClient.receive(state, Channel.RELIABLE, bytes),
             deliverOutbound: (buf) => ws.send(buf),
         },
     );
@@ -115,8 +118,6 @@ export async function start(opts: StartClientOptions): Promise<void> {
         last = now;
         netSim.pump(now); // release due inbound before update reads the inbox.
         EngineClient.update(state, dt);
-        for (const bytes of state.net.outbox) netSim.send(bytes.slice().buffer, now);
-        state.net.outbox.length = 0;
         netSim.pump(now); // flush just-queued outbound that's due (immediate when disabled).
         requestAnimationFrame(frame);
     };

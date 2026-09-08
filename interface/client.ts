@@ -2,6 +2,9 @@ import type { ResolvedAvatar } from './server';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
+export const Channel = { RELIABLE: 0, UNRELIABLE: 1 } as const;
+export type Channel = (typeof Channel)[keyof typeof Channel];
+
 /** The client's own player: identity + the avatar they wear. Deliberately NOT the
  *  server's identity-only `User` — the client knows its full player (the host injects
  *  it), whereas a server room's avatar is matchmaker-resolved separately. Anon hosts
@@ -39,6 +42,7 @@ export type ClientDriver = {
         started(backend: 'webgpu' | 'webgl' | 'none'): void;
         deviceLost(backend: 'webgpu' | 'webgl' | 'none'): void;
     };
+    send(channel: Channel, bytes: Uint8Array): void;
 };
 
 export type Platform = {
@@ -53,10 +57,7 @@ export type ClientApp<S = any> = {
     load: (state: S) => Promise<void>;
     update: (state: S, dt: number) => void;
     dispose: (state: S) => void;
-
-    getInbox: (state: S) => Uint8Array[];
-    getOutbox: (state: S) => Uint8Array[];
-    clearOutbox: (state: S) => void;
+    receive: (state: S, channel: Channel, bytes: Uint8Array) => void;
 };
 
 export function client<S>(app: ClientApp<S>): ClientApp<S> {

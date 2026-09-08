@@ -34,7 +34,7 @@ describe('relay host link', () => {
         const control: Array<{ localId: number; message: unknown }> = [];
         createRelayHostLink(socket, { onControl: (localId, message) => control.push({ localId, message }) });
 
-        socket.onmessage?.({ data: inbound(7, Channel.control, { type: 'guest-join', localId: 7, userId: 'u' }) });
+        socket.onmessage?.({ data: inbound(7, Channel.CONTROL, { type: 'guest-join', localId: 7, userId: 'u' }) });
         expect(control).toEqual([{ localId: 7, message: { type: 'guest-join', localId: 7, userId: 'u' } }]);
     });
 
@@ -44,11 +44,11 @@ describe('relay host link', () => {
         const g7game: unknown[] = [];
         const g7bundler: unknown[] = [];
         const g8game: unknown[] = [];
-        link.guestPort(7, Channel.os).onmessage = (e) => g7game.push(e.data);
-        link.guestPort(7, Channel.fsrpc).onmessage = (e) => g7bundler.push(e.data);
-        link.guestPort(8, Channel.os).onmessage = (e) => g8game.push(e.data);
+        link.guestPort(7, Channel.OS).onmessage = (e) => g7game.push(e.data);
+        link.guestPort(7, Channel.FSRPC).onmessage = (e) => g7bundler.push(e.data);
+        link.guestPort(8, Channel.OS).onmessage = (e) => g8game.push(e.data);
 
-        socket.onmessage?.({ data: inbound(7, Channel.os, new Uint8Array([1, 2, 3])) });
+        socket.onmessage?.({ data: inbound(7, Channel.OS, new Uint8Array([1, 2, 3])) });
         expect(g7game).toHaveLength(1);
         expect([...(g7game[0] as Uint8Array)]).toEqual([1, 2, 3]);
         expect(g7bundler).toHaveLength(0); // different channel
@@ -58,12 +58,12 @@ describe('relay host link', () => {
     it('stamps the guest localId on outbound frames', () => {
         const socket = fakeSocket();
         const link = createRelayHostLink(socket);
-        link.guestPort(9, Channel.os).postMessage(new Uint8Array([42]));
+        link.guestPort(9, Channel.OS).postMessage(new Uint8Array([42]));
 
         expect(socket.sent).toHaveLength(1);
         const framed = socket.sent[0]!;
         expect((framed[0]! << 8) | framed[1]!).toBe(9); // localId prefix
-        expect(framed[2]).toBe(Channel.os); // channel
+        expect(framed[2]).toBe(Channel.OS); // channel
         expect(framed[3]).toBe(0); // binary kind
         expect([...framed.subarray(4)]).toEqual([42]);
     });
@@ -72,16 +72,16 @@ describe('relay host link', () => {
         const socket = fakeSocket();
         createRelayHostLink(socket);
         // no guestPort registered — must not throw, just drop.
-        expect(() => socket.onmessage?.({ data: inbound(1, Channel.os, new Uint8Array([1])) })).not.toThrow();
+        expect(() => socket.onmessage?.({ data: inbound(1, Channel.OS, new Uint8Array([1])) })).not.toThrow();
     });
 
     it('dropGuest forgets a guest so later frames no longer route', () => {
         const socket = fakeSocket();
         const link = createRelayHostLink(socket);
         const got: unknown[] = [];
-        link.guestPort(3, Channel.os).onmessage = (e) => got.push(e.data);
+        link.guestPort(3, Channel.OS).onmessage = (e) => got.push(e.data);
         link.dropGuest(3);
-        socket.onmessage?.({ data: inbound(3, Channel.os, new Uint8Array([9])) });
+        socket.onmessage?.({ data: inbound(3, Channel.OS, new Uint8Array([9])) });
         expect(got).toHaveLength(0);
     });
 });

@@ -1,4 +1,4 @@
-import type { Client } from 'bongle/interface';
+import { Channel, type Client, type ServerInitOptions } from 'bongle/interface';
 import { frameOutbound, type Reassembler } from '../core/net';
 import type { ServerMessage } from '../core/protocol';
 import { packServerMessage } from '../core/protocol';
@@ -14,11 +14,14 @@ type OutboxEntry = {
 };
 
 export function init() {
-    const inbox = new Map<Client, Uint8Array[]>();
+    /** inbound frames awaiting the next tick, per client, indexed by Channel. */
+    const inbox = new Map<Client, Uint8Array[][]>();
+    /** framed outbound batches, drained to the host at the end of flush. */
     const outbox = new Map<Client, Uint8Array[]>();
     const outboxMessages = new Map<Client, OutboxEntry[]>();
-    // per-client reassembly of inbound fragments back into a whole message batch.
-    const reassemblers = new Map<Client, Reassembler>();
+    // per-client, per-channel reassembly of inbound fragments back into a whole
+    // message batch. Fragments are contiguous only within one channel.
+    const reassemblers = new Map<Client, Reassembler[]>();
 
     return {
         inbox,
@@ -68,11 +71,11 @@ export function broadcastToRoom(net: ServerNet, rooms: Rooms, room: Room, messag
 }
 
 /**
- * Frame each client's queued messages onto its outbox and clear the pending
- * queue. The batch is one atomic unit; `frameOutbound` splits it across ws
- * frames only when it exceeds `WIRE_BUDGET`, and the client reassembles it whole.
+ * Frame each client's queued messages and hand every frame to the host. The
+ * batch is one atomic unit; `frameOutbound` splits it across frames only when it
+ * exceeds `WIRE_BUDGET`, and the client reassembles it whole.
  */
-export function flush(net: ServerNet) {
+export function flush(net: ServerNet, send: ServerInitOptions['send']) {
     for (const [client, messages] of net.outboxMessages) {
         if (messages.length === 0) continue;
 
@@ -81,15 +84,19 @@ export function flush(net: ServerNet) {
             outbox = [];
             net.outbox.set(client, outbox);
         }
-        // frame the atomic batch; the transport sends each frame opaquely and
-        // the client reassembles the batch whole before decoding.
+        // frame the atomic batch; the host sends each frame opaquely and the
+        // client reassembles the batch whole before decoding.
         frameOutbound(
             messages.map((m) => m.bytes),
             outbox,
         );
     }
-
     net.outboxMessages.clear();
+
+    for (const [client, frames] of net.outbox) {
+        for (const frame of frames) send(client, Channel.RELIABLE, frame);
+    }
+    net.outbox.clear();
 }
 
 export type NetStats = {
