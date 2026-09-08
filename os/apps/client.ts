@@ -100,7 +100,7 @@ const client: App<AppInit> = async (env) => {
         graphics.handshakeStarted();
         await EngineClient.load(state);
         mark('loaded (device handshake + resources)');
-        EngineClientEditor.watchRegistry(state);
+        EngineClient.watchRegistry(state);
         env.onDispose(() => EngineClient.dispose(state));
 
         // DevTools automation surface for this client realm: `bongle` in the frame's

@@ -73,7 +73,7 @@ export async function start(opts: StartClientOptions): Promise<void> {
     await EngineClient.load(state);
     // watch the registry for HMR re-declares + do the initial apply. AFTER load so
     // the first apply sees the render tier.
-    EngineClientEditor.watchRegistry(state);
+    EngineClient.watchRegistry(state);
 
     // scene HMR: a .scene.json edit on disk → live update in the running world.
     if (import.meta.hot) {

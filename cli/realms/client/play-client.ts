@@ -6,7 +6,6 @@
 
 import { EngineClient } from 'bongle/engine-client';
 import { env } from 'bongle/env';
-import { __bongle } from 'bongle/internal';
 import { Channel, type ClientDriver } from 'bongle/interface';
 import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
 
@@ -57,13 +56,12 @@ export async function start(opts: StartClientOptions): Promise<void> {
 
     const state = EngineClient.init({ mode: 'play', driver, resourceLoader, domElement: document.body });
     // mount the play UI (Viewport owns the canvas) BEFORE load — load's resize
-    // needs the viewport element to size the renderer. Then registerFlush + the
-    // initial flush AFTER load, so applyRegistryChanges sees the render tier the
-    // load set up (otherwise settingsForTier reads a null tier). Mirrors the editor.
+    // needs the viewport element to size the renderer. Then watch the registry
+    // AFTER load, so the first apply sees the render tier the load set up
+    // (otherwise settingsForTier reads a null tier). Mirrors the editor.
     EngineClient.mountPlayUI(state.domElement);
     await EngineClient.load(state);
-    __bongle.registerFlush(() => EngineClient.applyRegistryChanges(state));
-    __bongle.flush();
+    EngineClient.watchRegistry(state);
 
     ws.addEventListener('message', (e) => EngineClient.receive(state, Channel.RELIABLE, new Uint8Array(e.data as ArrayBuffer)));
     await new Promise<void>((res) => ws.addEventListener('open', () => res(), { once: true }));

@@ -44,62 +44,28 @@ function envFor(target: Target): EnvValues {
         : { client: false, server: true, editor: false, offline: false };
 }
 
-// ── play-* adapters (the deployed client/server entry shims) ────────────────
+// ── play-* entries (the deployed client/server entry shims) ─────────────────
 //
-// Same shape the dev realms' play-{client,server} emit: a `bongle/interface`
-// adapter default-exported after the user side-effect imports run. Env is set
-// inside init(), matching the prod ordering.
+// Each default-exports the engine's own `bongle/interface` adapter after the user
+// side-effect imports run. The env flags are literals after the env bake; the
+// assignments stay for a reader and for a bundle run unbaked.
 
 const PLAY_CLIENT = `
 import { env } from 'bongle';
-import { client } from 'bongle/interface';
 import { EngineClient, browserResourceLoader } from 'bongle/engine-client';
-export default client({
-    init: (driver) => {
-        env.client = true; env.server = false; env.editor = false;
-        return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader, domElement: document.body });
-    },
-    load: async (state) => {
-        EngineClient.mountPlayUI(state.domElement);
-        await EngineClient.load(state);
-        // a standalone (client-only) build self-boots its local room; a multiplayer
-        // build boots from the server's join_room instead.
-        if (EngineClient.isStandaloneBuild()) EngineClient.startStandaloneRoom(state);
-    },
-    update: (state, dt) => EngineClient.update(state, dt),
-    dispose: (state) => EngineClient.dispose(state),
-    receive: (state, channel, bytes) => EngineClient.receive(state, channel, bytes),
-});
+env.client = true; env.server = false; env.editor = false;
+export default EngineClient.app({ resourceLoader: browserResourceLoader, domElement: document.body });
 `;
 
 const PLAY_SERVER = `
 import { env } from 'bongle';
-import { server } from 'bongle/interface';
 import { EngineServer } from 'bongle/engine-server';
-
 // Host-neutral: no node imports. The host injects fs (project files: scenes under
 // content/scenes/, model bins under resources/server/), zstd (native node:zlib or
-// wasm), and the driver (storage + avatars). Runs unchanged in a node process
-// (deploy) or a browser worker (solo).
-export default server({
-    init: (opts) => {
-        env.client = false; env.server = true; env.editor = false;
-        return EngineServer.init({
-            mode: 'play',
-            fs: opts.fs,
-            zstd: opts.zstd,
-            options: opts.options,
-            driver: opts.driver,
-            send: opts.send,
-        });
-    },
-    load: async (state) => { await EngineServer.load(state); },
-    update: (state, dt) => EngineServer.update(state, dt),
-    dispose: (state) => EngineServer.dispose(state),
-    onClientJoin: (state, c, user, joinData, avatar) => EngineServer.onClientJoin(state, c, user, joinData, avatar),
-    onClientLeave: (state, c) => EngineServer.onClientLeave(state, c),
-    receive: (state, c, channel, bytes) => EngineServer.receive(state, c, channel, bytes),
-});
+// wasm), the driver (storage + avatars) and the outbound sink. Runs unchanged in a
+// node process (deploy) or a browser worker (solo).
+env.client = false; env.server = true; env.editor = false;
+export default EngineServer.app('play');
 `;
 
 // Asset registrations reference their SOURCE files with `asset('./x', import.meta.url)`

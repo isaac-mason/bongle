@@ -8,9 +8,9 @@
 import type { Server as HttpServer } from 'node:http';
 import * as api from 'bongle';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
-import * as EngineServerEditor from 'bongle/engine-server-editor';
+import 'bongle/engine-server-editor';
 import { env } from 'bongle/env';
-import type { Channel, Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
+import type { ResolvedAvatar, ServerApp } from '../../../interface/index';
 import { createFallbackAvatarsDriver } from '../../../src/node/sample-avatars-driver';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
@@ -68,7 +68,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     g._api = api;
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
-    EngineServerEditor.watchRegistry(state);
+    EngineServer.watchRegistry(state);
 
     // random sample avatar per join → onClientJoin (via the transport), so clients
     // wear a real avatar instead of the failing builtin fallback.
@@ -79,16 +79,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     const resolveAvatar = (): ResolvedAvatar | undefined =>
         avatarPool.length > 0 ? avatarPool[Math.floor(Math.random() * avatarPool.length)] : undefined;
 
-    const app: ServerApp<ServerState> = {
-        init: () => state,
-        load: async () => {},
-        update: (s, dt) => EngineServer.update(s, dt),
-        dispose: (s) => EngineServer.dispose(s),
-        onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
-            EngineServer.onClientJoin(s, client, user, joinData, avatar),
-        onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
-        receive: (s, client: Client, channel: Channel, bytes: Uint8Array) => EngineServer.receive(s, client, channel, bytes),
-    };
+    const app = EngineServer.app('edit');
 
     const transport = attachGameTransport({ httpServer, app, state, sink, resolveAvatar });
 

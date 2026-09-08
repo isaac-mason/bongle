@@ -1,4 +1,5 @@
-import type { Channel, ClientDriver, JsonValue } from 'bongle/interface';
+import type { Channel, ClientApp, ClientDriver, JsonValue } from 'bongle/interface';
+import { registerFlushHandler, requestFlush } from '../core/capture/flush';
 import * as Clock from '../core/clock';
 import { isStandalone } from '../core/config';
 import * as Content from '../core/content';
@@ -40,12 +41,13 @@ import * as Input from './input';
 import * as Manifest from './manifest';
 import * as Net from './net';
 import * as Performance from './performance';
-import { seedModels } from './registry-dispatch';
+import { applyRegistryChanges, seedModels } from './registry-dispatch';
 import * as Replication from './replication';
 import * as Rooms from './rooms';
 import * as ClientRpc from './rpc';
 import * as Telemetry from './telemetry';
 import * as Transfer from './transfer';
+import { mountPlayUI } from './ui/play-ui';
 import { useClient } from './ui/stores/client-store';
 import * as Viewport from './viewport';
 import * as VoxelNet from './voxel-net';
@@ -76,14 +78,12 @@ export type InitOptions = {
     domElement: HTMLElement;
 };
 
-// Re-export the registry-dispatch entry so the client boot template can call
-// `EngineClient.applyRegistryChanges(state)` from its flush handler.
-export { applyRegistryChanges, refreshAudioResources, refreshBlockResources, refreshSpriteResources } from './registry-dispatch';
+// The resource refreshes the edit hosts call when a baked artifact changes on disk.
+export { refreshAudioResources, refreshBlockResources, refreshSpriteResources } from './registry-dispatch';
 
-// Re-export the play-mode UI mount so the play-mode boot template can mount
-// the play shell directly, keeps `engine-client` free of `env.editor` UI
-// branches; the editor counterpart lives at `bongle/engine-client-editor`.
-export { mountPlayUI } from './ui/play-ui';
+// The play-mode UI mount, for a host that boots play mode by hand rather than
+// through `app()`; the editor counterpart lives at `bongle/engine-client-editor`.
+export { mountPlayUI };
 
 export function init(opts: InitOptions) {
     const { mode, driver } = opts;
@@ -712,4 +712,36 @@ export function dispose(state: EngineClient): void {
         state.renderer.dispose();
     }
     state.domElement?.remove();
+}
+
+/** The play client as a `ClientApp`: what a bundle default-exports and a host (the
+ *  play page, `bongle start`) drives. Play-mode boot in one place: init with the
+ *  host's driver, mount the play shell, load, and boot a standalone build's local
+ *  room. Edit hosts mount the editor instead and call these functions themselves. */
+export function app(opts: Omit<InitOptions, 'mode' | 'driver'>): ClientApp<EngineClient> {
+    return {
+        init: (driver) => init({ ...opts, mode: 'play', driver }),
+        load: async (state) => {
+            // the Viewport owns the canvas, so it mounts BEFORE load: load's resize
+            // needs the viewport element to size the renderer.
+            mountPlayUI(state.domElement);
+            await load(state);
+            // a standalone (client-only) build self-boots its local room; a multiplayer
+            // build boots from the server's join_room instead.
+            if (isStandaloneBuild()) startStandaloneRoom(state);
+        },
+        update,
+        dispose,
+        receive,
+    };
+}
+
+/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),
+ *  plus an initial apply; returns an unregister for teardown. Call AFTER `load` so
+ *  the first apply sees the render tier. Dev only: a deployed client applies the
+ *  registry once in `load()` and never calls this. */
+export function watchRegistry(state: EngineClient): () => void {
+    const unregister = registerFlushHandler(() => applyRegistryChanges(state));
+    requestFlush();
+    return unregister;
 }

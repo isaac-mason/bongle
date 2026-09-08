@@ -9,8 +9,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import { env } from 'bongle/env';
-import { __bongle } from 'bongle/internal';
-import type { Channel, Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
+import type { ServerApp } from '../../../interface/index';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
 import { attachGameTransport, createSocketSink, type GameTransport } from './transport';
@@ -55,18 +54,9 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
-    __bongle.registerFlush(() => EngineServer.applyRegistryChanges(state));
+    EngineServer.watchRegistry(state);
 
-    const app: ServerApp<ServerState> = {
-        init: () => state,
-        load: async () => {},
-        update: (s, dt) => EngineServer.update(s, dt),
-        dispose: (s) => EngineServer.dispose(s),
-        onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
-            EngineServer.onClientJoin(s, client, user, joinData, avatar),
-        onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
-        receive: (s, client: Client, channel: Channel, bytes: Uint8Array) => EngineServer.receive(s, client, channel, bytes),
-    };
+    const app = EngineServer.app('play');
 
     const transport = attachGameTransport({ httpServer, app, state, sink });
 
@@ -77,8 +67,6 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         last = now;
         EngineServer.update(state, dt);
     }, 1000 / SERVER_TICK_HZ);
-
-    __bongle.flush();
 
     return {
         app,

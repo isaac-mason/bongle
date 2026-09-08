@@ -8,16 +8,7 @@
 // game-room composes around the WS transport.
 
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
-import type {
-    Channel,
-    Client,
-    JsonValue,
-    ResolvedAvatar,
-    ServerApp,
-    ServerDriver,
-    ServerInitOptions,
-    User,
-} from 'bongle/interface';
+import type { ResolvedAvatar, ServerApp, ServerDriver, ServerInitOptions } from 'bongle/interface';
 import { initZstd, zstdCompress } from 'bongle/zstd-wasm';
 import type { Filesystem } from '../../interface';
 
@@ -130,21 +121,11 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // watch the registry: re-apply on each settled flush (the realm's runner
     // flushes after evaluating user code / an HMR cascade; this updates the live
     // world in place) plus an initial apply.
-    const unregister = EngineServerEditor.watchRegistry(state);
+    const unregister = EngineServer.watchRegistry(state);
 
-    // ServerApp adapter — the transport (transport-server.ts) drives the engine
-    // through this exactly like game-room/edit-server drive it through the WS
-    // transport.
-    const app: ServerApp<ServerState> = {
-        init: () => state,
-        load: async () => {},
-        update: (s, dt) => EngineServer.update(s, dt),
-        dispose: (s) => EngineServer.dispose(s),
-        onClientJoin: (s, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) =>
-            EngineServer.onClientJoin(s, client, user, joinData, avatar),
-        onClientLeave: (s, client: Client) => EngineServer.onClientLeave(s, client),
-        receive: (s, client: Client, channel: Channel, bytes: Uint8Array) => EngineServer.receive(s, client, channel, bytes),
-    };
+    // the engine's own ServerApp: the transport (transport-server.ts) drives the
+    // engine through it exactly like the play room drives it over WS.
+    const app = EngineServer.app('edit');
 
     // pre-fetch the sample pool once; picker yields a random avatar per join.
     let avatarPool: ResolvedAvatar[] = [];

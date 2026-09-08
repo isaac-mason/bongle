@@ -7,14 +7,11 @@
 // out of `engine-client.ts` keeps the runtime entry free of `env.editor`
 // UI conditionals, composition lives in the template, not the core.
 //
-// Pairs with `engine-server-editor` (the server-side counterpart). Both own the
-// HMR re-apply loop via `watchRegistry`, so the edit realms never reach into
-// `bongle/internal` for the flush themselves.
+// Pairs with `engine-server-editor` (the server-side counterpart). The HMR re-apply
+// loop is `EngineClient.watchRegistry`, the same one every dev realm uses.
 
 import * as api from 'bongle';
 import type { EngineClient } from './client/client';
-import { applyRegistryChanges } from './client/registry-dispatch';
-import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import { type SceneSource, setSceneSource } from './editor/blueprints';
 import './editor/client';
 import { mountEditUI } from './editor/ui/edit-ui';
@@ -53,18 +50,4 @@ export function setup(state: EngineClient, opts?: { sceneSource?: SceneSource })
             setSceneSource(null);
         },
     };
-}
-
-/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),
- *  plus an initial apply. Returns an unregister for teardown. Call AFTER
- *  `EngineClient.load` so the first apply sees the loaded render tier.
- *
- *  Edit/dev only: deployed play applies the registry once in `load()` and never
- *  runs this. Lives here (not on `EngineClient`) so the play surface stays free
- *  of the HMR loop; `registerFlushHandler`/`requestFlush` are the same
- *  `core/capture/flush` primitives `bongle/internal` exposes to realm entries. */
-export function watchRegistry(state: EngineClient): () => void {
-    const unregister = registerFlushHandler(() => applyRegistryChanges(state));
-    requestFlush();
-    return unregister;
 }

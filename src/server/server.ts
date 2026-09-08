@@ -4,10 +4,12 @@ import type {
     Filesystem,
     JsonValue,
     ResolvedAvatar,
+    ServerApp,
     ServerDriver,
     ServerInitOptions,
     User,
 } from 'bongle/interface';
+import { registerFlushHandler, requestFlush } from '../core/capture/flush';
 import * as Clock from '../core/clock';
 import { serverMaxPlayers } from '../core/config';
 import * as Content from '../core/content';
@@ -40,7 +42,7 @@ import * as Clients from './clients';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
 import * as Net from './net';
-import { seedModels } from './registry-dispatch';
+import { applyRegistryChanges, seedModels } from './registry-dispatch';
 import * as ResourceManager from './resource-manager';
 import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
@@ -49,11 +51,6 @@ import * as Telemetry from './telemetry';
 // runtime avatar swap (editor live preview — re-register the edited glb under a
 // fresh modelId + re-stamp the player without a re-join).
 export { reloadClientAvatar } from './avatars';
-// Re-export the registry-dispatch entry so the cli play realms (a dev loop over
-// the play interface) can call `EngineServer.applyRegistryChanges(state)` from
-// their flush handler. The editor + cli EDIT realms go through
-// `engine-server-editor.watchRegistry` instead, so this stays off their path.
-export { applyRegistryChanges } from './registry-dispatch';
 export { DEFAULT_SCENE_ID };
 
 export type InitOptions = {
@@ -647,4 +644,29 @@ export function dispose(state: EngineServer): void {
     }
 
     state.defaultRoomId = null;
+}
+
+/** The server as a `ServerApp`: what a bundle default-exports and a host (the play
+ *  room, `bongle start`, the dev transports) drives. `mode` is the one choice a
+ *  host makes at build or boot time; everything else arrives per init. */
+export function app(mode: InitOptions['mode']): ServerApp<EngineServer> {
+    return {
+        init: (opts) => init({ mode, ...opts }),
+        load,
+        update,
+        dispose,
+        onClientJoin,
+        onClientLeave,
+        receive,
+    };
+}
+
+/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),
+ *  plus an initial apply; returns an unregister for teardown. Call AFTER `load` so
+ *  the first apply sees the loaded rooms. Dev only: a deployed server applies the
+ *  registry once in `load()` and never calls this. */
+export function watchRegistry(state: EngineServer): () => void {
+    const unregister = registerFlushHandler(() => applyRegistryChanges(state));
+    requestFlush();
+    return unregister;
 }
