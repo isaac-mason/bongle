@@ -1,17 +1,18 @@
 /// <reference types="vite/client" />
-// cli/realms/client/edit-client.ts — the browser EDIT client for `bongle dev`.
-// Runs the game client in mode:'edit' — the in-game scene + voxel editing tools
-// (EngineClientEditor.setup mounts the edit UI). Your IDE is the code editor; this is the
-// in-project editor. Served by the Vite `client` env; dials the edit server over /game.
+// cli/realms/client/edit-client.ts, the browser EDIT client for `bongle dev`. Runs the
+// game client in mode:'edit' with the editor mounted on it (the in-project scene +
+// voxel editing tools; your IDE is the code editor). Served by the Vite `client` env;
+// dials the edit server over /game through the debug pane's latency sim.
 //
 // (Play-from-source lives in play-client.ts, reserved for `bongle start`/preview.)
 
 import { EngineClient } from 'bongle/engine-client';
 import * as EngineClientEditor from 'bongle/engine-client-editor';
 import { env } from 'bongle/env';
-import { Channel, type ClientDriver } from 'bongle/interface';
-import { createNetSim } from '../../../build';
+import { Channel } from 'bongle/interface';
+import { devUser, editorNetSim, frameLoop, inertPlatform, transferNotWired } from '../../../build';
 import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
+import { dialGame, httpResourceLoader, httpSceneSource, opened } from './dev-host';
 
 export type StartClientOptions = {
     userEntry: () => Promise<unknown>;
@@ -25,101 +26,56 @@ export async function start(opts: StartClientOptions): Promise<void> {
     // the baked barrel patches model handles with their bin paths (mirrors the
     // editor realm importing src/generated/models.ts). Without it, `model()`
     // handles keep their cold-start placeholder and render as placeholder nodes.
-    // @ts-expect-error — a Vite resolve.alias (→ <projectDir>/src/generated/models.ts), not resolvable by tsgo.
+    // @ts-expect-error a Vite resolve.alias (<projectDir>/src/generated/models.ts), not resolvable by tsgo.
     await import('bongle-project-models');
 
-    const driver: ClientDriver = {
-        matchmake() {},
-        // the editor is not a play page: a transfer opens the target in a new tab
-        // instead of navigating, so the editing session survives.
-        async transfer({ slug }) {
-            console.warn(`[bongle] client.transfer to '${slug}': not wired in the editor yet, staying here`);
-            return false;
+    const ws = dialGame();
+    const netSim = editorNetSim<ArrayBuffer>(EngineClientEditor.useEditor, {
+        deliverInbound: (bytes) => EngineClient.receive(state, Channel.RELIABLE, bytes),
+        deliverOutbound: (buf) => ws.send(buf),
+    });
+    const state = EngineClient.init({
+        mode: 'edit',
+        driver: {
+            matchmake() {},
+            // the editor is not a play page: a transfer would open the target elsewhere.
+            transfer: transferNotWired('not wired in the editor yet'),
+            platform: inertPlatform,
+            user: devUser({ source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID }),
+            // outbound frames go through the net-sim delay line before the socket; the
+            // engine only calls this from inside update. SAB-backed views get copied.
+            send: (_channel, bytes) => netSim.send(bytes.slice().buffer, performance.now()),
         },
-        platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
-        // dev editor: a stand-in local identity + builtin avatar (no session/account).
-        user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
-        // outbound frames go through the net-sim delay line (below) before the socket;
-        // the engine only calls this from inside update. SAB-backed views get copied.
-        send: (_channel, bytes) => netSim.send(bytes.slice().buffer, performance.now()),
-    };
-    const resourceLoader = {
-        loadBytes: async (url: string): Promise<Uint8Array> => {
-            const target = /^(https?:|\/)/.test(url) ? url : `/resources/client/${url.replace(/^\.?\//, '')}`;
-            const r = await fetch(target);
-            if (!r.ok) throw new Error(`fetch ${target}: ${r.status}`);
-            return new Uint8Array(await r.arrayBuffer());
-        },
-    };
-    // the editor lists/reads scene files over HTTP from the dev server (writes flow
-    // through the engine's scene protocol to the server's disk persist).
-    const sceneSource: EngineClientEditor.SceneSource = {
-        listScenes: async () => {
-            const r = await fetch('/__bongle/scenes');
-            return r.ok ? ((await r.json()) as string[]) : [];
-        },
-        readScene: async (id) => {
-            const r = await fetch(`/__bongle/scenes/${encodeURIComponent(id)}`);
-            return r.ok ? await r.text() : null;
-        },
-    };
-
-    const state = EngineClient.init({ mode: 'edit', driver, resourceLoader, domElement: document.body });
-    // EngineClientEditor.setup registers the editor client + mounts the in-world edit UI —
-    // BEFORE load() (its clearPendingChanges sweep). Then flush AFTER load so the
-    // registry apply sees the render tier load set up. Resources are already baked
-    // (startup child-bake), so no pipeline-ready gate is needed.
-    await EngineClientEditor.setup(state, { sceneSource });
-    await EngineClient.load(state);
-    // watch the registry for HMR re-declares + do the initial apply. AFTER load so
-    // the first apply sees the render tier.
-    EngineClient.watchRegistry(state);
-
-    // scene HMR: a .scene.json edit on disk → live update in the running world.
-    if (import.meta.hot) {
-        import.meta.hot.on('bongle:scene-update', (msg: { id: string; scene: string }) => {
-            const file = JSON.parse(msg.scene);
-            EngineClient.applyScenePayload(state, msg.id, {
-                nodes: file.nodes,
-                voxels: file.chunks ? { chunks: file.chunks } : null,
-            });
-        });
-        import.meta.hot.on('bongle:scene-clear', (msg: { id: string }) => EngineClient.clearScene(state, msg.id));
-    }
-
-    const ws = new WebSocket(`ws://${location.host}/game`);
-    ws.binaryType = 'arraybuffer';
-
-    // debug-pane latency sim (see build/dev/net-sim): holds inbound + outbound
-    // frames per the live net-sim toggle so a laggy link is reproducible locally.
-    const netSim = createNetSim<Uint8Array, ArrayBuffer>(
-        () => {
-            const s = EngineClientEditor.useEditor.getState();
-            return {
-                enabled: s.netSimEnabled,
-                rttMs: s.netSimRttMs,
-                jitterMs: s.netSimJitterMs,
-                burstMs: s.netSimBurstMs,
-                burstChance: s.netSimBurstChance,
-            };
-        },
-        {
-            deliverInbound: (bytes) => EngineClient.receive(state, Channel.RELIABLE, bytes),
-            deliverOutbound: (buf) => ws.send(buf),
-        },
-    );
-
+        resourceLoader: httpResourceLoader,
+        domElement: document.body,
+    });
     ws.addEventListener('message', (e) => netSim.receive(new Uint8Array(e.data as ArrayBuffer), performance.now()));
-    await new Promise<void>((res) => ws.addEventListener('open', () => res(), { once: true }));
 
-    let last = performance.now();
-    const frame = (now: number): void => {
-        const dt = (now - last) / 1000;
-        last = now;
-        netSim.pump(now); // release due inbound before update reads the inbox.
+    // the editor mounts BEFORE load (its clearPendingChanges sweep); the registry is
+    // watched AFTER, so the first apply sees the render tier. Resources are already
+    // baked (the startup child-bake), so no pipeline-ready gate is needed.
+    EngineClientEditor.setup(state, { sceneSource: httpSceneSource });
+    await EngineClient.load(state);
+    EngineClient.watchRegistry(state);
+    installSceneHmr(state);
+    await opened(ws);
+
+    frameLoop((dt, now) => {
+        netSim.pump(now); // release due inbound before update reads it
         EngineClient.update(state, dt);
-        netSim.pump(now); // flush just-queued outbound that's due (immediate when disabled).
-        requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
+        netSim.pump(now); // flush just-queued outbound that's due (immediate when disabled)
+    });
+}
+
+/** scene HMR: a .scene.json edit on disk becomes a live update in the running world. */
+function installSceneHmr(state: ReturnType<typeof EngineClient.init>): void {
+    if (!import.meta.hot) return;
+    import.meta.hot.on('bongle:scene-update', (msg: { id: string; scene: string }) => {
+        const file = JSON.parse(msg.scene);
+        EngineClient.applyScenePayload(state, msg.id, {
+            nodes: file.nodes,
+            voxels: file.chunks ? { chunks: file.chunks } : null,
+        });
+    });
+    import.meta.hot.on('bongle:scene-clear', (msg: { id: string }) => EngineClient.clearScene(state, msg.id));
 }

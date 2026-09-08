@@ -23,6 +23,17 @@ export { bundleWorkerEntry, createBonglePlugin, workerWrapperModule } from './bu
 export { type BuildOptions, buildBundle } from './bundle/bundle';
 export { wrapModuleDeps } from './capture/capture-native';
 export { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, type CapturePluginOptions, capturePlugin } from './capture/capture-plugin';
+export {
+    type AvatarPicker,
+    avatarPicker,
+    devUser,
+    editorNetSim,
+    frameLoop,
+    inertPlatform,
+    type NetSimKnobs,
+    serverTick,
+    transferNotWired,
+} from './dev/host';
 export { contentType } from './dev/mime';
 export { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './dev/net-sim';
 export {

@@ -1,14 +1,15 @@
 /// <reference types="vite/client" />
-// cli/realms/server/play-server.ts — boot EngineServer inside the `server` Vite
-// env (a RunnableDevEnvironment in the node process). Imported through
+// cli/realms/server/play-server.ts, boot EngineServer inside the `server` Vite env (a
+// RunnableDevEnvironment in the node process) for `bongle dev`. Imported through
 // virtual:bongle/play-server by start.ts; noExternal bundles bongle into this env's
-// graph, so EngineServer/__bongle/env are the SAME instance the user code (userEntry)
-// registered into. Sets env → evaluates user code → inits + loads EngineServer →
-// attaches the /game WS transport → runs the 60Hz sim loop.
+// graph, so EngineServer and env are the SAME instance the user code (userEntry)
+// registered into. Sets env, evaluates user code, inits + loads EngineServer,
+// attaches the /game WS transport, runs the 60Hz sim.
 
 import type { Server as HttpServer } from 'node:http';
 import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
 import { env } from 'bongle/env';
+import { serverTick } from '../../../build';
 import type { ServerApp } from '../../../interface/index';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
@@ -32,7 +33,7 @@ export type ServerBootResult = {
 export async function start(opts: StartServerOptions): Promise<ServerBootResult> {
     const { httpServer, projectDir, userEntry } = opts;
 
-    // env BEFORE user code — top-level declarations may branch on it.
+    // env BEFORE user code: top-level declarations may branch on it.
     env.client = false;
     env.server = true;
     env.editor = false;
@@ -51,29 +52,20 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         driver: { storage: createInMemoryStorageDriver(), avatars: { sample: async () => [] } },
         send: sink.send,
     });
-
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
     EngineServer.watchRegistry(state);
 
     const app = EngineServer.app('play');
-
     const transport = attachGameTransport({ httpServer, app, state, sink });
-
-    let last = performance.now();
-    const timer = setInterval(() => {
-        const now = performance.now();
-        const dt = (now - last) / 1000;
-        last = now;
-        EngineServer.update(state, dt);
-    }, 1000 / SERVER_TICK_HZ);
+    const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ);
 
     return {
         app,
         state,
         transport,
         stop: () => {
-            clearInterval(timer);
+            stopTick();
             transport.close();
             EngineServer.dispose(state);
         },
