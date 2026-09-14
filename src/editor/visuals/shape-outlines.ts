@@ -112,14 +112,24 @@ function segment(
     Lines.line(lines, _a[0], _a[1], _a[2], _b[0], _b[1], _b[2], color[0], color[1], color[2], color[3]);
 }
 
-function drawShape(lines: Lines.LineBatch, spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, color: Rgba): void {
+const _centred: Mat4 = mat4.create();
+
+/** a shape's `center` is its own translation-only frame; the shape's maths stays at the origin of the returned matrix. */
+export function centredMatrix(spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, out: Mat4): Mat4 {
+    const center = spec.kind === 'segment' || !spec.center ? undefined : (local[spec.center] as Vec3 | undefined);
+    if (!center) return matrix;
+    mat4.fromTranslation(out, center);
+    return mat4.multiply(out, matrix, out);
+}
+
+function drawShape(lines: Lines.LineBatch, spec: ShapeSpecData, local: Record<string, unknown>, parent: Mat4, color: Rgba): void {
+    const matrix = centredMatrix(spec, local, parent, _centred);
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3 | undefined;
         if (half) box(lines, matrix, half[0], half[1], half[2], color);
     } else if (spec.kind === 'sphere') {
         const radius = local[spec.radius] as number | undefined;
-        const center = spec.center ? ((local[spec.center] as Vec3 | undefined) ?? [0, 0, 0]) : [0, 0, 0];
-        if (radius !== undefined) sphere(lines, matrix, center[0], center[1], center[2], radius, color);
+        if (radius !== undefined) sphere(lines, matrix, 0, 0, 0, radius, color);
     } else if (spec.kind === 'segment') {
         const from = local[spec.from] as Vec3 | undefined;
         const to = local[spec.to] as Vec3 | undefined;

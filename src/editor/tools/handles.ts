@@ -18,7 +18,7 @@ import * as Text from '../../render/overlay/text';
 import { setTraitProps } from '../actions';
 import { SetTraitCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
-import { silhouette } from '../visuals/shape-outlines';
+import { centredMatrix, silhouette } from '../visuals/shape-outlines';
 
 const HANDLE_HALF_SIZE_PX = 9.5;
 /** the pointer under pointer lock: the screen centre. */
@@ -476,7 +476,12 @@ function walk(schema: Schema, value: unknown, matrix: Mat4, path: PropPath): voi
     }
 }
 
-function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
+function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, parent: Mat4, path: PropPath): void {
+    const matrix = centredMatrix(spec, local, parent, _centred);
+    if (spec.kind !== 'segment' && spec.center) {
+        const origin = take('frame', path, '', 0, 1, matrix, 0, 0, 0);
+        origin.framePosition = spec.center;
+    }
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3 | undefined;
         if (!half) return;
@@ -489,16 +494,9 @@ function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, matri
     } else if (spec.kind === 'sphere') {
         const radius = local[spec.radius] as number | undefined;
         if (radius === undefined) return;
-        const center = spec.center ? ((local[spec.center] as Vec3 | undefined) ?? [0, 0, 0]) : [0, 0, 0];
-        const handle = take('radius', path, spec.radius, 0, 1, matrix, center[0], center[1], center[2]);
-        // the drag measures from the sphere centre, so the handle's matrix carries the centre as its origin,
-        // and the dot sits on the silhouette ring, where the sphere's edge is on screen.
-        mat4.copy(_centered, matrix);
-        vec3.transformMat4(_centerWorld, vec3.set(_centerWorld, center[0], center[1], center[2]), matrix);
-        _centered[12] = _centerWorld[0];
-        _centered[13] = _centerWorld[1];
-        _centered[14] = _centerWorld[2];
-        mat4.copy(handle.matrix, _centered);
+        // the drag measures from the centre (the matrix origin); the dot sits on the silhouette ring, where the edge is on screen.
+        const handle = take('radius', path, spec.radius, 0, 1, matrix, 0, 0, 0);
+        vec3.set(_centerWorld, matrix[12]!, matrix[13]!, matrix[14]!);
         const ringRadius = silhouette(_centerWorld, radius, _collectEye, _ringCenter, _ringU, _ringV);
         if (ringRadius > 0) vec3.scaleAndAdd(handle.world, _ringCenter, _ringU, ringRadius);
         else vec3.scaleAndAdd(handle.world, _centerWorld, [1, 0, 0], radius);
@@ -510,7 +508,7 @@ function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, matri
     }
 }
 
-const _centered: Mat4 = mat4.create();
+const _centred: Mat4 = mat4.create();
 const _centerWorld: Vec3 = [0, 0, 0];
 const _ringCenter: Vec3 = [0, 0, 0];
 const _ringU: Vec3 = [0, 0, 0];

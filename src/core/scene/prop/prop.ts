@@ -59,7 +59,7 @@ export type SphereSpec<F> = {
     radius: Field<F, { subtype: 'radius' }>;
     center?: Field<F, { subtype: 'point' }>;
 };
-export type Box3Spec<F> = { kind: 'box3'; halfExtents: Field<F, Vector3Schema> };
+export type Box3Spec<F> = { kind: 'box3'; halfExtents: Field<F, Vector3Schema>; center?: Field<F, { subtype: 'point' }> };
 export type SegmentSpec<F> = {
     kind: 'segment';
     from: Field<F, { subtype: 'point' }>;
@@ -76,7 +76,7 @@ export type FrameSpec<F> = {
 /** the stored form: field names as plain strings, checked by `checkSpecs`. */
 export type ShapeSpecData =
     | { kind: 'sphere'; radius: string; center?: string }
-    | { kind: 'box3'; halfExtents: string }
+    | { kind: 'box3'; halfExtents: string; center?: string }
     | { kind: 'segment'; from: string; to: string };
 export type FrameSpecData = { position?: string; quaternion?: string };
 

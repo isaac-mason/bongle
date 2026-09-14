@@ -875,7 +875,11 @@ function boundsCenter(bounds: Selection.Bounds): Vec3 {
 function fittedShape(site: ShapeSite, bounds: Selection.Bounds): Record<string, unknown> | null {
     const [dx, dy, dz] = bounds.dimensions;
     const spec = site.spec;
-    if (spec.kind === 'box3') return { ...site.local, [spec.halfExtents]: [dx / 2, dy / 2, dz / 2] };
+    if (spec.kind === 'box3') {
+        const next = { ...site.local, [spec.halfExtents]: [dx / 2, dy / 2, dz / 2] };
+        if (spec.center) next[spec.center] = [0, 0, 0];
+        return next;
+    }
     if (spec.kind === 'sphere') {
         const next = { ...site.local, [spec.radius]: Math.max(dx, dy, dz) / 2 };
         if (spec.center) next[spec.center] = [0, 0, 0];
@@ -983,14 +987,18 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
     const selection = Selection.create();
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3;
+        const center = spec.center ? ((local[spec.center] as Vec3 | undefined) ?? [0, 0, 0]) : [0, 0, 0];
+        const cx = origin[0] + center[0];
+        const cy = origin[1] + center[1];
+        const cz = origin[2] + center[2];
         Selection.setAABB(
             selection,
-            Math.ceil(origin[0] - half[0] - 0.5),
-            Math.ceil(origin[1] - half[1] - 0.5),
-            Math.ceil(origin[2] - half[2] - 0.5),
-            Math.floor(origin[0] + half[0] - 0.5),
-            Math.floor(origin[1] + half[1] - 0.5),
-            Math.floor(origin[2] + half[2] - 0.5),
+            Math.ceil(cx - half[0] - 0.5),
+            Math.ceil(cy - half[1] - 0.5),
+            Math.ceil(cz - half[2] - 0.5),
+            Math.floor(cx + half[0] - 0.5),
+            Math.floor(cy + half[1] - 0.5),
+            Math.floor(cz + half[2] - 0.5),
         );
         return selection;
     }

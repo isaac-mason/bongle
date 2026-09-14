@@ -82,6 +82,7 @@ function checkObject(schema: ObjectSchema, path: string, problems: string[]): vo
             expect(shape.center, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
         } else if (shape.kind === 'box3') {
             expect(shape.halfExtents, 'a vector3', (s) => s.type === 'vector3');
+            expect(shape.center, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
         } else {
             expect(shape.from, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
             expect(shape.to, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');

@@ -50,3 +50,18 @@ describe('shape and frame specs', () => {
         expect(validate(prop.point(), [0, 2, 0])).toEqual([]);
     });
 });
+
+describe('shape centres', () => {
+    it('a box may name a point as its centre, and a non-point centre is reported', async () => {
+        const { checkSpecs, prop } = await import('../../../../src/core/scene/prop');
+        const good = prop.object(
+            { center: prop.point(), halfExtents: prop.vec3() },
+            { shape: { kind: 'box3', halfExtents: 'halfExtents', center: 'center' } },
+        );
+        expect(checkSpecs(good)).toEqual([]);
+        const bad = prop.object({ center: prop.vec3(), halfExtents: prop.vec3() }, {
+            shape: { kind: 'box3', halfExtents: 'halfExtents', center: 'center' },
+        } as never);
+        expect(checkSpecs(bad)).toHaveLength(1);
+    });
+});
