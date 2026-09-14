@@ -6,6 +6,7 @@ import { computeWorldTransforms, TransformTrait } from '../../../../src/builtins
 import { createMouseKeyboardInput } from '../../../../src/client/input';
 import { control, registry, reindexRegistry, trait } from '../../../../src/core/registry';
 import { prop } from '../../../../src/core/scene/prop';
+import type { Schema } from '../../../../src/core/scene/prop/prop';
 import { addChild, addTrait, createNode, createSceneTree } from '../../../../src/core/scene/scene-tree';
 import * as Selection from '../../../../src/core/scene/selection';
 import type { EditRoomStoreApi } from '../../../../src/editor/edit-room-store';
@@ -157,13 +158,9 @@ describe('shape handles on a list of centred spheres', () => {
 });
 
 // a scene with one node carrying a trait whose single control is `schema`, viewed from +z.
-function harness(
-    schema: ReturnType<typeof prop.object> | ReturnType<typeof prop.list>,
-    initial: unknown,
-    nodePosition: Vec3 = [0, 0, 0],
-) {
+function harness(schema: Schema, initial: unknown, nodePosition: Vec3 = [0, 0, 0]) {
     const id = `test-harness-${harnessCount++}`;
-    const Trait = trait(id, { value: null as unknown });
+    const Trait = trait(id, { value: (): unknown => null });
     control(Trait, 'value', {
         label: 'Value',
         schema,
@@ -234,13 +231,13 @@ describe('shape handles: drags and spaces', () => {
         h.mk._gestures.left.pressed = false;
         h.aim([2.6, 0, 0]);
         h.tick();
-        expect((h.instance.value as { halfExtents: number[] }).halfExtents).toEqual([3, 1, 1]);
+        expect((h.instance.value as unknown as { halfExtents: number[] }).halfExtents).toEqual([3, 1, 1]);
         h.mk._buttons.left = false;
         h.tick();
         expect(h.handles.armed).toBeNull();
         expect(h.actions).toHaveLength(1);
         h.actions[0]!.undo();
-        expect((h.instance.value as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
+        expect((h.instance.value as unknown as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
     });
 
     it('a world-space shape ignores the node transform', () => {

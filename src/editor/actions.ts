@@ -1,5 +1,11 @@
-import type { Quat, Vec3 } from 'math';
-import { getWorldPosition, TransformTrait, worldToLocalPosition } from '../builtins/transform';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
+import {
+    getVisualWorldMatrix,
+    getVisualWorldPosition,
+    getWorldPosition,
+    TransformTrait,
+    worldToLocalPosition,
+} from '../builtins/transform';
 import { registry } from '../core/registry';
 import { setAtPath } from '../core/scene/prop/path';
 import { findShape, type ShapeSite } from '../core/scene/prop/specs';
@@ -872,27 +878,43 @@ function boundsCenter(bounds: Selection.Bounds): Vec3 {
     ];
 }
 
-function fittedShape(site: ShapeSite, bounds: Selection.Bounds): Record<string, unknown> | null {
-    const [dx, dy, dz] = bounds.dimensions;
-    const spec = site.spec;
-    // a local shape is centred on the node (which moves to the bounds); a world shape carries the centre itself.
-    const center: Vec3 = site.space === 'world' ? boundsCenter(bounds) : [0, 0, 0];
-    if (spec.kind === 'box3') {
-        if (site.space === 'world' && !spec.center) return null;
-        const next = { ...site.local, [spec.halfExtents]: [dx / 2, dy / 2, dz / 2] };
-        if (spec.center) next[spec.center] = center;
-        return next;
+const _fitFrame: Mat4 = mat4.create();
+const _fitShapeFrame: Mat4 = mat4.create();
+const _fitInverse: Mat4 = mat4.create();
+const _fitRotation: Quat = [0, 0, 0, 1];
+const _fitInverseRotation: Quat = [0, 0, 0, 1];
+const _fitCorner: Vec3 = [0, 0, 0];
+const IDENTITY: Mat4 = mat4.create();
+
+// half extents of the bounds seen in the shape frame's rotation about `centre`: an axis-aligned selection under a
+// rotated frame is enclosed, not matched.
+function halfExtentsInFrame(bounds: Selection.Bounds, centre: Vec3, shapeFrame: Mat4): Vec3 {
+    mat4.getRotation(_fitRotation, shapeFrame);
+    quat.invert(_fitInverseRotation, _fitRotation);
+    const half: Vec3 = [0, 0, 0];
+    for (const sx of [0, 1]) {
+        for (const sy of [0, 1]) {
+            for (const sz of [0, 1]) {
+                vec3.set(
+                    _fitCorner,
+                    (sx ? bounds.max[0] + 1 : bounds.min[0]) - centre[0],
+                    (sy ? bounds.max[1] + 1 : bounds.min[1]) - centre[1],
+                    (sz ? bounds.max[2] + 1 : bounds.min[2]) - centre[2],
+                );
+                vec3.transformQuat(_fitCorner, _fitCorner, _fitInverseRotation);
+                half[0] = Math.max(half[0], Math.abs(_fitCorner[0]));
+                half[1] = Math.max(half[1], Math.abs(_fitCorner[1]));
+                half[2] = Math.max(half[2], Math.abs(_fitCorner[2]));
+            }
+        }
     }
-    if (spec.kind === 'sphere') {
-        if (site.space === 'world' && !spec.center) return null;
-        const next = { ...site.local, [spec.radius]: Math.max(dx, dy, dz) / 2 };
-        if (spec.center) next[spec.center] = center;
-        return next;
-    }
-    return null;
+    return half;
 }
 
-/** moves the node to the bounds' centre and sizes its first shape field to the bounds; false when the node has no fittable shape. */
+/**
+ * moves the node's first shape onto the bounds and sizes it to them: a shape with a centre takes the centre itself,
+ * otherwise the node moves; the extents are read in the shape's own frame. false when the node has no fittable shape.
+ */
 export function fitShapeToBoundsAction(
     state: EditRoomState,
     ctx: ScriptContext,
@@ -903,13 +925,41 @@ export function fitShapeToBoundsAction(
     if (!node) return false;
     const shape = findNodeShape(node);
     if (!shape) return false;
-    const fitted = fittedShape(shape.site, bounds);
-    if (!fitted) return false;
-    const transform = shape.site.space === 'world' ? undefined : getTrait(node, TransformTrait);
+    const { spec, local, space } = shape.site;
+    if (spec.kind === 'segment') return false;
+    const transform = getTrait(node, TransformTrait);
+    if (space === 'local' && !transform) return false;
+    if (space === 'world' && !spec.center) return false;
+
+    const nodeWorld = space === 'world' || !transform ? IDENTITY : getVisualWorldMatrix(transform);
+    mat4.multiply(_fitFrame, nodeWorld, shape.site.matrix);
+    mat4.multiply(_fitShapeFrame, nodeWorld, shape.site.shapeMatrix);
+    const centre = boundsCenter(bounds);
+    const half = halfExtentsInFrame(bounds, centre, _fitShapeFrame);
+
+    const fitted: Record<string, unknown> =
+        spec.kind === 'box3'
+            ? { ...local, [spec.halfExtents]: half }
+            : { ...local, [spec.radius]: Math.max(half[0], half[1], half[2]) };
+    let nextTransformProps: Record<string, unknown> | null = null;
+    if (spec.center) {
+        mat4.invert(_fitInverse, _fitFrame);
+        fitted[spec.center] = vec3.transformMat4([0, 0, 0], centre, _fitInverse);
+    } else {
+        // the shape sits at its frame origin: shift the node by that origin's offset from the bounds centre
+        const origin: Vec3 = [_fitShapeFrame[12]!, _fitShapeFrame[13]!, _fitShapeFrame[14]!];
+        const nodeWorldPosition = getVisualWorldPosition(transform!);
+        const target: Vec3 = [
+            nodeWorldPosition[0] + centre[0] - origin[0],
+            nodeWorldPosition[1] + centre[1] - origin[1],
+            nodeWorldPosition[2] + centre[2] - origin[2],
+        ];
+        nextTransformProps = { position: worldToLocalPosition(transform!, target, [0, 0, 0]) };
+    }
+
     const nextShapeProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
     const prevShapeProps = captureTraitProps(node, shape.traitId);
-    const prevTransformProps = transform ? captureTraitProps(node, 'transform') : null;
-    const nextTransformProps = transform ? { position: worldToLocalPosition(transform, boundsCenter(bounds), [0, 0, 0]) } : null;
+    const prevTransformProps = nextTransformProps ? captureTraitProps(node, 'transform') : null;
 
     const write = (shapeProps: Record<string, unknown> | null, transformProps: Record<string, unknown> | null) => {
         const n = getNodeById(ctx.scene, nodeId);

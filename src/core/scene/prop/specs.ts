@@ -2,7 +2,16 @@ import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import type { PropPath } from './path';
 import type { ObjectSchema, Schema, ShapeSpecData } from './prop';
 
-export type ShapeSite = { path: PropPath; spec: ShapeSpecData; local: Record<string, unknown>; space: 'local' | 'world' };
+export type ShapeSite = {
+    path: PropPath;
+    spec: ShapeSpecData;
+    local: Record<string, unknown>;
+    space: 'local' | 'world';
+    /** the object's frame relative to the walk root (the node), without the shape's centre. */
+    matrix: Mat4;
+    /** `matrix` with the shape's centre applied. */
+    shapeMatrix: Mat4;
+};
 
 /** one annotated object met by `walkObjects`, with the frames composed for it. */
 export type ObjectSite = {
@@ -93,7 +102,14 @@ export function findShape(schema: Schema, value: unknown): ShapeSite | null {
     let found: ShapeSite | null = null;
     walkObjects(schema, value, IDENTITY, (site) => {
         if (!site.schema.shape) return false;
-        found = { path: site.path, spec: site.schema.shape, local: site.local, space: site.schema.space ?? 'local' };
+        found = {
+            path: site.path,
+            spec: site.schema.shape,
+            local: site.local,
+            space: site.schema.space ?? 'local',
+            matrix: mat4.clone(site.matrix),
+            shapeMatrix: mat4.clone(site.shapeMatrix),
+        };
         return true;
     });
     return found;
