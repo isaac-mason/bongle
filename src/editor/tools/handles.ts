@@ -1,12 +1,13 @@
 import type { PerspectiveCamera } from 'gpucat';
 import { unproject } from 'gpucat';
-import { type Mat4, mat4, type Quat, type Vec3, vec3 } from 'math';
+import { type Mat4, mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import type { Cursor, MouseKeyboardInput } from '../../client/input';
 import { getCursor, isModDown, isMouseDown, isMouseJustDown, isMouseLocked } from '../../client/input';
 import { registry } from '../../core/registry';
 import { type PropPath, setAtPath } from '../../core/scene/prop/path';
-import type { ObjectSchema, Schema, ShapeSpecData } from '../../core/scene/prop/prop';
+import type { ShapeSpecData } from '../../core/scene/prop/prop';
+import { walkObjects } from '../../core/scene/prop/specs';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -18,22 +19,35 @@ import * as Text from '../../render/overlay/text';
 import { setTraitProps } from '../actions';
 import { SetTraitCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
-import { centredMatrix, silhouette } from '../visuals/shape-outlines';
+import { silhouette } from '../visuals/shape-outlines';
 
 const HANDLE_HALF_SIZE_PX = 9.5;
+
 /** the pointer under pointer lock: the screen centre. */
 const CROSSHAIR: Cursor = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
+
 const HANDLE_DOT_PX = 14;
+
 const HANDLE_DOT_HOT_PX = 18;
+
 const FRAME_DOT_PX = 10;
+
 const HANDLE_LABEL_SCALE = 2;
+
 const HANDLE_LABEL_GAP_PX = 6;
+
 const AXIS_NAMES = ['x', 'y', 'z'] as const;
+
 const READOUT_DX_PX = HANDLE_DOT_HOT_PX / 2 + HANDLE_LABEL_GAP_PX;
+
 const MIN_LENGTH = 0.05;
+
 const MAX_RAY_DIST = 1024;
+
 const DOT_COLOR: [number, number, number, number] = [1, 1, 1, 1];
+
 const HOT_COLOR: [number, number, number, number] = [1, 0.85, 0.1, 1];
+
 const FRAME_COLOR: [number, number, number, number] = [0.3, 0.9, 1, 1];
 
 type Handle = {
@@ -228,12 +242,19 @@ function resolve(handle: Handle, sceneTree: SceneTree): Target | null {
 }
 
 const _near: Vec3 = [0, 0, 0];
+
 const _far: Vec3 = [0, 0, 0];
+
 const _dir: Vec3 = [0, 0, 0];
+
 const _origin: Vec3 = [0, 0, 0];
+
 const _axis: Vec3 = [0, 0, 0];
+
 const _hit: Vec3 = [0, 0, 0];
+
 const _eye: Vec3 = [0, 0, 0];
+
 const _inverse: Mat4 = mat4.create();
 
 function cursorRay(cursor: Cursor, camera: PerspectiveCamera): void {
@@ -316,8 +337,11 @@ function drag(
 }
 
 const _view: Mat4 = mat4.create();
+
 const _viewProjection: Mat4 = mat4.create();
+
 const _projected: Vec3 = [0, 0, 0];
+
 const _viewSpace: Vec3 = [0, 0, 0];
 
 function nearest(state: HandlesState, cursor: Cursor, camera: PerspectiveCamera, width: number, height: number): number {
@@ -358,11 +382,12 @@ function draw(state: HandlesState, quads: Quads.QuadBatch, text: Text.TextBatch)
 
 // collection: one handle per box face, sphere radius, segment end and frame origin on the active node.
 
-const MATRIX_STACK: Mat4[] = [];
-let _depth = 0;
 let _collecting: HandlesState | null = null;
+
 let _nodeId = 0;
+
 let _traitId = '';
+
 let _controlId = '';
 
 let _collectEye: Vec3 = [0, 0, 0];
@@ -384,8 +409,22 @@ function collect(state: HandlesState, node: Node | undefined, eye: Vec3): void {
         _traitId = trait.def.id;
         for (const reg of trait.def.controls) {
             _controlId = reg.controlId;
-            _depth = 0;
-            walk(reg.schema, reg.get(instance), world, []);
+            walkObjects(reg.schema, reg.get(instance), world, (site) => {
+                const { schema, local, path } = site;
+                if (schema.frame) {
+                    const origin = take('frame', path, '', 0, 1, site.matrix, 0, 0, 0);
+                    origin.framePosition = schema.frame.position;
+                    origin.frameQuaternion = schema.frame.quaternion;
+                }
+                if (schema.shape) {
+                    if (schema.shape.kind !== 'segment' && schema.shape.center) {
+                        const origin = take('frame', path, '', 0, 1, site.shapeMatrix, 0, 0, 0);
+                        origin.framePosition = schema.shape.center;
+                    }
+                    shapeHandles(schema.shape, local, site.shapeMatrix, path);
+                }
+                return false;
+            });
         }
     }
     _collecting = null;
@@ -433,66 +472,7 @@ function take(
     return handle;
 }
 
-function pushFrame(parent: Mat4, position: Vec3 | undefined, quaternion: Quat | undefined): Mat4 {
-    if (MATRIX_STACK.length <= _depth) MATRIX_STACK.push(mat4.create());
-    const out = MATRIX_STACK[_depth++]!;
-    mat4.fromRotationTranslation(out, quaternion ?? [0, 0, 0, 1], position ?? [0, 0, 0]);
-    return mat4.multiply(out, parent, out);
-}
-
-function walk(schema: Schema, value: unknown, matrix: Mat4, path: PropPath): void {
-    switch (schema.type) {
-        case 'object': {
-            if (value === null || typeof value !== 'object') return;
-            const local = value as Record<string, unknown>;
-            let frame = schema.space === 'world' ? _identity : matrix;
-            const depth = _depth;
-            if (schema.frame) {
-                frame = pushFrame(
-                    frame,
-                    schema.frame.position ? (local[schema.frame.position] as Vec3 | undefined) : undefined,
-                    schema.frame.quaternion ? (local[schema.frame.quaternion] as Quat | undefined) : undefined,
-                );
-                const origin = take('frame', path, '', 0, 1, frame, 0, 0, 0);
-                origin.framePosition = schema.frame.position;
-                origin.frameQuaternion = schema.frame.quaternion;
-            }
-            if (schema.shape) shapeHandles(schema.shape, local, frame, path);
-            for (const [key, field] of Object.entries(schema.fields)) walk(field, local[key], frame, [...path, key]);
-            _depth = depth;
-            return;
-        }
-        case 'union': {
-            if (value === null || typeof value !== 'object') return;
-            const discriminator = (value as Record<string, unknown>)[schema.key];
-            const variant: ObjectSchema | undefined = schema.variants.find((v) => {
-                const lit = v.fields[schema.key];
-                return lit !== undefined && lit.type === 'literal' && lit.value === discriminator;
-            });
-            if (variant) walk(variant, value, matrix, path);
-            return;
-        }
-        case 'list': {
-            if (!Array.isArray(value)) return;
-            for (let i = 0; i < value.length; i++) walk(schema.of, value[i], matrix, [...path, i]);
-            return;
-        }
-        case 'nullable':
-        case 'optional':
-        case 'nullish':
-            walk(schema.of, value, matrix, path);
-            return;
-        default:
-            return;
-    }
-}
-
-function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, parent: Mat4, path: PropPath): void {
-    const matrix = centredMatrix(spec, local, parent, _centred);
-    if (spec.kind !== 'segment' && spec.center) {
-        const origin = take('frame', path, '', 0, 1, matrix, 0, 0, 0);
-        origin.framePosition = spec.center;
-    }
+function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3 | undefined;
         if (!half) return;
@@ -519,9 +499,10 @@ function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, paren
     }
 }
 
-const _centred: Mat4 = mat4.create();
-const _identity: Mat4 = mat4.create();
 const _centerWorld: Vec3 = [0, 0, 0];
+
 const _ringCenter: Vec3 = [0, 0, 0];
+
 const _ringU: Vec3 = [0, 0, 0];
+
 const _ringV: Vec3 = [0, 0, 0];

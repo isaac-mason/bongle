@@ -23,8 +23,8 @@ import {
 import { registry } from '../../core/registry';
 import type { Resources } from '../../core/resources';
 import { prefabHasVoxels } from '../../core/scene/prefab';
-import { getAtPath, setAtPath } from '../../core/scene/prop/path';
-import type { Schema } from '../../core/scene/prop/prop';
+import { getAtPath, samePath, setAtPath } from '../../core/scene/prop/path';
+import { walkObjects } from '../../core/scene/prop/specs';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -728,56 +728,18 @@ function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): Resolved
 
 const _frameParent: Mat4 = mat4.create();
 const _frameParentQuaternion: Quat = [0, 0, 0, 1];
-const _frameStep: Mat4 = mat4.create();
 
-// node world times every `frame` annotation enclosing the edited field along the path. the object at the path contributes
-// its own frame only when the field being edited is not that frame (a shape's centre sits inside the object's frame).
+// node world times every frame enclosing the edited field: the object's parent when the field is its own frame,
+// the object's frame when the field is a shape centre inside it.
 function _enclosingMatrix(frame: ResolvedFrame, out: Mat4): Mat4 {
+    const { activeFrame } = frame;
     mat4.copy(out, getVisualWorldMatrix(frame.transform));
-    let schema: Schema = frame.control.schema;
-    let value: unknown = frame.control.get(frame.instance);
-    const path = frame.activeFrame.path;
-    for (let i = 0; i <= path.length; i++) {
-        // resolve wrappers to the object they hold
-        for (;;) {
-            if (schema.type === 'optional' || schema.type === 'nullable' || schema.type === 'nullish') schema = schema.of;
-            else if (schema.type === 'union' && value !== null && typeof value === 'object') {
-                const discriminator = (value as Record<string, unknown>)[schema.key];
-                const variant = schema.variants.find((v) => {
-                    const lit = v.fields[schema.type === 'union' ? schema.key : ''];
-                    return lit !== undefined && lit.type === 'literal' && lit.value === discriminator;
-                });
-                if (!variant) return out;
-                schema = variant;
-            } else break;
-        }
-        if (schema.type === 'object' && value !== null && typeof value === 'object') {
-            const local = value as Record<string, unknown>;
-            if (schema.space === 'world') mat4.identity(out);
-            const editingThisFrame = i === path.length && schema.frame?.position === frame.activeFrame.position;
-            if (schema.frame && !editingThisFrame) {
-                const p: Vec3 = schema.frame.position
-                    ? ((local[schema.frame.position] as Vec3 | undefined) ?? [0, 0, 0])
-                    : [0, 0, 0];
-                const q: Quat = schema.frame.quaternion
-                    ? ((local[schema.frame.quaternion] as Quat | undefined) ?? [0, 0, 0, 1])
-                    : [0, 0, 0, 1];
-                mat4.fromRotationTranslation(_frameStep, q, p);
-                mat4.multiply(out, out, _frameStep);
-            }
-        }
-        if (i === path.length) break;
-        const key = path[i]!;
-        if (schema.type === 'object') {
-            schema = schema.fields[key as string]!;
-            value = (value as Record<string, unknown>)[key as string];
-        } else if (schema.type === 'list') {
-            schema = schema.of;
-            value = (value as unknown[])[key as number];
-        } else {
-            return out;
-        }
-    }
+    walkObjects(frame.control.schema, frame.control.get(frame.instance), getVisualWorldMatrix(frame.transform), (site) => {
+        if (!samePath(site.path, activeFrame.path)) return false;
+        const editingOwnFrame = site.schema.frame?.position === activeFrame.position;
+        mat4.copy(out, editingOwnFrame ? site.parent : site.matrix);
+        return true;
+    });
     return out;
 }
 

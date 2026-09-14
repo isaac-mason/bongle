@@ -1,24 +1,18 @@
-import { type Mat4, mat4, type Quat, type Vec3, vec3 } from 'math';
+import { type Mat4, mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { registry } from '../../core/registry';
-import type { ObjectSchema, Schema, ShapeSpecData } from '../../core/scene/prop/prop';
+import type { ShapeSpecData } from '../../core/scene/prop/prop';
+import { walkObjects } from '../../core/scene/prop/specs';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait } from '../../core/scene/scene-tree';
 import * as Lines from '../../render/overlay/lines';
 import type { Rgba } from './editor-colors';
 
 const CIRCLE_SEGMENTS = 32;
-const GREAT_CIRCLE_ALPHA = 0.35;
-let _eye: Vec3 = [0, 0, 0];
-const MATRIX_STACK: Mat4[] = [];
-let _depth = 0;
 
-function pushFrame(parent: Mat4, position: Vec3 | undefined, quaternion: Quat | undefined): Mat4 {
-    if (MATRIX_STACK.length <= _depth) MATRIX_STACK.push(mat4.create());
-    const out = MATRIX_STACK[_depth++]!;
-    mat4.fromRotationTranslation(out, quaternion ?? [0, 0, 0, 1], position ?? [0, 0, 0]);
-    return mat4.multiply(out, parent, out);
-}
+const GREAT_CIRCLE_ALPHA = 0.35;
+
+let _eye: Vec3 = [0, 0, 0];
 
 /** every shape-annotated object in the node's controls, each under its enclosing frames. */
 export function drawNode(lines: Lines.LineBatch, node: Node, color: Rgba, eye: Vec3): void {
@@ -31,61 +25,18 @@ export function drawNode(lines: Lines.LineBatch, node: Node, color: Rgba, eye: V
         const handle = registry.slotToTrait[slot];
         if (!instance || !handle) continue;
         for (const reg of handle.def.controls) {
-            _depth = 0;
-            walk(lines, reg.schema, reg.get(instance), world, color);
-        }
-    }
-}
-
-function walk(lines: Lines.LineBatch, schema: Schema, value: unknown, matrix: Mat4, color: Rgba): void {
-    switch (schema.type) {
-        case 'object': {
-            if (value === null || typeof value !== 'object') return;
-            const local = value as Record<string, unknown>;
-            let frame = schema.space === 'world' ? _identity : matrix;
-            if (schema.frame) {
-                const depth = _depth;
-                frame = pushFrame(
-                    frame,
-                    schema.frame.position ? (local[schema.frame.position] as Vec3 | undefined) : undefined,
-                    schema.frame.quaternion ? (local[schema.frame.quaternion] as Quat | undefined) : undefined,
-                );
-                if (schema.shape) drawShape(lines, schema.shape, local, frame, color);
-                for (const [key, field] of Object.entries(schema.fields)) walk(lines, field, local[key], frame, color);
-                _depth = depth;
-                return;
-            }
-            if (schema.shape) drawShape(lines, schema.shape, local, frame, color);
-            for (const [key, field] of Object.entries(schema.fields)) walk(lines, field, local[key], frame, color);
-            return;
-        }
-        case 'union': {
-            if (value === null || typeof value !== 'object') return;
-            const discriminator = (value as Record<string, unknown>)[schema.key];
-            const variant: ObjectSchema | undefined = schema.variants.find((v) => {
-                const lit = v.fields[schema.key];
-                return lit !== undefined && lit.type === 'literal' && lit.value === discriminator;
+            walkObjects(reg.schema, reg.get(instance), world, (site) => {
+                if (site.schema.shape) drawShape(lines, site.schema.shape, site.local, site.shapeMatrix, color);
+                return false;
             });
-            if (variant) walk(lines, variant, value, matrix, color);
-            return;
         }
-        case 'list': {
-            if (!Array.isArray(value)) return;
-            for (const item of value) walk(lines, schema.of, item, matrix, color);
-            return;
-        }
-        case 'nullable':
-        case 'optional':
-        case 'nullish':
-            walk(lines, schema.of, value, matrix, color);
-            return;
-        default:
-            return;
     }
 }
 
 const _a: Vec3 = [0, 0, 0];
+
 const _b: Vec3 = [0, 0, 0];
+
 const _identityBox: Mat4 = mat4.create();
 
 /** the 12 edges of a world-space box. */
@@ -112,18 +63,7 @@ function segment(
     Lines.line(lines, _a[0], _a[1], _a[2], _b[0], _b[1], _b[2], color[0], color[1], color[2], color[3]);
 }
 
-const _centred: Mat4 = mat4.create();
-
-/** a shape's `center` is its own translation-only frame; the shape's maths stays at the origin of the returned matrix. */
-export function centredMatrix(spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, out: Mat4): Mat4 {
-    const center = spec.kind === 'segment' || !spec.center ? undefined : (local[spec.center] as Vec3 | undefined);
-    if (!center) return matrix;
-    mat4.fromTranslation(out, center);
-    return mat4.multiply(out, matrix, out);
-}
-
-function drawShape(lines: Lines.LineBatch, spec: ShapeSpecData, local: Record<string, unknown>, parent: Mat4, color: Rgba): void {
-    const matrix = centredMatrix(spec, local, parent, _centred);
+function drawShape(lines: Lines.LineBatch, spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, color: Rgba): void {
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3 | undefined;
         if (half) box(lines, matrix, half[0], half[1], half[2], color);
@@ -150,11 +90,17 @@ function box(lines: Lines.LineBatch, matrix: Mat4, hx: number, hy: number, hz: n
 }
 
 const _center: Vec3 = [0, 0, 0];
+
 const _toEye: Vec3 = [0, 0, 0];
+
 const _u: Vec3 = [0, 0, 0];
+
 const _v: Vec3 = [0, 0, 0];
+
 const _p0: Vec3 = [0, 0, 0];
+
 const _p1: Vec3 = [0, 0, 0];
+
 const _identity: Mat4 = mat4.create();
 
 /** the circle where the sphere's surface turns away from the eye; the ring an onlooker actually sees. */
