@@ -315,16 +315,22 @@ function drag(
     setTraitProps(sceneTree, target.node, handle.traitId, { [handle.controlId]: value });
 }
 
+const _view: Mat4 = mat4.create();
 const _viewProjection: Mat4 = mat4.create();
 const _projected: Vec3 = [0, 0, 0];
+const _viewSpace: Vec3 = [0, 0, 0];
 
 function nearest(state: HandlesState, cursor: Cursor, camera: PerspectiveCamera, width: number, height: number): number {
-    mat4.multiply(_viewProjection, camera.projectionMatrix, camera.matrixWorldInverse);
+    // the view matrix comes from matrixWorld the way the gizmo's raycaster does, not from a cached inverse that may lag.
+    mat4.invert(_view, camera.matrixWorld);
+    mat4.multiply(_viewProjection, camera.projectionMatrix, _view);
     let best = -1;
     let bestDistance = HANDLE_HALF_SIZE_PX;
     for (let i = 0; i < state.handles.length; i++) {
+        // in front of the camera is a view-space test; NDC depth ranges differ between the WebGPU and WebGL backends.
+        vec3.transformMat4(_viewSpace, state.handles[i]!.world, _view);
+        if (_viewSpace[2] >= 0) continue;
         vec3.transformMat4(_projected, state.handles[i]!.world, _viewProjection);
-        if (_projected[2] < 0 || _projected[2] > 1) continue;
         const dx = ((_projected[0] - cursor.ndcX) * width) / 2;
         const dy = ((_projected[1] - cursor.ndcY) * height) / 2;
         const distance = Math.hypot(dx, dy);
