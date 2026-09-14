@@ -177,7 +177,7 @@ export type LassoState = {
 
 export type InspectedBlock = { wx: number; wy: number; wz: number; key: string };
 
-/** the pose or shape the gizmo drives instead of the node: a pose takes translate and rotate, a shape's `center` translate only. */
+/** the pose inside a control value the gizmo drives instead of the node. */
 export type ActiveFrame = {
     nodeId: number;
     traitId: string;

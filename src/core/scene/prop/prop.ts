@@ -51,7 +51,7 @@ export type TupleSchema = {
     of: Schema[];
 };
 
-/** an object with a fixed layout the editor knows: shapes get outlines and handles, a pose frames its sibling fields. */
+/** an object with a fixed layout the editor knows: a shape sits at its frame's origin and gets outlines and handles, a pose frames its sibling fields. */
 export type ObjectKind = 'sphere' | 'box3' | 'segment' | 'pose';
 
 export type ObjectSchema = {
@@ -276,37 +276,33 @@ export const object = <F extends Record<string, Schema>>(fields: F): { type: 'ob
 
 export type ShapeOptions = { space?: 'local' | 'world' };
 
-/** value `{ type: 'sphere', center, radius }`; `center` is in the enclosing frame. */
+/** value `{ type: 'sphere', radius }`, centred on the enclosing frame; a sibling pose places it. */
 export const sphere = (
     opts?: ShapeOptions,
 ): {
     type: 'object';
     kind: 'sphere';
-    fields: { type: { type: 'literal'; value: 'sphere' }; center: { type: 'vector3'; subtype: 'point' }; radius: NumberSchema };
+    fields: { type: { type: 'literal'; value: 'sphere' }; radius: NumberSchema };
     space?: 'local' | 'world';
 } => ({
     type: 'object',
     kind: 'sphere',
-    fields: { type: literal('sphere'), center: point(), radius: radius() },
+    fields: { type: literal('sphere'), radius: radius() },
     ...opts,
 });
 
-/** value `{ type: 'box3', center, halfExtents }`; the box is axis-aligned in the enclosing frame, a pose rotates it. */
+/** value `{ type: 'box3', halfExtents }`, centred on and aligned to the enclosing frame; a sibling pose places and turns it. */
 export const box3 = (
     opts?: ShapeOptions,
 ): {
     type: 'object';
     kind: 'box3';
-    fields: {
-        type: { type: 'literal'; value: 'box3' };
-        center: { type: 'vector3'; subtype: 'point' };
-        halfExtents: Vector3Schema;
-    };
+    fields: { type: { type: 'literal'; value: 'box3' }; halfExtents: Vector3Schema };
     space?: 'local' | 'world';
 } => ({
     type: 'object',
     kind: 'box3',
-    fields: { type: literal('box3'), center: point(), halfExtents: vec3() },
+    fields: { type: literal('box3'), halfExtents: vec3() },
     ...opts,
 });
 

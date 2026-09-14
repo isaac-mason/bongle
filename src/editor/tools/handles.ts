@@ -388,7 +388,7 @@ function draw(
     }
 }
 
-// collection: one handle per box face, sphere radius, segment end, shape centre and pose origin on the active node.
+// collection: one handle per box face, sphere radius, segment end and pose origin on the active node.
 
 let _collecting: HandlesState | null = null;
 
@@ -421,10 +421,7 @@ function collect(state: HandlesState, node: Node | undefined, eye: Vec3): void {
                 const { schema, local, path } = site;
                 if (schema.kind === 'pose') take('frame', path, 'pose', 0, 1, site.matrix, 0, 0, 0);
                 else if (schema.kind === 'segment') segmentHandles(local, site.matrix, path);
-                else {
-                    take('frame', path, 'center', 0, 1, site.matrix, 0, 0, 0);
-                    shapeHandles(schema.kind, local, site.matrix, path);
-                }
+                else shapeHandles(schema.kind, local, site.matrix, path);
                 return false;
             });
         }

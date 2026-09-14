@@ -1,8 +1,14 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
-import { getVisualWorldMatrix, getWorldPosition, TransformTrait } from '../builtins/transform';
+import {
+    getVisualWorldMatrix,
+    getVisualWorldPosition,
+    getWorldMatrix,
+    TransformTrait,
+    worldToLocalPosition,
+} from '../builtins/transform';
 import { registry } from '../core/registry';
-import { setAtPath } from '../core/scene/prop/path';
-import { findShape, type ShapeSite } from '../core/scene/prop/specs';
+import { type PropPath, samePath, setAtPath } from '../core/scene/prop/path';
+import { findShape, type ShapeSite, walkObjects } from '../core/scene/prop/specs';
 import {
     addChild,
     addTraitBySlot,
@@ -905,7 +911,12 @@ function halfExtentsInFrame(bounds: Selection.Bounds, centre: Vec3, shapeFrame: 
     return half;
 }
 
-/** moves the node's first shape onto the bounds through its `center` and sizes it to them, the extents read in the shape's own frame. false when the node has no sphere or box. */
+const _fitPoseParent: Mat4 = mat4.create();
+
+/**
+ * sizes the node's first sphere or box to the bounds and moves it onto them: through the pose that places it when one
+ * does, otherwise by moving the node. the extents are read in the shape's own frame. false when nothing can be fitted.
+ */
 export function fitShapeToBoundsAction(
     state: EditRoomState,
     ctx: ScriptContext,
@@ -916,37 +927,82 @@ export function fitShapeToBoundsAction(
     if (!node) return false;
     const shape = findNodeShape(node);
     if (!shape) return false;
-    const { local, schema } = shape.site;
+    const { local, schema, posePath } = shape.site;
     if (schema.kind === 'segment') return false;
     const transform = getTrait(node, TransformTrait);
-    if (schema.space !== 'world' && !transform) return false;
+    if (!transform) return false;
+    if (posePath === null && schema.space === 'world') return false;
 
-    const nodeWorld = schema.space === 'world' || !transform ? IDENTITY : getVisualWorldMatrix(transform);
-    mat4.multiply(_fitFrame, nodeWorld, shape.site.parent);
+    const nodeWorld = getVisualWorldMatrix(transform);
     mat4.multiply(_fitShapeFrame, nodeWorld, shape.site.matrix);
     const centre = boundsCenter(bounds);
     const half = halfExtentsInFrame(bounds, centre, _fitShapeFrame);
-    mat4.invert(_fitInverse, _fitFrame);
-    const fitted: Record<string, unknown> = {
-        ...local,
-        center: vec3.transformMat4([0, 0, 0], centre, _fitInverse),
-        ...(schema.kind === 'box3' ? { halfExtents: half } : { radius: Math.max(half[0], half[1], half[2]) }),
-    };
+    const fitted: Record<string, unknown> =
+        schema.kind === 'box3' ? { ...local, halfExtents: half } : { ...local, radius: Math.max(half[0], half[1], half[2]) };
+    let value = setAtPath(shape.value, shape.site.path, fitted);
 
-    const nextProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
-    const prevProps = captureTraitProps(node, shape.traitId);
-    const write = (props: Record<string, unknown> | null) => {
+    let nextTransformProps: Record<string, unknown> | null = null;
+    if (posePath !== null) {
+        const pose = findPose(shape.traitId, shape.controlId, node, posePath, _fitPoseParent);
+        if (!pose) return false;
+        mat4.invert(_fitInverse, pose.space === 'world' ? IDENTITY : mat4.multiply(_fitFrame, nodeWorld, _fitPoseParent));
+        value = setAtPath(value, posePath, { ...pose.local, position: vec3.transformMat4([0, 0, 0], centre, _fitInverse) });
+    } else {
+        // the shape sits at the node: shift the node by the shape origin's offset from the bounds centre
+        const origin: Vec3 = [_fitShapeFrame[12]!, _fitShapeFrame[13]!, _fitShapeFrame[14]!];
+        const nodeWorldPosition = getVisualWorldPosition(transform);
+        const target: Vec3 = [
+            nodeWorldPosition[0] + centre[0] - origin[0],
+            nodeWorldPosition[1] + centre[1] - origin[1],
+            nodeWorldPosition[2] + centre[2] - origin[2],
+        ];
+        nextTransformProps = { position: worldToLocalPosition(transform, target, [0, 0, 0]) };
+    }
+
+    const nextShapeProps = { [shape.controlId]: value };
+    const prevShapeProps = captureTraitProps(node, shape.traitId);
+    const prevTransformProps = nextTransformProps ? captureTraitProps(node, 'transform') : null;
+
+    const write = (shapeProps: Record<string, unknown> | null, transformProps: Record<string, unknown> | null) => {
         const n = getNodeById(ctx.scene, nodeId);
-        if (!n || !props) return;
-        setTraitProps(ctx.scene, n, shape.traitId, props);
-        send(ctx, SetTraitCommand, { id: nodeId, traitId: shape.traitId, props: JSON.stringify(props) });
+        if (!n) return;
+        if (shapeProps) {
+            setTraitProps(ctx.scene, n, shape.traitId, shapeProps);
+            send(ctx, SetTraitCommand, { id: nodeId, traitId: shape.traitId, props: JSON.stringify(shapeProps) });
+        }
+        if (transformProps) {
+            setTraitProps(ctx.scene, n, 'transform', transformProps);
+            send(ctx, SetTraitCommand, { id: nodeId, traitId: 'transform', props: JSON.stringify(transformProps) });
+        }
     };
     state.action({
         label: 'fit to selection',
-        do: () => write(nextProps),
-        undo: () => write(prevProps),
+        do: () => write(nextShapeProps, nextTransformProps),
+        undo: () => write(prevShapeProps, prevTransformProps),
     });
     return true;
+}
+
+// the pose at `posePath` in a control value: its fields, its space and (into `outParent`) the frame it is expressed in.
+function findPose(
+    traitId: string,
+    controlId: string,
+    node: Node,
+    posePath: PropPath,
+    outParent: Mat4,
+): { local: Record<string, unknown>; space: 'local' | 'world' } | null {
+    const handle = registry.traits.handles.get(traitId);
+    const control = handle?.def.controls.find((c) => c.controlId === controlId);
+    const instance = handle ? node.traits[handle.slot] : undefined;
+    if (!control || !instance) return null;
+    let found: { local: Record<string, unknown>; space: 'local' | 'world' } | null = null;
+    walkObjects(control.schema, control.get(instance), IDENTITY, (site) => {
+        if (site.schema.kind !== 'pose' || !samePath(site.path, posePath)) return false;
+        mat4.copy(outParent, site.parent);
+        found = { local: site.local, space: site.schema.space ?? 'local' };
+        return true;
+    });
+    return found;
 }
 
 /** a prefab node at the selection's centre; its shape is fitted once the node lands from the server. */
@@ -997,7 +1053,7 @@ export function drainPendingShapeFits(state: EditRoomState, ctx: ScriptContext):
     }
 }
 
-// voxels whose centre lies inside the node's shape; rotation and scale are ignored, the shape is placed at the node's world position.
+// voxels whose centre lies inside the node's first sphere or box, placed where the shape is; rotation and scale are ignored.
 export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection.Selection | null {
     const node = getNodeById(ctx.scene, nodeId);
     const transform = node ? getTrait(node, TransformTrait) : null;
@@ -1006,11 +1062,10 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
     if (!shape) return null;
     const { schema, local } = shape.site;
     if (schema.kind === 'segment') return null;
-    const origin: Vec3 = schema.space === 'world' ? [0, 0, 0] : getWorldPosition(transform);
-    const center = local.center as Vec3;
-    const cx = origin[0] + center[0];
-    const cy = origin[1] + center[1];
-    const cz = origin[2] + center[2];
+    mat4.multiply(_fitShapeFrame, getWorldMatrix(transform), shape.site.matrix);
+    const cx = _fitShapeFrame[12]!;
+    const cy = _fitShapeFrame[13]!;
+    const cz = _fitShapeFrame[14]!;
     const selection = Selection.create();
     if (schema.kind === 'box3') {
         const half = local.halfExtents as Vec3;

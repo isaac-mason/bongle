@@ -12,32 +12,32 @@ import {
     addTrait,
     broadcast,
     type ClientId,
+    ContactsTrait,
     clientToUser,
     cloneModel,
     command,
-    ContactsTrait,
+    config,
     env,
-    projectStorage,
     getTrait,
     listen,
     log,
-    config,
     MotionType,
     onInit,
     onJoin,
     onTick,
-    pack,
     PlayerTrait,
+    pack,
+    projectStorage,
     query,
     RigidBodyTrait,
-    script,
     type ScriptContext,
-    send,
     SERVER_TO_CLIENT,
+    script,
+    send,
     setBlock,
     setPosition,
-    trait,
     TransformTrait,
+    trait,
     userStorage,
     warn,
 } from 'bongle';
@@ -77,148 +77,140 @@ const SPARK_POSITIONS: [number, number, number][] = [
     [11, SPARK_Y, 11],
 ];
 
-script(
-    GameplayTrait,
-    'session',
-    (ctx) => {
-        // Floor + sparks are spawned on the server only. Voxel writes
-        // and server-created nodes both sync to clients via the engine's
-        // discovery channel.
-        if (env.server) {
-            onInit(
-                ctx,
-                () => {
-                    const grassKey = Grass.defaultKey();
-                    for (let x = 0; x < FLOOR_SIZE; x++) {
-                        for (let z = 0; z < FLOOR_SIZE; z++) {
-                            setBlock(ctx.voxels, x, FLOOR_Y, z, grassKey);
-                        }
-                    }
-                    log(ctx, `built ${FLOOR_SIZE}x${FLOOR_SIZE} grass floor at y=${FLOOR_Y}`);
-
-                    for (let i = 0; i < SPARK_POSITIONS.length; i++) {
-                        const pos = SPARK_POSITIONS[i]!;
-                        const mesh = cloneModel(SparkModel.scene);
-                        mesh.name = `spark-${i}`;
-                        mesh.persist = false;
-                        const t = addTrait(mesh, TransformTrait);
-                        setPosition(t, pos);
-                        addTrait(mesh, CollectableTrait);
-                        const rb = addTrait(mesh, RigidBodyTrait);
-                        rb.def = {
-                            shape: {
-                                type: 'box3',
-                                center: [0, 0, 0],
-                                halfExtents: [SPARK_HALF_EXTENT, SPARK_HALF_EXTENT, SPARK_HALF_EXTENT],
-                            },
-                            motionType: MotionType.STATIC,
-                            sensor: true,
-                        };
-                        addTrait(mesh, ContactsTrait);
-                        addChild(ctx.node, mesh);
-                    }
-                    log(ctx, `spawned ${SPARK_POSITIONS.length} sparks`);
-                },
-            );
-        }
-
-        if (ctx.mode === 'edit') return;
-
-        if (env.client) {
-            // Mount a tiny score HUD into the per-room viewport div.
-            // The viewport is auto-removed when the room is disposed,
-            // so we don't need explicit teardown.
-            onInit(ctx, () => {
-                const viewport = ctx.client?.viewport;
-                if (!viewport) return;
-
-                const hud = document.createElement('div');
-                hud.style.cssText = [
-                    'position: absolute',
-                    'top: 12px',
-                    'left: 12px',
-                    'padding: 8px 12px',
-                    'background: white',
-                    'border: 1px solid black',
-                    'font-family: ui-monospace, monospace',
-                    'font-size: 13px',
-                    'line-height: 1.4',
-                    'pointer-events: none',
-                    'white-space: pre',
-                ].join('; ');
-                hud.textContent = 'score: -\ntotal: -';
-                viewport.appendChild(hud);
-
-                let score = 0;
-                let total = 0;
-                const render = () => {
-                    hud.textContent = `score: ${score}\ntotal: ${total}`;
-                };
-
-                listen(ctx, ScoreUpdate, (msg) => {
-                    score = msg.score;
-                    render();
-                });
-                listen(ctx, TotalUpdate, (msg) => {
-                    total = msg.total;
-                    render();
-                });
-            });
-            return;
-        }
-
-        // Per-spark respawn timestamp. 0 = available, >0 = hidden until then.
-        const respawnAt = new Map<TransformTrait, number>();
-        // Original Y so we can put the spark back where it came from.
-        const originalY = new Map<TransformTrait, number>();
-        const sparks = query(ctx, [CollectableTrait, TransformTrait]);
-        const players = query(ctx, [PlayerTrait, ContactsTrait]);
-
-        onJoin(ctx, ({ client, playerNode }) => {
-            const transform = getTrait(playerNode, TransformTrait)!;
-            setPosition(transform, [FLOOR_SIZE / 2, FLOOR_Y + 4, FLOOR_SIZE / 2]);
-            addTrait(playerNode, ContactsTrait);
-
-            const user = clientToUser(ctx, client);
-            log(ctx, `client ${client} joined as ${user.username} (userId=${user.id})`);
-            void greetPlayer(ctx, client, user.id, user.username);
-        });
-
-        onTick(ctx, () => {
-            const now = Date.now();
-
-            // Respawn expired sparks and index live collectables by nodeId so
-            // we can resolve contact targets in the next pass.
-            const sparkByNodeId = new Map<number, TransformTrait>();
-            for (const [collectable, sparkTransform] of sparks) {
-                sparkByNodeId.set(collectable._node.id, sparkTransform);
-                const until = respawnAt.get(sparkTransform) ?? 0;
-                if (until === 0 || now < until) continue;
-                respawnAt.set(sparkTransform, 0);
-                const y = originalY.get(sparkTransform) ?? SPARK_Y;
-                setPosition(sparkTransform, [sparkTransform.position[0], y, sparkTransform.position[2]]);
-            }
-
-            // Drive collection from sensor contact events.
-            for (const [playerTrait, contacts] of players) {
-                for (const c of contacts.added) {
-                    if (c.type !== 'rigidBody') continue;
-                    const sparkTransform = sparkByNodeId.get(c.nodeId);
-                    if (!sparkTransform) continue;
-                    if ((respawnAt.get(sparkTransform) ?? 0) > now) continue;
-
-                    const sx = sparkTransform.position[0];
-                    const sy = sparkTransform.position[1];
-                    const sz = sparkTransform.position[2];
-                    if (!originalY.has(sparkTransform)) originalY.set(sparkTransform, sy);
-                    setPosition(sparkTransform, [sx, HIDDEN_Y, sz]);
-                    respawnAt.set(sparkTransform, now + RESPAWN_MS);
-                    void onCollect(ctx, playerTrait.client, playerTrait.userId, playerTrait.username);
+script(GameplayTrait, 'session', (ctx) => {
+    // Floor + sparks are spawned on the server only. Voxel writes
+    // and server-created nodes both sync to clients via the engine's
+    // discovery channel.
+    if (env.server) {
+        onInit(ctx, () => {
+            const grassKey = Grass.defaultKey();
+            for (let x = 0; x < FLOOR_SIZE; x++) {
+                for (let z = 0; z < FLOOR_SIZE; z++) {
+                    setBlock(ctx.voxels, x, FLOOR_Y, z, grassKey);
                 }
             }
+            log(ctx, `built ${FLOOR_SIZE}x${FLOOR_SIZE} grass floor at y=${FLOOR_Y}`);
+
+            for (let i = 0; i < SPARK_POSITIONS.length; i++) {
+                const pos = SPARK_POSITIONS[i]!;
+                const mesh = cloneModel(SparkModel.scene);
+                mesh.name = `spark-${i}`;
+                mesh.persist = false;
+                const t = addTrait(mesh, TransformTrait);
+                setPosition(t, pos);
+                addTrait(mesh, CollectableTrait);
+                const rb = addTrait(mesh, RigidBodyTrait);
+                rb.def = {
+                    shape: {
+                        type: 'box3',
+                        halfExtents: [SPARK_HALF_EXTENT, SPARK_HALF_EXTENT, SPARK_HALF_EXTENT],
+                    },
+                    motionType: MotionType.STATIC,
+                    sensor: true,
+                };
+                addTrait(mesh, ContactsTrait);
+                addChild(ctx.node, mesh);
+            }
+            log(ctx, `spawned ${SPARK_POSITIONS.length} sparks`);
         });
-    },
-);
+    }
+
+    if (ctx.mode === 'edit') return;
+
+    if (env.client) {
+        // Mount a tiny score HUD into the per-room viewport div.
+        // The viewport is auto-removed when the room is disposed,
+        // so we don't need explicit teardown.
+        onInit(ctx, () => {
+            const viewport = ctx.client?.viewport;
+            if (!viewport) return;
+
+            const hud = document.createElement('div');
+            hud.style.cssText = [
+                'position: absolute',
+                'top: 12px',
+                'left: 12px',
+                'padding: 8px 12px',
+                'background: white',
+                'border: 1px solid black',
+                'font-family: ui-monospace, monospace',
+                'font-size: 13px',
+                'line-height: 1.4',
+                'pointer-events: none',
+                'white-space: pre',
+            ].join('; ');
+            hud.textContent = 'score: -\ntotal: -';
+            viewport.appendChild(hud);
+
+            let score = 0;
+            let total = 0;
+            const render = () => {
+                hud.textContent = `score: ${score}\ntotal: ${total}`;
+            };
+
+            listen(ctx, ScoreUpdate, (msg) => {
+                score = msg.score;
+                render();
+            });
+            listen(ctx, TotalUpdate, (msg) => {
+                total = msg.total;
+                render();
+            });
+        });
+        return;
+    }
+
+    // Per-spark respawn timestamp. 0 = available, >0 = hidden until then.
+    const respawnAt = new Map<TransformTrait, number>();
+    // Original Y so we can put the spark back where it came from.
+    const originalY = new Map<TransformTrait, number>();
+    const sparks = query(ctx, [CollectableTrait, TransformTrait]);
+    const players = query(ctx, [PlayerTrait, ContactsTrait]);
+
+    onJoin(ctx, ({ client, playerNode }) => {
+        const transform = getTrait(playerNode, TransformTrait)!;
+        setPosition(transform, [FLOOR_SIZE / 2, FLOOR_Y + 4, FLOOR_SIZE / 2]);
+        addTrait(playerNode, ContactsTrait);
+
+        const user = clientToUser(ctx, client);
+        log(ctx, `client ${client} joined as ${user.username} (userId=${user.id})`);
+        void greetPlayer(ctx, client, user.id, user.username);
+    });
+
+    onTick(ctx, () => {
+        const now = Date.now();
+
+        // Respawn expired sparks and index live collectables by nodeId so
+        // we can resolve contact targets in the next pass.
+        const sparkByNodeId = new Map<number, TransformTrait>();
+        for (const [collectable, sparkTransform] of sparks) {
+            sparkByNodeId.set(collectable._node.id, sparkTransform);
+            const until = respawnAt.get(sparkTransform) ?? 0;
+            if (until === 0 || now < until) continue;
+            respawnAt.set(sparkTransform, 0);
+            const y = originalY.get(sparkTransform) ?? SPARK_Y;
+            setPosition(sparkTransform, [sparkTransform.position[0], y, sparkTransform.position[2]]);
+        }
+
+        // Drive collection from sensor contact events.
+        for (const [playerTrait, contacts] of players) {
+            for (const c of contacts.added) {
+                if (c.type !== 'rigidBody') continue;
+                const sparkTransform = sparkByNodeId.get(c.nodeId);
+                if (!sparkTransform) continue;
+                if ((respawnAt.get(sparkTransform) ?? 0) > now) continue;
+
+                const sx = sparkTransform.position[0];
+                const sy = sparkTransform.position[1];
+                const sz = sparkTransform.position[2];
+                if (!originalY.has(sparkTransform)) originalY.set(sparkTransform, sy);
+                setPosition(sparkTransform, [sx, HIDDEN_Y, sz]);
+                respawnAt.set(sparkTransform, now + RESPAWN_MS);
+                void onCollect(ctx, playerTrait.client, playerTrait.userId, playerTrait.username);
+            }
+        }
+    });
+});
 
 async function greetPlayer(ctx: ScriptContext, client: ClientId, userId: string, username: string): Promise<void> {
     log(ctx, `reading persisted state for ${username}...`);

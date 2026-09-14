@@ -9,8 +9,10 @@ export type ObjectSite = {
     path: PropPath;
     /** the frame the object's fields are expressed in: node world times every enclosing pose. */
     parent: Mat4;
-    /** the object's own frame: `parent` times its pose, or times its `center` for a sphere or box. */
+    /** the object's own frame: `parent` times its pose; a shape sits at `parent`'s origin so this is `parent` itself. */
     matrix: Mat4;
+    /** the nearest pose enclosing the object, the one that places it; null when only the node does. */
+    posePath: PropPath | null;
 };
 
 const IDENTITY: Mat4 = mat4.create();
@@ -44,6 +46,7 @@ export function walkObjects(
     visit: (site: ObjectSite) => boolean | undefined,
     path: PropPath = [],
     depth = 0,
+    posePath: PropPath | null = null,
 ): boolean {
     switch (schema.type) {
         case 'object': {
@@ -57,16 +60,12 @@ export function walkObjects(
                 const quaternion = local.quaternion as Quat | undefined;
                 mat4.fromRotationTranslation(pool.own, quaternion ?? quat.identity(_q), position ?? vec3.set(_p, 0, 0, 0));
                 mat4.multiply(pool.own, parent, pool.own);
-                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own }) === true;
+                return (
+                    visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own, posePath }) === true
+                );
             }
-            if (schema.kind === 'sphere' || schema.kind === 'box3') {
-                const center = local.center as Vec3 | undefined;
-                mat4.fromTranslation(pool.own, center ?? vec3.set(_p, 0, 0, 0));
-                mat4.multiply(pool.own, parent, pool.own);
-                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own }) === true;
-            }
-            if (schema.kind === 'segment') {
-                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: parent }) === true;
+            if (schema.kind !== undefined) {
+                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: parent, posePath }) === true;
             }
             let matrix = parent;
             const poseField = poseFieldOf(schema);
@@ -82,8 +81,10 @@ export function walkObjects(
             }
             for (const [key, field] of Object.entries(schema.fields)) {
                 // the pose is visited in the frame it is expressed in, its siblings in the frame it makes
-                const fieldMatrix = key === poseField ? parent : matrix;
-                if (walkObjects(field, local[key], fieldMatrix, visit, [...path, key], depth + 1)) return true;
+                const isPose = key === poseField;
+                const fieldMatrix = isPose ? parent : matrix;
+                const fieldPose = isPose || poseField === null ? posePath : [...path, poseField];
+                if (walkObjects(field, local[key], fieldMatrix, visit, [...path, key], depth + 1, fieldPose)) return true;
             }
             return false;
         }
@@ -94,19 +95,19 @@ export function walkObjects(
                 const lit = v.fields[schema.key];
                 return lit !== undefined && lit.type === 'literal' && lit.value === discriminator;
             });
-            return variant ? walkObjects(variant, value, matrixIn, visit, path, depth) : false;
+            return variant ? walkObjects(variant, value, matrixIn, visit, path, depth, posePath) : false;
         }
         case 'list': {
             if (!Array.isArray(value)) return false;
             for (let i = 0; i < value.length; i++) {
-                if (walkObjects(schema.of, value[i], matrixIn, visit, [...path, i], depth)) return true;
+                if (walkObjects(schema.of, value[i], matrixIn, visit, [...path, i], depth, posePath)) return true;
             }
             return false;
         }
         case 'nullable':
         case 'optional':
         case 'nullish':
-            return walkObjects(schema.of, value, matrixIn, visit, path, depth);
+            return walkObjects(schema.of, value, matrixIn, visit, path, depth, posePath);
         default:
             return false;
     }

@@ -9,15 +9,15 @@ describe('shape and pose value types', () => {
         expect(prop.sphere()).toEqual({
             type: 'object',
             kind: 'sphere',
-            fields: { type: prop.literal('sphere'), center: prop.point(), radius: prop.radius() },
+            fields: { type: prop.literal('sphere'), radius: prop.radius() },
         });
         expect(prop.box3({ space: 'world' })).toMatchObject({ kind: 'box3', space: 'world' });
         expect(Object.keys(prop.segment().fields)).toEqual(['type', 'from', 'to']);
         expect(Object.keys(prop.pose().fields)).toEqual(['position', 'quaternion']);
         const Zone = prop.union('type', [prop.box3(), prop.sphere()]);
-        expect(validate(Zone, { type: 'sphere', center: [0, 0, 0], radius: 1 })).toEqual([]);
-        expect(validate(Zone, { type: 'box3', center: [0, 0, 0], halfExtents: [1, 1, 1] })).toEqual([]);
-        expect(validate(Zone, { type: 'sphere', center: [0, 0, 0] }).length).toBeGreaterThan(0);
+        expect(validate(Zone, { type: 'sphere', radius: 1 })).toEqual([]);
+        expect(validate(Zone, { type: 'box3', halfExtents: [1, 1, 1] })).toEqual([]);
+        expect(validate(Zone, { type: 'sphere' }).length).toBeGreaterThan(0);
     });
 
     it('the rigid body defs are built from the value types and pass the check', () => {
@@ -27,7 +27,7 @@ describe('shape and pose value types', () => {
             shape: {
                 type: 'transformed',
                 pose: { position: [1, 0, 0], quaternion: [0, 0, 0, 1] },
-                shape: { type: 'sphere', center: [0, 0, 0], radius: 1 },
+                shape: { type: 'sphere', radius: 1 },
             },
         };
         expect(validate(RigidBodyDef, good)).toEqual([]);
@@ -40,28 +40,30 @@ describe('shape and pose value types', () => {
         ]);
     });
 
-    it('a pose frames its siblings, a world-space shape ignores everything above it', () => {
+    it("a pose frames its siblings and is the shape's placer; a world-space shape ignores everything above it", () => {
         const Item = prop.object({ pose: prop.pose(), shape: prop.sphere() });
         const World = prop.object({ pose: prop.pose(), shape: prop.sphere({ space: 'world' }) });
         const root = mat4.fromTranslation(mat4.create(), [10, 0, 0]);
         const value = {
             pose: { position: [1, 0, 0], quaternion: [0, 0, 0, 1] },
-            shape: { type: 'sphere', center: [0, 1, 0], radius: 1 },
+            shape: { type: 'sphere', radius: 1 },
         };
         const local = findShape(Item, value)!;
         expect(local.path).toEqual(['shape']);
+        expect(local.posePath).toEqual(['pose']);
         const seen: string[] = [];
         walkObjects(Item, value, root, (site) => {
             seen.push(`${site.schema.kind}@${site.matrix[12]},${site.matrix[13]},${site.matrix[14]}`);
             return false;
         });
-        expect(seen).toEqual(['pose@11,0,0', 'sphere@11,1,0']);
+        expect(seen).toEqual(['pose@11,0,0', 'sphere@11,0,0']);
         const world: string[] = [];
         walkObjects(World, value, root, (site) => {
             world.push(`${site.schema.kind}@${site.matrix[12]},${site.matrix[13]},${site.matrix[14]}`);
             return false;
         });
-        expect(world).toEqual(['pose@11,0,0', 'sphere@0,1,0']);
+        expect(world).toEqual(['pose@11,0,0', 'sphere@0,0,0']);
+        expect(findShape(prop.sphere(), { type: 'sphere', radius: 1 })!.posePath).toBeNull();
     });
 
     it('a radius is never negative and a direction is unit length', () => {

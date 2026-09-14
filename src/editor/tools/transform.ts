@@ -63,11 +63,9 @@ type ResolvedFrame = {
     transform: TransformTrait;
     control: ControlDef;
     instance: TraitBase;
-    /** the pose or shape at `activeFrame.path` inside the control's value. */
+    /** the pose at `activeFrame.path` inside the control's value. */
     local: Record<string, unknown>;
-    /** which of its fields the gizmo writes: a pose's position and quaternion, or a shape's centre. */
-    kind: 'pose' | 'center';
-    /** node world times every pose enclosing the object; valid until the next resolve. */
+    /** node world times every pose enclosing this one; valid until the next resolve. */
     parent: Mat4;
 };
 
@@ -702,7 +700,7 @@ const _frameInvWorld: Mat4 = mat4.create();
 
 const _frameInvWorldQuaternion: Quat = [0, 0, 0, 1];
 
-// the store's `activeFrame` is a request; it resolves only while its node is the active selection and the path still lands on a pose or shape.
+// the store's `activeFrame` is a request; it resolves only while its node is the active selection and the path still lands on a pose.
 function _resolveActiveFrame(state: TransformToolState, sceneTree: SceneTree): ResolvedFrame | null {
     const storeState = state.store.getState();
     const activeFrame = storeState.activeFrame;
@@ -730,9 +728,7 @@ function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): Resolved
     if (!control || !instance) return null;
     let resolved: ResolvedFrame | null = null;
     walkObjects(control.schema, control.get(instance), getVisualWorldMatrix(transform), (site) => {
-        if (!samePath(site.path, activeFrame.path) || site.schema.kind === 'segment') return false;
-        // a pose moves and turns; a sphere or box only moves, through its centre
-        const kind = site.schema.kind === 'pose' ? 'pose' : 'center';
+        if (site.schema.kind !== 'pose' || !samePath(site.path, activeFrame.path)) return false;
         resolved = {
             activeFrame,
             node,
@@ -740,7 +736,6 @@ function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): Resolved
             control,
             instance,
             local: site.local,
-            kind,
             parent: mat4.copy(_frameParent, site.parent),
         };
         return true;
@@ -749,8 +744,8 @@ function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): Resolved
 }
 
 function _frameWorldPose(frame: ResolvedFrame, proxy: Object3D): void {
-    const localPosition = (frame.kind === 'pose' ? frame.local.position : frame.local.center) as Vec3 | undefined;
-    const localQuaternion = frame.kind === 'pose' ? (frame.local.quaternion as Quat | undefined) : undefined;
+    const localPosition = frame.local.position as Vec3 | undefined;
+    const localQuaternion = frame.local.quaternion as Quat | undefined;
     vec3.transformMat4(proxy.position, localPosition ?? vec3.set(_frameLocalPosition, 0, 0, 0), frame.parent);
     mat4.getRotation(_frameParentQuaternion, frame.parent);
     quat.multiply(proxy.quaternion, _frameParentQuaternion, localQuaternion ?? quat.identity(_frameLocalQuaternion));
@@ -771,10 +766,10 @@ function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 
             snapAxis(_frameLocalPosition[1], step, 'corner', 1),
             snapAxis(_frameLocalPosition[2], step, 'corner', 2),
         ];
-        next = { ...next, [frame.kind === 'pose' ? 'position' : 'center']: snapped };
+        next = { ...next, position: snapped };
         // the gizmo sits on the snapped frame; the next pointer move re-derives from the drag start.
         vec3.transformMat4(state.proxy.position, snapped, frame.parent);
-    } else if (mode === 'rotate' && frame.kind === 'pose') {
+    } else if (mode === 'rotate') {
         mat4.getRotation(_frameParentQuaternion, frame.parent);
         quat.invert(_frameInvWorldQuaternion, _frameParentQuaternion);
         quat.multiply(_frameLocalQuaternion, _frameInvWorldQuaternion, state.proxy.quaternion);

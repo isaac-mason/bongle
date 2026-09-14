@@ -35,7 +35,7 @@ describe('shape handles', () => {
             shape: {
                 type: 'transformed',
                 pose: { position: [2, 0, 0], quaternion: [0, 0, 0, 1] },
-                shape: { type: 'sphere', center: [0, 0, 0], radius: 1 },
+                shape: { type: 'sphere', radius: 1 },
             },
         };
         computeWorldTransforms(sceneTree);
@@ -88,12 +88,13 @@ describe('shape handles', () => {
     });
 });
 
-describe('shape handles on a list of centred spheres', () => {
-    it('a sphere gets a centre dot that arms it for the gizmo', () => {
-        const ZonesTrait = trait('test-zones', { zones: [] as prop.SchemaType<ReturnType<typeof prop.sphere>>[] });
+describe('shape handles on a list of posed spheres', () => {
+    it('each item gets a pose dot that arms its pose for the gizmo', () => {
+        const Zone = prop.object({ pose: prop.pose(), shape: prop.sphere() });
+        const ZonesTrait = trait('test-zones', { zones: [] as prop.SchemaType<typeof Zone>[] });
         control(ZonesTrait, 'zones', {
             label: 'Zones',
-            schema: prop.list(prop.sphere()),
+            schema: prop.list(Zone),
             get: (t) => t.zones,
             set: (t, v) => {
                 t.zones = v;
@@ -107,8 +108,8 @@ describe('shape handles on a list of centred spheres', () => {
         addTrait(node, TransformTrait);
         const zones = addTrait(node, ZonesTrait);
         zones.zones = [
-            { type: 'sphere', center: [3, 0, 0], radius: 1 },
-            { type: 'sphere', center: [-3, 0, 0], radius: 0.5 },
+            { pose: { position: [3, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 1 } },
+            { pose: { position: [-3, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 0.5 } },
         ];
         computeWorldTransforms(sceneTree);
 
@@ -147,7 +148,7 @@ describe('shape handles on a list of centred spheres', () => {
 
         mk._gestures.left.pressed = true;
         Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
-        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1] });
+        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1, 'pose'] });
         expect(state.activeTool).toBe('transform');
     });
 });
@@ -216,7 +217,7 @@ let harnessCount = 0;
 
 describe('shape handles: drags and spaces', () => {
     it('dragging a box face along its axis resizes that extent, snapped, with one history entry on release', () => {
-        const h = harness(prop.box3(), { type: 'box3', center: [0, 0, 0], halfExtents: [1, 1, 1] });
+        const h = harness(prop.box3(), { type: 'box3', halfExtents: [1, 1, 1] });
         h.aim([1, 0, 0]);
         h.tick();
         expect(h.handles.handles[h.handles.hovered]).toMatchObject({ kind: 'box-face', axis: 0, sign: 1 });
@@ -236,11 +237,19 @@ describe('shape handles: drags and spaces', () => {
         expect((h.value() as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
     });
 
-    it('a world-space shape ignores the node transform', () => {
-        const h = harness(prop.sphere({ space: 'world' }), { type: 'sphere', center: [1, 0, 0], radius: 1 }, [5, 0, 0]);
+    it('a world-space pose ignores the node transform, and a bare shape has no dot', () => {
+        const Placed = prop.object({ pose: prop.pose({ space: 'world' }), shape: prop.sphere() });
+        const h = harness(
+            Placed,
+            { pose: { position: [1, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 1 } },
+            [5, 0, 0],
+        );
         h.tick();
         const frame = h.handles.handles.find((x) => x.kind === 'frame')!;
         expect(Array.from(frame.world)).toEqual([1, 0, 0]);
+        const bare = harness(prop.sphere(), { type: 'sphere', radius: 1 });
+        bare.tick();
+        expect(bare.handles.handles.map((x) => x.kind)).toEqual(['radius']);
     });
 
     it('a local shape sits under the node transform, and a segment gets its two end handles', () => {

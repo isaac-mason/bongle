@@ -92,7 +92,7 @@ const LaunchPadPrefab = prefab('launch-pad', {
         const pad = cloneModel(LaunchPadModel.scene);
         const body = addTrait(pad, RigidBodyTrait);
         body.def = {
-            shape: { type: 'box3', center: [0, 0, 0], halfExtents: [1, 0.25, 1] },
+            shape: { type: 'box3', halfExtents: [1, 0.25, 1] },
             motionType: MotionType.STATIC,
             sensor: true,
         };

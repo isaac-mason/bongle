@@ -98,7 +98,7 @@ script(ExampleTrait, 'pool', (ctx) => {
 
         const rb = addTrait(node, RigidBodyTrait);
         rb.def = {
-            shape: { type: 'sphere', center: [0, 0, 0], radius: SPHERE_RADIUS },
+            shape: { type: 'sphere', radius: SPHERE_RADIUS },
             restitution: 0.3,
             friction: 0.5,
         };
