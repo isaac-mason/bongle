@@ -4,7 +4,9 @@ import { registry } from '../../../../src/core/registry';
 import { getControlCodecs, getSyncCodecs } from '../../../../src/core/scene/packcat-bridge';
 import { prop } from '../../../../src/core/scene/prop';
 import { createNode } from '../../../../src/core/scene/scene-tree';
-import { buildTraitInstance, control, sync, type TraitType, trait } from '../../../../src/core/scene/traits';
+import { buildTraitInstance, type TraitType } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
+import { control, sync } from '../../../../src/core/registry';
 
 const TEST_NODE = createNode({ name: 'test' });
 

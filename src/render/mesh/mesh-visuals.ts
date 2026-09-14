@@ -30,7 +30,7 @@
 //   - per-instance state never moves slot. visibility = "got included in
 //     some bucket this frame"; no per-instance visible u32 to write.
 
-import type { Scene } from 'gpucat';
+import { packTo, type Scene } from 'gpucat';
 import { box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
@@ -41,15 +41,16 @@ import * as Resources from '../../core/resources';
 import { Optional, type Src, Up } from '../../core/scene/conditions';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
-import { sampleVoxelLight } from '../../core/voxels/light';
-import type { Voxels } from '../../core/voxels/voxels';
 import * as Visibility from '../visibility/visibility';
 import {
     allocateSlot,
+    ensureSmoothNormals,
     freeSlot,
     growMeshBatch,
+    INSTANCE_PARAMS_STRIDE,
+    INSTANCE_PARAMS_STRIDE_F32,
+    InstanceParams,
     type MeshBatch,
-    type MeshInfoEntry,
     type MeshResources,
     MODEL_INSTANCE_PARAMS_OFFSET_F32,
     MODEL_INSTANCE_STRIDE_F32,
@@ -61,19 +62,20 @@ type MeshQuery = ReturnType<
     typeof query<[typeof MeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
 >;
 
-// InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
-// mesh-resources.ts, must stay in sync, no compiler will catch drift):
-//   [ 0..3 ]  tint     vec4f  (rgb = target, a = intensity)
-//   [ 4..7 ]  flash    vec4f  (rgb = colour, a = strength)
-//   [ 8..11]  light    vec4f
-//   [  12  ]  glow     f32
-//   [  13  ]  unlit    f32   (0=lit, 1=bypass)
-//   [  14  ]  litMin   f32
-//   [  15  ]  dither   f32
-//   [ 16..17] uvOffset vec2f
-//   [ 18..19] uvScale  vec2f
-// If you reorder fields in `InstanceParams`, update the writes below AND
-// `destroyInstance` AND `MODEL_INSTANCE_PARAMS_OFFSET_F32` in lockstep.
+// InstanceParams is written through `packTo` against the schema in
+// mesh-resources.ts, NOT by hand-numbered float indices. It used to be the
+// latter, and removing one field silently shifted every field after it into the
+// next instance's memory - every model in the game rendered garbled, and no
+// compiler caught it. Adding or reordering a field is now free.
+//
+// Dirtiness is decided by COMPARING the packed result against what the buffer
+// already holds, rather than by a version counter the trait's setters had to
+// remember to bump. That is the same shape `meshIdRef` already uses, and it
+// means a script can assign trait fields directly with no setter to forget.
+
+/** one packed `InstanceParams`, reused every write. Module scratch: the per-frame
+ *  loop is single-threaded and the contents never outlive one iteration. */
+const _paramsScratch = new Float32Array(INSTANCE_PARAMS_STRIDE_F32);
 
 // ── types ───────────────────────────────────────────────────────────
 
@@ -98,17 +100,10 @@ export type MeshVisualState = {
      *  state. cleanup at end of update() destroys any state whose
      *  lastSeenFrame is stale. */
     lastSeenFrame: number;
-    /** MeshTrait._version observed at the most recent params upload.
-     *  -1 forces the initial upload (trait._version starts at 0). */
-    paramsVersionAtUpload: number;
     /** TransformTrait._version observed at the most recent transform
      *  upload. NOT advanced while the instance is hidden, so the moment
      *  it becomes visible the version mismatch forces a fresh write. */
     transformVersionAtUpload: number;
-    /** MeshInfoEntry reference observed at the most recent params upload.
-     *  Image-decode patches replace the entry object, mismatch retriggers
-     *  the params upload so the new uvOffset/uvScale reach the slot. */
-    entryRefAtUpload: MeshInfoEntry | null;
     /** this mesh's own frustum-cull entry. `cull.aabb` is the mesh handle's
      *  bind-pose box (filled at alloc / mesh swap); the shared Visibility
      *  culler owns the leaf and writes `cull.visible`, which the per-frame
@@ -127,20 +122,6 @@ export type MeshVisualState = {
      *  is always present at alloc time; if a script removes the transform
      *  later the query stops matching and the state goes stale → destroyed. */
     transform: TransformTrait;
-    /** frame of the most recent voxel-light resample, and the inputs that
-     *  justified it. Only meaningful for an ungrouped mesh (one in a lighting
-     *  group reads the group's value and never samples). */
-    lightSampledFrame: number;
-    lightTransformVersion: number;
-    lightEpoch: number;
-    /** RGBA of the last light written into the slot's params block. Compared
-     *  against the freshly resolved light each frame; only a delta marks
-     *  params dirty. Initialised to NaN so the first compare always
-     *  mismatches and the initial upload fires. */
-    lastLightR: number;
-    lastLightG: number;
-    lastLightB: number;
-    lastLightA: number;
 };
 
 export type MeshVisuals = {
@@ -150,7 +131,8 @@ export type MeshVisuals = {
     /** bound to THIS room's sceneTree. */
     _query: MeshQuery;
     frameId: number;
-    /** this room's scene, where the client-global `batch.mesh` is added on init. */
+    /** this room's scene, where the client-global `batch.mesh` and its outline
+     *  shell are added on init. */
     scene: Scene;
 };
 
@@ -167,6 +149,7 @@ export type MeshVisuals = {
 export function init(batch: MeshBatch, scene: Scene, sceneTree: SceneTree): MeshVisuals {
     resetMeshBatch(batch);
     scene.add(batch.mesh);
+    scene.add(batch.outlineMesh);
     return {
         aliveStates: [],
         _query: query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
@@ -184,13 +167,12 @@ export function update(
     modelResources: MeshResources,
     resources: Resources.Resources,
     visibility: Visibility.Visibility,
-    voxels: Voxels,
 ): void {
     const frameId = ++visuals.frameId;
     refreshStates(visuals, batch, modelResources, resources, visibility, frameId);
     destroyStaleStates(visuals, batch, visibility, frameId);
-    const instanceDataDirty = writeInstances(visuals, batch, modelResources, voxels, frameId);
-    packDraws(batch, modelResources, instanceDataDirty);
+    writeInstances(visuals, batch, modelResources);
+    packDraws(batch, modelResources);
 }
 
 /** phase 1: give every matched mesh a live MeshVisualState, allocating or rebinding as
@@ -261,19 +243,10 @@ function refreshStates(
             meshIdRef: meshId,
             meshSlot,
             lastSeenFrame: frameId,
-            paramsVersionAtUpload: -1,
             transformVersionAtUpload: -1,
-            entryRefAtUpload: null,
             cull,
             model,
             transform,
-            lightSampledFrame: -1,
-            lightTransformVersion: -1,
-            lightEpoch: -1,
-            lastLightR: NaN,
-            lastLightG: NaN,
-            lastLightB: NaN,
-            lastLightA: NaN,
         };
         meshTrait._state = state;
         visuals.aliveStates.push(state);
@@ -290,20 +263,20 @@ function destroyStaleStates(visuals: MeshVisuals, batch: MeshBatch, visibility: 
 }
 
 /** phase 3: per-instance writes into the merged instance buffer, plus bucketing by mesh for
- *  the draw pack below. Returns whether anything was written. */
-function writeInstances(
-    visuals: MeshVisuals,
-    batch: MeshBatch,
-    modelResources: MeshResources,
-    voxels: Voxels,
-    frameId: number,
-): boolean {
+ *  the draw pack below. Queues the touched span for upload before returning. */
+function writeInstances(visuals: MeshVisuals, batch: MeshBatch, modelResources: MeshResources): void {
     const aliveStates = visuals.aliveStates;
     // re-read here rather than in `update`: growing the batch in refreshStates
     // reallocates the buffer, so a reference taken earlier can be stale.
     const instArr = batch.instanceDataBuf.array as Float32Array;
     const meshInfoEntries = modelResources.meshInfo.entries;
-    let instanceDataDirty = false;
+    // touched-slot span, widened by each write below and uploaded as ONE range at the end.
+    // slots come from a free-list allocator so they can scatter, and a span then covers
+    // untouched slots in the middle — those re-send unchanged bytes, which is exactly what
+    // the old blanket `needsUpdate` did for the WHOLE buffer, so the span is never worse.
+    let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
+    let dirtyMaxSlot = -1;
+    let dirtySlotCount = 0;
 
     // reset buckets, empty arrays in-place and pool any orphaned ones.
     const buckets = batch._bucketScratch;
@@ -329,65 +302,13 @@ function writeInstances(
 
         const slot = state.slot;
 
-        // Resolve lighting. Unlit meshes skip the work entirely; toggling
-        // `unlit` via `setMeshUnlit` bumps `meshTrait._version` so the
-        // params upload below still picks up the flag flip.
-        //
-        // The lit branch writes `meshTrait.light` (script-visible), then compares
-        // against the state's last-uploaded light. Writing unchanged values
-        // doesn't flip `lightDirty`, so the params upload is skipped; without
-        // this gate every visible mesh would re-upload every frame.
-        //
-        // A mesh in a lighting group (a `ModelTrait` at or above it) shares that
-        // group's one sample, so a rig's limbs stay consistent and a bone whose
-        // world position clips into a solid voxel can't pop dark. A mesh with no
-        // group is its own lighting unit and samples at its own AABB centre,
-        // which is inside its geometry by construction — no anchor to configure.
         const visualWorldMatrix = getVisualWorldMatrix(transformTrait);
-        let lightDirty = false;
-        if (!meshTrait.unlit) {
-            const light = meshTrait.light;
-            const cull = state.cull;
-            if (model !== null) {
-                const src = model.light;
-                light[0] = src[0]!;
-                light[1] = src[1]!;
-                light[2] = src[2]!;
-                light[3] = src[3]!;
-            } else if (cull.leaf !== -1 && shouldResampleLight(state, transformTrait, voxels, frameId)) {
-                // the centre of a box's world AABB is the world transform of its
-                // local centre (the box is symmetric about it), so this is a
-                // point transform, not a box transform.
-                const b = cull.aabb;
-                const lx = (b[0]! + b[3]!) * 0.5;
-                const ly = (b[1]! + b[4]!) * 0.5;
-                const lz = (b[2]! + b[5]!) * 0.5;
-                const m = visualWorldMatrix;
-                sampleVoxelLight(
-                    voxels,
-                    m[0]! * lx + m[4]! * ly + m[8]! * lz + m[12]!,
-                    m[1]! * lx + m[5]! * ly + m[9]! * lz + m[13]!,
-                    m[2]! * lx + m[6]! * ly + m[10]! * lz + m[14]!,
-                    light,
-                );
-            }
-            const lr = light[0]!;
-            const lg = light[1]!;
-            const lb = light[2]!;
-            const la = light[3]!;
-            if (lr !== state.lastLightR || lg !== state.lastLightG || lb !== state.lastLightB || la !== state.lastLightA) {
-                state.lastLightR = lr;
-                state.lastLightG = lg;
-                state.lastLightB = lb;
-                state.lastLightA = la;
-                lightDirty = true;
-            }
-        }
 
         // both transforms and params write into the same merged
         // instanceData buffer at their slot's sub-ranges. each has its
         // own version compare so we still skip whichever didn't change.
         const slotBase = slot * MODEL_INSTANCE_STRIDE_F32;
+        let slotDirty = false;
 
         // ── transform upload, gated on TransformTrait._version ──
         const transformVersion = transformTrait._version;
@@ -409,44 +330,53 @@ function writeInstances(
             instArr[slotBase + 14] = visualWorldMatrix[14]!;
             instArr[slotBase + 15] = visualWorldMatrix[15]!;
             state.transformVersionAtUpload = transformVersion;
-            instanceDataDirty = true;
+            slotDirty = true;
         }
 
-        // ── params (tint/light/glow + uv), re-uploads on trait._version
-        //    bump (script-visible field changed), MeshInfo entry swap
-        //    (image-decode patch landed → new uvOffset/uvScale), OR a
-        //    light delta detected above. ──
-        const meshVersion = meshTrait._version;
-        if (meshVersion !== state.paramsVersionAtUpload || entry !== state.entryRefAtUpload || lightDirty) {
-            const po = slotBase + MODEL_INSTANCE_PARAMS_OFFSET_F32;
-            const tint = meshTrait.tint;
-            const flash = meshTrait.flash;
-            const light = meshTrait.light;
-            const uvOffset = entry.uvOffset;
-            const uvScale = entry.uvScale;
-            instArr[po] = tint[0]!;
-            instArr[po + 1] = tint[1]!;
-            instArr[po + 2] = tint[2]!;
-            instArr[po + 3] = tint[3]!;
-            instArr[po + 4] = flash[0]!;
-            instArr[po + 5] = flash[1]!;
-            instArr[po + 6] = flash[2]!;
-            instArr[po + 7] = flash[3]!;
-            instArr[po + 8] = light[0]!;
-            instArr[po + 9] = light[1]!;
-            instArr[po + 10] = light[2]!;
-            instArr[po + 11] = light[3]!;
-            instArr[po + 12] = meshTrait.glow;
-            instArr[po + 13] = meshTrait.unlit ? 1 : 0;
-            instArr[po + 14] = meshTrait.litMin;
-            instArr[po + 15] = meshTrait.dither;
-            instArr[po + 16] = uvOffset[0]!;
-            instArr[po + 17] = uvOffset[1]!;
-            instArr[po + 18] = uvScale[0]!;
-            instArr[po + 19] = uvScale[1]!;
-            state.paramsVersionAtUpload = meshVersion;
-            state.entryRefAtUpload = entry;
-            instanceDataDirty = true;
+        // ── params (tint/flash/glow/outline + atlas uv) ──
+        // Packed into a scratch, then compared field-for-field against what the
+        // instance buffer already holds. The buffer IS the cache, so there is no
+        // per-instance snapshot to keep in step, and a MeshInfo entry swap
+        // (image-decode patch landed → new uvOffset/uvScale) shows up as a plain
+        // difference rather than needing its own ref check.
+        const outline = meshTrait.outline;
+        // LAZY: the smoothed-normal bake only runs for a mesh something actually
+        // outlines, and only once. `ensureSmoothNormals` is idempotent, so this is
+        // a flag check on every subsequent frame.
+        if (outline.enabled) ensureSmoothNormals(modelResources.geometry, entry.geometry);
+        packTo(InstanceParams, _paramsScratch, 0, {
+            tint: meshTrait.tint,
+            flash: meshTrait.flash,
+            glow: meshTrait.glow,
+            unlit: meshTrait.unlit ? 1 : 0,
+            litMin: meshTrait.litMin,
+            dither: meshTrait.dither,
+            uvOffset: entry.uvOffset,
+            uvScale: entry.uvScale,
+            outlineColor: outline.color,
+            // width 0 IS the off switch on the GPU: the vertex stage drops the
+            // triangle outright. `enabled` stays a separate field so a configured
+            // width survives being toggled.
+            outlineWidth: outline.enabled ? outline.width : 0,
+            outlineSpace: outline.space === 'world' ? 0 : 1,
+        });
+        const po = slotBase + MODEL_INSTANCE_PARAMS_OFFSET_F32;
+        // compare and write in ONE pass, element by element: `set()` would re-send
+        // the whole block on any change and costs a call for ~24 floats.
+        let paramsDirty = false;
+        for (let k = 0; k < INSTANCE_PARAMS_STRIDE_F32; k++) {
+            const v = _paramsScratch[k]!;
+            if (instArr[po + k] !== v) {
+                instArr[po + k] = v;
+                paramsDirty = true;
+            }
+        }
+        if (paramsDirty) slotDirty = true;
+
+        if (slotDirty) {
+            dirtySlotCount++;
+            if (slot < dirtyMinSlot) dirtyMinSlot = slot;
+            if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
         }
 
         // ── bucket by meshSlot ────────────────────────────────────
@@ -458,12 +388,24 @@ function writeInstances(
         bucket.push(slot);
     }
 
-    return instanceDataDirty;
+    if (dirtyMaxSlot >= 0) {
+        const base = dirtyMinSlot * MODEL_INSTANCE_STRIDE_F32;
+        batch.instanceDataBuf.addUpdateRange(base, (dirtyMaxSlot - dirtyMinSlot + 1) * MODEL_INSTANCE_STRIDE_F32);
+        batch.instanceDataBuf.needsUpdate = true;
+    }
+
+    // Span efficiency, read by the render backend into the frame profiler. `dirtySlots` is what
+    // actually changed; `dirtySpan` is what the single min..max range uploads. They diverge
+    // when dirty slots scatter — the light resample is phased BY SLOT, so every 8th slot
+    // re-samples on a given frame — and a wide span then re-sends untouched slots.
+    batch.aliveInstances = aliveStates.length;
+    batch.dirtyInstances = dirtySlotCount;
+    batch.dirtySpan = dirtyMaxSlot >= 0 ? dirtyMaxSlot - dirtyMinSlot + 1 : 0;
 }
 
 /** phase 4: walk the buckets phase 3 filled, writing slots contiguously into slotMap and
  *  emitting one MeshDraw per non-empty bucket. */
-function packDraws(batch: MeshBatch, modelResources: MeshResources, instanceDataDirty: boolean): void {
+function packDraws(batch: MeshBatch, modelResources: MeshResources): void {
     const meshInfoEntries = modelResources.meshInfo.entries;
     const buckets = batch._bucketScratch;
     const freeBuckets = batch._freeBuckets;
@@ -509,37 +451,12 @@ function packDraws(batch: MeshBatch, modelResources: MeshResources, instanceData
     // trim the reused draw array to this frame's active count.
     draws.length = writtenDraws;
 
-    if (writtenDraws > 0) batch.slotMapBuf.needsUpdate = true;
-    if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
-}
-
-/** how often an unmoved, ungrouped mesh re-samples voxel light, in frames.
- *  phased by instance slot so the cost spreads instead of spiking. */
-const LIGHT_RESAMPLE_FRAMES = 8;
-
-/**
- * Should this ungrouped mesh sample voxel light this frame? A mesh that hasn't
- * moved is almost always looking at unchanged light, so a static prop pays one
- * sample rather than one per frame.
- *
- * Movement and a full relight (`lighting.epoch`) resample immediately. Ordinary
- * local light changes — a torch placed nearby — bump neither, so the phased
- * periodic refresh is what catches those, within `LIGHT_RESAMPLE_FRAMES`.
- */
-function shouldResampleLight(state: MeshVisualState, transform: TransformTrait, voxels: Voxels, frameId: number): boolean {
-    const version = transform._version;
-    const epoch = voxels.lighting.epoch;
-    if (state.lightTransformVersion !== version || state.lightEpoch !== epoch) {
-        state.lightTransformVersion = version;
-        state.lightEpoch = epoch;
-        state.lightSampledFrame = frameId;
-        return true;
+    // only [0, firstInstance) was written and only that prefix is indexed by the draws, so
+    // upload the prefix rather than the whole instanceCapacity-sized allocation.
+    if (writtenDraws > 0) {
+        batch.slotMapBuf.addUpdateRange(0, firstInstance);
+        batch.slotMapBuf.needsUpdate = true;
     }
-    if ((frameId + state.slot) % LIGHT_RESAMPLE_FRAMES === 0) {
-        state.lightSampledFrame = frameId;
-        return true;
-    }
-    return false;
 }
 
 // ── dispose ─────────────────────────────────────────────────────────
@@ -555,6 +472,7 @@ export function dispose(visuals: MeshVisuals, batch: MeshBatch, visibility: Visi
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
     visuals.scene.remove(batch.mesh);
+    visuals.scene.remove(batch.outlineMesh);
 }
 
 // ── internal ────────────────────────────────────────────────────────
@@ -565,33 +483,15 @@ function destroyInstance(visuals: MeshVisuals, batch: MeshBatch, trait: MeshTrai
     Visibility.remove(visibility, state.cull);
     const slot = state.slot;
 
-    // zero per-slot params so a reused slot doesn't briefly inherit
-    // stale tint/light/uv before the first write lands. transforms aren't
-    // zeroed, the next allocation's version mismatch forces a full
-    // re-upload before the slot is referenced again. 20 f32 = 80B params
-    // block (mirrors `InstanceParams` layout above).
+    // zero per-slot params so a reused slot doesn't briefly inherit stale
+    // tint/uv before the first write lands - and so the comparison in
+    // `writeInstances` sees a difference and writes. Transforms aren't zeroed:
+    // the next allocation's version mismatch forces a full re-upload before the
+    // slot is referenced again.
     const instArr = batch.instanceDataBuf.array as Float32Array;
     const po = slot * MODEL_INSTANCE_STRIDE_F32 + MODEL_INSTANCE_PARAMS_OFFSET_F32;
-    instArr[po] = 0;
-    instArr[po + 1] = 0;
-    instArr[po + 2] = 0;
-    instArr[po + 3] = 0;
-    instArr[po + 4] = 0;
-    instArr[po + 5] = 0;
-    instArr[po + 6] = 0;
-    instArr[po + 7] = 0;
-    instArr[po + 8] = 0;
-    instArr[po + 9] = 0;
-    instArr[po + 10] = 0;
-    instArr[po + 11] = 0;
-    instArr[po + 12] = 0;
-    instArr[po + 13] = 0;
-    instArr[po + 14] = 0;
-    instArr[po + 15] = 0;
-    instArr[po + 16] = 0;
-    instArr[po + 17] = 0;
-    instArr[po + 18] = 0;
-    instArr[po + 19] = 0;
+    for (let k = 0; k < INSTANCE_PARAMS_STRIDE_F32; k++) instArr[po + k] = 0;
+    batch.instanceDataBuf.addUpdateRange(po, INSTANCE_PARAMS_STRIDE / 4);
     batch.instanceDataBuf.needsUpdate = true;
 
     freeSlot(batch.instanceAllocator, slot);

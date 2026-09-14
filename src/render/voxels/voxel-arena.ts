@@ -334,7 +334,10 @@ export function arenaDispose<S extends Record<string, StreamSpec>>(a: SegmentAre
 
 // ── arena factories ─────────────────────────────────────────────────
 
-const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4; // 56, interleaved header (40 B) + light (16 B)
+// 40 B, geometry only. Per-corner light USED to be interleaved here; it lives in
+// the light-volume texture now, so this is the whole quad. The number matters: it
+// is the divisor sizing the arena, and the tier budgets were measured against it.
+const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4;
 
 export type QuadArenaStreams = {
     quads: { schema: d.u32; perSlot: number };
@@ -410,6 +413,17 @@ export type VoxelArenaBudget = {
     maxSections: number;
     /** OffsetAllocator node-pool size for the quad arena. */
     maxAllocs: number;
+    /** light-volume tile slots. Sized off `maxSections` because a tile is needed
+     *  for roughly the 1-CHUNK DILATION of the geometry, not the geometry: a
+     *  chunk adjacent to a surface is non-uniform even when it holds nothing
+     *  itself, since the bake's padded region reaches across the boundary.
+     *  Uniform chunks consume no slot, so this can sit below the resident count. */
+    maxLightTiles: number;
+    /** chunk radius the light-volume residency grid must cover. The STREAM
+     *  radius, not the draw radius: chunks are resident (and so lit) slightly
+     *  beyond what is drawn, and a grid that does not cover a sampled chunk
+     *  aliases onto another one. */
+    lightGridChunkRadius: number;
 };
 
 // voxelArenaBudgetForTier lives in client/performance (tier -> budget is a

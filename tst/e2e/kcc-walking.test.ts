@@ -4,7 +4,18 @@
 // attaches a character controller, walks forward, and asserts the
 // character stays on the ground without jittering.
 
-import { addTrait, block, CharacterControllerTrait, getTrait, onJoin, script, setBlock, TransformTrait, trait } from 'bongle';
+import {
+    addTrait,
+    block,
+    CharacterControllerTrait,
+    getTrait,
+    onJoin,
+    script,
+    setBlock,
+    TransformTrait,
+    tile,
+    trait,
+} from 'bongle';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
@@ -18,8 +29,9 @@ describe('kcc walking', () => {
 
     it('should walk across a flat floor without y jitter', async () => {
         harness = await createTestHarness((root) => {
+            const stoneTex = tile('stone', { src: 'textures/stone.png' });
             block('stone', {
-                model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }),
+                model: () => ({ type: 'cube', tiles: { all: stoneTex } }),
             });
 
             const Gameplay = trait('test-gameplay', {}, { persist: false });

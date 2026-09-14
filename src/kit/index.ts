@@ -1,11 +1,12 @@
-// `bongle/kit`, a free baseline of blocks, textures, models and
+// `bongle/kit`, a free baseline of blocks, tiles, models and
 // sounds. Each subsystem is re-exported as its own namespace so usage
 // is uniform across kinds:
 //
-//   import { blocks, blockTextures, models, sounds, sprites, blockSoundPresets, particlePresets } from 'bongle/kit';
+//   import { blocks, tiles, textures, models, sounds, sprites, blockSoundPresets, particlePresets } from 'bongle/kit';
 //
 //   blocks.stone
-//   blockTextures.grassTop
+//   tiles.grassTop
+//   textures.white
 //   models.spark
 //   sounds.chestOpen
 //   sprites.smoke
@@ -27,9 +28,10 @@
 // whole.
 
 export * as blockSoundPresets from 'bongle/kit/block-sound-presets';
-export * as blockTextures from 'bongle/kit/block-textures';
 export * as blocks from 'bongle/kit/blocks';
 export * as models from 'bongle/kit/models';
 export * as particlePresets from 'bongle/kit/particle-presets';
 export * as sounds from 'bongle/kit/sounds';
 export * as sprites from 'bongle/kit/sprites';
+export * as textures from 'bongle/kit/textures';
+export * as tiles from 'bongle/kit/tiles';

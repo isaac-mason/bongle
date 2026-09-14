@@ -1,7 +1,6 @@
 import { type Box3, box3 } from 'math/shapes';
 import { ModelTrait } from '../builtins/model';
 import { TransformTrait } from '../builtins/transform';
-import { unionSubtreeLocalAabb } from '../core/scene/node-aabb';
 import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/scene-tree';
 import * as SceneTree from '../core/scene/scene-tree';
 import type { TraitBase } from '../core/scene/traits';
@@ -67,7 +66,6 @@ export function cloneModel(node: Node): Node {
     if (!model) {
         model = SceneTree.addTrait(clone, ModelTrait);
         box3.empty(_cloneBounds);
-        if (unionSubtreeLocalAabb(clone, _cloneBounds)) box3.center(model.lightOffset, _cloneBounds);
     }
     if (!SceneTree.getTrait(clone, TransformTrait)) {
         SceneTree.addTrait(clone, TransformTrait);

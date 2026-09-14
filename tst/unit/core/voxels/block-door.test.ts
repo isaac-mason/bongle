@@ -14,30 +14,30 @@ import type {
     BlockHandle,
     BlockPlaceCtx,
     BlockQuad,
-    BlockTextureDef,
-    BlockTextureHandle,
     PlaceIO,
+    TileDef,
+    TileHandle,
 } from '../../../../src/core/voxels/blocks';
 import { createVoxels, setBlock } from '../../../../src/core/voxels/voxels';
 
-const topTex: BlockTextureHandle = {
+const topTex: TileHandle = {
     id: 'door-top',
-    dependency: { registry: 'blockTextures', id: 'door-top' },
-    def: { id: 'door-top', frames: ['door-top.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'door-top' },
+    def: { id: 'door-top', frames: [{ registry: 'textures', id: 'door-top' }], fps: 1, interpolate: false },
 };
-const botTex: BlockTextureHandle = {
+const botTex: TileHandle = {
     id: 'door-bot',
-    dependency: { registry: 'blockTextures', id: 'door-bot' },
-    def: { id: 'door-bot', frames: ['door-bot.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'door-bot' },
+    def: { id: 'door-bot', frames: [{ registry: 'textures', id: 'door-bot' }], fps: 1, interpolate: false },
 };
-const stoneTex: BlockTextureHandle = {
+const stoneTex: TileHandle = {
     id: 'stone',
-    dependency: { registry: 'blockTextures', id: 'stone' },
-    def: { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'stone' },
+    def: { id: 'stone', frames: [{ registry: 'textures', id: 'stone' }], fps: 1, interpolate: false },
 };
 
-const doorHandle = door('test:door', { textures: { top: topTex, bottom: botTex } }) as BlockHandle;
-const stoneHandle = cube('test:stone', { textures: stoneTex }) as BlockHandle;
+const doorHandle = door('test:door', { tiles: { top: topTex, bottom: botTex } }) as BlockHandle;
+const stoneHandle = cube('test:stone', { tiles: stoneTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [doorHandle.id, doorHandle.def],
@@ -47,7 +47,7 @@ const handles = new Map<string, BlockHandle>([
     [doorHandle.id, doorHandle as BlockHandle],
     [stoneHandle.id, stoneHandle as BlockHandle],
 ]);
-const textures = new Map<string, BlockTextureDef>([
+const tiles = new Map<string, TileDef>([
     [topTex.id, topTex.def],
     [botTex.id, botTex.def],
     [stoneTex.id, stoneTex.def],
@@ -57,7 +57,7 @@ let registry: Blocks;
 beforeAll(() => {
     registerAllShapes();
     registry = createBlockRegistry();
-    buildBlockRegistry(registry, defs, handles, textures);
+    buildBlockRegistry(registry, defs, handles, tiles);
 });
 
 // floor-click ctx at (x,y,z); camera yaw controls the resolved facing.
@@ -153,7 +153,7 @@ describe('get/setDoorOpen', () => {
 
 describe('door model — hinge mirror', () => {
     it('mirrorX is involutive (mirror twice = identity)', () => {
-        const q = blockModel.box([0, 0, 0], [1, 1, 3 / 16], { all: { texture: botTex } }, { uvs: 'local', cull: false });
+        const q = blockModel.box([0, 0, 0], [1, 1, 3 / 16], { all: botTex }, { uvs: 'local', cull: false });
         expect(blockModel.mirrorX(blockModel.mirrorX(q))).toEqual(q);
     });
 

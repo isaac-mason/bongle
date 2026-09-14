@@ -135,6 +135,10 @@ export type ModelPayload = {
 
 export type BuildEntry = {
     id: string;
+    /** the declared display name and search tags, carried through so a barrel
+     *  re-registration keeps what the author wrote rather than the id. */
+    name: string;
+    tags: readonly string[];
     srcRel: string;
     srcHash: string;
     hash8: string;
@@ -172,7 +176,8 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     // only skips itself rather than rejecting the batch.
     const built = await mapConcurrent([...models], BAKE_CONCURRENCY, async ([id, def]) => {
         try {
-            return await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
+            const built = await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
+            return built && { ...built, name: def.name, tags: def.tags };
         } catch (err) {
             // a single unparseable/unfetchable model must not fail the whole
             // bake — warn and skip it (its barrel entry is just absent).
@@ -279,7 +284,7 @@ async function processModel(
     loader: ResourceLoader,
     projectFs: Filesystem,
     emitServer: boolean,
-): Promise<BuildEntry | null> {
+): Promise<Omit<BuildEntry, 'name' | 'tags'> | null> {
     let srcBytes: Uint8Array;
     try {
         srcBytes = await loader.loadBytes(srcRel);
@@ -868,7 +873,8 @@ function renderModelConstruction(e: BuildEntry, lines: string[]): void {
 
     lines.push(`    return {`);
     lines.push(`        modelId: MODEL_ID,`);
-    lines.push(`        name: MODEL_ID,`);
+    lines.push(`        name: ${JSON.stringify(e.name)},`);
+    lines.push(`        tags: ${JSON.stringify(e.tags)},`);
     lines.push(`        src: ${JSON.stringify(srcRel)},`);
     lines.push(`        bin: {`);
     lines.push(`            client: ${JSON.stringify(clientBinUrl)},`);
@@ -906,11 +912,10 @@ export {};
 
 async function gcOrphanBins(projectFs: Filesystem, live: Set<string>): Promise<void> {
     for (const dir of [CLIENT_BIN_DIR, SERVER_BIN_DIR]) {
-        for (const entry of await projectFs.list(dir)) {
-            if (entry.kind !== 'file' || !entry.path.endsWith('.bin')) continue;
-            const name = entry.path.split('/').pop()!;
+        for (const [name, kind] of await projectFs.readDir(dir)) {
+            if (kind !== 'file' || !name.endsWith('.bin')) continue;
             if (live.has(name)) continue;
-            await projectFs.remove(entry.path);
+            await projectFs.remove(`${dir}/${name}`);
         }
     }
 }

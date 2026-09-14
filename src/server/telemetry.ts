@@ -8,26 +8,46 @@ import * as Rooms from './rooms';
 import type { EngineServer } from './server';
 
 /**
- * Server-side debug telemetry: who's subscribed to `debug_logs` / `room_metrics`
- * and the throttled pushes to them, plus the metric recorders (net / process /
- * physics). Pushes are server-paced, independent of any client's frame timing.
+ * Server-side debug telemetry: who's subscribed to `debug_logs` / `room_frames`
+ * and the throttled pushes to them, plus the recorders (net / process / physics)
+ * that write scalars into the frame in progress. Pushes are server-paced,
+ * independent of any client's frame timing.
+ *
+ * Recording is gated on there being a subscriber at all: with nobody watching,
+ * the server's profiler is disabled, every scope call returns immediately and the
+ * frame ring is released. An unwatched server pays nothing for being profileable.
  */
 export type Telemetry = {
     /** per-client `roomId -> last cursor sent`; presence = client wants debug_logs. */
     debugLogSubscribers: Map<Client, Map<string, number>>;
-    /** presence = client wants room_metrics for the rooms it holds a Player in. */
-    metricsSubscribers: Set<Client>;
-    /** seconds accumulated since the last metrics push. */
+    /** per-client count of interned key names already sent. ids are dense and
+     *  assigned in order, so the tail past this is the dictionary delta. */
+    metricsSubscribers: Map<Client, number>;
+    /** seconds accumulated since the last frame push. */
     metricsPushSince: number;
+    /** index of the newest frame already pushed, so each push picks the worst
+     *  frame SINCE the last one rather than re-sending or missing frames. */
+    lastPushedFrame: number;
+    /** reusable scratch for the per-room slice; one push at a time. */
+    slice: Debug.FrameSlice;
 };
 
 export function init(): Telemetry {
-    return { debugLogSubscribers: new Map(), metricsSubscribers: new Set(), metricsPushSince: 0 };
+    return {
+        debugLogSubscribers: new Map(),
+        metricsSubscribers: new Map(),
+        metricsPushSince: 0,
+        lastPushedFrame: -1,
+        slice: Debug.createFrameSlice(),
+    };
 }
 
-export function subscribeMetrics(t: Telemetry, client: Client, enabled: boolean): void {
-    if (enabled) t.metricsSubscribers.add(client);
+/** subscribe/unsubscribe a panel, and enable recording iff anyone is watching. */
+export function subscribeMetrics(state: EngineServer, client: Client, enabled: boolean): void {
+    const t = state.telemetry;
+    if (enabled) t.metricsSubscribers.set(client, 0);
     else t.metricsSubscribers.delete(client);
+    Debug.setEnabled(state.profiler, t.metricsSubscribers.size > 0);
 }
 
 export function subscribeDebugLogs(t: Telemetry, client: Client, enabled: boolean): void {
@@ -39,46 +59,34 @@ export function subscribeDebugLogs(t: Telemetry, client: Client, enabled: boolea
 }
 
 /** drop a disconnected client from both subscriber sets. */
-export function dropClient(t: Telemetry, client: Client): void {
+export function dropClient(state: EngineServer, client: Client): void {
+    const t = state.telemetry;
     t.debugLogSubscribers.delete(client);
     t.metricsSubscribers.delete(client);
+    Debug.setEnabled(state.profiler, t.metricsSubscribers.size > 0);
 }
 
 // ── recorders ───────────────────────────────────────────────────────
 
-/** per-message-type net rates + game/total aggregates onto a room's metrics.
- *  global byte counts are split evenly across rooms (1/roomCount), matching the
- *  per-room metric model. */
-export function recordNetStats(metrics: Debug.Metrics, stats: NetStats, delta: number, roomCount: number): void {
-    const seen = new Set<string>();
+/** per-message-type net rates + game/total aggregates into the frame. global byte
+ *  counts are split evenly across rooms (1/roomCount), matching the per-room view
+ *  a panel gets. a type that saw no traffic records nothing, and the panel's
+ *  history reads the gap as zero. */
+export function recordNetStats(profiler: Debug.Profiler, stats: NetStats, delta: number, roomCount: number): void {
     let inGame = 0;
     let outGame = 0;
     for (const [type, bytes] of stats.bytesInByType) {
-        const id = `net/in/${type}`;
-        Debug.record(metrics, id, bytes / 1024 / delta / roomCount);
-        seen.add(id);
+        Debug.record(profiler, `net/in/${type}`, bytes / 1024 / delta / roomCount, 'kb/s');
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) inGame += bytes;
     }
     for (const [type, bytes] of stats.bytesOutByType) {
-        const id = `net/out/${type}`;
-        Debug.record(metrics, id, bytes / 1024 / delta / roomCount);
-        seen.add(id);
+        Debug.record(profiler, `net/out/${type}`, bytes / 1024 / delta / roomCount, 'kb/s');
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) outGame += bytes;
     }
-    Debug.record(metrics, 'net/ingress', inGame / 1024 / delta / roomCount);
-    Debug.record(metrics, 'net/egress', outGame / 1024 / delta / roomCount);
-    Debug.record(metrics, 'net/in/total', stats.bytesIn / 1024 / delta / roomCount);
-    Debug.record(metrics, 'net/out/total', stats.bytesOut / 1024 / delta / roomCount);
-    seen.add('net/in/total');
-    seen.add('net/out/total');
-    // stale decay: a per-type rate is only written on frames its type had
-    // traffic. zero every known net/{in,out} id absent this frame so a type that
-    // goes quiet reads 0 and the panel's trailing average decays.
-    for (const id of Debug.getIds(metrics)) {
-        if (!seen.has(id) && (id.startsWith('net/in/') || id.startsWith('net/out/'))) {
-            Debug.record(metrics, id, 0);
-        }
-    }
+    Debug.record(profiler, 'net/ingress', inGame / 1024 / delta / roomCount, 'kb/s');
+    Debug.record(profiler, 'net/egress', outGame / 1024 / delta / roomCount, 'kb/s');
+    Debug.record(profiler, 'net/in/total', stats.bytesIn / 1024 / delta / roomCount, 'kb/s');
+    Debug.record(profiler, 'net/out/total', stats.bytesOut / 1024 / delta / roomCount, 'kb/s');
 }
 
 // One server process per game-room container in prod, so process CPU + RSS are
@@ -94,11 +102,11 @@ const proc = (globalThis as { process?: ProcessStats }).process;
 // than every tick (a per-tick % over a ~16ms window is mostly noise).
 let lastCpuUsage: { user: number; system: number } | null = proc ? proc.cpuUsage() : null;
 let procSampleAccumMs = 0;
-const PROC_SAMPLE_INTERVAL_MS = 1000; // 1Hz; the 600-sample ring then holds ~10min of trend
+const PROC_SAMPLE_INTERVAL_MS = 1000; // 1Hz, a slow-moving readout rather than a chart
 
-/** record process CPU% (of one core) + memory (RSS/heap, MB) onto the global
- *  metrics bag; throttled to ~1Hz. `delta` is the tick delta in seconds. */
-export function recordProcessStats(metrics: Debug.Metrics, delta: number): void {
+/** record process CPU% (of one core) + memory (RSS/heap, MB) into the frame;
+ *  throttled to ~1Hz. `delta` is the tick delta in seconds. */
+export function recordProcessStats(profiler: Debug.Profiler, delta: number): void {
     if (!proc || lastCpuUsage === null) return;
     procSampleAccumMs += delta * 1000;
     if (procSampleAccumMs < PROC_SAMPLE_INTERVAL_MS) return;
@@ -107,25 +115,26 @@ export function recordProcessStats(metrics: Debug.Metrics, delta: number): void 
 
     const used = proc.cpuUsage(lastCpuUsage); // microseconds of CPU since the last sample
     lastCpuUsage = proc.cpuUsage();
-    Debug.record(metrics, 'proc/cpu', ((used.user + used.system) / 1000 / windowMs) * 100, '%'); // us over the wall window
+    Debug.record(profiler, 'proc/cpu', ((used.user + used.system) / 1000 / windowMs) * 100, '%'); // us over the wall window
 
     const mem = proc.memoryUsage();
-    Debug.record(metrics, 'proc/rss', mem.rss / 1024 / 1024, 'mb');
-    Debug.record(metrics, 'proc/heap', mem.heapUsed / 1024 / 1024, 'mb');
+    Debug.record(profiler, 'proc/rss', mem.rss / 1024 / 1024, 'mb');
+    Debug.record(profiler, 'proc/heap', mem.heapUsed / 1024 / 1024, 'mb');
 }
 
-/** physics world counts (bodies by motion type, live contact pairs) onto the
- *  room metrics bag. gated on `enabled` since it walks the rigid body pool. */
-export function recordPhysicsStats(metrics: Debug.Metrics, world: physics.Physics): void {
-    if (!metrics.enabled) return;
+/** physics world counts (bodies by motion type, live contact pairs). called from
+ *  inside the room's scope, so the counters ride with that room's subtree. gated
+ *  on `enabled` since it walks the rigid body pool. */
+export function recordPhysicsStats(profiler: Debug.Profiler, world: physics.Physics): void {
+    if (!profiler.enabled) return;
     const s = physics.stats(world);
-    Debug.record(metrics, 'physics/bodies', s.bodies, 'count');
-    Debug.record(metrics, 'physics/bodies/active', s.active, 'count');
-    Debug.record(metrics, 'physics/bodies/static', s.static, 'count');
-    Debug.record(metrics, 'physics/bodies/kinematic', s.kinematic, 'count');
-    Debug.record(metrics, 'physics/bodies/dynamic', s.dynamic, 'count');
-    Debug.record(metrics, 'physics/contacts', s.contacts, 'count');
-    Debug.record(metrics, 'physics/contacts/vcc', s.vccContacts, 'count');
+    Debug.record(profiler, 'physics/bodies', s.bodies, 'count');
+    Debug.record(profiler, 'physics/bodies/active', s.active, 'count');
+    Debug.record(profiler, 'physics/bodies/static', s.static, 'count');
+    Debug.record(profiler, 'physics/bodies/kinematic', s.kinematic, 'count');
+    Debug.record(profiler, 'physics/bodies/dynamic', s.dynamic, 'count');
+    Debug.record(profiler, 'physics/contacts', s.contacts, 'count');
+    Debug.record(profiler, 'physics/contacts/vcc', s.vccContacts, 'count');
 }
 
 // ── pushes ──────────────────────────────────────────────────────────
@@ -155,35 +164,83 @@ export function pushDebugLogs(state: EngineServer): void {
     }
 }
 
-/** cadence the server pushes room_metrics to subscribed panels, independent of
- *  any client's frame timing. */
-const METRICS_PUSH_INTERVAL_S = 0.2; // 5Hz
+/** cadence the server pushes frames to subscribed panels, independent of any
+ *  client's frame timing. */
+const FRAME_PUSH_INTERVAL_S = 0.2; // 5Hz
 
-/** push room_metrics snapshots to subscribed panels, server-throttled. each
- *  snapshot merges the room's latest values with the global (non-room) stages. */
-export function pushRoomMetrics(state: EngineServer, delta: number): void {
-    state.telemetry.metricsPushSince += delta;
-    if (state.telemetry.metricsSubscribers.size === 0 || state.telemetry.metricsPushSince < METRICS_PUSH_INTERVAL_S) return;
-    state.telemetry.metricsPushSince = 0;
+/** spans shorter than this are dropped, with their subtree, before a frame goes
+ *  on the wire. sub-0.05ms scopes are the bulk of a busy frame's spans and the
+ *  flame graph cannot draw them anyway. */
+const WIRE_MIN_SPAN_MS = 0.05;
 
-    const global = Debug.getLatestValues(state.metrics);
-    for (const client of state.telemetry.metricsSubscribers) {
+/**
+ * push one profiled frame per subscribed panel, server-throttled.
+ *
+ * the frame sent is the SLOWEST since the last push, not the newest: at 5Hz the
+ * panel sees a sample either way, and the worst frame in each window is the one
+ * worth looking at when hunting a hitch.
+ *
+ * each subscriber gets its own slice — other rooms' subtrees are dropped, so a
+ * client only ever sees the room it is in. process-wide phases (inbox, discovery,
+ * netflush) are shared and stay in, which is what makes the client's server flame
+ * a picture of the real tick rather than a room-shaped fragment of it.
+ */
+export function pushRoomFrames(state: EngineServer, delta: number): void {
+    const t = state.telemetry;
+    t.metricsPushSince += delta;
+    if (t.metricsSubscribers.size === 0 || t.metricsPushSince < FRAME_PUSH_INTERVAL_S) return;
+    t.metricsPushSince = 0;
+
+    // the worst frame recorded since the last push.
+    let worst: Debug.Frame | null = null;
+    for (let offset = 0; offset < Debug.frameCount(state.profiler); offset++) {
+        const frame = Debug.getFrame(state.profiler, offset);
+        if (!frame || frame.index <= t.lastPushedFrame) break;
+        if (!worst || frame.duration > worst.duration) worst = frame;
+    }
+    if (!worst) return;
+    t.lastPushedFrame = worst.index;
+
+    // every room's scope key except the subscriber's own is dropped from the slice.
+    const roomKeys = new Map<string, number>();
+    for (const room of state.rooms.rooms.values()) {
+        const id = state.profiler.keyToId.get(room.profileKey);
+        if (id !== undefined) roomKeys.set(room.id, id);
+    }
+    const drop = new Set<number>();
+
+    for (const [client, knownKeys] of t.metricsSubscribers) {
         const seen = new Set<string>();
         for (const player of Rooms.getPlayersForClient(state.rooms, client)) {
             const roomId = player.roomId;
             if (seen.has(roomId)) continue;
             seen.add(roomId);
-            const room = Rooms.getRoom(state.rooms, roomId);
-            if (!room) continue;
-            const values = {
-                ...Debug.getLatestValues(room.metrics),
-                tick: global.tick ?? 0,
-                inbox: global.inbox ?? 0,
-                'proc/cpu': global['proc/cpu'] ?? 0,
-                'proc/rss': global['proc/rss'] ?? 0,
-                'proc/heap': global['proc/heap'] ?? 0,
-            };
-            Net.send(state.net, client, { type: 'room_metrics', roomId: room.id, values });
+            if (!Rooms.getRoom(state.rooms, roomId)) continue;
+
+            drop.clear();
+            for (const [id, keyId] of roomKeys) {
+                if (id !== roomId) drop.add(keyId);
+            }
+            Debug.sliceFrame(worst, drop, WIRE_MIN_SPAN_MS, t.slice);
+
+            const slice = t.slice;
+            Net.send(state.net, client, {
+                type: 'room_frames',
+                roomId,
+                keys: state.profiler.idToKey.slice(knownKeys),
+                units: state.profiler.unitById.slice(knownKeys),
+                duration: slice.duration,
+                spanKey: slice.key.slice(0, slice.count),
+                spanDepth: slice.depth.slice(0, slice.count),
+                spanStart: slice.start.slice(0, slice.count),
+                spanEnd: slice.end.slice(0, slice.count),
+                counterKey: slice.counterKey.slice(0, slice.counterCount),
+                counterValue: slice.counterValue.slice(0, slice.counterCount),
+            });
         }
+        // every room this client holds gets the same name tail: each room mirrors
+        // into its own ring on the client, and ids only line up if every one of
+        // them learns the whole table. mark them known once the client is served.
+        t.metricsSubscribers.set(client, state.profiler.idToKey.length);
     }
 }

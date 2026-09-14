@@ -23,16 +23,27 @@ function allocOrThrow(a: OffsetAllocator, size: number): OAHandle {
     return h;
 }
 
-/** Brute-force tracker: live segments with sizes. Asserts no overlap as a
- *  cross-check against the allocator's internal bookkeeping. */
+/** Brute-force tracker: live segments with sizes. Returns the first overlapping
+ *  pair as a readable string, or null, as a cross-check against the allocator's
+ *  internal bookkeeping.
+ *
+ *  Returns rather than asserting per pair on purpose. The stress loop calls this
+ *  1000 times with up to 200 live segments, so a per-pair `expect` is ~200k
+ *  assertion objects: enough to push a 0.6s test past the 5s default timeout
+ *  whenever the machine is loaded, which read as flakiness in a test whose PRNG
+ *  is seeded and whose values never vary. One assertion per call keeps the
+ *  runtime flat and names the offending pair when it does fail. */
 type LiveSeg = { offset: number; size: number; handle: OAHandle };
-function assertNoOverlap(live: LiveSeg[]): void {
+function findOverlap(live: LiveSeg[]): string | null {
     const sorted = [...live].sort((a, b) => a.offset - b.offset);
     for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1]!;
         const cur = sorted[i]!;
-        expect(cur.offset).toBeGreaterThanOrEqual(prev.offset + prev.size);
+        if (cur.offset < prev.offset + prev.size) {
+            return `[${prev.offset}, ${prev.offset + prev.size}) overlaps [${cur.offset}, ${cur.offset + cur.size})`;
+        }
     }
+    return null;
 }
 
 // ── SmallFloat helpers ──────────────────────────────────────────────
@@ -137,7 +148,7 @@ describe('OffsetAllocator basics', () => {
         const sizes = [100, 50, 200, 75, 33];
         const handles = sizes.map((s) => allocOrThrow(a, s));
         const live = handles.map((h, i) => ({ offset: h.offset, size: sizes[i]!, handle: h }));
-        assertNoOverlap(live);
+        expect(findOverlap(live)).toBeNull();
         const totalUsed = sizes.reduce((s, x) => s + x, 0);
         expect(oaStorageReport(a).totalFree).toBe(1024 - totalUsed);
     });
@@ -275,7 +286,7 @@ describe('randomised alloc/free stress', () => {
                 const seg = live.splice(idx, 1)[0]!;
                 oaFree(a, seg.handle);
             }
-            assertNoOverlap(live);
+            expect(findOverlap(live)).toBeNull();
         }
 
         // Drain and verify full reclaim.

@@ -15,8 +15,8 @@ import { watch } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer, type RunnableDevEnvironment, type ViteDevServer } from 'vite';
-import type { EngineRebootRef } from './plugin';
 import { defineBongleDevConfig } from './config';
+import type { EngineRebootRef } from './plugin';
 
 const SHELL_DIR = fileURLToPath(new URL('./shell/', import.meta.url));
 const BONGLE_BIN = fileURLToPath(new URL('../bongle.mjs', import.meta.url));
@@ -76,7 +76,7 @@ export async function startDevServer(opts: { projectDir: string; port?: number }
     // onBaked fans the client HMR refresh events the edit-client listens for.
     const pipelineEnv = server.environments.pipeline as RunnableDevEnvironment;
     const refreshResources = (): void => {
-        for (const ev of ['bongle:block-texture-atlas-updated', 'bongle:sprite-atlas-updated', 'bongle:audio-atlas-updated']) {
+        for (const ev of ['bongle:tile-atlas-updated', 'bongle:sprite-atlas-updated', 'bongle:audio-atlas-updated']) {
             server.environments.client.hot.send(ev, {});
         }
     };

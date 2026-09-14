@@ -1,6 +1,8 @@
 import { pack } from '../core/scene/pack';
 import { dirty } from '../core/scene/sync/sync-rate';
-import { sync, type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
+import { sync } from '../core/registry';
 
 /**
  * player trait. marks a node as the in-scene body of a specific Player,

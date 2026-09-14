@@ -151,6 +151,19 @@ const STAR_DOT_FEATHER = 0.35;
 /** one per celestial body (2 instances: sun, moon). `kind` 0=sun, 1=moon
  *  selects direction/enable/fade in the shader; direction itself is
  *  derived from `EnvConfig.time`, so this buffer is baked once. */
+/** the voxel light volume's residency-grid shape as the shader needs it:
+ *  `mask = dim - 1`, and strides rather than shift counts because WGSL wants a
+ *  u32 shift amount while gpucat's node types insist it match the i32 value;
+ *  `x << b` is `x * 2^b`. One engine-global frameGroup uniform like the rest
+ *  of env, pointed at the live volume by `VoxelResources.init`; declared here
+ *  and not in voxels/ so env never value-imports the voxel modules (that
+ *  import order is a cycle through core/voxels for the node CLI). */
+export const LightVolumeConfig = gpu.struct('LightVolumeConfig', {
+    mask: gpu.d.i32,
+    rowStride: gpu.d.i32,
+    sliceStride: gpu.d.i32,
+});
+
 export const SkyBodyInstance = gpu.struct('SkyBodyInstance', {
     color: gpu.d.vec3f,
     kind: gpu.d.f32,
@@ -211,11 +224,16 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
     );
     const envConfig = new gpu.Uniform(EnvConfig, buildConfigObject(initial), gpu.frameGroup);
     const envSky = new gpu.Uniform(skyArraySchema(), buildSkyValue(initial.sky.stops), gpu.frameGroup);
+    // the light volume's grid shape. Engine-global like the rest: every
+    // light-sampling material reads this one uniform, and `VoxelResources.init`
+    // points it at the volume it creates.
+    const lightVolumeConfig = new gpu.Uniform(LightVolumeConfig, { mask: 0, rowStride: 1, sliceStride: 1 }, gpu.frameGroup);
 
     // shared nodes captured (value-based) by every env-aware material.
     const timeNode = makeTimeNode(envTime);
     const cfgNode = makeCfgNode(envConfig);
     const skyNode = makeSkyNode(envSky);
+    const lightVolumeCfgNode = gpu.fields(gpu.uniform(lightVolumeConfig));
 
     // engine-global, baked-once per-instance data for the sun/moon + star billboards
     // (static; identical every room). captured by the materials as instanced vertex
@@ -239,9 +257,11 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
         envTime,
         envConfig,
         envSky,
+        lightVolumeConfig,
         timeNode,
         cfgNode,
         skyNode,
+        lightVolumeCfgNode,
         skyMaterial,
         skyBodyMaterial,
         starMaterial,

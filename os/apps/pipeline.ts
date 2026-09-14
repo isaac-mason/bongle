@@ -1,5 +1,5 @@
 import { bootMarks } from '../boot-marks';
-import type { App, AppInit, Channel, Config, PipelineReport } from '../interface';
+import type { App, AppInit, Channel, PipelineReport } from '../interface';
 
 // The asset-pipeline app. Evaluates the user graph through the runner, drives
 // the engine's EditPipeline bake, then serves "pipeline" as a readiness signal —
@@ -28,17 +28,25 @@ const pipeline: App<AppInit> = async (env) => {
 
     const { EditPipeline } = await runner.import('bongle/engine-asset-pipeline');
     mark('pipeline module imported');
-    let config: Config | null = null;
-    // held connections get the fresh report after every bake (the shell holds
-    // one open as its config subscription). PipelineReport is the ABI shape.
+    // the last report, replayed to whoever connects next. Held connections get a
+    // fresh one every time the bake's outputs move — more than once per bake, since
+    // the icon render settles after the data bake. PipelineReport is the ABI shape;
+    // the shell holds a connection open as its config subscription, the client realm
+    // as its "re-read this artifact" signal.
+    let latest: PipelineReport = {
+        config: null,
+        artifacts: { blocks: null, sprites: null, audio: null, blockIcons: null, prefabIcons: [] },
+    };
     const subscribers = new Set<Channel>();
-    const report = (): PipelineReport => ({ config });
     const session = EditPipeline.init(
         {
             fs,
-            onBaked: (r: { atlasChanged: boolean; config: Config | null }) => {
-                config = r.config;
-                for (const conn of subscribers) conn.send(report());
+            onBaked: (r: PipelineReport) => {
+                // prefabIcons is edge-shaped (ids that moved), so the replay kept for
+                // late connectors must not carry them: they'd re-invalidate icons that
+                // consumer never had. Everything else is an identity and replays fine.
+                latest = { config: r.config, artifacts: { ...r.artifacts, prefabIcons: [] } };
+                for (const conn of subscribers) conn.send(r);
             },
             // mirrored to the console so the bake's stage timings sit next to the boot marks.
             log: (m: string) => {
@@ -78,7 +86,7 @@ const pipeline: App<AppInit> = async (env) => {
     env.listen('pipeline', (conn) => {
         subscribers.add(conn);
         void conn.closed.then(() => subscribers.delete(conn));
-        conn.send(report());
+        conn.send(latest);
         return () => {};
     });
 };

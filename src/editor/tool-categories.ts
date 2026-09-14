@@ -57,12 +57,12 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
         key: TOOL_CATEGORY_KEYS.build,
         tools: [
             { id: 'build', icon: Icons.Hammer, label: 'build', hint: 'place and break voxels' },
-            { id: 'paint', icon: Icons.Brush, label: 'paint', hint: 'paint voxel faces' },
+            { id: 'paint', icon: Icons.Paintbrush, label: 'paint', hint: 'paint voxel faces' },
             { id: 'brush', icon: Icons.Paintbrush, label: 'brush', hint: 'stamp a shape × pattern at the cursor' },
-            { id: 'smooth', icon: Icons.MoveDown, label: 'smooth', hint: 'heightmap gaussian — smooth the terrain surface' },
+            { id: 'smooth', icon: Icons.Waves, label: 'smooth', hint: 'heightmap gaussian — smooth the terrain surface' },
             {
                 id: 'elevation',
-                icon: Icons.Mountain,
+                icon: Icons.WavesUp,
                 label: 'elevation',
                 hint: 'raise / lower / flatten terrain — heightmap brush',
             },

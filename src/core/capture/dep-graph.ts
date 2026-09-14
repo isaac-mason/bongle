@@ -49,7 +49,7 @@ let version = 0;
  * reverse edges, attaches any new ones. Returns `true` if the dep set
  * actually differed from the previous one, `upsert` uses this to elevate
  * a "content hash unchanged but deps shifted" case (e.g. a block model
- * factory that now closes over a different `BlockTextureDef`) into a
+ * factory that now closes over a different `TileHandle`) into a
  * `changed` event on the consumer's registry. The dep set itself is the
  * signal, since neither the consumer's source nor the producer's content
  * moved.
@@ -146,7 +146,7 @@ export function clearDeps(consumer: DepKey): void {
 /**
  * Return the transitive set of consumers affected by `producers` changing.
  * Walks forward edges breadth-first; a consumer is itself a producer for
- * its own consumers (e.g. blockTexture → block → scene), so the frontier
+ * its own consumers (e.g. texture → tile → block → scene), so the frontier
  * grows until no new entries appear.
  *
  * Result includes consumers only, producers passed in are not in the

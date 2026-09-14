@@ -14,7 +14,7 @@ import type { Voxels } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
-import type { PointerState } from '../pointer-state';
+import { playBulkEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import { applyStamp } from './brush-apply';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
@@ -42,16 +42,9 @@ function activeBlockKey(store: EditRoomStoreApi): string {
 
 // ── per-frame update ───────────────────────────────────────────────
 
-export function updateBrush(
-    state: BrushState,
-    store: EditRoomStoreApi,
-    ctx: ScriptContext,
-    pointer: PointerState,
-    input: Input,
-    voxels: Voxels,
-): void {
+export function updateBrush(state: BrushState, store: EditRoomStoreApi, ctx: ScriptContext, input: Input, voxels: Voxels): void {
     const { pattern, mask } = store.getState().brushOptions;
-    advanceBrushStroke(state.brush, store, pointer, input, store.getState().brushOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, input, store.getState().brushOptions, (accumulated) => {
         const active = activeBlockKey(store);
         const forward: VoxelOp[] = [];
         const reverse: VoxelOp[] = [];
@@ -61,9 +54,11 @@ export function updateBrush(
                 label: 'brush',
                 do() {
                     sendOps(ctx, forward);
+                    playBulkEdit(ctx, forward, reverse);
                 },
                 undo() {
                     sendOps(ctx, reverse);
+                    playBulkEdit(ctx, reverse, forward);
                 },
             });
         }

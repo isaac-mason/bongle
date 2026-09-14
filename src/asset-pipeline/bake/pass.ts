@@ -12,7 +12,7 @@
  *
  * Both call sites materialize a partial ProjectModule view (only the
  * fields atlas + models read) from the typed registries and dispatch to
- * `buildBlockTextureAtlas` / `buildModels`. The config the bundle
+ * `buildTileAtlas` / `buildModels`. The config the bundle
  * manifest needs is exposed via `state.config`, the `build.ts` caller
  * reads it directly off pipeline state after the pass.
  */
@@ -24,16 +24,16 @@ import { type Registry, resolveConfig } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SceneHandle } from '../../core/scene/scene-handle';
 import type { Blocks } from '../../core/voxels/block-registry';
-import type { BlockDef, BlockHandle, BlockTextureDef } from '../../core/voxels/blocks';
+import type { BlockDef, BlockHandle, TileDef } from '../../core/voxels/blocks';
 import type { ModuleVersion } from '../../internal';
 import { buildAudio } from './audio';
-import { buildBlockTextureAtlas } from './block-texture-atlas';
+import { type BakedTextures, bakeTextures } from './bake-textures';
 import type { DecodeAudio } from './decode-audio';
-import { type BakedDraws, bakeDrawTextures } from './draw-textures';
 import { buildModels, type ModelsCacheEntry } from './models';
 import type { Raster } from './raster';
 import { buildScenes } from './scenes';
 import { buildSpriteAtlas } from './sprite-atlas';
+import { buildTileAtlas } from './tile-atlas';
 
 /** Shape of the `bongle/internal` exports the pipeline pass consumes.
  *  Captured as a struct so each call site can adapt its own import
@@ -47,7 +47,7 @@ export type PipelineInternal = {
         out: Blocks,
         defs: Map<string, BlockDef>,
         handles: Map<string, BlockHandle>,
-        blockTextures: Map<string, BlockTextureDef>,
+        tiles: Map<string, TileDef>,
     ) => void;
 };
 
@@ -65,9 +65,8 @@ export type PipelineOpts = {
     /** forwarded to the two atlas builders as their `cache` option. true
      *  in dev HMR (the upstream revision gate has already decided this
      *  call is worth making); false in prod build paths because the
-     *  sidecar hash collapses every DrawSource to a constant `'draw'`
-     *  marker, so a cache hit can mask draw-fn changes between build
-     *  invocations. */
+     *  sidecar hash collapses every computed texture to a constant marker,
+     *  so a cache hit can mask `fn` changes between build invocations. */
     cache: boolean;
 };
 
@@ -85,7 +84,7 @@ export type PipelineOpts = {
  */
 export type PipelineState = {
     blocks: number;
-    blockTextures: number;
+    tiles: number;
     models: number;
     scenes: number;
     /** last-seen config-store revision (named apart from `config` below, which
@@ -94,6 +93,11 @@ export type PipelineState = {
     configRev: number;
     sounds: number;
     sprites: number;
+    /** last-seen textures-store revision. Both atlases consume textures, so a
+     *  texture edit must dirty them even though neither consumer's own
+     *  revision moved — a consumer holds frame REFERENCES, so its hash covers
+     *  which textures it uses, not their pixels. */
+    textures: number;
     /** Latest observed config, refreshed every pass. `build.ts` reads this
      *  after the pass to seed the bundle manifest; the pass also compares
      *  against it to detect a standalone flip. */
@@ -107,12 +111,13 @@ export type PipelineState = {
 export function createPipelineState(): PipelineState {
     return {
         blocks: -1,
-        blockTextures: -1,
+        tiles: -1,
         models: -1,
         scenes: -1,
         configRev: -1,
         sounds: -1,
         sprites: -1,
+        textures: -1,
         config: null,
         modelsCache: new Map(),
     };
@@ -164,12 +169,13 @@ export async function runAssetPipelinePass(
 
     const { registry } = internal;
     const blocksRev = registry.blocks.revision;
-    const blockTexturesRev = registry.blockTextures.revision;
+    const tilesRev = registry.tiles.revision;
     const modelsRev = registry.models.revision;
     const scenesRev = registry.scenes.revision;
     const configRev = registry.config.revision;
     const soundsRev = registry.sounds.revision;
     const spritesRev = registry.sprites.revision;
+    const texturesRev = registry.textures.revision;
 
     // The scene SET (all authored scenes vs `scene()`-declared only) and the
     // model bake (whether the server bin is emitted) both branch on `standalone`,
@@ -180,24 +186,25 @@ export async function runAssetPipelinePass(
     const prevStandalone = isStandalone(state.config ?? DEFAULT_CONFIG);
     const standaloneChanged = standalone !== prevStandalone;
 
-    // Atlas reads blocks (for `BlockRegistryData.textures` derivation) and
-    // blockTextures (the source PNGs). Either bumping is grounds for rebuild.
-    const atlasDirty = forceAll || blocksRev !== state.blocks || blockTexturesRev !== state.blockTextures;
+    // Atlas reads blocks (for the atlas-layer derivation) and tiles (which
+    // textures each layer samples). Either bumping is grounds for rebuild, as is
+    // a texture edit, which moves neither.
+    const atlasDirty = forceAll || blocksRev !== state.blocks || tilesRev !== state.tiles || texturesRev !== state.textures;
     const modelsDirty = forceAll || modelsRev !== state.models || standaloneChanged;
     const scenesDirty = forceAll || scenesRev !== state.scenes || standaloneChanged;
     const configDirty = configRev !== state.configRev;
     const soundsDirty = forceAll || soundsRev !== state.sounds;
-    const spritesDirty = forceAll || spritesRev !== state.sprites;
+    const spritesDirty = forceAll || spritesRev !== state.sprites || texturesRev !== state.textures;
 
     if (!atlasDirty && !modelsDirty && !scenesDirty && !configDirty && !soundsDirty && !spritesDirty) return timings;
 
     // Build the block registry first when blocks/models/scenes are dirty.
     // `buildBlockRegistry` evaluates each block's default model and, for
-    // cube blocks, calls `deriveBlockDust`, which registers per-block
-    // `<id>:particle{0..N-1}` sprites whose `src` is a `draw(...)`
-    // DrawSource. Those sprites must be in `registry.sprites` BEFORE
-    // `bakeDrawTextures` walks it, otherwise their DrawSources never get
-    // baked and the sprite atlas falls back to magenta placeholders.
+    // cube blocks, calls `deriveBlockDust`, which registers a computed
+    // `<id>:particle{0..N-1}` TEXTURE per variant plus the sprite wrapping it.
+    // Those must be in `registry.textures` BEFORE `bakeTextures` walks it,
+    // otherwise they never get baked and the sprite atlas falls back to
+    // magenta placeholders.
     let moduleView: ModuleVersion | null = null;
     if (atlasDirty || modelsDirty || scenesDirty) {
         const defs = new Map<string, BlockDef>();
@@ -207,30 +214,30 @@ export async function runAssetPipelinePass(
             const handle = registry.blocks.handles.get(id);
             if (handle) handles.set(id, handle);
         }
-        const blockTextures = new Map<string, BlockTextureDef>();
-        for (const [id, h] of registry.blockTextures.byId) blockTextures.set(id, h);
+        const tiles = new Map<string, TileDef>();
+        for (const [id, h] of registry.tiles.byId) tiles.set(id, h);
         const models = new Map<string, ModelDef>();
         for (const [id, h] of registry.models.byId) models.set(id, h);
 
         const blocks = internal.createBlockRegistry();
-        internal.buildBlockRegistry(blocks, defs, handles, blockTextures);
+        internal.buildBlockRegistry(blocks, defs, handles, tiles);
         const scenes = new Map<string, SceneHandle>();
         for (const [id, h] of registry.scenes.handles) scenes.set(id, h);
-        moduleView = { blocks, blockTextures, models, scenes };
+        moduleView = { blocks, tiles, models, scenes };
     }
 
-    // Bake DrawSources after block-registry derivation so dust sprites are present. Atlas
-    // builders read the resulting `BakedDraws` map to replace magenta placeholders with rendered
-    // pixels. The bake walks both registries unconditionally; per-builder gates downstream still
+    // Bake computed textures after block-registry derivation so dust textures are present. Atlas
+    // builders read the resulting `BakedTextures` map to replace magenta placeholders with rendered
+    // pixels. The bake walks the texture store unconditionally; per-builder gates downstream still
     // apply.
     //
     // NOT awaited here: only the two ATLASES consume it. Audio, models and scenes read none of it,
     // and awaiting up front put all three behind a bake they don't need — audio worst of all,
     // since it is the longest phase and depends on nothing but `registry.sounds`. Started as a
     // promise, the atlases chain off it and everything else runs alongside.
-    const bakedDraws: Promise<BakedDraws> =
+    const bakedTextures: Promise<BakedTextures> =
         atlasDirty || spritesDirty
-            ? timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { loader, raster }))
+            ? timed('draw', bakeTextures(registry.textures, { loader, raster }))
             : Promise.resolve(new Map());
 
     const tasks: Promise<void>[] = [];
@@ -239,9 +246,9 @@ export async function runAssetPipelinePass(
         if (atlasDirty) {
             const view = moduleView;
             tasks.push(
-                bakedDraws
-                    .then((draws) =>
-                        timed('block-atlas', buildBlockTextureAtlas(view, { bakedDraws: draws, cache, loader, fs, raster })),
+                bakedTextures
+                    .then((baked) =>
+                        timed('tile-atlas', buildTileAtlas(view, { bakedTextures: baked, cache, loader, fs, raster })),
                     )
                     .then(() => undefined),
             );
@@ -268,13 +275,23 @@ export async function runAssetPipelinePass(
 
     if (spritesDirty) {
         // buildSpriteAtlas reads the sprites store directly, independent of
-        // the block/model view above. `bakedDraws` is the in-memory output
-        // of the draw-textures pass above; nullable map entries fall back
-        // to magenta inside the builder.
+        // the block/model view above. `bakedTextures` is the in-memory output
+        // of the texture bake above; missing map entries fall back to magenta
+        // inside the builder.
         tasks.push(
-            bakedDraws
-                .then((draws) =>
-                    timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { bakedDraws: draws, cache, loader, fs, raster })),
+            bakedTextures
+                .then((baked) =>
+                    timed(
+                        'sprite-atlas',
+                        buildSpriteAtlas(registry.sprites, {
+                            bakedTextures: baked,
+                            textures: registry.textures,
+                            cache,
+                            loader,
+                            fs,
+                            raster,
+                        }),
+                    ),
                 )
                 .then(() => undefined),
         );
@@ -288,12 +305,13 @@ export async function runAssetPipelinePass(
     state.config = cfg;
 
     state.blocks = blocksRev;
-    state.blockTextures = blockTexturesRev;
+    state.tiles = tilesRev;
     state.models = modelsRev;
     state.scenes = scenesRev;
     state.configRev = configRev;
     state.sounds = soundsRev;
     state.sprites = spritesRev;
+    state.textures = texturesRev;
 
     return timings;
 }

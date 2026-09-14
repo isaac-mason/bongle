@@ -5,7 +5,8 @@ export { MaterialCombineMode, MotionQuality, MotionType } from 'crashcat';
 import { type Vec3, vec3 } from 'math';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';
-import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
+import { dirty, rate, type TraitType } from '../api/traits';
+import { control, sync, trait } from '../core/registry';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 
 // observer-normalized contact lifecycle lives on `ContactsTrait` (see

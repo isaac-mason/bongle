@@ -59,7 +59,7 @@ export async function buildScenes(module: ModuleVersion, opts: BuildScenesOption
         // client-only: no server serves scenes, so the client needs EVERY authored
         // scene baked in (handles + payloads), whether or not `scene('id')` declared
         // it. Walks all of content/scenes/ (blueprints included, they live here too).
-        for (const entry of await fs.list(SCENES_DIR, { recursive: true })) {
+        for (const entry of await fs.list(SCENES_DIR)) {
             if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;
             ids.add(entry.path.slice(SCENES_DIR.length + 1, -SCENE_EXT.length));
         }
@@ -69,7 +69,7 @@ export async function buildScenes(module: ModuleVersion, opts: BuildScenesOption
         // renderer + prefab placement). An undeclared non-blueprint scene stays
         // server-only (the server serves it), matching the strict play surface.
         const blueprintsDir = `${SCENES_DIR}/blueprints`;
-        for (const entry of await fs.list(blueprintsDir, { recursive: true })) {
+        for (const entry of await fs.list(blueprintsDir)) {
             if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;
             // ids are scene-dir-relative ('blueprints/tree').
             ids.add(entry.path.slice(SCENES_DIR.length + 1, -SCENE_EXT.length));

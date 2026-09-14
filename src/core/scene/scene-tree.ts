@@ -1,11 +1,4 @@
-import {
-    getWorldChunk,
-    invalidateTransformAncestry,
-    invalidateTransformChildren,
-    parentTransform,
-    releaseTransform,
-    TransformTrait,
-} from '../../builtins/transform';
+import type { TransformTrait } from '../../builtins/transform';
 import { env } from '../../env';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';
@@ -31,6 +24,14 @@ import { logScriptError } from './script-errors';
 import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
 import { buildTraitInstance, cloneTraitValue, type TraitBase, type TraitDef, type TraitHandle } from './traits';
+import {
+    getWorldChunk,
+    invalidateTransformAncestry,
+    invalidateTransformChildren,
+    parentTransform,
+    releaseTransform,
+    transformSlot,
+} from './transform';
 
 export type { TraitHandle } from './traits';
 
@@ -462,7 +463,7 @@ export function isLocalNode(node: Node): boolean {
  * Derived on demand (no maintained set), reconciled per tick off `replication.dirty`.
  */
 export function isTransformRoot(node: Node): boolean {
-    const transform = getTrait(node, TransformTrait);
+    const transform = node.traits[transformSlot()] as TransformTrait | undefined;
     return node.scene !== null && transform !== undefined && isReplicable(node) && parentTransform(transform) === null;
 }
 
@@ -514,7 +515,7 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
     for (const node of sceneTree.replication.dirty) {
         const filed = sceneTree.regions.rootToRegion.get(node);
         if (isTransformRoot(node)) {
-            const t = getTrait(node, TransformTrait)!;
+            const t = node.traits[transformSlot()] as TransformTrait;
             const c = getWorldChunk(t);
             const key = regionKey(chunkToRegionCoord(c[0]), chunkToRegionCoord(c[1]), chunkToRegionCoord(c[2]));
             if (filed === key) continue; // already filed here, nothing moved
@@ -586,7 +587,7 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
         sceneTree.prefabs.dirty.delete(node);
         sceneTree.prefabs.state.delete(node);
     }
-    const t = getTrait(node, TransformTrait);
+    const t = node.traits[transformSlot()] as TransformTrait | undefined;
     if (t) releaseTransform(sceneTree, t);
     node.scene = null;
 
@@ -735,8 +736,8 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         // the trait value is still resolvable.
         if (scene?.context) disposeTraitScripts(scene.context, node, handle.def);
 
-        if (traitSlot === TransformTrait.slot) {
-            releaseTransform(scene, getTrait(node, TransformTrait)!);
+        if (traitSlot === transformSlot()) {
+            releaseTransform(scene, node.traits[transformSlot()] as TransformTrait);
         }
 
         // update bitset so queries see the node as no longer matching
@@ -780,8 +781,8 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
             if (handle) disposeTraitScripts(scene.context, node, handle.def);
         }
 
-        if (traitSlot === TransformTrait.slot) {
-            releaseTransform(scene, getTrait(node, TransformTrait)!);
+        if (traitSlot === transformSlot()) {
+            releaseTransform(scene, node.traits[transformSlot()] as TransformTrait);
         }
 
         bitset.remove(node.bitset, traitSlot);
@@ -1301,17 +1302,18 @@ function perfKey(hook: string, key: string): string {
     return id;
 }
 
-// disabled metrics for hooks we don't surface (the physics-step hooks run from
-// physics.tick, which has no metrics handle); begin/end no-op on it.
-const SILENT = Debug.createMetrics(false);
+// a disabled profiler for hooks we don't surface (the physics-step hooks run from
+// physics.tick, which has no profiler handle); begin/end no-op on it.
+const SILENT = Debug.createProfiler(false);
 
 // the one driver behind every runOn* below: walk initialized instances, run each
-// `select`-ed hook fn with `args`, time it as `script/<hook>/<key>` (begin/end
-// self-gate on metrics.enabled), and log errors with the node + hook name.
+// `select`-ed hook fn with `args`, scope it as `script/<hook>/<key>` (begin/end
+// self-gate on the profiler), and log errors with the node + hook name. one span
+// per INSTANCE, so a trait's per-frame total is the sum the reduction reports.
 function runHook<A>(
     sceneTree: SceneTree,
     args: A,
-    metrics: Debug.Metrics,
+    profiler: Debug.Profiler,
     hook: string,
     select: (i: ScriptInstance) => Iterable<(a: A) => void>,
 ): void {
@@ -1321,13 +1323,13 @@ function runHook<A>(
             if (!instance.initialized) continue;
             for (const fn of select(instance)) {
                 const id = perfKey(hook, instance.def.key);
-                Debug.begin(metrics, id);
+                Debug.begin(profiler, id);
                 try {
                     fn(args);
                 } catch (err) {
                     logScriptError(`script '${instance.def.key}'.${hook} @${instance.node.id}`, err);
                 }
-                Debug.end(metrics, id);
+                Debug.end(profiler, id);
             }
         }
     }
@@ -1338,30 +1340,30 @@ function runHook<A>(
  * before runOnUpdate, so consumers can pre-process / consume input (e.g. an
  * editor zeroing mk._dx/_dy) before player controllers read it.
  */
-export function runOnInput(sceneTree: SceneTree, args: FrameArgs, metrics: Debug.Metrics): void {
-    runHook(sceneTree, args, metrics, 'onInput', (i) => i.onInput);
+export function runOnInput(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onInput', (i) => i.onInput);
 }
 
 /**
  * update all scripts in the scene tree. fires once per frame before the
  * fixed-timestep tick loop, intended for input polling and camera binding.
  */
-export function runOnUpdate(sceneTree: SceneTree, args: UpdateArgs, metrics: Debug.Metrics): void {
-    runHook(sceneTree, args, metrics, 'onUpdate', (i) => i.onUpdate);
+export function runOnUpdate(sceneTree: SceneTree, args: UpdateArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onUpdate', (i) => i.onUpdate);
 }
 
 /**
  * tick all scripts in the scene tree. iterates all nodes and calls onTick
  * on each script instance.
  */
-export function runOnTick(sceneTree: SceneTree, args: TickArgs, metrics: Debug.Metrics): void {
-    runHook(sceneTree, args, metrics, 'onTick', (i) => i.onTick);
+export function runOnTick(sceneTree: SceneTree, args: TickArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onTick', (i) => i.onTick);
 }
 
 /**
  * fire onPrePhysicsStep hooks on all scripts in the scene tree. called after
  * tickSceneTree but before the physics step. routes through SILENT, it runs
- * from physics.tick, which carries no metrics, and isn't surfaced in the digest.
+ * from physics.tick, which carries no profiler, and isn't surfaced in the digest.
  */
 export function runOnPrePhysicsStep(sceneTree: SceneTree, args: TickArgs): void {
     runHook(sceneTree, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
@@ -1381,16 +1383,16 @@ export function runOnPostPhysicsStep(sceneTree: SceneTree, args: TickArgs): void
  * recompute, so post-anim callbacks see fresh local TRS but world matrices
  * are still last-tick.
  */
-export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, metrics: Debug.Metrics): void {
-    runHook(sceneTree, args, metrics, 'onPostAnimate', (i) => i.onPostAnimate);
+export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
 /**
  * frame all scripts in the scene tree. iterates all nodes and calls onFrame
  * on each script instance. intended for client-side render frame updates.
  */
-export function runOnFrame(sceneTree: SceneTree, args: FrameArgs, metrics: Debug.Metrics): void {
-    runHook(sceneTree, args, metrics, 'onFrame', (i) => i.onFrame);
+export function runOnFrame(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onFrame', (i) => i.onFrame);
 }
 
 /* serialization, schema-driven */
@@ -2427,7 +2429,7 @@ function resolveSubtreeFor(groups: TraversalTerm[][], node: Node, movedFrom?: No
  * prune at the node that changed.
  */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
-    if (traitSlot === TransformTrait.slot) invalidateTransformChildren(node);
+    if (traitSlot === transformSlot()) invalidateTransformChildren(node);
     if (sceneTree !== null) resolveChildrenFor(sceneTree.queries.traversals, node, traitSlot);
 }
 

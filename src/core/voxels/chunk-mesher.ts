@@ -29,7 +29,7 @@
 //   (`_slab`, `_blockLightSlab`) built by `buildSlabs` from the chunk
 //   + its 26 neighbours. AO is a 4-bit raw level per corner packed
 //   into the meta word; smooth light is 4 u32/quad (RGB+sky) written
-//   by `emitQuadLightSmooth/Flat/Emissive`. The Sodium hierarchical
+//   Light is NOT baked into quads: every consumer samples the GPU light
 //   diagFlip decision lives in `light[0]` bit 29, set at emit time.
 //   Any light change reruns the full mesher, there is no
 //   relight-only fast path (worker pool absorbs the cost).
@@ -98,66 +98,6 @@ const _blockLightSlab = new Uint16Array(SLAB_VOLUME);
 // packed-byte add (max sum 60 per lane < 256 → no carry). `blendCornerBrightness`
 // drops the per-channel unpack work to a single mask.
 
-/** Sodium `ModelQuadOrientation.orientByBrightness` port. Returns
- *  `diagFlip << 29` (ready to OR into corner-0's light word).
- *
- *  Hierarchical compare: AO primary with `>` (seam through the brighter
- *  AO pair), light tiebreaker with `<=` direction (seam through the
- *  darker-or-equal light pair). Opposite-direction tiebreaker is
- *  intentional, keeps the interpolation seam on the side that loses
- *  the least brightness fidelity.
- *
- *  `metaWord` is `quads[qBase + META_OFFSET]` (4 bits/corner AO in low
- *  16). `l0..l3` are the 4 per-corner light words just written into the
- *  output buffer; the function reads channel nibbles only, bit 28
- *  (opaque) is ignored. */
-function applyDiagFlipBit(metaWord: number, l0: number, l1: number, l2: number, l3: number): number {
-    const ao0 = metaWord & 0xf;
-    const ao1 = (metaWord >>> 4) & 0xf;
-    const ao2 = (metaWord >>> 8) & 0xf;
-    const ao3 = (metaWord >>> 12) & 0xf;
-    const ao02 = ao0 + ao2;
-    const ao13 = ao1 + ao3;
-    if (ao02 > ao13) return 0;
-    if (ao02 < ao13) return 1 << 29;
-    const lm02 =
-        (l0 & 0xf) +
-        ((l0 >>> 8) & 0xf) +
-        ((l0 >>> 16) & 0xf) +
-        ((l0 >>> 24) & 0xf) +
-        (l2 & 0xf) +
-        ((l2 >>> 8) & 0xf) +
-        ((l2 >>> 16) & 0xf) +
-        ((l2 >>> 24) & 0xf);
-    const lm13 =
-        (l1 & 0xf) +
-        ((l1 >>> 8) & 0xf) +
-        ((l1 >>> 16) & 0xf) +
-        ((l1 >>> 24) & 0xf) +
-        (l3 & 0xf) +
-        ((l3 >>> 8) & 0xf) +
-        ((l3 >>> 16) & 0xf) +
-        ((l3 >>> 24) & 0xf);
-    return lm02 <= lm13 ? 0 : 1 << 29;
-}
-
-/** Sodium `LightDataAccess.get` analog. Reads the packed light word for one
- *  cell directly by slab index. Both reads come from the eager 18³ slabs
- *  built by `buildSlabs`:
- *   - opacity bit 28 from `cullTable[_slab[slabIdx]]`
- *   - 4 light channels expanded from `_blockLightSlab[slabIdx]` (packed u16)
- *
- *  Missing-neighbour cells: `_blockLightSlab` is pre-filled with
- *  PACKED_LIGHT_SKY_FULL so absent borders read as sky-lit air, and
- *  `_slab` is pre-filled with AIR so opacity reads 0, matches the
- *  Sodium "no chunk = sky-lit void" fallback. */
-function readLightCellByIdx(_blockSlab: Uint32Array, _lightSlab: Uint16Array, slabIdx: number, cullTable: Uint8Array): number {
-    const stateId = _blockSlab[slabIdx]!;
-    const opaque = cullTable[stateId]! === CULL_SOLID ? 1 << 28 : 0;
-    const packed = _lightSlab[slabIdx]!;
-    return ((packed >> 8) & 0xf) | ((packed & 0xf0) << 4) | ((packed & 0xf) << 16) | ((packed & 0xf000) << 12) | opaque;
-}
-
 const CULL_NONE = 0;
 const CULL_SOLID = 1;
 const CULL_SELF = 2;
@@ -167,13 +107,14 @@ const MAT_TRANSPARENT = 1;
 const MAT_TRANSLUCENT = 2;
 
 /**
- * per-vertex packed light (u32) layout:
- *   R | (G << 8) | (B << 16) | (sky << 24)
- * each channel is 0-255 (light level 0-15 scaled by curve). shader unpacks
- * sky separately so it can be dimmed for day/night. relight rebuilds these
- * per quad-corner from the chunk's lightSlab + opaqueMaskSlab; the source
- * stateId lives on PassMesh.quadStateId so the registry can resolve
- * cube-vs-mesh and emissive per quad.
+ * THE MESHER NO LONGER BAKES LIGHT. It once wrote a packed u32 per quad corner,
+ * rebuilt by relight from the chunk's slabs; that is gone. Light lives in the
+ * light-volume texture and is sampled per fragment (`voxel-light-sample`), which
+ * is why a relight no longer touches quad data at all.
+ *
+ * The volume's format is NOT the old per-corner one: cells are u16 with 4-bit
+ * RGB+sky nibbles, two cells to a u32, plus a trailing solidity bitset per tile.
+ * See `light-lattice` for the writer and `voxel-light-sample` for the reader.
  */
 
 /** unified all-quads per-pass output. cubes, custom-model quads, and
@@ -181,26 +122,30 @@ const MAT_TRANSLUCENT = 2;
  *  the VS draws 6 verts/quad non-indexed, decoding cornerIdx via
  *  (vertexIndex % 6) → {0,1,2,0,2,3} (or {0,1,3,1,2,3} when diagFlip).
  *
- *  per-quad stride = 56 B (14 × u32). geometry header occupies the first
- *  10 u32; per-corner light packs into the trailing 4 u32:
- *      u32[0..2]  pos: u8×3 per corner × 4 corners (chunk-local in 1/16-voxel units)
- *      u32[3]     normal oct16 in low 16 bits |
+ *  per-quad stride = 52 B (13 × u32), geometry only - there is no light here,
+ *  see the note above:
+ *      u32[0..5]  pos: u16×3 per corner × 4 corners, chunk-local voxels encoded
+ *                 as `(v + 8) * 2048`, i.e. the range [-8, +24) at 1/2048 voxel.
+ *                 The range OVERHANGS the chunk on every side so a model can
+ *                 reach past its own cell and past the chunk itself - leaning
+ *                 foliage, wide overhangs - where a u8 over [0, 16] clamped it
+ *                 flat at the boundary. Sodium spends 20 bits an axis over
+ *                 [-8, +24] for the same reason; this is the same range at half
+ *                 the cost. 2048 is a power of two, so every 1/16 authoring
+ *                 position lands on an exact integer (2048/16 = 128) and chunk
+ *                 seams stay watertight.
+ *      u32[6]     normal oct16 in low 16 bits |
  *                 blockLocal: x(4b) at <<16 | y(4b) at <<20 | z(4b) at <<24 |
  *                 stackOffset(4b) reserved at <<28 (v2 stacked-sway)
- *      u32[4..7]  uvAnchor[0..3]: 4 × packUV (u16 u + u16 v per corner)
- *      u32[8]     flags: texIndex 16 | animType 4 | facing 3 | reserved 9
- *                        (bit 23 was diagFlip; now lives in light[0] bit 29
- *                        as a per-relight decision, see `applyDiagFlipBit`)
- *      u32[9]     meta: aoPacked 16 (4 bits/corner: ao0 | ao1<<4 |
- *                        ao2<<8 | ao3<<12) | reserved 16. each AO is
+ *      u32[7..10] uvAnchor[0..3]: 4 × packUV (u16 u + u16 v per corner)
+ *      u32[11]    flags: texIndex 16 | animType 4 | facing 3 | emissive 1 | unshaded 1 |
+ *                        reserved 8. bit 23 is emissive; it was the bake-time
+ *                        diagFlip before that moved to the meta word.
+ *      u32[12]    meta: aoPacked 16 (4 bits/corner: ao0 | ao1<<4 |
+ *                        ao2<<8 | ao3<<12) | diagFlip 1 (bit 16,
+ *                        `QUAD_META_DIAG_FLIP_BIT`) | reserved 15. each AO is
  *                        `round((brightness - 0.5) * 30)` in [0..15],
  *                        recovers via `bits/30 + 0.5` in the shader.
- *      u32[10..13] per-corner packed light: one u32 per corner. RGB+sky
- *                        smooth-light, written inline at quad emit time by
- *                        `emitQuadLightSmooth/Flat/Emissive` from the eager
- *                        18³ block + light slabs. The Sodium hierarchical
- *                        diagFlip decision lives in `u32[10]` bit 29 (set
- *                        per-emit; see `applyDiagFlipBit`).
  *
  *  The shader multiplies light by AO at draw time; the 4-bit AO level per
  *  corner lives in the low 16 bits of the meta word. AO is bake-once
@@ -226,8 +171,8 @@ export type ChunkMeshResult = {
 
 /** quad capacity per pass in a `MeshOutput`. Generous, realistic chunks
  *  emit far fewer; egregious overage is silently truncated by
- *  `finishPassMesh`. Per-buffer bytes = `MAX_QUADS_PER_PASS × 14 u32 × 4
- *  = 56 B/quad × 4096 = 224 KB`; one MeshOutput = 3 × 224 KB = 672 KB. */
+ *  `finishPassMesh`. Per-buffer bytes = `MAX_QUADS_PER_PASS × 13 u32 × 4
+ *  = 52 B/quad × 4096 = 208 KB`; one MeshOutput = 3 × 208 KB = 624 KB. */
 export const MAX_QUADS_PER_PASS = 4096;
 
 /** caller-provided final-pass write targets. `meshChunk` writes the
@@ -503,13 +448,11 @@ const _faceCacheAoValid = new Uint8Array(FACE_CACHE_SIZE); // 13 flags
 // output (R | G<<8 | B<<16 | sky<<24), opacity bit 28 is stripped by
 // `blendCornerBrightness` at cache-fill time, so the stored words are
 // pure light.
-const _faceCacheLm = new Uint32Array(FACE_CACHE_SIZE * 4); // 52 u32
 // Independent validity from `_faceCacheAoValid`: AO bake and light bake
 // have the same lifetime (`meshChunk` runs both per voxel and
 // `resetFaceCaches` clears them together), but a quad emit may request AO
 // without light or vice-versa, so we don't want one to false-cache-hit
 // the other.
-const _faceCacheLmValid = new Uint8Array(FACE_CACHE_SIZE); // 13 flags
 
 // per-face edge scratch, populated by every consumer of the Sodium-style
 // edge-share path (`ensureFaceCache`, `ensureFaceLightCache`, cube AO emit,
@@ -518,7 +461,6 @@ const _faceCacheLmValid = new Uint8Array(FACE_CACHE_SIZE); // 13 flags
 // every call; values overwritten on entry.
 const _edgeOffset = new Int32Array(4); // slab-stride offsets to the 4 edges
 const _edgeOpaque = new Uint8Array(4); // 0/1 opacity flag per edge
-const _edgeLightWords = new Uint32Array(4); // packed light word per edge
 
 /** per-face × per-corner (u, w) ∈ {0,1}², matching FACE_VERTS v0..v3
  *  projected via the face's (axisU, axisW). bilerp weights against these
@@ -574,19 +516,6 @@ function resetFaceCaches(): void {
     _faceCacheAoValid[10] = 0;
     _faceCacheAoValid[11] = 0;
     _faceCacheAoValid[12] = 0;
-    _faceCacheLmValid[0] = 0;
-    _faceCacheLmValid[1] = 0;
-    _faceCacheLmValid[2] = 0;
-    _faceCacheLmValid[3] = 0;
-    _faceCacheLmValid[4] = 0;
-    _faceCacheLmValid[5] = 0;
-    _faceCacheLmValid[6] = 0;
-    _faceCacheLmValid[7] = 0;
-    _faceCacheLmValid[8] = 0;
-    _faceCacheLmValid[9] = 0;
-    _faceCacheLmValid[10] = 0;
-    _faceCacheLmValid[11] = 0;
-    _faceCacheLmValid[12] = 0;
 }
 
 /** bake variant: populate _faceCacheAo for (face, offset) at this block if
@@ -684,188 +613,13 @@ function ensureFaceCache(
 /** Per-channel Sodium min-non-zero blend (Sodium `calculateCornerBrightness`'s
  *  per-channel inner): pick the smallest non-zero of the 4 corner samples,
  *  substitute zeros with that min, then average. */
-function blendChannelMinNonZero(a: number, b: number, c: number, d: number): number {
-    const mA = a || 16;
-    const mB = b || 16;
-    const mC = c || 16;
-    const mD = d || 16;
-    const m = Math.min(mA, mB, mC, mD);
-    if (m === 16) return 0;
-    return ((a || m) + (b || m) + (c || m) + (d || m)) >>> 2;
-}
-
 /** Sodium `AoFaceData.calculateCornerBrightness(a, b, c, d, em…)`. Arg order
  *  matches Sodium: a=edgeA, b=edgeB, c=cornerDiagonal, d=center. The min-
  *  non-zero blend is symmetric across the 4 args, so the order is documentary
  *  rather than load-bearing, keep it aligned so the relationship to Sodium
  *  is obvious. */
-function blendCornerBrightness(eAword: number, eBword: number, diagWord: number, centerWord: number): number {
-    const r = blendChannelMinNonZero(eAword & 0xf, eBword & 0xf, diagWord & 0xf, centerWord & 0xf);
-    const g = blendChannelMinNonZero(
-        (eAword >>> 8) & 0xf,
-        (eBword >>> 8) & 0xf,
-        (diagWord >>> 8) & 0xf,
-        (centerWord >>> 8) & 0xf,
-    );
-    const b = blendChannelMinNonZero(
-        (eAword >>> 16) & 0xf,
-        (eBword >>> 16) & 0xf,
-        (diagWord >>> 16) & 0xf,
-        (centerWord >>> 16) & 0xf,
-    );
-    const sk = blendChannelMinNonZero(
-        (eAword >>> 24) & 0xf,
-        (eBword >>> 24) & 0xf,
-        (diagWord >>> 24) & 0xf,
-        (centerWord >>> 24) & 0xf,
-    );
-    return r | (g << 8) | (b << 16) | (sk << 24);
-}
-
-/** Light-side sibling of `ensureFaceCache`. Mirrors Sodium
- *  `AoFaceData.initLightData` (AoFaceData.java:19): read 4 unique edges
- *  around the face center, then 0..4 conditional diagonals, skipping the
- *  diagonal read entirely when both bracketing edges are opaque. The
- *  skip is what kills the "light leak through wall corners" bug: with
- *  both edges occluding, the diagonal cell is "behind the wall" and its
- *  light shouldn't reach this face's corner.
- *
- *  Sodium's MC-12558 fix: when substituting the diagonal, corners 0/1
- *  use e0lm and corners 2/3 use e1lm (`AoFaceData.java:86, 101, 117, 133`).
- *  Our `FACE_CORNER_EDGES` table puts the {e0, e1} axis-U edge in slot A
- *  per corner, so substituting with `eAWord` reproduces the post-fix
- *  pattern across all 6 faces.
- *
- *  Cached for the lifetime of one voxel iteration alongside `_faceCacheAo`;
- *  every quad on the same (face, offset) reuses the 4 blended corner
- *  words via `vertPicks`. */
-function ensureFaceLightCache(
-    blockSlabIdx: number,
-    face: number,
-    offset: number, // 0 | 1
-    cullTable: Uint8Array,
-): number {
-    const cacheIdx = face * 2 + offset;
-    if (_faceCacheLmValid[cacheIdx]) return cacheIdx;
-
-    const centerSlabIdx = offset ? blockSlabIdx + FACE_STRIDE[face]! : blockSlabIdx;
-    const edgeOffsetBase = face * 4;
-    const cornerEdgeBase = face * 8;
-
-    // 1 center read. Sodium AoFaceData.java:43-50: when the adjacent face
-    // cell is a full-cube occluder (FO/OP), substitute the originating
-    // block's lightmap, the occluder's interior light is meaningless and
-    // would pin every channel's min-non-zero to 0.
-    let centerWord = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx, cullTable);
-    if (offset && (centerWord >>> 28) & 1) {
-        centerWord = readLightCellByIdx(_slab, _blockLightSlab, blockSlabIdx, cullTable);
-    }
-
-    // 4 edge reads, each shared by 2 corners
-    const e0Off = FACE_EDGE_OFFSETS[edgeOffsetBase]!;
-    const e1Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 1]!;
-    const e2Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 2]!;
-    const e3Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 3]!;
-    const e0Word = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + e0Off, cullTable);
-    const e1Word = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + e1Off, cullTable);
-    const e2Word = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + e2Off, cullTable);
-    const e3Word = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + e3Off, cullTable);
-    _edgeLightWords[0] = e0Word;
-    _edgeLightWords[1] = e1Word;
-    _edgeLightWords[2] = e2Word;
-    _edgeLightWords[3] = e3Word;
-    _edgeOpaque[0] = (e0Word >>> 28) & 1;
-    _edgeOpaque[1] = (e1Word >>> 28) & 1;
-    _edgeOpaque[2] = (e2Word >>> 28) & 1;
-    _edgeOpaque[3] = (e3Word >>> 28) & 1;
-    _edgeOffset[0] = e0Off;
-    _edgeOffset[1] = e1Off;
-    _edgeOffset[2] = e2Off;
-    _edgeOffset[3] = e3Off;
-
-    const outBase = cacheIdx * 4;
-    for (let corner = 0; corner < 4; corner++) {
-        const eA = FACE_CORNER_EDGES[cornerEdgeBase + corner * 2]!;
-        const eB = FACE_CORNER_EDGES[cornerEdgeBase + corner * 2 + 1]!;
-        const eAWord = _edgeLightWords[eA]!;
-        const eBWord = _edgeLightWords[eB]!;
-        const diagWord =
-            _edgeOpaque[eA] && _edgeOpaque[eB]
-                ? eAWord
-                : readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + _edgeOffset[eA]! + _edgeOffset[eB]!, cullTable);
-        _faceCacheLm[outBase + corner] = blendCornerBrightness(eAWord, eBWord, diagWord, centerWord);
-    }
-
-    _faceCacheLmValid[cacheIdx] = 1;
-    return cacheIdx;
-}
-
 // ── inline per-quad light emit ──────────────────────────────────────
 //
-// Called from the mesh emit hot loop. Reads via `ensureFaceLightCache`
-// against the eager `_slab` + `_blockLightSlab` filled by `buildSlabs`
-// and writes 4 packed light words directly into the per-quad scratch
-// bucket, no separate recipe encode + relight walk. The Sodium
-// hierarchical diagFlip compare (`applyDiagFlipBit`) is applied inline
-// once we have the 4 corner words, before writing corner 0.
-
-/** Cube/liquid/ALIGNED-mesh corner blend. `(blockSlabIdx, offset)` keys
- *  the face cache (offset=1 reads the cell beyond the face plane, cube
- *  default; offset=0 reads the host cell, used by inset mesh quads).
- *  `vertPicks` packs 4 × 2-bit face-corner picks (vert v → cache corner
- *  `(vertPicks >>> (v*2)) & 3`). */
-function emitQuadLightSmooth(
-    target: QuadScratch,
-    quadIdx: number,
-    blockSlabIdx: number,
-    face: number,
-    offset: number,
-    vertPicks: number,
-    metaWord: number,
-    cullTable: Uint8Array,
-): void {
-    const cacheIdx = ensureFaceLightCache(blockSlabIdx, face, offset, cullTable);
-    const lmBase = cacheIdx * 4;
-    const l0 = _faceCacheLm[lmBase + (vertPicks & 0x3)]!;
-    const l1 = _faceCacheLm[lmBase + ((vertPicks >>> 2) & 0x3)]!;
-    const l2 = _faceCacheLm[lmBase + ((vertPicks >>> 4) & 0x3)]!;
-    const l3 = _faceCacheLm[lmBase + ((vertPicks >>> 6) & 0x3)]!;
-    const out = target.quads;
-    const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    out[cornerBase] = l0 | applyDiagFlipBit(metaWord, l0, l1, l2, l3);
-    out[cornerBase + 1] = l1;
-    out[cornerBase + 2] = l2;
-    out[cornerBase + 3] = l3;
-}
-
-/** Flat broadcast, SHAPE_FLAT/IRREGULAR/NON_PARALLEL. Single cell read,
- *  same word into all 4 corners. diagFlip still depends on AO direction
- *  (when AO bits differ corner-to-corner), so we still consult
- *  `applyDiagFlipBit`, its lm-tiebreaker collapses to 0 since the 4
- *  lights are identical. */
-function emitQuadLightFlat(target: QuadScratch, quadIdx: number, cellIdx: number, metaWord: number, cullTable: Uint8Array): void {
-    const out = target.quads;
-    const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    const w = readLightCellByIdx(_slab, _blockLightSlab, cellIdx, cullTable) & 0x0f0f0f0f;
-    out[cornerBase] = w | applyDiagFlipBit(metaWord, w, w, w, w);
-    out[cornerBase + 1] = w;
-    out[cornerBase + 2] = w;
-    out[cornerBase + 3] = w;
-}
-
-/** Emissive shortcut. Writes 0xffffffff (all channels max, including the
- *  diagFlip bit). diagFlip bit 29 is set unconditionally, which is fine
- *  because all 4 corners are identical and the shader's interpolation is
- *  symmetric. */
-function emitQuadLightEmissive(target: QuadScratch, quadIdx: number): void {
-    const out = target.quads;
-    const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    out[cornerBase] = 0xffffffff;
-    out[cornerBase + 1] = 0xffffffff;
-    out[cornerBase + 2] = 0xffffffff;
-    out[cornerBase + 3] = 0xffffffff;
-}
-
 /** scratch for mesh per-vert ao emit. cube and liquid use their own
  *  scratch; this is exclusive to MODEL_MESH shape-dispatch so it
  *  doesn't alias liquid's mid-loop reads. stores brightness floats
@@ -1294,17 +1048,15 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
 // facing (every cell of the chunk could emit one quad in that
 // direction). cheap scratch, module-level typed arrays.
 
-export const QUAD_U32S = 10; // 40 B / quad header (see PassMesh layout above)
-export const QUAD_LIGHT_OFFSET = 10; // u32[10..13] = 4 × per-corner light
-export const QUAD_LIGHT_U32S = 4;
-export const QUAD_STRIDE_U32S = QUAD_U32S + QUAD_LIGHT_U32S; // 14 u32 = 56 B / quad
-export const META_OFFSET = 9; // u32[9] within each quad header
+export const QUAD_U32S = 13; // 52 B / quad header (see PassMesh layout above)
+export const QUAD_STRIDE_U32S = QUAD_U32S; // 13 u32 = 52 B / quad
+export const FLAGS_OFFSET = 11; // u32[11] within each quad header
+export const META_OFFSET = 12; // u32[12] within each quad header
 
 /** per-vert corner picks for cube/liquid quads. cube vert k IS corner k,
  *  so this is the identity packing `0 | 1<<2 | 2<<4 | 3<<6 = 0xE4`,
  *  same for every face. Consumed by `emitQuadLightSmooth` to index
  *  AO_OFFSETS per vertex. */
-const CUBE_VERT_CORNER_PICKS = 0xe4;
 
 const MAX_QUADS_PER_BUCKET = 4096;
 const SCRATCH_BUCKET_COUNT = 3 * FACING_COUNT; // 21
@@ -1333,27 +1085,52 @@ const quadScratch: QuadScratch[] = /* @__PURE__ */ (() => {
     return arr;
 })();
 
-/** flags layout: texIndex 16 | animType 4 | facing 3 | emissive 1 | reserved 8.
- *  bit 23 (was the bake-time diagFlip, that decision now lives in
- *  `light[0]` bit 29, see `applyDiagFlipBit`) is reused as the emissive
+/** flags layout: texIndex 16 | animType 4 | facing 3 | emissive 1 | unshaded 1 | reserved 7.
+ *  bit 23 (was the bake-time diagFlip, which now lives in the meta word at
+ *  `QUAD_META_DIAG_FLIP_BIT`) is reused as the emissive
  *  flag: the shader skips directional face-shade + AO for emissive quads
  *  so a self-lit block (torch, glowstone) glows uniformly instead of
- *  dimming its E/W/N/S faces. AO sits in the dedicated meta word
- *  (`u32[9]`). bits 24..31 stay reserved. */
+ *  dimming its E/W/N/S faces. bit 24 is unshaded (`BlockQuad.shade: false`):
+ *  the shader skips the directional face shade only, AO still applies. AO
+ *  sits in the dedicated meta word (`u32[9]`). bits 25..31 stay reserved. */
 const QUAD_FLAG_EMISSIVE = 1 << 23;
+const QUAD_FLAG_UNSHADED = 1 << 24;
 
-function packQuadFlags(texIndex: number, animType: number, facing: number, emissive: number): number {
-    return (texIndex & 0xffff) | ((animType & 0xf) << 16) | ((facing & 0x7) << 20) | (emissive ? QUAD_FLAG_EMISSIVE : 0);
+function packQuadFlags(texIndex: number, animType: number, facing: number, emissive: number, unshaded = 0): number {
+    return (
+        (texIndex & 0xffff) |
+        ((animType & 0xf) << 16) |
+        ((facing & 0x7) << 20) |
+        (emissive ? QUAD_FLAG_EMISSIVE : 0) |
+        (unshaded ? QUAD_FLAG_UNSHADED : 0)
+    );
 }
 
-/** meta layout: aoPacked 16 (4 bits/corner) | reserved 16.
+/** diagFlip, bit 16 of the meta word. Was `light[0]` bit 29 back when the
+ *  mesher baked per-corner light; that word is gone. */
+export const QUAD_META_DIAG_FLIP_BIT = 16;
+export const QUAD_META_DIAG_FLIP = 1 << QUAD_META_DIAG_FLIP_BIT;
+
+/** meta layout: aoPacked 16 (4 bits/corner) | diagFlip 1 | reserved 15.
  *  aoPacked is `ao0Bits | (ao1Bits<<4) | (ao2Bits<<8) | (ao3Bits<<12)` where
  *  each `aoNBits` ∈ [0..15] encodes brightness via
  *  `round((brightness - 0.5) * 30)`. shader recovers brightness as
- *  `bits/30 + 0.5`. top 16 bits reserved for future per-quad metadata
- *  (foliage sway intensity, emissive boost, per-quad tint, etc.). */
+ *  `bits/30 + 0.5`. bits 17..31 reserved for future per-quad metadata
+ *  (foliage sway intensity, emissive boost, per-quad tint, etc.).
+ *
+ *  DIAGFLIP is Sodium's `ModelQuadOrientation.orientByBrightness`: put the
+ *  triangulation seam through the brighter AO pair. Sodium breaks an AO tie
+ *  with the corner LIGHT values, and this used to as well. That tiebreaker is
+ *  deliberately gone: light is no longer known at mesh time, and more to the
+ *  point a bake-time decision derived from light would go stale the moment
+ *  light changed without a remesh, which is exactly what the light volume
+ *  makes possible. AO ties now keep the unflipped diagonal. */
 function packQuadMeta(aoPacked: number): number {
-    return aoPacked & 0xffff;
+    const ao0 = aoPacked & 0xf;
+    const ao1 = (aoPacked >>> 4) & 0xf;
+    const ao2 = (aoPacked >>> 8) & 0xf;
+    const ao3 = (aoPacked >>> 12) & 0xf;
+    return (aoPacked & 0xffff) | (ao0 + ao2 < ao1 + ao3 ? QUAD_META_DIAG_FLIP : 0);
 }
 
 /** all 4 corners at full brightness (`round((1.0 - 0.5) * 30)` = 15 each).
@@ -1361,21 +1138,47 @@ function packQuadMeta(aoPacked: number): number {
  *  inside a solid until a vertex animation pulls them out of it. */
 const AO_PACKED_UNOCCLUDED = 0xffff;
 
-/** convert a chunk-local position component (voxels, [0..16]) to u8.
- *  scale = 255/16 so v=0 → 0 and v=16 → 255 exactly, chunk-top
- *  boundary meets the next chunk's origin with no sub-pixel seam. VS
- *  decodes with the inverse: chunkLocal = byte * (16/255). */
-function pos16(v: number): number {
-    const i = Math.round(v * (255 / 16));
-    return i < 0 ? 0 : i > 255 ? 255 : i;
+/** voxels per encoded unit's reciprocal: positions are stored as
+ *  `(v + POS_ORIGIN) * POS_SCALE` in a u16. A POWER OF TWO so every 1/16
+ *  authoring position is an exact integer (2048/16 = 128) and a vertex on a
+ *  chunk boundary encodes identically from either side. */
+const POS_SCALE = 2048;
+/** voxels of overhang below the chunk origin. With a u16 this buys [-8, +24),
+ *  i.e. 8 voxels of reach past the chunk on every side, matching Sodium's
+ *  MODEL_ORIGIN/MODEL_RANGE. */
+const POS_ORIGIN = 8;
+
+/**
+ * integer hash of a WORLD block position, for per-position variation.
+ *
+ * World, never chunk-local: hashing local coords repeats the identical pattern
+ * in every chunk, which reads as a 16-block grid and looks plausible enough to
+ * miss. Modelled on minecraft's `Mth.getSeed`, kept in int32 throughout so it
+ * is the same on every machine.
+ *
+ * Callers pass y = 0 for JITTER, so a vertical stack of one block shares an
+ * offset and a two-block plant cannot tear apart. Variants pass the real y.
+ */
+function posHash(x: number, y: number, z: number): number {
+    let h = (Math.imul(x, 3129871) ^ Math.imul(z, 116129781) ^ y) | 0;
+    h = (Math.imul(h, h) + Math.imul(h, 11)) | 0;
+    return (h >>> 16) | 0;
 }
 
-/** integer fast path for `pos16`. cube verts are always v ∈ {0..16}
- *  (integer x,y,z + 0/1 from FACE_VERTS), so `Math.round` is wasted
- *  work, the result equals `POS16_INT_LUT[v]`. */
-const POS16_INT_LUT = /* @__PURE__ */ (() => {
-    const lut = new Uint8Array(17);
-    for (let i = 0; i <= 16; i++) lut[i] = Math.round(i * (255 / 16));
+/** convert a chunk-local position component (voxels) to its u16 encoding.
+ *  VS decodes with the inverse: `chunkLocal = half / POS_SCALE - POS_ORIGIN`. */
+function posEncode(v: number): number {
+    const i = Math.round((v + POS_ORIGIN) * POS_SCALE);
+    return i < 0 ? 0 : i > 65535 ? 65535 : i;
+}
+
+/** integer fast path for `posEncode`. cube verts are always v in {0..16}
+ *  (integer x,y,z + 0/1 from FACE_VERTS), so `Math.round` is wasted work and the
+ *  result equals `POS_INT_LUT[v]`. Both scale and origin are integers, so every
+ *  entry is exact. */
+const POS_INT_LUT = /* @__PURE__ */ (() => {
+    const lut = new Uint32Array(17);
+    for (let i = 0; i <= 16; i++) lut[i] = (i + POS_ORIGIN) * POS_SCALE;
     return lut;
 })();
 
@@ -1413,28 +1216,32 @@ function writeQuadHeader(
     bz: number,
 ): void {
     const off = quadIdx * QUAD_STRIDE_U32S;
-    const x0 = pos16(x0v),
-        y0 = pos16(y0v),
-        z0 = pos16(z0v);
-    const x1 = pos16(x1v),
-        y1 = pos16(y1v),
-        z1 = pos16(z1v);
-    const x2 = pos16(x2v),
-        y2 = pos16(y2v),
-        z2 = pos16(z2v);
-    const x3 = pos16(x3v),
-        y3 = pos16(y3v),
-        z3 = pos16(z3v);
-    s.quads[off] = x0 | (y0 << 8) | (z0 << 16) | (x1 << 24);
-    s.quads[off + 1] = y1 | (z1 << 8) | (x2 << 16) | (y2 << 24);
-    s.quads[off + 2] = z2 | (x3 << 8) | (y3 << 16) | (z3 << 24);
-    s.quads[off + 3] = (normalOct16 & 0xffff) | ((bx & 0xf) << 16) | ((by & 0xf) << 20) | ((bz & 0xf) << 24);
-    s.quads[off + 4] = uvPacked0;
-    s.quads[off + 5] = uvPacked1;
-    s.quads[off + 6] = uvPacked2;
-    s.quads[off + 7] = uvPacked3;
-    s.quads[off + 8] = flags;
-    s.quads[off + 9] = metaWord;
+    const x0 = posEncode(x0v),
+        y0 = posEncode(y0v),
+        z0 = posEncode(z0v);
+    const x1 = posEncode(x1v),
+        y1 = posEncode(y1v),
+        z1 = posEncode(z1v);
+    const x2 = posEncode(x2v),
+        y2 = posEncode(y2v),
+        z2 = posEncode(z2v);
+    const x3 = posEncode(x3v),
+        y3 = posEncode(y3v),
+        z3 = posEncode(z3v);
+    // 12 u16 across 6 u32, low half first: half index (corner*3 + axis).
+    s.quads[off] = x0 | (y0 << 16);
+    s.quads[off + 1] = z0 | (x1 << 16);
+    s.quads[off + 2] = y1 | (z1 << 16);
+    s.quads[off + 3] = x2 | (y2 << 16);
+    s.quads[off + 4] = z2 | (x3 << 16);
+    s.quads[off + 5] = y3 | (z3 << 16);
+    s.quads[off + 6] = (normalOct16 & 0xffff) | ((bx & 0xf) << 16) | ((by & 0xf) << 20) | ((bz & 0xf) << 24);
+    s.quads[off + 7] = uvPacked0;
+    s.quads[off + 8] = uvPacked1;
+    s.quads[off + 9] = uvPacked2;
+    s.quads[off + 10] = uvPacked3;
+    s.quads[off + 11] = flags;
+    s.quads[off + 12] = metaWord;
 }
 
 /** identical to writeQuadHeader but uses `POS16_INT_LUT` instead of `pos16`.
@@ -1467,28 +1274,32 @@ function writeQuadHeaderInt(
     bz: number,
 ): void {
     const off = quadIdx * QUAD_STRIDE_U32S;
-    const x0 = POS16_INT_LUT[x0v]!,
-        y0 = POS16_INT_LUT[y0v]!,
-        z0 = POS16_INT_LUT[z0v]!;
-    const x1 = POS16_INT_LUT[x1v]!,
-        y1 = POS16_INT_LUT[y1v]!,
-        z1 = POS16_INT_LUT[z1v]!;
-    const x2 = POS16_INT_LUT[x2v]!,
-        y2 = POS16_INT_LUT[y2v]!,
-        z2 = POS16_INT_LUT[z2v]!;
-    const x3 = POS16_INT_LUT[x3v]!,
-        y3 = POS16_INT_LUT[y3v]!,
-        z3 = POS16_INT_LUT[z3v]!;
-    s.quads[off] = x0 | (y0 << 8) | (z0 << 16) | (x1 << 24);
-    s.quads[off + 1] = y1 | (z1 << 8) | (x2 << 16) | (y2 << 24);
-    s.quads[off + 2] = z2 | (x3 << 8) | (y3 << 16) | (z3 << 24);
-    s.quads[off + 3] = (normalOct16 & 0xffff) | ((bx & 0xf) << 16) | ((by & 0xf) << 20) | ((bz & 0xf) << 24);
-    s.quads[off + 4] = uvPacked0;
-    s.quads[off + 5] = uvPacked1;
-    s.quads[off + 6] = uvPacked2;
-    s.quads[off + 7] = uvPacked3;
-    s.quads[off + 8] = flags;
-    s.quads[off + 9] = metaWord;
+    const x0 = POS_INT_LUT[x0v]!,
+        y0 = POS_INT_LUT[y0v]!,
+        z0 = POS_INT_LUT[z0v]!;
+    const x1 = POS_INT_LUT[x1v]!,
+        y1 = POS_INT_LUT[y1v]!,
+        z1 = POS_INT_LUT[z1v]!;
+    const x2 = POS_INT_LUT[x2v]!,
+        y2 = POS_INT_LUT[y2v]!,
+        z2 = POS_INT_LUT[z2v]!;
+    const x3 = POS_INT_LUT[x3v]!,
+        y3 = POS_INT_LUT[y3v]!,
+        z3 = POS_INT_LUT[z3v]!;
+    // same 12 u16 across 6 u32 as `writeQuadHeader`, low half first.
+    s.quads[off] = x0 | (y0 << 16);
+    s.quads[off + 1] = z0 | (x1 << 16);
+    s.quads[off + 2] = y1 | (z1 << 16);
+    s.quads[off + 3] = x2 | (y2 << 16);
+    s.quads[off + 4] = z2 | (x3 << 16);
+    s.quads[off + 5] = y3 | (z3 << 16);
+    s.quads[off + 6] = (normalOct16 & 0xffff) | ((bx & 0xf) << 16) | ((by & 0xf) << 20) | ((bz & 0xf) << 24);
+    s.quads[off + 7] = uvPacked0;
+    s.quads[off + 8] = uvPacked1;
+    s.quads[off + 9] = uvPacked2;
+    s.quads[off + 10] = uvPacked3;
+    s.quads[off + 11] = flags;
+    s.quads[off + 12] = metaWord;
 }
 
 /** classify a normal into one of the 7 facing slices.
@@ -1596,10 +1407,36 @@ function packUV(u: number, v: number): number {
     return ui | (vi << 16);
 }
 
+/** how far each corner's UV moves toward the quad's UV centroid: a quarter of
+ *  a texel on a 16-texel tile. The block atlas packs tiles edge to edge with no
+ *  gutter, so a nearest tap at a quad's very edge can land in the neighbouring
+ *  tile once the sampler's snap and the mip chain's half-texel offsets add up;
+ *  pulling the edge in by less than a texel keeps every tap inside its own
+ *  tile. Sodium does the same in its vertex format (`u_TexCoordShrink`); ours
+ *  is baked here, per quad toward that quad's own centre, so sub-tile quads
+ *  (`box()` local UVs) shrink toward their own rect and not the tile's. */
+const UV_SHRINK = 1 / 64;
+
+function shrinkToward(u: number, centre: number): number {
+    const d = centre - u;
+    return d > UV_SHRINK ? u + UV_SHRINK : d < -UV_SHRINK ? u - UV_SHRINK : centre;
+}
+
+/** packUV of four corners after the shrink, into `_uvPacked[0..3]`. */
+const _uvPacked = new Uint32Array(4);
+function packQuadUVs(u0: number, v0: number, u1: number, v1: number, u2: number, v2: number, u3: number, v3: number): void {
+    const cu = (u0 + u1 + u2 + u3) * 0.25;
+    const cv = (v0 + v1 + v2 + v3) * 0.25;
+    _uvPacked[0] = packUV(shrinkToward(u0, cu), shrinkToward(v0, cv));
+    _uvPacked[1] = packUV(shrinkToward(u1, cu), shrinkToward(v1, cv));
+    _uvPacked[2] = packUV(shrinkToward(u2, cu), shrinkToward(v2, cv));
+    _uvPacked[3] = packUV(shrinkToward(u3, cu), shrinkToward(v3, cv));
+}
+
 // scratch shared by the liquid corner loop and its diag-flip heuristic.
 // stores brightness floats in [0.5, 1.0]; 4-bit quantize happens at bake.
 const _liquidAoScratch = new Float32Array(4);
-const _liquidUvScratch = new Uint32Array(4); // packUV per corner
+const _liquidUvRaw = new Float32Array(8); // (u, v) per corner, packed after the loop
 
 // ── mesh input ──────────────────────────────────────────────────────
 
@@ -1657,6 +1494,12 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
     // swap the module scratch views to the transferred buffers before
     // calling.
 
+    // world-space origin of this chunk, so per-position variation hashes world
+    // coords. chunk-local would repeat the same pattern in every chunk.
+    const wx0 = input.cx << CHUNK_BITS;
+    const wy0 = input.cy << CHUNK_BITS;
+    const wz0 = input.cz << CHUNK_BITS;
+
     const {
         cull: cullTable,
         blockTypeId: blockTypeIdTable,
@@ -1664,8 +1507,13 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
         modelType: modelTypeTable,
         cubeTexIndices,
         cubeFaceUVs,
+        variantCount,
+        variantBase,
+        jitterXz,
+        jitterY,
         meshId: meshIdTable,
         meshQuadMaterials,
+        meshQuadUnshaded,
         meshTexIndices,
         meshQuadShape: meshQuadShapeTable,
         meshQuadFaceDir: meshQuadFaceDirTable,
@@ -1743,8 +1591,12 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                               ? PASS_TRANSPARENT_BASE
                               : PASS_OPAQUE_BASE;
 
-                    const texBase = stateId * 6;
-                    const uvStateBase = stateId * 48;
+                    // per-position variant: consecutive cube slots from variantBase.
+                    const cubeVariants = variantCount[stateId]!;
+                    const cubeSlot =
+                        cubeVariants > 1 ? variantBase[stateId]! + (posHash(wx0 + x, wy0 + y, wz0 + z) % cubeVariants) : stateId;
+                    const texBase = cubeSlot * 6;
+                    const uvStateBase = cubeSlot * 48;
 
                     for (let face = 0; face < 6; face++) {
                         const faceStride = FACE_STRIDE[face]!;
@@ -1883,6 +1735,16 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                         const normalPacked = FACE_OCT16[face]!;
                         const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
+                        packQuadUVs(
+                            cubeFaceUVs[faceUvBase]!,
+                            cubeFaceUVs[faceUvBase + 1]!,
+                            cubeFaceUVs[faceUvBase + 2]!,
+                            cubeFaceUVs[faceUvBase + 3]!,
+                            cubeFaceUVs[faceUvBase + 4]!,
+                            cubeFaceUVs[faceUvBase + 5]!,
+                            cubeFaceUVs[faceUvBase + 6]!,
+                            cubeFaceUVs[faceUvBase + 7]!,
+                        );
 
                         const quadIdx = target.quadCount;
                         writeQuadHeaderInt(
@@ -1901,10 +1763,10 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             y + FACE_VERTS[faceVertBase + 10]!,
                             z + FACE_VERTS[faceVertBase + 11]!,
                             normalPacked,
-                            packUV(cubeFaceUVs[faceUvBase]!, cubeFaceUVs[faceUvBase + 1]!),
-                            packUV(cubeFaceUVs[faceUvBase + 2]!, cubeFaceUVs[faceUvBase + 3]!),
-                            packUV(cubeFaceUVs[faceUvBase + 4]!, cubeFaceUVs[faceUvBase + 5]!),
-                            packUV(cubeFaceUVs[faceUvBase + 6]!, cubeFaceUVs[faceUvBase + 7]!),
+                            _uvPacked[0]!,
+                            _uvPacked[1]!,
+                            _uvPacked[2]!,
+                            _uvPacked[3]!,
                             flags,
                             metaWord,
                             x,
@@ -1912,20 +1774,6 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             z,
                         );
 
-                        if (emissiveTable[stateId]!) {
-                            emitQuadLightEmissive(target, quadIdx);
-                        } else {
-                            emitQuadLightSmooth(
-                                target,
-                                quadIdx,
-                                slabIdx,
-                                face,
-                                coversAnimSeam ? 0 : 1,
-                                CUBE_VERT_CORNER_PICKS,
-                                metaWord,
-                                cullTable,
-                            );
-                        }
                         target.quadCount++;
 
                         // aabb, cube cell spans (x..x+1, y..y+1, z..z+1)
@@ -2121,7 +1969,8 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                                 pz3 = pz;
                             }
 
-                            _liquidUvScratch[corner] = packUV(FACE_UVS[uvOffset]!, finalV);
+                            _liquidUvRaw[corner * 2] = FACE_UVS[uvOffset]!;
+                            _liquidUvRaw[corner * 2 + 1] = finalV;
                             _liquidAoScratch[corner] = ao;
 
                             if (px < aabbMinX) aabbMinX = px;
@@ -2148,6 +1997,16 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
 
                         const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
+                        packQuadUVs(
+                            _liquidUvRaw[0]!,
+                            _liquidUvRaw[1]!,
+                            _liquidUvRaw[2]!,
+                            _liquidUvRaw[3]!,
+                            _liquidUvRaw[4]!,
+                            _liquidUvRaw[5]!,
+                            _liquidUvRaw[6]!,
+                            _liquidUvRaw[7]!,
+                        );
                         const liquidQuadIdx = target.quadCount;
                         writeQuadHeader(
                             target,
@@ -2165,30 +2024,16 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             py3,
                             pz3,
                             normalPacked,
-                            _liquidUvScratch[0]!,
-                            _liquidUvScratch[1]!,
-                            _liquidUvScratch[2]!,
-                            _liquidUvScratch[3]!,
+                            _uvPacked[0]!,
+                            _uvPacked[1]!,
+                            _uvPacked[2]!,
+                            _uvPacked[3]!,
                             flags,
                             metaWord,
                             x,
                             y,
                             z,
                         );
-                        if (emissiveTable[stateId]!) {
-                            emitQuadLightEmissive(target, liquidQuadIdx);
-                        } else {
-                            emitQuadLightSmooth(
-                                target,
-                                liquidQuadIdx,
-                                slabIdx,
-                                face,
-                                coversAnimSeam ? 0 : 1,
-                                CUBE_VERT_CORNER_PICKS,
-                                metaWord,
-                                cullTable,
-                            );
-                        }
                         target.quadCount++;
                     }
                 } else if (modelType === MODEL_MESH) {
@@ -2202,9 +2047,33 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                     //   PARALLEL, blend offset/non-offset by uniform depth
                     //   NON_PARALLEL, same blend, per-vertex depth
                     //   IRREGULAR, 3 axis face caches, weighted by n²
-                    const meshId = meshIdTable[stateId]!;
+                    // render-only positional jitter. y is left OUT of the hash so a
+                    // vertical stack shares one offset; the vertical component is
+                    // downward only, so plants sink rather than float.
+                    const jxzMax = jitterXz[stateId]!;
+                    const jyMax = jitterY[stateId]!;
+                    let jx = 0;
+                    let jy = 0;
+                    let jz = 0;
+                    if (jxzMax !== 0 || jyMax !== 0) {
+                        const jh = posHash(wx0 + x, 0, wz0 + z);
+                        if (jxzMax !== 0) {
+                            const scale = jxzMax / 255;
+                            jx = (((jh & 0xf) / 15) * 2 - 1) * scale;
+                            jz = ((((jh >>> 8) & 0xf) / 15) * 2 - 1) * scale;
+                        }
+                        if (jyMax !== 0) jy = -(((jh >>> 4) & 0xf) / 15) * (jyMax / 255);
+                    }
+
+                    // per-position variant: consecutive meshIds from variantBase.
+                    const meshVariants = variantCount[stateId]!;
+                    const meshId =
+                        meshVariants > 1
+                            ? variantBase[stateId]! + (posHash(wx0 + x, wy0 + y, wz0 + z) % meshVariants)
+                            : meshIdTable[stateId]!;
                     const quadTexIndices = meshTexIndices[meshId]!;
                     const quadMaterials = meshQuadMaterials[meshId]!;
+                    const qUnshaded = meshQuadUnshaded[meshId]!;
                     const qShape = meshQuadShapeTable[meshId]!;
                     const qFaceDir = meshQuadFaceDirTable[meshId]!;
                     const qCullFaceDir = meshQuadCullFaceDirTable[meshId]!;
@@ -2438,21 +2307,34 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             : ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
 
                         const vBase = qi * 12;
-                        const px0 = x + qVerts[vBase]!,
-                            py0 = y + qVerts[vBase + 1]!,
-                            pz0 = z + qVerts[vBase + 2]!;
-                        const px1 = x + qVerts[vBase + 3]!,
-                            py1 = y + qVerts[vBase + 4]!,
-                            pz1 = z + qVerts[vBase + 5]!;
-                        const px2 = x + qVerts[vBase + 6]!,
-                            py2 = y + qVerts[vBase + 7]!,
-                            pz2 = z + qVerts[vBase + 8]!;
-                        const px3 = x + qVerts[vBase + 9]!,
-                            py3 = y + qVerts[vBase + 10]!,
-                            pz3 = z + qVerts[vBase + 11]!;
+                        const ox = x + jx,
+                            oy = y + jy,
+                            oz = z + jz;
+                        const px0 = ox + qVerts[vBase]!,
+                            py0 = oy + qVerts[vBase + 1]!,
+                            pz0 = oz + qVerts[vBase + 2]!;
+                        const px1 = ox + qVerts[vBase + 3]!,
+                            py1 = oy + qVerts[vBase + 4]!,
+                            pz1 = oz + qVerts[vBase + 5]!;
+                        const px2 = ox + qVerts[vBase + 6]!,
+                            py2 = oy + qVerts[vBase + 7]!,
+                            pz2 = oz + qVerts[vBase + 8]!;
+                        const px3 = ox + qVerts[vBase + 9]!,
+                            py3 = oy + qVerts[vBase + 10]!,
+                            pz3 = oz + qVerts[vBase + 11]!;
 
-                        const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
+                        const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!, qUnshaded[qi]!);
                         const metaWord = packQuadMeta(aoPacked);
+                        packQuadUVs(
+                            qUVs[uvBase]!,
+                            qUVs[uvBase + 1]!,
+                            qUVs[uvBase + 2]!,
+                            qUVs[uvBase + 3]!,
+                            qUVs[uvBase + 4]!,
+                            qUVs[uvBase + 5]!,
+                            qUVs[uvBase + 6]!,
+                            qUVs[uvBase + 7]!,
+                        );
 
                         const quadIdx = target.quadCount;
                         writeQuadHeader(
@@ -2471,10 +2353,10 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             py3,
                             pz3,
                             normalPacked,
-                            packUV(qUVs[uvBase]!, qUVs[uvBase + 1]!),
-                            packUV(qUVs[uvBase + 2]!, qUVs[uvBase + 3]!),
-                            packUV(qUVs[uvBase + 4]!, qUVs[uvBase + 5]!),
-                            packUV(qUVs[uvBase + 6]!, qUVs[uvBase + 7]!),
+                            _uvPacked[0]!,
+                            _uvPacked[1]!,
+                            _uvPacked[2]!,
+                            _uvPacked[3]!,
                             flags,
                             metaWord,
                             x,
@@ -2482,33 +2364,6 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): 
                             z,
                         );
 
-                        if (emissiveTable[stateId]!) {
-                            emitQuadLightEmissive(target, quadIdx);
-                        } else if (shape === SHAPE_FLAT || shape === SHAPE_IRREGULAR || shape === SHAPE_NON_PARALLEL) {
-                            // SHAPE_FLAT/IRREGULAR/NON_PARALLEL, single host
-                            // cell broadcast, no smooth corner blend.
-                            emitQuadLightFlat(target, quadIdx, slabIdx, metaWord, cullTable);
-                        } else {
-                            // ALIGNED_FULL / ALIGNED_PARTIAL / PARALLEL, pick a
-                            // face-side base cell from uniform depth (offset=0
-                            // = host cell, offset=1 = beyond face plane), then
-                            // bake 4 × 2-bit per-vert corner picks via UV-hash
-                            // for proper 4-corner Sodium smooth blend.
-                            const meshFace = qFaceDir[qi]!;
-                            // a seam cover sits inside the solid it borders, so
-                            // its own cell is the only sane light source.
-                            const meshOffset = coversAnimSeam || qDepth[qi]! > 0.5 ? 0 : 1;
-                            const meshHashBase = meshFace * 4;
-                            let picks = 0;
-                            for (let v = 0; v < 4; v++) {
-                                const u = qCornerUV[qi * 8 + v * 2]!;
-                                const w = qCornerUV[qi * 8 + v * 2 + 1]!;
-                                const hash = (u >= 0.5 ? 2 : 0) | (w >= 0.5 ? 1 : 0);
-                                const corner = FACE_UV_HASH_TO_CORNER[meshHashBase + hash]!;
-                                picks |= (corner & 0x3) << (v * 2);
-                            }
-                            emitQuadLightSmooth(target, quadIdx, slabIdx, meshFace, meshOffset, picks, metaWord, cullTable);
-                        }
                         target.quadCount++;
 
                         if (px0 < aabbMinX) aabbMinX = px0;

@@ -62,6 +62,7 @@ import {
     sub,
     type Texture,
     texture,
+    u32,
     varying,
     vec2f,
     vec3f,
@@ -72,6 +73,7 @@ import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
+import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 import { bakeExtrudedSpriteMesh } from './sprite-extrusion';
 import type { SpriteResources } from './sprite-resources';
 
@@ -86,7 +88,6 @@ export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     tint: d.vec4f,
     // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
-    light: d.vec4f,
     glow: d.f32,
     unlit: d.f32,
     litMin: d.f32,
@@ -584,11 +585,14 @@ function createExtrudedSpriteMaterial(
     const uvRect = instMat.field('uvRect').toVar('esUvRect');
     const tint = instMat.field('tint').toVar('esTint');
     const flashF = instMat.field('flash').toVar('esFlash');
-    const lightF = instMat.field('light').toVar('esLight');
     const glowF = instMat.field('glow').toVar('esGlow');
     const unlitF = instMat.field('unlit').toVar('esUnlit');
     const litMinF = instMat.field('litMin').toVar('esLitMin');
     const ditherF = instMat.field('dither').toVar('esDither');
+
+    // sampled at the instance origin (the matrix translation column), where the
+    // CPU used to sample it. Unconditional: `unlit` is applied in `shadeTinted`.
+    const lightF = sampleWorldLight(bindLightVolume(env), worldMatrix.element(u32(3)).xyz).toVar('esLight');
 
     const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('esWorldPos');
     const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, worldPos)).toVar('esClipPos');

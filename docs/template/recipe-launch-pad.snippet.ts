@@ -9,13 +9,13 @@ import {
     asset,
     block,
     CharacterControllerTrait,
-    cloneModel,
     ContactsTrait,
+    cloneModel,
     createPrefab,
     env,
     getTrait,
-    model,
     MotionType,
+    model,
     type Node,
     onInit,
     onPostPhysicsStep,
@@ -27,10 +27,10 @@ import {
     setPosition,
     stateToBlock,
     system,
-    trait,
     TransformTrait,
+    trait,
 } from 'bongle';
-import { blockSoundPresets, blockTextures } from 'bongle/kit';
+import { blockSoundPresets, tiles } from 'bongle/kit';
 import { type Vec3, vec3 } from 'math';
 
 /* SNIPPET_START: launch */
@@ -53,7 +53,7 @@ export function launch(node: Node, impulse: Vec3): void {
 // the block under the feet each tick and exposes it as `state.groundBlockState`
 // (the standing block's state id when grounded).
 const LaunchPadBlock = block('demo:launch_pad', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.slime } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.slime } }),
     sounds: blockSoundPresets.grass,
 });
 

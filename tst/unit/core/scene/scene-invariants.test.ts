@@ -21,7 +21,7 @@ import {
     reparent,
     type SceneTree,
 } from '../../../../src/core/scene/scene-tree';
-import { trait } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
 
 const Mesh = trait('inv/mesh', { id: 0 });
 const Model = trait('inv/model', { light: 0 });

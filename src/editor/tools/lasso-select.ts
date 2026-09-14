@@ -19,17 +19,17 @@ import { mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Input } from '../../client/input';
-import { isKeyDown } from '../../client/input';
+import { getCursor, isKeyDown, isMouseDown, isMouseJustDown, isMouseJustUp } from '../../client/input';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
+import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Blocks } from '../../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import type { NodeBodies } from '../node-bodies';
-import type { PointerState } from '../pointer-state';
-import { pointerHeld, pointerJustDown, pointerJustUp } from '../pointer-state';
+import { playSelected } from '../sounds';
 
 const MIN_NDC_DELTA = 0.004; // ~ a few pixels at typical resolutions
 const SAMPLE_GRID_RES = 96; // samples across the polygon's NDC bbox
@@ -76,7 +76,7 @@ function projectWorldToNdc(_camera: PerspectiveCamera, w: Vec3): boolean {
 
 export function updateLassoSelect(
     store: EditRoomStoreApi,
-    pointer: PointerState,
+    ctx: ScriptContext,
     input: Input,
     camera: PerspectiveCamera,
     voxels: Voxels,
@@ -84,15 +84,17 @@ export function updateLassoSelect(
     nodeBodies: NodeBodies | null,
     sceneTree: SceneTree,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
-    const held = pointerHeld(pointer, input);
-    const justUp = pointerJustUp(pointer, input);
+    const mk = input.mouseKeyboard;
+    const justDown = isMouseJustDown(mk, 'left');
+    const held = isMouseDown(mk, 'left');
+    const justUp = isMouseJustUp(mk, 'left');
+    const cursor = getCursor(mk);
     const lasso = store.getState().lasso;
 
     // ── start a new stroke ─────────────────────────────────────────
     if (justDown && !lasso) {
         store.setState({
-            lasso: { points: [[pointer.ndcX, pointer.ndcY]] },
+            lasso: { points: [[cursor.ndcX, cursor.ndcY]] },
         });
         return;
     }
@@ -101,12 +103,12 @@ export function updateLassoSelect(
     if (lasso && held && !justUp) {
         const pts = lasso.points;
         const last = pts[pts.length - 1]!;
-        const dx = pointer.ndcX - last[0];
-        const dy = pointer.ndcY - last[1];
+        const dx = cursor.ndcX - last[0];
+        const dy = cursor.ndcY - last[1];
         if (dx * dx + dy * dy >= MIN_NDC_DELTA * MIN_NDC_DELTA) {
             const nextPoints: Array<[number, number]> = new Array(pts.length + 1);
             for (let i = 0; i < pts.length; i++) nextPoints[i] = [pts[i]![0], pts[i]![1]];
-            nextPoints[pts.length] = [pointer.ndcX, pointer.ndcY];
+            nextPoints[pts.length] = [cursor.ndcX, cursor.ndcY];
             store.setState({ lasso: { points: nextPoints } });
         }
         return;
@@ -119,7 +121,7 @@ export function updateLassoSelect(
     if (lasso && justUp) {
         const stroke = lasso.points;
         clearLassoStroke(store);
-        commitLasso(store, stroke, input, camera, voxels, blocks, nodeBodies, sceneTree);
+        commitLasso(store, ctx, stroke, input, camera, voxels, blocks, nodeBodies, sceneTree);
     }
 }
 
@@ -127,6 +129,7 @@ export function updateLassoSelect(
 
 function commitLasso(
     store: EditRoomStoreApi,
+    ctx: ScriptContext,
     polygon: ReadonlyArray<readonly [number, number]>,
     input: Input,
     camera: PerspectiveCamera,
@@ -250,6 +253,7 @@ function commitLasso(
     }
 
     store.setState({ selection: next });
+    playSelected(ctx, effective === 'add');
 }
 
 // inline NDC → world unprojection. caller must call rebuildUnprojectCache

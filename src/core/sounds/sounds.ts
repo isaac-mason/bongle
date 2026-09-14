@@ -28,16 +28,11 @@
 //     under `PLACEHOLDER_OWNER`; the first user `sound()` call promotes
 //     ownership via `claimOwnership`.
 
-import { recordSound } from '../capture/module-scope';
-import { declare, registry, touch, upsertPlaceholder } from '../registry';
-
 /* ── types ── */
 
-export type SoundOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
+import type { AssetMeta, ResolvedAssetMeta } from '../asset-meta';
+
+export type SoundOptions = AssetMeta & {
     /**
      * source audio (.wav/.mp3/.ogg/.flac): either a string path relative to
      * project root, or a module-relative `asset('./clip.ogg', import.meta.url)`
@@ -83,6 +78,8 @@ export type SoundDef = {
      *  defaults to `soundId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     readonly name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    readonly tags: readonly string[];
     readonly src: string;
     readonly long: boolean;
     /**
@@ -109,33 +106,6 @@ export type SoundHandle = {
 /* ── codegen-seeded registry ── */
 
 /**
- * Called by the per-project barrel `src/generated/sounds.ts` at module-
- * eval to populate each handle's codegen'd fields. Barrel does not own
- * registry entries, see file header. Mutates the existing payload in
- * place so user code refs stay valid, then `touch()`es so consumers
- * react via the dispatch path.
- *
- * If no entry exists (cold start where the barrel ran before any user
- * `sound()` call), the payload is registered under `PLACEHOLDER_OWNER`;
- * the first user `sound()` call promotes ownership.
- *
- * Re-runs on every barrel re-import (hot reload). The `touch` call is
- * what bumps `revision` so the cli's flush handler picks up duration
- * changes for downstream consumers.
- */
-export function _registerSoundDef(id: string, def: SoundDef): void {
-    const handle = registry.sounds.handles.get(id);
-    if (registry.sounds.byId.has(id)) {
-        registry.sounds.byId.set(id, def);
-        if (handle) handle.def = def;
-        touch(registry.sounds, id);
-        return;
-    }
-    upsertPlaceholder(registry.sounds, id, def);
-    if (handle) handle.def = def;
-}
-
-/**
  * Build a per-id placeholder handle. Used by `sound()` when the user
  * declares a sound before codegen has run for it, the placeholder sits
  * in the registry so the cli can discover the declaration (`.src` is the
@@ -146,10 +116,11 @@ export function _registerSoundDef(id: string, def: SoundDef): void {
  * `handle.duration` before the first pipeline pass sees zero, which is
  * also the correct value for an empty handle.
  */
-function createPlaceholderDef(id: string, src: string, long: boolean, name: string): SoundDef {
+export function createSoundPlaceholderDef(id: string, src: string, long: boolean, meta: ResolvedAssetMeta): SoundDef {
     return {
         soundId: id,
-        name,
+        name: meta.name,
+        tags: meta.tags,
         src,
         long,
         duration: 0,
@@ -158,45 +129,3 @@ function createPlaceholderDef(id: string, src: string, long: boolean, name: stri
 }
 
 /* ── registration ── */
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * Declare an audio clip. Called at module scope.
- *
- * Returns the codegen'd `SoundHandle` (typed via `SoundHandleMap` if the
- * cli has emitted the registry barrel yet, generic `SoundHandle` otherwise).
- *
- * ```ts
- * import { sound } from 'bongle';
- * const Footstep = sound('footstep', { src: 'audio/footstep.wav' });
- * const Ambient  = sound('ambient', { src: 'audio/ambient.ogg', long: true });
- * ```
- *
- * The bongle asset pipeline reads `soundsRegistry` on every flush and
- * builds the atlas (long:false bucket) + standalone files (long:true
- * bucket) into `resources/client/`, then codegens per-id sidecars +
- * barrel under `src/generated/sounds*`. Playback is via the script APIs
- * in `api/audio.ts` (`playMono` / `playAt` / `playOnNode`).
- */
-export function sound<const Id extends string>(
-    id: Id,
-    options: SoundOptions,
-): Id extends keyof SoundHandleMap ? SoundHandleMap[Id] : SoundHandle {
-    const long = options.long ?? false;
-    const src = options.src;
-    const name = options.name ?? id;
-    // minting a placeholder is the normal cold-start path, not a warning case: the
-    // user-entry shim wipes `src/generated/sounds.ts` on every dev start
-    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY declared sound
-    // hits it before the pipeline's first flush populates the barrel.
-    const handle = declare(
-        registry.sounds,
-        id,
-        // codegen owns `duration`; merge onto whatever the barrel registered rather
-        // than replacing it.
-        (previous): SoundDef => (previous ? { ...previous, src, long, name } : createPlaceholderDef(id, src, long, name)),
-        (def): SoundHandle => ({ id, dependency: { registry: 'sounds', id }, def }),
-    );
-    recordSound(id);
-    return handle as never;
-}

@@ -37,7 +37,13 @@ import * as MeshVisuals from './mesh/mesh-visuals';
 import type { OfflineRenderer, TileTarget } from './offline';
 import * as ParticleResources from './particles/particle-resources';
 import * as ParticleVisuals from './particles/particle-visuals';
-import { createRenderPipeline, type EngineRenderPipeline, setActiveScene, updateCameraEnvironment } from './pipeline';
+import {
+    createRenderPipeline,
+    type EngineRenderPipeline,
+    rebuildRenderPipelineIfStale,
+    setActiveScene,
+    updateCameraEnvironment,
+} from './pipeline';
 import * as ShadowResources from './shadows/shadow-resources';
 import * as ShadowVisuals from './shadows/shadow-visuals';
 import * as ExtrudedSpriteResources from './sprites/extruded-sprite-resources';
@@ -45,9 +51,11 @@ import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
 import * as SpriteResources from './sprites/sprite-resources';
 import * as SpriteVisuals from './sprites/sprite-visuals';
 import * as Time from './time';
-import { flushMeshQueue, readMeshPerf } from './voxels/mesher';
+import { flushMeshQueue, meshQueueStats, readMeshPerf } from './voxels/mesher';
 import * as VoxelAoi from './voxels/voxel-aoi';
 import * as VoxelArena from './voxels/voxel-arena';
+import * as VoxelLightSample from './voxels/voxel-light-sample';
+import * as VoxelLightVolume from './voxels/voxel-light-volume';
 import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
 import * as VoxelResources from './voxels/voxel-resources-cpu';
@@ -55,6 +63,13 @@ import * as VoxelVisuals from './voxels/voxel-visuals';
 
 /** Which graphics backend this module drives. The backend facade
  *  (`render/backend`) keys off this; the WebGPU twin exports `'webgpu'`. */
+/** light tiles rebaked per frame. A tile is ~9.8 kB, so this bounds the
+ *  per-frame upload; the rest stay dirty and are retried nearest-first. */
+/** per-frame CPU budget for rebaking light tiles. The drain has no other work,
+ *  so this is the whole per-frame cost of the light volume. A time budget rather
+ *  than a tile count so it self-calibrates on slower devices. */
+const LIGHT_BAKE_BUDGET_MS = 1.5;
+
 export const kind = 'webgl' as const;
 
 /**
@@ -204,6 +219,11 @@ export function resize(state: WebGlState, width: number, height: number, pixelRa
  */
 export function render(state: WebGlState, voxelViewChunkRadius: number): void {
     if (!state.active) return;
+    // a game's `setRenderPipeline` may have re-declared the stages since the last
+    // frame (a module reload, most often). Rebuilding here, ahead of
+    // `setActiveScene` below, means the fresh passes pick up the active room on
+    // this same frame with nothing extra to re-bind.
+    rebuildRenderPipelineIfStale(state.pipeline);
     const { room } = state.active;
     // `state.pipeline.camera` is `Renderer.camera`, already resolved to the active
     // room's POV by the client's frame loop (via render/camera) before render.
@@ -275,6 +295,21 @@ export async function refreshBlockResources(
  * HMR (sprite atlas change): swap the sprite resources and rebuild the active
  * room's extruded-sprite visuals. Returns whether the atlas changed.
  */
+
+/** See `Renderer.voxelWorldDrawable`. Resident-and-settled: a chunk mesh is in
+ *  the arena and the mesher has nothing left queued or in flight. A room with no
+ *  voxel content never queues anything and never goes resident, so it reports
+ *  drawable rather than waiting forever — same for a runtime with no worker pool. */
+function voxelWorldDrawable(state: WebGlState): boolean {
+    if (!state.active) return false;
+    const mesher = state.resources.voxel.meshDispatcher;
+    if (mesher === null) return true;
+    const stats = meshQueueStats(mesher);
+    const queued = stats.perSlot.reduce((n, s) => n + s.pending + s.pendingUrgent, 0);
+    if (stats.inFlightTotal > 0 || queued > 0) return false;
+    return state.resources.voxel.arenas.residentKeys.size > 0 || state.active.room.voxels.chunks.size === 0;
+}
+
 export async function refreshSpriteResources(state: WebGlState, opts: { resources: EngineResources }): Promise<boolean> {
     const changed = await swapSpriteResources(state, opts);
     if (changed && state.active) {
@@ -463,12 +498,15 @@ async function buildOfflineDeps(
     const cloudResources = CloudResources.init(state.environmentResources);
     const modelResources = MeshResources.init(state.environmentResources);
     const voxelResources = VoxelResources.init(registry.blockRegistry, state.environmentResources, budget, state.timeResources);
-    const voxelMeshResources = VoxelMeshResources.init(
-        voxelResources.textures.atlas,
-        voxelResources.textures.texAnimBuffer,
-        state.timeResources,
-        state.environmentResources,
-    );
+    const voxelMeshResources = VoxelMeshResources.init(voxelResources.textures, state.timeResources, state.environmentResources);
+
+    // the offline path builds its own resources, so it must route the light
+    // volume too: the model and voxel-mesh materials bind `lightTiles` /
+    // `lightGrid` by name, and a geometry missing them
+    // fails pipeline creation rather than rendering unlit.
+    for (const geometry of [modelResources.batch.geometry, voxelMeshResources.batch.geometry]) {
+        VoxelLightSample.routeLightVolumeBuffers(geometry, voxelResources.lightVolume);
+    }
 
     // workerCount=0 → synchronous remesh (icons mesh inline via meshChunk). The CPU
     // producer has no compute to pre-warm, so atlas readiness is the only gate.
@@ -520,8 +558,10 @@ export function create(): Renderer {
         initResources: (o) => initResources(state, o),
         loadResources: (o) => loadResources(state, o),
         disposeResources: () => disposeResources(state),
+        atlases: () => ({ voxel: state.resources?.voxel.textures ?? null, sprite: state.resources?.sprite ?? null }),
         updateFrame: (activeRoom, ctx) => updateFrame(state, activeRoom, ctx),
         render: (radius) => render(state, radius),
+        voxelWorldDrawable: () => voxelWorldDrawable(state),
         refreshBlockResources: (o) => refreshBlockResources(state, o),
         refreshSpriteResources: (o) => refreshSpriteResources(state, o),
     };
@@ -565,12 +605,20 @@ export function initResources(
         opts.voxelBudget,
         renderer.timeResources,
     );
-    const voxelMesh = VoxelMeshResources.init(
-        voxel.textures.atlas,
-        voxel.textures.texAnimBuffer,
-        renderer.timeResources,
-        renderer.environmentResources,
-    );
+    const voxelMesh = VoxelMeshResources.init(voxel.textures, renderer.timeResources, renderer.environmentResources);
+    // every visual samples light in the shader now, so route the volume's
+    // buffers to the names their (engine-global) materials bind. Here rather
+    // than in each init because the volume is built with VoxelResources.
+    for (const geometry of [
+        particle.batch.geometry,
+        sprite.batch.geometry,
+        extrudedSprite.batch.geometry,
+        model.batch.geometry,
+        voxelMesh.batch.geometry,
+    ]) {
+        VoxelLightSample.routeLightVolumeBuffers(geometry, voxel.lightVolume);
+    }
+
     renderer.resources = { sprite, extrudedSprite, particle, cloud, model, shadow, voxel, voxelMesh };
 }
 
@@ -632,12 +680,19 @@ export async function swapVoxelResources(
     // rebuild alongside voxelResources whenever those swap.
     if (changed) {
         VoxelMeshResources.dispose(r.voxelMesh);
-        r.voxelMesh = VoxelMeshResources.init(
-            r.voxel.textures.atlas,
-            r.voxel.textures.texAnimBuffer,
-            renderer.timeResources,
-            renderer.environmentResources,
-        );
+        r.voxelMesh = VoxelMeshResources.init(r.voxel.textures, renderer.timeResources, renderer.environmentResources);
+        // a new VoxelResources carries a NEW light volume, so EVERY batch has to
+        // be re-pointed, not just the one just rebuilt: the others are still
+        // bound to the old volume's buffers, which this swap disposed.
+        for (const geometry of [
+            r.particle.batch.geometry,
+            r.sprite.batch.geometry,
+            r.extrudedSprite.batch.geometry,
+            r.model.batch.geometry,
+            r.voxelMesh.batch.geometry,
+        ]) {
+            VoxelLightSample.routeLightVolumeBuffers(geometry, r.voxel.lightVolume);
+        }
     }
     return changed;
 }
@@ -791,7 +846,7 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
     const { room, visuals: rv } = state.active;
     const res = state.resources;
 
-    Debug.begin(room.clientMetrics, 'mesh');
+    Debug.begin(ctx.profiler, 'mesh');
     // The live drive: the AOI schedules dirty chunks off-thread (streaming rooms
     // defer a chunk until its 26-neighbourhood has arrived so it meshes once with
     // correct AO/light; local rooms mesh immediately), then the CPU producer
@@ -803,54 +858,87 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
     if (mesher !== null) {
         VoxelAoi.reDirtyLost(mesher, room.voxels);
         const toForget: string[] = [];
-        VoxelAoi.scheduleDirtyChunks(rv.voxel, mesher, room.voxels, povCamera.position, !room.local, toForget);
+        VoxelAoi.scheduleDirtyChunks(
+            rv.voxel,
+            mesher,
+            room.voxels,
+            res.voxel.lightVolume,
+            povCamera.position,
+            !room.local,
+            toForget,
+        );
         VoxelResources.consume(res.voxel, mesher, room.voxels, povCamera.position, toForget);
         // flush AFTER consume drains: the flush recycles output buffers back to the
         // workers, which would detach them from an undrained result (see mesher.ts).
         flushMeshQueue(mesher, room.voxels);
         rv.voxel.lastMeshPerf = readMeshPerf(mesher);
     }
-    Debug.end(room.clientMetrics, 'mesh');
+    Debug.end(ctx.profiler, 'mesh');
+
+    // Light volume: rebake tiles for chunks whose light changed. Deliberately
+    // OUTSIDE the `mesher !== null` guard above — a room with no mesh worker
+    // still has entities, sprites and particles sampling this. Budgeted per
+    // frame because relight is not latency-critical the way input is.
+    Debug.begin(ctx.profiler, 'light-volume');
+    const lightBakes = VoxelLightVolume.drainLightVolume(
+        res.voxel.lightVolume,
+        room.voxels,
+        povCamera.position,
+        LIGHT_BAKE_BUDGET_MS,
+        rv.voxel.frame,
+    );
+    if (ctx.profiler.enabled) {
+        Debug.record(ctx.profiler, 'voxels/light/bakes', lightBakes, 'count');
+        Debug.record(
+            ctx.profiler,
+            'voxels/light/queued',
+            room.voxels.dirty.lightVolume.size + room.voxels.dirty.lightVolumeUrgent.size,
+            'count',
+        );
+        Debug.record(ctx.profiler, 'voxels/light/urgent', room.voxels.dirty.lightVolumeUrgent.size, 'count');
+        Debug.record(ctx.profiler, 'voxels/light/tiles', res.voxel.lightVolume.head, 'count');
+    }
+    Debug.end(ctx.profiler, 'light-volume');
 
     // arena occupancy + fragmentation, recorded post-update so the sample
     // reflects this frame's allocs.
-    if (room.clientMetrics.enabled) {
+    if (ctx.profiler.enabled) {
         const quadR = VoxelArena.arenaReport(res.voxel.arenas.quadArena);
-        Debug.record(room.clientMetrics, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
-        Debug.record(room.clientMetrics, 'voxels/arena/quad/largestFreePct', (100 * quadR.largestFree) / quadR.slotCount, '%');
-        Debug.record(room.clientMetrics, 'voxels/arena/quad/allocs', quadR.allocs, 'count');
+        Debug.record(ctx.profiler, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
+        Debug.record(ctx.profiler, 'voxels/arena/quad/largestFreePct', (100 * quadR.largestFree) / quadR.slotCount, '%');
+        Debug.record(ctx.profiler, 'voxels/arena/quad/allocs', quadR.allocs, 'count');
     }
 
-    Debug.begin(room.clientMetrics, 'voxel-mesh');
-    VoxelMeshVisuals.update(rv.voxelMesh, res.voxelMesh.batch, room.voxels, room.visibility);
-    Debug.end(room.clientMetrics, 'voxel-mesh');
+    Debug.begin(ctx.profiler, 'voxel-mesh');
+    VoxelMeshVisuals.update(rv.voxelMesh, res.voxelMesh.batch, room.visibility);
+    Debug.end(ctx.profiler, 'voxel-mesh');
 
-    Debug.begin(room.clientMetrics, 'model');
-    MeshVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility, room.voxels);
-    Debug.end(room.clientMetrics, 'model');
+    Debug.begin(ctx.profiler, 'model');
+    MeshVisuals.update(rv.model, res.model.batch, res.model, ctx.resources, room.visibility);
+    Debug.end(ctx.profiler, 'model');
 
-    Debug.begin(room.clientMetrics, 'dom-ui');
+    Debug.begin(ctx.profiler, 'dom-ui');
     DomUi.update(rv.domUi, povCamera, ctx.viewport);
-    Debug.end(room.clientMetrics, 'dom-ui');
+    Debug.end(ctx.profiler, 'dom-ui');
 
-    Debug.begin(room.clientMetrics, 'sprite');
-    SpriteVisuals.update(rv.sprite, res.sprite.batch, res.sprite, room.voxels, povCamera, room.visibility);
-    Debug.end(room.clientMetrics, 'sprite');
+    Debug.begin(ctx.profiler, 'sprite');
+    SpriteVisuals.update(rv.sprite, res.sprite.batch, res.sprite, povCamera, room.visibility);
+    Debug.end(ctx.profiler, 'sprite');
 
-    Debug.begin(room.clientMetrics, 'extruded-sprite');
-    ExtrudedSpriteVisuals.update(rv.extrudedSprite, res.extrudedSprite.batch, res.extrudedSprite, room.voxels, room.visibility);
-    Debug.end(room.clientMetrics, 'extruded-sprite');
+    Debug.begin(ctx.profiler, 'extruded-sprite');
+    ExtrudedSpriteVisuals.update(rv.extrudedSprite, res.extrudedSprite.batch, res.extrudedSprite, room.visibility);
+    Debug.end(ctx.profiler, 'extruded-sprite');
 
-    Debug.begin(room.clientMetrics, 'shadow');
+    Debug.begin(ctx.profiler, 'shadow');
     ShadowVisuals.update(rv.shadow, res.shadow.batch, room.voxels, povCamera);
-    Debug.end(room.clientMetrics, 'shadow');
+    Debug.end(ctx.profiler, 'shadow');
 
     // particle visuals reads pool[0..count) directly, no scene-graph traits. runs
     // after Particles.update (per-frame loop) so freshly-stepped positions feed
     // this frame's pose buffer.
-    Debug.begin(room.clientMetrics, 'particle');
-    ParticleVisuals.update(rv.particle, res.particle.batch, room.particles, room.voxels, ctx.now);
-    Debug.end(room.clientMetrics, 'particle');
+    Debug.begin(ctx.profiler, 'particle');
+    ParticleVisuals.update(rv.particle, res.particle.batch, room.particles, ctx.now);
+    Debug.end(ctx.profiler, 'particle');
 }
 
 /**

@@ -13,14 +13,14 @@ import { iconBakeIsNoop, planIconBake } from '../../../src/asset-pipeline/icons'
 import { registry } from '../../../src/core/registry';
 import { cube } from '../../../src/core/voxels/block-presets';
 import { buildBlockRegistry } from '../../../src/core/voxels/block-registry';
-import type { BlockDef, BlockHandle, BlockTextureDef } from '../../../src/core/voxels/blocks';
+import type { BlockDef, BlockHandle, TileDef } from '../../../src/core/voxels/blocks';
 
 const BLOCK_ICON_PNG = 'resources/client/voxels-icons.png';
 const BLOCK_ICON_JSON = 'resources/client/voxels-icons.json';
 const PREFAB_ICON_MANIFEST = 'resources/client/prefab-icons.json';
 
-function texture(id: string): BlockTextureDef {
-    return { id, frames: [`${id}.png`], fps: 1, interpolate: false };
+function tileDef(id: string): TileDef {
+    return { id, frames: [{ registry: 'textures', id }], fps: 1, interpolate: false };
 }
 
 /** map-backed stand-in for the project disk: the read/write/exists surface the
@@ -61,28 +61,27 @@ function memFs(): Filesystem & { files: Map<string, string> } {
     } as unknown as Filesystem & { files: Map<string, string> };
 }
 
-const stone = texture('stone');
-const dirt = texture('dirt');
-const moss = texture('moss');
+const stone = tileDef('stone');
+const dirt = tileDef('dirt');
+const moss = tileDef('moss');
 
 /** publish a block registry onto the engine registry, the way `reindexRegistry`
  *  does after a declaration flush. */
-function declareBlocks(...wearing: [id: string, texture: BlockTextureDef][]): void {
+function declareBlocks(...wearing: [id: string, tile: TileDef][]): void {
     const handles = wearing.map(
-        ([id, t]) =>
-            cube(id, { textures: { id: t.id, dependency: { registry: 'blockTextures', id: t.id }, def: t } }) as BlockHandle,
+        ([id, t]) => cube(id, { tiles: { id: t.id, dependency: { registry: 'tiles', id: t.id }, def: t } }) as BlockHandle,
     );
     const defs = new Map<string, BlockDef>(handles.map((h) => [h.id, h.def]));
     const handleMap = new Map<string, BlockHandle>(handles.map((h) => [h.id, h]));
-    const textures = new Map<string, BlockTextureDef>([
+    const tiles = new Map<string, TileDef>([
         [stone.id, stone],
         [dirt.id, dirt],
         [moss.id, moss],
     ]);
-    buildBlockRegistry(registry.blockRegistry, defs, handleMap, textures);
+    buildBlockRegistry(registry.blockRegistry, defs, handleMap, tiles);
 }
 
-const BASE_BLOCKS: [string, BlockTextureDef][] = [
+const BASE_BLOCKS: [string, TileDef][] = [
     ['test:stone', stone],
     ['test:dirt', dirt],
 ];

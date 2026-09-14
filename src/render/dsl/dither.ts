@@ -1,4 +1,5 @@
 import { add, Discard, d, Fn, f32, fract, fragCoord, If, mul, type Node } from 'gpucat';
+import { ALPHA_REF } from '../../core/voxels/mip-levels';
 
 // ── alpha cutout + dither ───────────────────────────────────────────
 /**
@@ -17,7 +18,9 @@ import { add, Discard, d, Fn, f32, fract, fragCoord, If, mul, type Node } from '
 export function ditherDiscard(color: Node<d.vec4f>, alpha: Node<d.f32>, dither: Node<d.f32>): Node<d.vec4f> {
     const discard = Fn(
         (c, a, fade, fragX, fragY) => {
-            If(a.lessThan(f32(0.5)), () => {
+            // the same ALPHA_REF the mip chain preserves coverage against, so the
+            // bake and the discard cannot drift apart.
+            If(a.lessThan(f32(ALPHA_REF)), () => {
                 Discard();
             });
             const ign = fract(mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY))))).toVar(

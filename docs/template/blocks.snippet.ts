@@ -9,7 +9,6 @@ import {
     blockModel,
     blockPreset,
     blockState,
-    blockTexture,
     CullType,
     chunkData,
     debug,
@@ -29,53 +28,52 @@ import {
     setBlock,
     setChunkBlock,
     system,
+    tile,
     use,
     VertexAnimation,
     voxelIndex,
 } from 'bongle';
-import { blockTextures } from 'bongle/kit';
+import { tiles } from 'bongle/kit';
 
 /* SNIPPET_START: first-cube */
-// 1. declare a texture from your own image. drop the .png in assets/ (drawn at
-//    16x16) and point src at it with asset(rel, import.meta.url).
-const StoneTexture = blockTexture('guide:stone', { src: asset('./assets/stone.png', import.meta.url) });
+// 1. declare a tile from your own image. a tile is one 16x16 entry in the voxel
+//    atlas. drop the .png in assets/ and point src at it with
+//    asset(rel, import.meta.url).
+const StoneTile = tile('guide:stone', { src: asset('./assets/stone.png', import.meta.url) });
 
-// 2. wrap it in a cube. one texture argument paints all six faces the same.
-const StoneBlock = blockPreset.cube('guide:stone', { name: 'Stone', textures: StoneTexture });
+// 2. wrap it in a cube. one tile argument paints all six faces the same.
+const StoneBlock = blockPreset.cube('guide:stone', { name: 'Stone', tiles: StoneTile });
 
 // keep the handle alive through bundling if nothing else in code references it
 use(StoneBlock);
 /* SNIPPET_END: first-cube */
 
 /* SNIPPET_START: cube-faces */
-// a block can draw from several textures, one per face. declare one blockTexture
-// per image, then pass a per-face map instead of a single texture: top/bottom/
-// sides (a grass-topped dirt block), or name all six for full control
+// a block can wear a different tile per face. declare one tile per image, then
+// pass a per-face map instead of a single tile: top/bottom/sides (a grass-topped
+// dirt block), or name all six for full control
 // (top/bottom/north/south/east/west).
-const GrassTop = blockTexture('guide:grass_top', { src: asset('./assets/grass_top.png', import.meta.url) });
-const GrassSide = blockTexture('guide:grass_side', { src: asset('./assets/grass_side.png', import.meta.url) });
-const DirtTexture = blockTexture('guide:dirt', { src: asset('./assets/dirt.png', import.meta.url) });
+const GrassTop = tile('guide:grass_top', { src: asset('./assets/grass_top.png', import.meta.url) });
+const GrassSide = tile('guide:grass_side', { src: asset('./assets/grass_side.png', import.meta.url) });
+const DirtTile = tile('guide:dirt', { src: asset('./assets/dirt.png', import.meta.url) });
 
 const GrassBlock = blockPreset.cube('guide:grass', {
     name: 'Grass',
-    textures: {
-        top: { texture: GrassTop },
-        bottom: { texture: DirtTexture },
-        sides: { texture: GrassSide },
-    },
+    // a bare handle is the common case; use `{ tile, rotation }` to turn a face.
+    tiles: { top: GrassTop, bottom: DirtTile, sides: GrassSide },
 });
 use(GrassBlock);
 /* SNIPPET_END: cube-faces */
 
 /* SNIPPET_START: block-api */
-// every preset is sugar over block(). here is what blockPreset.plant expands to:
+// every preset is sugar over block(). here is what blockPreset.cross expands to:
 // a flower is not a cube at all but two crossed quads (blockModel.cross), plus
 // the handful of options that make vegetation behave. reach for block() directly
 // whenever a preset's shape or defaults do not fit.
-const PoppyTexture = blockTexture('guide:poppy', { src: asset('./assets/poppy.png', import.meta.url) });
+const PoppyTile = tile('guide:poppy', { src: asset('./assets/poppy.png', import.meta.url) });
 const PoppyBlock = block('guide:poppy', {
     name: 'Poppy',
-    model: () => ({ type: 'custom' as const, quads: blockModel.cross(PoppyTexture) }),
+    model: () => ({ type: 'custom' as const, quads: blockModel.cross(PoppyTile) }),
     collision: false, // walk straight through it
     cull: CullType.SELF, // only hide faces against other poppies, never neighbours
     lightOpacity: 0, // sparse quads, let light pass instead of shadowing
@@ -147,7 +145,7 @@ system('grass-events', (ctx) => {
 const LampBlock = block('guide:lamp', {
     name: 'LampBlock',
     states: blockState.create({ lit: blockState.bool() }),
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.stone } }),
 });
 
 // address a specific state by its property values; pass the key to setBlock

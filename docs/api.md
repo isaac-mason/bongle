@@ -358,62 +358,6 @@ export function attachWorldTrait(root: Node): void;
 
 Read and write node positions, rotations, and scales in local and world space.
 
-#### `getVisualWorldMatrix`
-
-```ts
-/** get the world matrix to render with, visual chain if interpolated, world otherwise. */
-export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
-```
-
-#### `getVisualWorldPosition`
-
-```ts
-/** visual world-space position, read from the matrix translation. */
-export function getVisualWorldPosition(transform: TransformTrait): Vec3;
-```
-
-#### `getVisualWorldQuaternion`
-
-```ts
-/** get visual world-space quaternion, lazy-decomposing if deferred. */
-export function getVisualWorldQuaternion(transform: TransformTrait): Quat;
-```
-
-#### `getVisualWorldScale`
-
-```ts
-/** get visual world-space scale, lazy-decomposing if deferred. */
-export function getVisualWorldScale(transform: TransformTrait): Vec3;
-```
-
-#### `getWorldMatrix`
-
-```ts
-/** get world matrix, recomputing if dirty. */
-export function getWorldMatrix(transform: TransformTrait): Mat4;
-```
-
-#### `getWorldPosition`
-
-```ts
-/** world-space position, read from the matrix translation; leaves the TRS decompose deferred. */
-export function getWorldPosition(transform: TransformTrait): Vec3;
-```
-
-#### `getWorldQuaternion`
-
-```ts
-/** get world-space quaternion, decomposing from worldMatrix if needed. */
-export function getWorldQuaternion(transform: TransformTrait): Quat;
-```
-
-#### `getWorldScale`
-
-```ts
-/** get world-space scale, decomposing from worldMatrix if needed. */
-export function getWorldScale(transform: TransformTrait): Vec3;
-```
-
 #### `resetInterpolation`
 
 ```ts
@@ -503,25 +447,7 @@ export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3)
 export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void;
 ```
 
-#### `worldToLocalPosition`
-
-```ts
-/**
- * convert a world-space position to local-space for a node.
- * fast path: if no transformed parent, world === local, just copies.
- */
-export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3;
-```
-
-#### `worldToLocalQuaternion`
-
-```ts
-/**
- * convert a world-space quaternion to local-space for a node.
- * fast path: if no transformed parent, world === local, just copies.
- */
-export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat;
-```
+Also exported: `getVisualWorldMatrix`, `getVisualWorldPosition`, `getVisualWorldQuaternion`, `getVisualWorldScale`, `getWorldMatrix`, `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, `worldToLocalPosition`, `worldToLocalQuaternion`.
 
 ## Traits & schemas
 
@@ -689,25 +615,13 @@ export type TraitHandle<T extends TraitBase = TraitBase> = {
      */
     readonly slot: number;
     /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'traits'; id: string };
+    readonly dependency: DepKey;
     /** the authored data. re-pointed on every re-declaration. */
     def: TraitDef;
-
-    // ── derived from `def`; rebuilt by `mintHandle` on every declaration ──
-
-    /** compiled instance constructor, built from `def.body`. */
-    construct: () => TraitBase;
-    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. */
+    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. Not
+     *  derived from the def but from the registry's ordering, same as a block's
+     *  `_baseStateId`, so it lives on the handle and survives re-declaration. */
     netIndex: number | undefined;
-    /** `controlId` → its registration + slot index, over `def.controls`. */
-    controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** `syncId` → its registration + slot index, over `def.sync`. */
-    syncById: Map<string, { reg: SyncDef; index: number }>;
-    /** `scriptId` → its registration + slot index, over `def.scripts`. */
-    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
-    /** memoised packcat codecs; null until first built, dropped on re-declaration. */
-    syncCodecs: SyncCodec[] | null;
-    controlCodecs: ControlCodec[] | null;
 
     /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
@@ -753,18 +667,6 @@ export type TraitOptions = {
 export type TraitType<H extends TraitHandle> = H['__type'];
 ```
 
-#### `control`
-
-```ts
-/**
- * register a control on a trait. callable multiple times per trait.
- * declared *after* the trait() literal so `t` is fully typed in get/set.
- * `id` is a stable string used as the persisted key in scene files and
- * the inspector lookup key.
- */
-export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void;
-```
-
 #### `Self`
 
 ```ts
@@ -785,6 +687,18 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
 export type Self = TraitBase & {
     readonly [SELF_MARKER]: true;
 };
+```
+
+#### `control`
+
+```ts
+/**
+ * register a control on a trait. callable multiple times per trait.
+ * declared *after* the trait() literal so `t` is fully typed in get/set.
+ * `id` is a stable string used as the persisted key in scene files and
+ * the inspector lookup key.
+ */
+export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void;
 ```
 
 #### `sync`
@@ -1032,10 +946,10 @@ export type ClientContext = {
     clientId: ClientId | undefined;
 
     /**
-     * client debug surface. `dashboard` is the shared dashcat Dashboard —
+     * client debug surface. `dashboard` is the shared `Dashboard` —
      * games dock their own panels on it (or via the scoped `debug.panel(ctx, …)`
      * helper, which auto-cleans on script dispose). the raw handle is the
-     * escape hatch for full dashcat control. built lazily on first access.
+     * escape hatch for full dashboard control. built lazily on first access.
      *
      * future home for the client-global metrics/logs handles + open flag
      * that currently live on the store / ClientRoom.
@@ -1065,46 +979,6 @@ export type EditorPlayData = {
 };
 ```
 
-#### `EditRoomState`
-
-```ts
-/**
- * client-side editor lens. when present, this client is in some flavor of
- * edit mode, either a real edit room (server-authoritative, `subject` ===
- * playerNode) or a local-only peek into a play room (`subject` is a
- * `realm: 'client'` node carrying EditorTrait + CameraTrait).
- *
- * the existence of `room.editor` is the on/off switch for the editor lens.
- * scripts declared with `{ editor: true }` also run in edit mode and read
- * the lens via `ctx.client.room?.editor`.
- *
- * grows over time with selection / hover / gizmo state. today: the lens's
- * subject + camera nodes. while the lens is active `client.subject` /
- * `client.camera` point at these.
- */
-export type EditRoomState = {
-    /** stable opaque id for this editor view, so the UI can address the editor
-     *  POV separately from the player POV even though both belong to the same
-     *  ClientRoom. */
-    id: string;
-
-    /**
-     * the node representing the editor actor. becomes `client.subject` while
-     * the lens is active.
-     */
-    subject: SceneTree.Node;
-
-    /**
-     * lens-private camera node, `realm: 'client'` with TransformTrait +
-     * CameraTrait. becomes `client.camera` while the lens is active, so the
-     * lens's pose is preserved across play/edit tab toggles, independently of
-     * `room.cameraNode` (which the player controller drives while in play
-     * view). torn down with the lens.
-     */
-    camera: SceneTree.Node;
-};
-```
-
 #### `FrameArgs`
 
 ```ts
@@ -1121,6 +995,9 @@ export type JoinArgs = {
     playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
+    /** the mode the player joined in: 'edit' for an editor (including one
+     *  inspecting a play room), 'play' otherwise. */
+    mode: PlayerMode;
     /** Model id the player renders with, resolved upstream (matchmaker /
      *  builtin) and already stamped onto `playerNode`'s CharacterTrait
      *  before this fires. */
@@ -1533,6 +1410,12 @@ export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Un
 export function query<const Args extends ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Query<ConditionArgsToConditions<Args>>;
 ```
 
+#### `send`
+
+```ts
+export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirection>(ctx: ScriptContext, handle: CommandHandle<S, Direction>, data: Scripts.SchemaType<S>, client?: Direction extends typeof Rpc.SERVER_TO_CLIENT ? Client : never): void;
+```
+
 #### `script`
 
 ```ts
@@ -1555,12 +1438,6 @@ export function query<const Args extends ConditionArgs[]>(ctx: ScriptContext, co
  * ```
  */
 export function script<T extends TraitBase>(handle: TraitHandle<T>, scriptId: string, factory: ScriptFactory<T>, opts?: ScriptOptions): ScriptDef;
-```
-
-#### `send`
-
-```ts
-export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirection>(ctx: ScriptContext, handle: CommandHandle<S, Direction>, data: Scripts.SchemaType<S>, client?: Direction extends typeof Rpc.SERVER_TO_CLIENT ? Client : never): void;
 ```
 
 Also exported: `Oper`, `Src`.
@@ -1596,7 +1473,7 @@ export function error(ctx: ScriptContext, ...args: unknown[]): void;
 /**
  * open a floating debug panel on the shared dashboard, scoped to this script: it
  * is closed automatically when the script instance disposes (room teardown, node
- * removal, hot-reload), so game debug UI can't leak. the returned dashcat `Panel`
+ * removal, hot-reload), so game debug UI can't leak. the returned `Panel`
  * takes the full control surface — `add` (options), `monitor`, `graph`, `log`,
  * `stat`, `tabs`, etc. — alongside the engine's panels.
  *
@@ -1627,10 +1504,9 @@ export function panel(ctx: ScriptContext, opts: PanelOptions = {
  * The asset pipeline does NOT use a flag, it's a separate engine entry
  * (`EngineAssetPipeline`), not a headless variant of the client. Its realm runs
  * NEUTRAL: all three flags stay false. Declarations register ungated, so the bake
- * sees the whole registry either way, and a neutral realm keeps gameplay guarded
- * with `if (!env.server) return` from running against the bake's headless rooms.
- * A script that must run there (assembling visuals for a prefab capture) simply
- * doesn't guard.
+ * sees the whole registry either way. The bake runs no behaviour: its icon rooms
+ * instantiate no scripts and no systems, so a prefab icon shows only what its
+ * apply places up front.
  *
  * Note: there is no `env.edit` or `env.play`. Mode is per-room and
  * available on the script context as `ctx.mode`.
@@ -1664,12 +1540,105 @@ export const platform: {
 
 ## Assets
 
-Declare models, sounds, and sprites, and keep data-only handles alive.
+Declare textures, models, sounds, and sprites, and keep data-only handles alive.
 
 #### `asset`
 
 ```ts
 export function asset(rel: string, base: string): string;
+```
+#### `texture`
+
+```ts
+/**
+ * Declare a texture: one picture, from disk or computed from other textures.
+ *
+ * ```ts
+ * const stone = texture('kit:stone', { src: asset('./stone.png', import.meta.url) });
+ *
+ * const dust = texture('kit:stone:dust0', {
+ *     size: [8, 8],
+ *     inputs: { tex: stone },
+ *     params: { seed: 1234 },
+ *     fn: (ctx, inputs, params) => { ... },
+ * });
+ * ```
+ *
+ * Consumers (`sprite()`, and the voxel-atlas tile kind) hold textures in their `frames`,
+ * so animation is the consumer's concern and a texture stays exactly one picture.
+ */
+export function texture<I extends Record<string, TextureHandle>, P extends DrawParams>(id: string, options: TextureOptions<I, P>): TextureHandle;
+```
+
+#### `TextureComputedOptions`
+
+```ts
+/** a texture computed at bake time from other textures. */
+export type TextureComputedOptions<I extends Record<string, TextureHandle>, P extends DrawParams> = {
+    /** output canvas dims in pixels. */
+    size: [number, number];
+    /** other textures this one is drawn from, keyed by the name `fn` destructures. */
+    inputs?: I;
+    /** scalar tweak knobs. Hashed, so a change here invalidates; a value the `fn` closes
+     *  over instead of taking through here is INVISIBLE to change detection. */
+    params?: P;
+    /** drawn at bake time. Sync, and pure with respect to its three arguments. */
+    fn: DrawFn<DrawInputs, P>;
+};
+```
+
+#### `TextureDef`
+
+```ts
+/**
+ * The declared data for one texture. Pure: hashed wholesale, swapped wholesale on
+ * re-declaration. `inputs` holds `DepKey`s rather than live handles so the def stays plain
+ * data — the bake resolves them through the store, which is safe because by bake time
+ * every declaration has run.
+ */
+export type TextureDef =
+    | { id: string; from: 'file'; src: string }
+    | {
+          id: string;
+          from: 'computed';
+          size: [number, number];
+          inputs: Record<string, DepKey>;
+          params: DrawParams;
+          fn: DrawFn<DrawInputs, DrawParams>;
+      };
+```
+
+#### `TextureFileOptions`
+
+```ts
+/** a texture from a file: a project-relative path or an `asset()` href. */
+export type TextureFileOptions = {
+    src: string;
+};
+```
+
+#### `TextureHandle`
+
+```ts
+/** Stable wrapper around a `TextureDef`; the data is read through `.def`, which is
+ *  re-pointed on every re-declaration (see `declare`). */
+export type TextureHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    readonly dependency: DepKey;
+    /** the declared data. re-pointed on every re-declaration. */
+    def: TextureDef;
+};
+```
+
+#### `TextureOptions`
+
+```ts
+export type TextureOptions<
+    I extends Record<string, TextureHandle> = Record<string, TextureHandle>,
+    P extends DrawParams = DrawParams,
+> = TextureFileOptions | TextureComputedOptions<I, P>;
 ```
 #### `getModel`
 
@@ -1763,6 +1732,8 @@ export type SoundDef = {
      *  defaults to `soundId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     readonly name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    readonly tags: readonly string[];
     readonly src: string;
     readonly long: boolean;
     /**
@@ -1817,11 +1788,7 @@ export interface SoundHandleMap {
 #### `SoundOptions`
 
 ```ts
-export type SoundOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
+export type SoundOptions = AssetMeta & {
     /**
      * source audio (.wav/.mp3/.ogg/.flac): either a string path relative to
      * project root, or a module-relative `asset('./clip.ogg', import.meta.url)`
@@ -1865,50 +1832,6 @@ export type SoundOptions = {
  */
 export function sound<const Id extends string>(id: Id, options: SoundOptions): Id extends keyof SoundHandleMap ? SoundHandleMap[Id] : SoundHandle;
 ```
-#### `SpriteHandle`
-
-```ts
-/** Stable wrapper around a `SpriteDef`; identity plus the live def. */
-export type SpriteHandle = {
-    /** the declared id (identity, never changes). */
-    readonly id: string;
-    /** DepGraph dependency + the brand `isHandle` tests. */
-    dependency: { registry: 'sprites'; id: string };
-    /** the declared data. re-pointed on every re-declaration. */
-    def: SpriteDef;
-};
-```
-
-#### `SpriteOptions`
-
-```ts
-export type SpriteOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
-
-    /**
-     * source image(s). single entry for static sprites, array for
-     * flipbooks (one entry per frame, frames mixed freely between
-     * paths/URLs and draw descriptors).
-     *
-     * URLs are normalized to `.href` at registration, same convention
-     * as `blockTexture()`. The URL form lets 3rd-party packs ship sprite
-     * pixels bundled alongside their modules (vite rewrites
-     * `new URL(...)` in the client bundle; the asset pipeline resolves
-     * `file://` URLs via `fileURLToPath` at bake time).
-     */
-    src: ImageSource | ImageSource[];
-
-    /** gutter pixels in the atlas to avoid bleed at mip levels. default 1. */
-    padding?: number;
-    /** generate mips for this sprite. default true. set false for crisp
-     *  pixel-art look (typical for particles). */
-    mipmap?: boolean;
-};
-```
-
 #### `sprite`
 
 ```ts
@@ -1929,6 +1852,87 @@ export type SpriteOptions = {
  * ```
  */
 export function sprite(id: string, options: SpriteOptions): SpriteHandle;
+```
+
+#### `ImageSource`
+
+```ts
+/** one image source: a project-relative path or an `asset()` href. Composition is no
+ *  longer expressible here — a composed image is a computed `texture()`, which has an id,
+ *  a hash and real dep edges. */
+export type ImageSource = string;
+```
+
+#### `SpriteHandle`
+
+```ts
+/** Stable wrapper around a `SpriteDef`; identity plus the live def. */
+export type SpriteHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'sprites'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: SpriteDef;
+};
+```
+
+#### `SpriteOptions`
+
+```ts
+export type SpriteOptions = AssetMeta & {
+    /**
+     * source image(s). single entry for static sprites, array for
+     * flipbooks (one entry per frame). Sugar: each entry declares a texture.
+     *
+     * URLs are normalized to `.href` at registration, same convention
+     * as `tile()`. The URL form lets 3rd-party packs ship sprite
+     * pixels bundled alongside their modules (vite rewrites
+     * `new URL(...)` in the client bundle; the asset pipeline resolves
+     * `file://` URLs via `fileURLToPath` at bake time).
+     */
+    src?: ImageSource | ImageSource[];
+
+    /** the textures this sprite's frames come from. The direct form; `src` is sugar
+     *  that declares textures for you. */
+    frames?: TextureHandle[];
+
+    /** gutter pixels in the atlas to avoid bleed at mip levels. default 1. */
+    padding?: number;
+    /** generate mips for this sprite. default true. set false for crisp
+     *  pixel-art look (typical for particles). */
+    mipmap?: boolean;
+};
+```
+
+#### `DrawFn`
+
+```ts
+/** generic over the inputs/params maps so the user fn args are typed. At runtime the bake
+ *  resolves each input to a `CanvasImageSource` (skia `Image` for file textures, skia
+ *  `Canvas` for computed ones, both structurally compatible with the DOM type). */
+export type DrawFn<I extends DrawInputs, P extends DrawParams> = (
+    ctx: CanvasRenderingContext2D,
+    inputs: { [K in keyof I]: CanvasImageSource },
+    params: P,
+) => void;
+```
+
+#### `DrawInputs`
+
+```ts
+/** the shape `DrawFn` keys its resolved input images by. The values are erased: only the
+ *  KEYS matter here, since the bake resolves each to a `CanvasImageSource`. */
+export type DrawInputs = Record<string, unknown>;
+```
+
+#### `DrawParams`
+
+```ts
+/** scalar param values, string / number / boolean only. JSON-serializes cleanly into the
+ *  registry `structuralHash` and covers the seed + tweak knobs use case. Widen later
+ *  (arrays, nested) only when a real consumer demands it. */
+export type DrawParams = Record<string, string | number | boolean>;
 ```
 
 #### `DEFAULT_PIXELS_PER_UNIT`
@@ -1968,15 +1972,13 @@ export function spriteWorldSize(ctx: ScriptContext, sprite: SpriteHandle, opts?:
     number
 ] | null;
 ```
-
-Also exported: `DrawFn`, `DrawInputs`, `DrawParams`, `DrawSource`, `ImageSource`, `NormalizedImageSource`, `draw`.
 #### `use`
 
 ```ts
 /**
  * Keep a handle alive through bundler tree-shaking.
  *
- * `block()` / `model()` / `sound()` / `blockTexture()` register into the
+ * `block()` / `model()` / `sound()` / `tile()` register into the
  * engine's registries when their declaration is evaluated. If a game
  * never references a handle in code (e.g. blocks listed only in a
  * scene's voxel palette, models referenced only by prefab id), prod
@@ -2004,30 +2006,6 @@ export function use(..._handles: unknown[]): void;
 ## Scenes & prefabs
 
 Reference authored scenes and instantiate prefabs.
-
-#### `cloneVoxels`
-
-```ts
-/**
- * deep-copy a Voxels instance into a fresh one. the new instance owns its
- * chunk data, mutations don't affect the source. registry is shared by
- * reference; if you need a different registry, reassign `.registry` and
- * call resolveAllChunks() on the result.
- */
-export function cloneVoxels(src: Voxels): Voxels;
-```
-
-#### `copyVoxels`
-
-```ts
-/**
- * copy all non-air blocks from `src` into `out`. preserves source coords,
- * blocks land at the same world positions in `out`. existing blocks in
- * `out` at those positions are overwritten; blocks at positions not
- * present in the source are left alone.
- */
-export function copyVoxels(out: Voxels, src: Voxels): void;
-```
 
 #### `scene`
 
@@ -2063,25 +2041,28 @@ export function copyVoxels(out: Voxels, src: Voxels): void;
 export function scene(id: string, options?: SceneOptions): SceneHandle;
 ```
 
-#### `_registerScenePayload`
+#### `cloneVoxels`
 
 ```ts
 /**
- * called at module-eval by the per-project codegen barrel
- * `src/generated/scenes.ts` (one call per discovered scene file).
- *
- *   - existing handle → mutate `_payload` in place so user-held refs stay
- *     valid.
- *   - no handle yet → register one under `PLACEHOLDER_OWNER` so it's
- *     visible through `registry.scenes` (icon renderer, editor inventory).
- *     If the user later declares the id via `scene()`, `claimOwnership`
- *     promotes the placeholder to the user module. Edit mode's filesystem
- *     walk surfaces every `.scene.json` (including blueprints), so many
- *     ids never get a user-side `scene()` and stay as placeholders, fine.
- *
- * Exposed via `bongle/internal`.
+ * deep-copy a Voxels instance into a fresh one. the new instance owns its
+ * chunk data, mutations don't affect the source. registry is shared by
+ * reference; if you need a different registry, reassign `.registry` and
+ * call resolveAllChunks() on the result.
  */
-export function _registerScenePayload(id: string, payload: ScenePayload): void;
+export function cloneVoxels(src: Voxels): Voxels;
+```
+
+#### `copyVoxels`
+
+```ts
+/**
+ * copy all non-air blocks from `src` into `out`. preserves source coords,
+ * blocks land at the same world positions in `out`. existing blocks in
+ * `out` at those positions are overwritten; blocks at positions not
+ * present in the source are left alone.
+ */
+export function copyVoxels(out: Voxels, src: Voxels): void;
 ```
 
 Also exported: `SceneHandle`, `SceneOptions`.
@@ -2100,6 +2081,15 @@ export type PrefabHandle<Args = unknown> = {
     /** phantom, carries the args type for inference. not present at runtime. */
     readonly __args: Args;
 };
+```
+
+#### `prefab`
+
+```ts
+/**
+ * declare a prefab def at module scope.
+ */
+export function prefab<T extends PrefabType, S extends Schema>(id: string, options: PrefabOptions<T, S>): PrefabHandle<SchemaType<S>>;
 ```
 
 #### `PrefabType`
@@ -2135,10 +2125,7 @@ export type PrefabDef<Args = unknown> = {
 #### `PrefabOptions`
 
 ```ts
-export type PrefabOptions<T extends PrefabType, S extends Schema> = {
-    /** human-readable display name for editor UIs (prefab picker,
-     *  inventory). falls back to the string id when omitted. */
-    name?: string;
+export type PrefabOptions<T extends PrefabType, S extends Schema> = AssetMeta & {
     /** what this prefab produces, voxels, nodes, or both. required. */
     type: T;
     /**
@@ -2160,13 +2147,16 @@ export type PrefabOptions<T extends PrefabType, S extends Schema> = {
 };
 ```
 
-#### `prefab`
+#### `emptyArgsSchema`
 
 ```ts
-/**
- * declare a prefab def at module scope.
- */
-export function prefab<T extends PrefabType, S extends Schema>(id: string, options: PrefabOptions<T, S>): PrefabHandle<SchemaType<S>>;
+export const emptyArgsSchema;
+```
+
+#### `noopApply`
+
+```ts
+export function noopApply(): () => void;
 ```
 
 #### `createPrefab`
@@ -2281,6 +2271,8 @@ export type ModelDef<NodeNames extends string = string, MeshNames extends string
     /** human-readable display name for editor UIs. always set,
      *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    readonly tags: readonly string[];
     /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
     /**
@@ -2402,10 +2394,7 @@ export interface ModelHandleMap {
 #### `ModelOptions`
 
 ```ts
-export type ModelOptions = {
-    /** human-readable display name for editor UIs (inventory, picker).
-     *  falls back to the string id when omitted. */
-    name?: string;
+export type ModelOptions = AssetMeta & {
     /**
      * source .gltf/.glb: either a string path relative to project root, or a
      * module-relative `asset('./model.glb', import.meta.url)` ref. The `asset()`
@@ -2415,6 +2404,37 @@ export type ModelOptions = {
      */
     src: string;
 };
+```
+
+#### `BUILTIN_BASE_AVATAR_ID`
+
+```ts
+/** Stable id for the builtin avatar. Imported by the service to short-
+ *  circuit the resolve endpoint (it returns `{ modelId: BUILTIN_BASE_AVATAR_ID }`
+ *  without a clientUrl/serverUrl since the engine already has it). */
+export const BUILTIN_BASE_AVATAR_ID;
+```
+
+#### `baseAvatar`
+
+```ts
+export const baseAvatar;
+```
+
+#### `block`
+
+```ts
+/**
+ * declare a block type. called at module scope, the definition is
+ * captured and frozen into a registry when the module is loaded.
+ *
+ * returns a handle used for getting global state ids in gameplay code.
+ */
+export function block<const P extends PropsDef = {
+
+}>(id: string, options: BlockOptions<P> = {
+
+}): BlockHandle<P>;
 ```
 
 #### `model`
@@ -2435,19 +2455,19 @@ export type ModelOptions = {
 export function model<const Id extends string>(id: Id, options: ModelOptions): Id extends keyof ModelHandleMap ? ModelHandleMap[Id] : ModelHandle;
 ```
 
-#### `BUILTIN_BASE_AVATAR_ID`
+#### `tile`
 
 ```ts
-/** Stable id for the builtin avatar. Imported by the service to short-
- *  circuit the resolve endpoint (it returns `{ modelId: BUILTIN_BASE_AVATAR_ID }`
- *  without a clientUrl/serverUrl since the engine already has it). */
-export const BUILTIN_BASE_AVATAR_ID;
-```
-
-#### `baseAvatar`
-
-```ts
-export const baseAvatar;
+/**
+ * declare a tile: one 16x16 entry in the voxel atlas, made of textures.
+ *
+ * pass a single `src` for a static tile, or an array for an animated one
+ * (one entry per frame) — `src` is sugar that declares a texture per frame.
+ * `frames` takes texture handles directly.
+ *
+ * returns a handle that can be passed to block model definitions.
+ */
+export function tile(id: string, options: TileOptions): TileHandle;
 ```
 
 #### `AABB`
@@ -2556,7 +2576,7 @@ export const SetBlockFlags;
  *
  * @param verts - 4 vertices in CCW order, block-local [0,1] space
  * @param normal - face normal
- * @param texture - texture ref (BlockTextureDef handle or string id)
+ * @param tile - the tile this quad samples
  * @param options - optional uvs, cullFace, material
  */
 export function quad(verts: [
@@ -2564,7 +2584,7 @@ export function quad(verts: [
     Vec3,
     Vec3,
     Vec3
-], normal: Vec3, texture: TextureRef, options?: {
+], normal: Vec3, tile: TileHandle, options?: {
     uvs?: [
         Vec2,
         Vec2,
@@ -2573,6 +2593,7 @@ export function quad(verts: [
     ];
     cullFace?: CullFace;
     material?: MaterialType;
+    shade?: boolean;
 }): BlockQuad;
 ```
 
@@ -2584,10 +2605,10 @@ export function quad(verts: [
  *
  * @param from - min corner [x, y, z] in block-local space [0, 1]
  * @param to - max corner [x, y, z] in block-local space [0, 1]
- * @param textures - texture assignment, same format as CubeTextures
+ * @param tiles - per-face tile assignment, same format as CubeTiles
  * @param options - optionally exclude faces or override cull behavior
  */
-export function box(from: Vec3, to: Vec3, textures: CubeTextures, options?: {
+export function box(from: Vec3, to: Vec3, tiles: CubeTiles, options?: {
     exclude?: FaceDir[];
     cull?: boolean | Partial<Record<FaceDir, boolean>>;
     material?: MaterialType;
@@ -2661,6 +2682,20 @@ export function shearByHeight(quads: BlockQuad[], axis: 'x' | 'z', yBase: number
 export function translate(quads: BlockQuad[], delta: Vec3): BlockQuad[];
 ```
 
+#### `blockModel.layer`
+
+```ts
+/**
+ * create one up-facing quad covering the cell at height `y` (block units),
+ * for ground cover that has no thickness (leaf litter, petals). same uv
+ * orientation as a cube's top face, so `rotateY` keeps it in step with the
+ * block below. nothing faces down: the block under it is what it lies on.
+ */
+export function layer(tile: TileHandle, y: number, options?: {
+    material?: MaterialType;
+}): BlockQuad[];
+```
+
 #### `blockModel.cross`
 
 ```ts
@@ -2668,7 +2703,78 @@ export function translate(quads: BlockQuad[], delta: Vec3): BlockQuad[];
  * create two intersecting diagonal planes (4 quads, front + back per plane).
  * used for vegetation: flowers, tall grass, saplings, mushrooms, etc.
  */
-export function cross(texture: TextureRef, options?: {
+export function cross(tile: TileHandle, options?: {
+    material?: MaterialType;
+}): BlockQuad[];
+```
+
+#### `blockModel.hash`
+
+```ts
+/**
+ * create four axis-aligned vertical planes (8 quads, front + back per plane),
+ * two facing X and two facing Z, on the quarter marks. viewed from above the
+ * arrangement reads as a `#`, where `cross` reads as an `x`.
+ *
+ * used for crops. the planes line up with the block grid across neighbouring
+ * cells, so a tilled field reads as rows; `cross`'s diagonals read as one
+ * isolated clump per cell instead.
+ *
+ * @param tile - the tile every plane samples
+ */
+export function hash(tile: TileHandle, options?: {
+    lean?: number;
+    material?: MaterialType;
+}): BlockQuad[];
+```
+
+#### `blockModel.plus`
+
+```ts
+/**
+ * create two axis-aligned vertical planes (4 quads, front + back per plane),
+ * one facing X and one facing Z, crossing on the cell's centre line. viewed
+ * from above it reads as a `+`.
+ *
+ * the sparse sibling of `hash`: same grid alignment, half the geometry. `cross`
+ * has the same quad count but sits diagonally, so it clumps where this still
+ * lines up with the cells either side.
+ *
+ * @param tile - the tile every plane samples
+ */
+export function plus(tile: TileHandle, options?: {
+    material?: MaterialType;
+}): BlockQuad[];
+```
+
+#### `blockModel.FLUFF_LEAN_DEG`
+
+```ts
+/** default lean, degrees. Enough that stacked blocks sit ~0.05 apart and the
+ *  planes show from above; small enough that the clumps still read upright. */
+export const FLUFF_LEAN_DEG;
+```
+
+#### `blockModel.fluff`
+
+```ts
+/**
+ * create the four crossed, overhanging, unshaded, leaning planes (8 quads)
+ * that soften a foliage cube's silhouette. meant to be concatenated onto a
+ * `box`, not used alone; `leaves()` adds the y rotations.
+ *
+ * costs 8 quads per block with no culling, so a canopy multiplies its quad
+ * count. the transparent pass is capped and truncates silently
+ * (`MAX_QUADS_PER_PASS`), so measure before shipping it on every leaf type.
+ *
+ * @param tile - the round blob every plane samples (`textures.leavesFluff`);
+ *   a square leaf tile here reads as a card, not foliage
+ * @param options.lean - degrees each plane tilts about its own horizontal
+ *   axis, the -22.5 pair by `+lean` and the +22.5 pair by `-lean` (default
+ *   `FLUFF_LEAN_DEG`); pass the negative to mirror the splay
+ */
+export function fluff(tile: TileHandle, options?: {
+    lean?: number;
     material?: MaterialType;
 }): BlockQuad[];
 ```
@@ -2767,7 +2873,29 @@ export function flipFacing4(f: Facing4, axis: Axis): Facing4;
 
 ```ts
 export type CubePresetOptions = PresetOptions & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
+    /**
+     * draw this cube at one of the four y rotations, picked from its world
+     * position, so a large flat expanse does not sit on a visible 16px grid.
+     * Minecraft does exactly this for grass_block, dirt, sand, podzol, mycelium
+     * and all sixteen concrete powders.
+     *
+     * For a cube whose four sides match — every block that wants this — a y
+     * rotation only turns the top and bottom faces, so it costs four UV sets and
+     * no extra geometry.
+     *
+     * The choice is a pure function of world position, NOT random: it is stable
+     * across remeshes and identical on every client. That is why this is not
+     * called `randomRotation`.
+     *
+     * A boolean rather than a list of angles because every texture that wants
+     * this is an isotropic noise field, where all four turns are equally good.
+     * An anisotropic one (visible grain or strata on its top face) would want
+     * half turns only, to keep the grain running one way; that widens this to
+     * `true | readonly QuarterTurn[]` without breaking any caller, so it can
+     * wait until something actually needs it.
+     */
+    varyRotation?: boolean;
 };
 ```
 
@@ -2775,9 +2903,9 @@ export type CubePresetOptions = PresetOptions & {
 
 ```ts
 export type ColumnPresetOptions = PresetOptions & {
-    textures: {
-        end: TextureRef;
-        side: TextureRef;
+    tiles: {
+        end: TileHandle;
+        side: TileHandle;
     };
 };
 ```
@@ -2786,7 +2914,7 @@ export type ColumnPresetOptions = PresetOptions & {
 
 ```ts
 export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
@@ -2794,7 +2922,7 @@ export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
@@ -2802,7 +2930,24 @@ export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
+    /**
+     * add four crossed, overhanging, unshaded, leaning planes so the canopy
+     * does not end on a hard cube edge. costs 8 extra quads per block with no
+     * culling, so it is opt-in per leaf type rather than the default. see
+     * `blockModel.fluff`.
+     *
+     * Pass the TILE the planes sample: the round masked 32x32 leaf blob
+     * (`textures.leavesFluff`). A square leaf tile here reads as a green card
+     * stuck through the block rather than as foliage.
+     */
+    fluff?: TileHandle;
+    /**
+     * draw the block at one of the four y rotations, picked from its world
+     * position, so a canopy is not the same shape repeated. Odd rotations also
+     * mirror the planes' lean, so the four read as eight.
+     */
+    varyRotation?: boolean;
 };
 ```
 
@@ -2810,7 +2955,7 @@ export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'
 
 ```ts
 export type FencePresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
@@ -2818,7 +2963,7 @@ export type FencePresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type PanePresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
@@ -2826,7 +2971,19 @@ export type PanePresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
+};
+```
+
+#### `blockPreset.LitterPresetOptions`
+
+```ts
+export type LitterPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one tile, or several picked per world position (see `cross`). */
+    tiles: TileHandle | readonly TileHandle[];
+    /** draw at one of four y rotations, picked per world position, so a
+     *  scattering of litter is not one sprite repeated. default true. */
+    varyRotation?: boolean;
 };
 ```
 
@@ -2834,7 +2991,7 @@ export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
@@ -2842,24 +2999,20 @@ export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type WallPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
 };
 ```
 
-#### `blockPreset.PlantPresetOptions`
+#### `blockPreset.CrossPresetOptions`
 
 ```ts
-export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
-    textures: TextureRef;
-};
-```
-
-#### `blockPreset.CropPresetOptions`
-
-```ts
-export type CropPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
-    /** one texture per growth stage, youngest first. */
-    textures: TextureRef[];
+export type CrossPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one tile, or several: with a list the mesher picks one per world
+     *  position, so a meadow is not one sprite stamped on a grid. */
+    tiles: TileHandle | readonly TileHandle[];
+    /** per-position offset, `xz` in blocks either way and `y` downward (see
+     *  `BlockOptions.jitter`). vanilla's short grass uses `{ xz: 0.25, y: 0.2 }`. */
+    jitter?: BlockOptions['jitter'];
 };
 ```
 
@@ -2867,7 +3020,7 @@ export type CropPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'ligh
 
 ```ts
 export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & {
-    textures: TextureRef;
+    tiles: TileHandle;
 };
 ```
 
@@ -2875,7 +3028,7 @@ export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'cl
 
 ```ts
 export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & {
-    textures: TextureRef;
+    tiles: TileHandle;
 };
 ```
 
@@ -2883,7 +3036,7 @@ export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & {
 
 ```ts
 export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & {
-    textures: TextureRef;
+    tiles: TileHandle;
 };
 ```
 
@@ -2891,9 +3044,9 @@ export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emi
 
 ```ts
 export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & {
-    textures: {
-        top: TextureRef;
-        bottom: TextureRef;
+    tiles: {
+        top: TileHandle;
+        bottom: TileHandle;
     };
 };
 ```
@@ -2902,7 +3055,7 @@ export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & {
 
 ```ts
 export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
-    textures: CubeTexturesInput;
+    tiles: CubeTilesInput;
     viscosity?: number;
     translucent?: boolean;
     levels?: number;
@@ -2923,7 +3076,7 @@ export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'mater
 
 ```ts
 export function cube(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, varyRotation, ...options;
 }: CubePresetOptions);
 ```
 
@@ -2931,7 +3084,7 @@ export function cube(id: string, {
 
 ```ts
 export function column(id: string, {
-    textures, ...options;
+    tiles, ...options;
 }: ColumnPresetOptions);
 ```
 
@@ -2939,7 +3092,7 @@ export function column(id: string, {
 
 ```ts
 export function stairs(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: StairsPresetOptions);
 ```
 
@@ -2947,42 +3100,23 @@ export function stairs(id: string, {
 
 ```ts
 export function slab(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: SlabPresetOptions);
 ```
 
-#### `blockPreset.plant`
+#### `blockPreset.cross`
 
 ```ts
-export function plant(id: string, {
-    textures: texture, ...options;
-}: PlantPresetOptions);
-```
-
-#### `blockPreset.CropHandle`
-
-```ts
-export type CropHandle = BlockHandle & {
-    /** state key for a growth stage (1..stages). */
-    stage(n: number): string;
-    /** state key for the final stage. */
-    ripe(): string;
-};
-```
-
-#### `blockPreset.crop`
-
-```ts
-export function crop(id: string, {
-    textures, ...options;
-}: CropPresetOptions): CropHandle;
+export function cross(id: string, {
+    tiles, ...options;
+}: CrossPresetOptions);
 ```
 
 #### `blockPreset.leaves`
 
 ```ts
 export function leaves(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, fluff, varyRotation, ...options;
 }: LeavesPresetOptions);
 ```
 
@@ -2990,7 +3124,7 @@ export function leaves(id: string, {
 
 ```ts
 export function ladder(id: string, {
-    textures: texture, ...options;
+    tiles: tile, ...options;
 }: LadderPresetOptions);
 ```
 
@@ -3021,7 +3155,7 @@ export type LiquidHandle = BlockHandle & {
 
 ```ts
 export function liquid(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: LiquidPresetOptions): LiquidHandle;
 ```
 
@@ -3029,7 +3163,7 @@ export function liquid(id: string, {
 
 ```ts
 export function fence(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: FencePresetOptions);
 ```
 
@@ -3037,7 +3171,7 @@ export function fence(id: string, {
 
 ```ts
 export function pane(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: PanePresetOptions);
 ```
 
@@ -3045,15 +3179,23 @@ export function pane(id: string, {
 
 ```ts
 export function carpet(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: CarpetPresetOptions);
+```
+
+#### `blockPreset.litter`
+
+```ts
+export function litter(id: string, {
+    tiles, varyRotation = true, ...options;
+}: LitterPresetOptions);
 ```
 
 #### `blockPreset.trapdoor`
 
 ```ts
 export function trapdoor(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: TrapdoorPresetOptions);
 ```
 
@@ -3061,7 +3203,7 @@ export function trapdoor(id: string, {
 
 ```ts
 export function plate(id: string, {
-    textures: texture, ...options;
+    tiles: tile, ...options;
 }: PlatePresetOptions);
 ```
 
@@ -3069,7 +3211,7 @@ export function plate(id: string, {
 
 ```ts
 export function wall(id: string, {
-    textures: texturesInput, ...options;
+    tiles: tilesInput, ...options;
 }: WallPresetOptions);
 ```
 
@@ -3077,7 +3219,7 @@ export function wall(id: string, {
 
 ```ts
 export function torch(id: string, {
-    textures: texture, ...options;
+    tiles: tile, ...options;
 }: TorchPresetOptions);
 ```
 
@@ -3085,7 +3227,7 @@ export function torch(id: string, {
 
 ```ts
 export function door(id: string, {
-    textures, ...options;
+    tiles, ...options;
 }: DoorPresetOptions);
 ```
 
@@ -3172,6 +3314,24 @@ export type BlockRegistryData = {
      */
     cubeFaceUVs: Uint8Array;
 
+    // ── per-position variation ──────────────────────────────────────
+
+    /**
+     * global state id → how many per-position model variants this state has.
+     * 0 or 1 means none; the mesher then reads the state's own base.
+     */
+    variantCount: Uint8Array;
+    /**
+     * global state id → the first of `variantCount` CONSECUTIVE bases. a cube
+     * base is a slot into cubeTexIndices/cubeFaceUVs, a mesh base is a meshId,
+     * so the mesher's arithmetic (`base + (hash & mask)`) is the same either way.
+     */
+    variantBase: Uint32Array;
+    /** global state id → max horizontal render offset, in 1/255 of a block. */
+    jitterXz: Uint8Array;
+    /** global state id → max downward render offset, in 1/255 of a block. */
+    jitterY: Uint8Array;
+
     // ── mesh-only data (dense, indexed by meshId) ───────────────────
 
     /**
@@ -3188,6 +3348,10 @@ export type BlockRegistryData = {
      * always allocated, quads without explicit material get the block's default.
      */
     meshQuadMaterials: Uint8Array[];
+
+    /** per-quad `shade: false` flag (1 = skip directional face shade). parallel
+     *  to meshQuads; always allocated. */
+    meshQuadUnshaded: Uint8Array[];
 
     /**
      * per-quad shape tag (SHAPE_FLAT..SHAPE_IRREGULAR) routing the mesher
@@ -3739,10 +3903,10 @@ export function create<const P extends PropsDef>(props: P): BlockStateDef<P>;
 
 ```ts
 /** Stable wrapper around a `BlockDef`; identity, the live def, and the state-id
- *  helpers gameplay code calls. The three `_`-prefixed slots are stamped by
- *  `buildBlockRegistry` at freeze time and are NOT declared data, which is why
- *  they live here rather than on the def (hashing them would make every rebuild
- *  look like a content change). */
+ *  helpers gameplay code calls. The `_`-prefixed slots are DERIVED, not declared
+ *  data, which is why they live here rather than on the def: `blockHash` walks
+ *  the def, and dust derived FROM a block feeding back into that block's own hash
+ *  would make every rebuild look like a content change. */
 export type BlockHandle<P extends PropsDef = PropsDef> = {
     /** the declared id (identity, never changes). */
     readonly id: string;
@@ -3762,6 +3926,16 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
      * see BlockHooks enum in block-hooks.ts.
      */
     _hooks: number;
+    /**
+     * per-block dust particles, derived from the default state's model by
+     * `block()` itself and shared across every state as the fallback for any
+     * particle slot the author left unset. `null` when the block opted out with
+     * `particles: false`, declared no model, or the model names no tile.
+     *
+     * Derived at DECLARATION time, in the declaring module's own scope, so the
+     * ordinary per-module sweep reclaims it when the block is deleted.
+     */
+    _defaultDust: readonly ParticleHandle[] | null;
 
     /** get the global state id for specific property values. */
     stateId(props: PropsValues<P>): number;
@@ -3796,11 +3970,7 @@ export type BlockModel = CubeModel | CustomModel;
 #### `BlockOptions`
 
 ```ts
-export type BlockOptions<P extends PropsDef = PropsDef> = {
-    /** human-readable display name for editor UIs (inventory, hotbar,
-     *  inspectors). falls back to the string id when omitted. */
-    name?: string;
-
+export type BlockOptions<P extends PropsDef = PropsDef> = AssetMeta & {
     /** block state schema. omit for stateless blocks. */
     states?: BlockStateDef<P>;
 
@@ -3821,7 +3991,23 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      *
      * omit for invisible blocks (air).
      */
-    model?: (props: PropsValues<P>) => BlockModel;
+    /**
+     * the block's geometry for a given state.
+     *
+     * returning an ARRAY declares per-position variants: the mesher picks one
+     * by hashing the block's world position, so the same block does not look
+     * identical everywhere. the array IS the variant set, so the count is
+     * derived and cannot drift out of step with what the entries actually are.
+     *
+     * every entry must share a `type` (a list mixing 'cube' and 'custom' has no
+     * single mesher path) and the list must be non-empty. a one-entry array
+     * behaves exactly like returning that entry directly.
+     *
+     * ```ts
+     * model: () => [0, 1, 2, 3].map((r) => ({ type: 'custom', quads: rotateY(base, r) }))
+     * ```
+     */
+    model?: (props: PropsValues<P>) => BlockModel | BlockModel[];
 
     /**
      * cull type, controls face culling between adjacent blocks.
@@ -3846,6 +4032,18 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      * @default VertexAnimation.NONE
      */
     vertexAnimation?: VertexAnimation | ((props: PropsValues<P>) => VertexAnimation);
+
+    /**
+     * offset this block's geometry by a small amount derived from its world
+     * position, so a field of them does not sit on a visible grid. rendering
+     * only; collision and occupancy stay on the cell.
+     *
+     * `xz` is the max horizontal offset in blocks, `y` the max downward one
+     * (plants sink, never float). the hash deliberately ignores world Y, so a
+     * vertical stack of the same block shares one offset and a two-block plant
+     * cannot tear apart.
+     */
+    jitter?: { xz?: number; y?: number };
 
     /**
      * rgb light emission, each channel 0-15. blocks with this set act
@@ -4092,8 +4290,8 @@ export type BlockQuad = {
     /** face normal as [nx, ny, nz]. */
     normal: Vec3;
 
-    /** texture ref for this quad (BlockTextureDef handle or string id). */
-    texture: TextureRef;
+    /** the tile this quad samples. */
+    tile: TileHandle;
 
     /** uv coordinates for each vertex. defaults to full-texture [[0,1],[1,1],[1,0],[0,0]]. */
     uvs?: [Vec2, Vec2, Vec2, Vec2];
@@ -4108,6 +4306,14 @@ export type BlockQuad = {
      * occluded by a neighbor.
      */
     cullFace?: 'north' | 'south' | 'east' | 'west' | 'up' | 'down';
+
+    /**
+     * `false` draws the quad without the per-face directional shade (top 1.0,
+     * sides 0.6 / 0.8, bottom 0.5); AO still applies. Minecraft's element
+     * `shade: false`. Foliage planes use it so a clump reads as one soft mass
+     * rather than as lit cards. Default true.
+     */
+    shade?: boolean;
 
     /**
      * render pass for this quad. defaults to the block's material.
@@ -4157,52 +4363,23 @@ export type BlockSoundConfig = {
 };
 ```
 
-#### `BlockTextureDef`
+#### `CubeFaceRotation`
 
 ```ts
-/** The declared data for one block texture. Pure: hashed wholesale, swapped
- *  wholesale on re-declaration (see `declare`). */
-export type BlockTextureDef = {
-    /** texture string id (e.g. 'lava') */
-    id: string;
-
-    /** DepGraph dependency, see SceneHandle.dependency. */
-
-    /** source declarations, post-URL-normalization. each entry is either
-     *  a path string or a `DrawSource` descriptor; the asset-pipeline
-     *  `draw-textures` pass (step 10) bakes any DrawSource entries to
-     *  in-memory canvases before the block atlas builder runs. */
-    frames: NormalizedImageSource[];
-
-    /** animation speed in frames per second. */
-    fps: number;
-
-    /** interpolate between frames. */
-    interpolate: boolean;
-};
+/** UV rotation for a cube face, 0/90/180/270 ccw. default 0. */
+export type CubeFaceRotation = 0 | 90 | 180 | 270;
 ```
 
-#### `BlockTextureOptions`
+#### `CubeFaceSpec`
 
 ```ts
-export type BlockTextureOptions = {
-    /**
-     * source image(s). single entry for static, array for animated. each
-     * entry may be a string path (project-root-relative), a module-relative
-     * `asset('./texture.png', import.meta.url)` ref, or a `draw()` bake-time
-     * descriptor for procedural / composed textures.
-     *
-     * the `asset()` form lets 3rd-party packs ship textures alongside their
-     * modules — it resolves relative to the calling module wherever it's
-     * installed, and the pipeline reads the resolved path.
-     */
-    src: ImageSource | ImageSource[];
-
-    /** animation speed in frames per second. default 1. ignored if single frame. */
-    fps?: number;
-
-    /** interpolate between frames (smooth water). default false. */
-    interpolate?: boolean;
+/**
+ * per-face slot for a cube model. A bare handle is the common case; the object
+ * form exists only to carry a rotation.
+ */
+export type CubeFaceSpec = TileHandle | {
+    tile: TileHandle;
+    rotation?: CubeFaceRotation;
 };
 ```
 
@@ -4212,15 +4389,15 @@ export type BlockTextureOptions = {
 /** cube model, standard solid block. */
 export type CubeModel = {
     type: 'cube';
-    textures: CubeTextures;
+    tiles: CubeTiles;
 };
 ```
 
-#### `CubeTextures`
+#### `CubeTiles`
 
 ```ts
-/** per-face texture assignment for a cube model. */
-export type CubeTextures =
+/** per-face tile assignment for a cube model. */
+export type CubeTiles =
     | { all: CubeFaceSpec }
     | { top: CubeFaceSpec; bottom: CubeFaceSpec; sides: CubeFaceSpec }
     | {
@@ -4246,48 +4423,104 @@ export type CustomModel = {
 };
 ```
 
-#### `TextureRef`
+#### `TileDef`
 
 ```ts
-export type TextureRef = BlockTextureHandle | string;
+/** The declared data for one tile. Pure: hashed wholesale, swapped
+ *  wholesale on re-declaration (see `declare`). */
+export type TileDef = {
+    /** tile string id (e.g. 'lava') */
+    id: string;
+
+    /** the textures this tile's frames sample, in order. one entry for a
+     *  static tile, N for a flipbook. every frame is a multiple of 16 per side
+     *  (see `BLOCK_TILE_SIZE`), and every frame of one tile is the same size. */
+    frames: DepKey[];
+
+    /** animation speed in frames per second. */
+    fps: number;
+
+    /** interpolate between frames. */
+    interpolate: boolean;
+};
 ```
 
-#### `block`
+#### `TileHandle`
 
 ```ts
 /**
- * declare a block type. called at module scope, the definition is
- * captured and frozen into a registry when the module is loaded.
+ * Stable wrapper around a `TileDef`; identity plus the live def.
  *
- * returns a handle used for getting global state ids in gameplay code.
+ * A tile is referenced by its HANDLE, never by id string. The handle carries
+ * its own def, so resolving a reference needs no registry lookup and cannot
+ * depend on declaration order — which is what lets a block derive its dust at
+ * declaration time rather than deferring to the registry build. A string id
+ * would reintroduce both: the lookup could miss simply because the tile was
+ * declared later in the file.
  */
-export function block<const P extends PropsDef = {
-
-}>(id: string, options: BlockOptions<P> = {
-
-}): BlockHandle<P>;
+export type TileHandle = {
+    /** the declared id (identity, never changes). */
+    readonly id: string;
+    /** DepGraph dependency + the brand `isHandle` tests. */
+    dependency: { registry: 'tiles'; id: string };
+    /** the declared data. re-pointed on every re-declaration. */
+    def: TileDef;
+};
 ```
 
-#### `blockTexture`
+#### `TileOptions`
+
+```ts
+export type TileOptions = {
+    /**
+     * source image(s). single entry for static, array for animated. each
+     * entry may be a string path (project-root-relative) or a module-relative
+     * `asset('./texture.png', import.meta.url)` ref.
+     *
+     * the `asset()` form lets 3rd-party packs ship textures alongside their
+     * modules — it resolves relative to the calling module wherever it's
+     * installed, and the pipeline reads the resolved path.
+     */
+    src?: ImageSource | ImageSource[];
+
+    /** the textures this tile's frames come from. The direct form; `src`
+     *  is sugar that declares textures for you. */
+    frames?: TextureHandle[];
+
+    /** animation speed in frames per second. default 1. ignored if single frame. */
+    fps?: number;
+
+    /** interpolate between frames (smooth water). default false. */
+    interpolate?: boolean;
+};
+```
+
+#### `faceRotation`
+
+```ts
+/** the rotation a face spec carries, 0 when it is a bare handle. */
+export function faceRotation(spec: CubeFaceSpec): CubeFaceRotation;
+```
+
+#### `faceTile`
+
+```ts
+/** the tile a face spec names, in either form. */
+export function faceTile(spec: CubeFaceSpec): TileHandle;
+```
+
+#### `tileFrame`
 
 ```ts
 /**
- * declare a block texture. called at module scope.
+ * The texture backing one of a tile's frames, resolved through the texture store.
+ * `null` when the tile has no such frame.
  *
- * pass a single src for static textures, or an array for animated
- * textures (one entry per frame). each entry may be a string path,
- * a URL, or a `draw()` descriptor; flipbook frames mix freely.
- *
- * returns a handle that can be passed to block model definitions.
+ * A tile stores frame REFERENCES, so reaching the texture is a lookup rather than a
+ * field read. This is the supported way to draw from an existing tile — pass the
+ * result as a `texture()` input.
  */
-export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureHandle;
-```
-
-#### `resolveTextureRef`
-
-```ts
-/** resolve a TextureRef to its string id. */
-export function resolveTextureRef(ref: TextureRef): string;
+export function tileFrame(tile: TileHandle, index = 0): TextureHandle | null;
 ```
 
 #### `propagateAllLight`
@@ -4577,6 +4810,20 @@ export type Chunk = {
      * boundary AO/light instead of re-meshing as each neighbor arrives.
      */
     knownNeighbourCount: number;
+    /** frame the light volume first wanted to re-bake this chunk while its 26
+     *  neighbourhood was still incomplete, or -1. */
+    lightWaitSince: number;
+    /** the AOI wants this chunk rendered, so it may hold a light tile. ADMISSION
+     *  is the AOI's decision alone: everything else that marks the light volume
+     *  may only REFRESH a tile that already exists. Without that, the light pool
+     *  and the mesh arena are two residency systems with different working sets,
+     *  and they thrash - the pool evicts by distance while the AOI re-requests. */
+    lightWanted: boolean;
+    /** this chunk's OWN light changed, as opposed to being apron-dirtied because
+     *  a neighbour did. Urgent rebakes are never deferred: a deferred edit is a
+     *  visible delay on the block the player just broke, while a deferred
+     *  neighbour rebake only postpones a boundary plane. */
+    lightUrgent: boolean;
 };
 ```
 
@@ -4602,7 +4849,13 @@ export type Voxels = {
      *  the arena. Data-driven so the client stays room-agnostic — only the
      *  active room's arena is maintained; non-active rooms rebuild fresh on
      *  activation (which clears this set). */
-    dirty: { blocks: Set<Chunk>; light: Set<Chunk>; removed: Set<string> };
+    dirty: {
+        blocks: Set<Chunk>;
+        light: Set<Chunk>;
+        lightVolume: Set<Chunk>;
+        lightVolumeUrgent: Set<Chunk>;
+        removed: Set<string>;
+    };
     /** xz-column index, chunks at the same (cx, cz) sorted by cy descending.
      *  maintained by `ensureChunk` and rebuilt by `loadVoxels`. lets
      *  sky-light / heightmap / surface code walk only chunks that actually
@@ -5227,13 +5480,56 @@ export function createVoxels(registry: Blocks): Voxels;
 export function markChunkDirty(voxels: Voxels, chunk: Chunk): void;
 ```
 
+#### `markLightVolumeDirty`
+
+```ts
+/**
+ * Queue `chunk` for a light-volume rebake, at BULK priority.
+ *
+ * ONE chunk, not an apron. A tile is exactly the chunk's own cells, so nothing
+ * else holds a copy of them. The 26-neighbour fan-out this used to do existed
+ * because the tile carried a borrowed shell, and it cost a streaming chunk up to
+ * 27 rebakes before its neighbourhood settled.
+ *
+ * Bulk work is drained NEAREST-FIRST and may be deferred while a chunk's
+ * neighbourhood is still filling in. Streaming arrivals and whole-world relights
+ * belong here: they are not latency-critical, and marking them urgent hands the
+ * entire budget to insertion-order work that bypasses both.
+ */
+export function markLightVolumeDirty(voxels: Voxels, chunk: Chunk): void;
+```
+
+#### `markLightVolumeUrgent`
+
+```ts
+/**
+ * Queue `chunk` at URGENT priority: the player just changed something here.
+ *
+ * Urgent work drains first and skips the neighbourhood deferral, because a
+ * deferred edit is a visible delay on the block that was just placed. Reserve it
+ * for edits - a bulk relight marking everything urgent starves the nearest-first
+ * ordering it is meant to jump.
+ */
+export function markLightVolumeUrgent(voxels: Voxels, chunk: Chunk): void;
+```
+
+#### `markLightVolumeDirtyForCell`
+
+```ts
+/** Queue the rebake implied by one cell of `chunk` changing. Just the chunk:
+ *  no other tile holds a copy of that cell. */
+export function markLightVolumeDirtyForCell(voxels: Voxels, chunk: Chunk, index: number): void;
+```
+
 #### `markChunkLightDirty`
 
 ```ts
-/** mark `chunk` as needing a relight. adds to BOTH `dirty.blocks` (so the
- *  client renderer remeshes, meshChunk emits geometry+light in one pass)
- *  AND `dirty.light` (so the server's chunk_light streaming path can find
- *  light-only changes without filtering a growing blocks set). */
+/** mark `chunk` as needing a relight: `dirty.light` for the server's chunk_light
+ *  streaming path, and the light volume for the renderer's tile.
+ *
+ *  Deliberately NOT `dirty.blocks`. That was needed when meshChunk emitted
+ *  geometry and light in one pass; quads carry no light now, so a light-only
+ *  change cannot alter the mesh and a remesh here is pure waste. */
 export function markChunkLightDirty(voxels: Voxels, chunk: Chunk): void;
 ```
 
@@ -5604,58 +5900,6 @@ export function setEnvironment(ctx: ScriptContext, config: EnvironmentConfig): v
 ```ts
 export const MeshTrait;
 ```
-
-#### `setMeshTint`
-
-```ts
-/** set per-instance tint (rgb target, a intensity) and flag the renderer
- *  to re-upload params. */
-export function setMeshTint(t: MeshTrait, v: Vec4): void;
-```
-
-#### `setMeshFlash`
-
-```ts
-/** set the transient flash overlay [r,g,b,a] (rgb colour, a strength) and
- *  flag the renderer to re-upload params. */
-export function setMeshFlash(t: MeshTrait, v: Vec4): void;
-```
-
-#### `setMeshLight`
-
-```ts
-/** set per-instance voxel light contribution and flag the renderer. */
-export function setMeshLight(t: MeshTrait, v: Vec4): void;
-```
-
-#### `setMeshGlow`
-
-```ts
-/** set per-instance self-illumination (0-1; lights the mesh in its own colour,
- *  no white wash) and flag the renderer. */
-export function setMeshGlow(t: MeshTrait, v: number): void;
-```
-
-#### `setMeshUnlit`
-
-```ts
-/** opt out of voxel + sun lighting; render the texture flat. */
-export function setMeshUnlit(t: MeshTrait, v: boolean): void;
-```
-
-#### `setMeshLitMin`
-
-```ts
-/** set the voxel-light floor (0-1). 0 = no floor; 1 = effectively self-lit. */
-export function setMeshLitMin(t: MeshTrait, v: number): void;
-```
-
-#### `setMeshDither`
-
-```ts
-/** set the screen-door fade (0-1). 0 = solid; 1 = fully invisible. */
-export function setMeshDither(t: MeshTrait, v: number): void;
-```
 #### `VoxelModel`
 
 ```ts
@@ -5771,11 +6015,7 @@ export type ParticleHandle = {
 #### `ParticleOptions`
 
 ```ts
-export type ParticleOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
+export type ParticleOptions = AssetMeta & {
     /** the sprite handle whose frames drive the particle's visuals. */
     sprite: SpriteHandle;
     /** how `age / total` (or `age * fps`) maps to the sprite's frame
@@ -7036,21 +7276,50 @@ export type FindPathOptions = {
 };
 ```
 
+#### `nav.Path`
+
+```ts
+/**
+ * A route, caller-owned and poolable: cells plus how many of them are live.
+ *
+ * `count` rather than `cells.length` for the reason `Flood` has one — the cells past it are
+ * retained storage from a longer path, and truncating to drop them is what would stop a warmed
+ * up `Path` from ever being allocation-free. Never read past `count`; never truncate.
+ *
+ * This is why every producer takes `out: Path` and not `out: Vec3[]`. An array cannot be
+ * genuinely reused: resetting it means `length = 0`, which throws the pooled cells away, so the
+ * callee ends up allocating a fresh `[x, y, z]` per cell anyway — an out-param that saves one
+ * allocation and churns N. A `Path` owns both halves, so cells are rewritten in place and only
+ * a path longer than any before it allocates at all.
+ */
+export type Path = {
+    cells: Vec3[];
+    count: number;
+};
+```
+
+#### `nav.createPath`
+
+```ts
+/** an empty `Path`. Grows to its high-water mark, then stops allocating. */
+export function createPath(): Path;
+```
+
 #### `nav.findPath`
 
 ```ts
 /**
- * find a path of cells from `start` to `goal` under the successor function
- * `actions`, or null. returns every cell, never smoothed (smooth explicitly with
- * `smoothPath` if you want steering waypoints). pass `actions` directly (e.g.
- * `groundActions`), wrap one, or build via `gridActions`. heuristic defaults to
- * euclidean (override via `options.heuristic`).
+ * Find a path of cells from `start` to `goal` under the successor function `actions`, into
+ * `out`. Returns whether the goal was reached; `out.count` is 0 when it was not.
  *
- * uses lazy deletion: a cheaper route to an open cell pushes a fresh node and
- * stale duplicates are skipped on pop (closed check), correct without
- * decrease-key bookkeeping.
+ * Every cell, never smoothed — smooth explicitly with `smoothPath` if you want steering
+ * waypoints. Pass `actions` directly (e.g. `groundActions`), wrap one, or build via
+ * `gridActions`. Heuristic defaults to euclidean (override via `options.heuristic`).
+ *
+ * Uses lazy deletion: a cheaper route to an open cell pushes a fresh node and stale duplicates
+ * are skipped on pop (closed check), correct without decrease-key bookkeeping.
  */
-export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Vec3[] | null;
+export function findPath(out: Path, voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): boolean;
 ```
 
 #### `nav.smoothPath`
@@ -7060,7 +7329,7 @@ export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actio
  *  directly (per `shortcut`) from the last kept cell to the one after it.
  *  never shortcuts across an upward hop, a waypoint whose predecessor is
  *  lower (a +Y step) is preserved so the agent still jumps it. */
-export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Vec3[];
+export function smoothPath(out: Path, voxels: Voxels, path: Path, shortcut: Shortcut): Path;
 ```
 
 #### `nav.groundShortcut`
@@ -7073,18 +7342,125 @@ export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Ve
 export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut;
 ```
 
+#### `nav.FloodMap`
+
+```ts
+/**
+ * A `Flood`'s own coord → cell-index map: the "have I seen this cell" set, which doubles as the
+ * lookup behind `floodIndexOf`.
+ *
+ * The flood used to borrow the A* table, and that is what made a completed flood unqueryable:
+ * one module-level table, reset per search, so it only ever described the MOST RECENT one. Ask
+ * a retained flood "did you reach here?" after anything else had run and it answered from
+ * somebody else's search.
+ *
+ * Owning one per flood is also SMALLER, not bigger. A flood needs "first touch?" and nothing
+ * else — it never reads a g-score or a closed flag — so this is four Int32Arrays where the A*
+ * table carries a Float64 g and a closed byte on top. And because the shapes differ, A* keeps
+ * its own table and its own probe loop untouched: nothing hot pays for this.
+ *
+ * Exported only because `Flood` names it. Treat it as internal.
+ */
+export type FloodMap = {
+    cap: number;
+    mask: number;
+    keyX: Int32Array;
+    keyY: Int32Array;
+    keyZ: Int32Array;
+    /** generation stamp per slot; a slot is live iff `gen[i] === generation`. */
+    gen: Int32Array;
+    /** index into `Flood.cells` for the cell in this slot. */
+    cell: Int32Array;
+    generation: number;
+    count: number;
+};
+```
+
+#### `nav.Flood`
+
+```ts
+/**
+ * A completed flood: the cells reached, the BFS tree that reached them, and the map to look a
+ * cell up by coordinate.
+ *
+ * The tree is the point. A breadth-first expansion necessarily discovers HOW it got to every
+ * cell, and throwing that away meant a caller who picked a destination out of the result had to
+ * run `findPath` to rediscover a route the flood had already proved exists — two searches for
+ * one answer, and the A* could still fail on its own budget.
+ *
+ * CALLER-OWNED, so it is also safe to keep. `floodFill` refills one of these in place, which
+ * means two agents can hold their own without clobbering each other, and one agent can flood
+ * once and query it across frames.
+ *
+ * Only `[0, count)` of `cells`/`parent` is live. Entries beyond it are retained pool storage
+ * from a previous, larger fill — never read them, and never truncate them either, since keeping
+ * them is what makes a warmed-up `Flood` allocation-free.
+ */
+export type Flood = {
+    /** cells reached, start first, roughly nearest-first. */
+    cells: Vec3[];
+    /** for each cell, the index it was discovered FROM. `-1` at the start. */
+    parent: number[];
+    /** how many entries of `cells`/`parent` this fill wrote. */
+    count: number;
+    /** coord → cell index. internal; go through `floodIndexOf`. */
+    map: FloodMap;
+};
+```
+
+#### `nav.createFlood`
+
+```ts
+/** an empty `Flood`, ready to be filled. Grows to its high-water mark, then stops allocating. */
+export function createFlood(): Flood;
+```
+
 #### `nav.floodFill`
 
 ```ts
-/** breadth-first expansion of every cell reachable from `start` under the successor
- *  `actions`. `start` is included; order is roughly nearest-first. flood-fill is
- *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
- *  `findPath` takes); the result includes the frontier discovered up to that bound.
+/**
+ * Breadth-first expansion of every cell reachable from `start` under the successor `actions`,
+ * written into `out`. `start` is included, first; order is roughly nearest-first.
  *
- *  the returned array ALIASES a reused pool — it (and its cells) are valid only until
- *  the next `floodFill` call. read or copy what you need out before then; clone any
- *  cell you intend to retain (`[c[0], c[1], c[2]]`). */
-export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[];
+ * Flood-fill is otherwise unbounded, so `maxIterations` caps cells EXPANDED (the same work
+ * budget `findPath` takes); the result includes the frontier discovered up to that bound.
+ *
+ * Touches no shared state — a fill neither disturbs nor is disturbed by A* or another `Flood`.
+ * Returns `out`, so a call reads as an assignment.
+ */
+export function floodFill(out: Flood, voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Flood;
+```
+
+#### `nav.floodIndexOf`
+
+```ts
+/** the index of `(x,y,z)` in `flood.cells`, or `-1` if the fill never reached it. */
+export function floodIndexOf(flood: Flood, x: number, y: number, z: number): number;
+```
+
+#### `nav.floodReached`
+
+```ts
+/** did this fill reach `(x,y,z)`? the question `floodIndexOf` answers, when you only want yes/no. */
+export function floodReached(flood: Flood, x: number, y: number, z: number): boolean;
+```
+
+#### `nav.floodPath`
+
+```ts
+/**
+ * The route from the fill's start to `cells[index]`, start-first — the same cell list
+ * `findPath` returns, and smoothable the same way.
+ *
+ * FREE, in the sense that matters: the flood already found this route, so this only walks the
+ * parent chain back. No search, no budget, and no way for it to fail on a cell the flood
+ * reached — which is what makes "pick a destination out of a flood" a reachable-by-construction
+ * move rather than a hopeful one.
+ *
+ * `out`'s cells are its own, rewritten in place, so the result survives the next fill — unlike
+ * `flood.cells`, which the next fill overwrites.
+ */
+export function floodPath(out: Path, flood: Flood, index: number): Path;
 ```
 
 ## Players & input
@@ -7716,6 +8092,12 @@ export type Direction = typeof CLIENT_TO_SERVER | typeof SERVER_TO_CLIENT;
 export const CLIENT_TO_SERVER;
 ```
 
+#### `SERVER_TO_CLIENT`
+
+```ts
+export const SERVER_TO_CLIENT;
+```
+
 #### `command`
 
 ```ts
@@ -7744,12 +8126,6 @@ export const CLIENT_TO_SERVER;
  * ```
  */
 export function command<S extends pack.Schema, D extends RpcDirection>(id: string, direction: D, schema: S): CommandHandle<S, D>;
-```
-
-#### `SERVER_TO_CLIENT`
-
-```ts
-export const SERVER_TO_CLIENT;
 ```
 <!-- RenderModule: module not found: api/matchmaking -->
 #### `rooms.create`

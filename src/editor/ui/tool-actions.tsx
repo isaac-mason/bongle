@@ -206,7 +206,7 @@ function ActionBtn({
                         : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
                 }`}
             >
-                <Icon size={touch ? 16 : 12} />
+                <Icon size={12} />
                 {label}
             </button>
             {hovered && slashCmd && (
@@ -251,7 +251,7 @@ function GizmoModeBtn({
                       : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
             }`}
         >
-            <Icon size={touch ? 16 : 12} />
+            <Icon size={12} />
             {label}
         </button>
     );

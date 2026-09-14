@@ -13,4 +13,5 @@ export type {
     TraitOptions,
     TraitType,
 } from '../core/scene/traits';
-export { control, Self, sync, trait } from '../core/scene/traits';
+export { Self } from '../core/scene/traits';
+export { control, sync, trait } from '../core/registry';

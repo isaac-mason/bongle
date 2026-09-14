@@ -77,7 +77,7 @@ export default EngineServer.app('play');
 /** the per-target entry: side-effect-import every existing generated barrel +
  *  user src (registries populate), then the play-* adapter as default. */
 async function entrySource(fs: BuildFs, target: Target): Promise<string> {
-    const generated = (await fs.list('src/generated', { recursive: true }).catch(() => []))
+    const generated = (await fs.list('src/generated').catch(() => []))
         .filter((e) => e.kind === 'file' && e.path.endsWith('.ts'))
         .map((e) => e.path)
         .sort();
@@ -120,7 +120,7 @@ async function buildTarget(
         // worker (solo/editor), injecting node/browser capabilities per host.
         platform: target === 'server' ? 'neutral' : 'browser',
         // `neutral` deliberately empties mainFields (esbuild's rule), which makes a legacy
-        // package carrying only `main` and no `exports` unresolvable — gpucat/packcat/dashcat
+        // package carrying only `main` and no `exports` unresolvable — gpucat/packcat
         // are exactly that. Neutral stays right for CONDITIONS (this bundle runs in node AND
         // in a browser worker, so neither the node nor the browser condition applies); the
         // entry fields still want the ordinary ESM-then-legacy fallback.
@@ -167,7 +167,7 @@ async function sri(bytes: Uint8Array): Promise<string> {
 
 /** copy an OPFS subtree into the zip map under `dest/`, stripping `srcDir/`. */
 async function copyTree(fs: BuildFs, srcDir: string, zip: Record<string, Uint8Array>, dest: string): Promise<void> {
-    for (const e of await fs.list(srcDir, { recursive: true }).catch(() => [])) {
+    for (const e of await fs.list(srcDir).catch(() => [])) {
         if (e.kind !== 'file') continue;
         const rel = e.path.slice(srcDir.length + 1);
         zip[`${dest}/${rel}`] = await fs.read(e.path);

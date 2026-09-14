@@ -25,8 +25,8 @@
 //   u32[5]   uvPacked for corner 1
 //   u32[6]   uvPacked for corner 2
 //   u32[7]   uvPacked for corner 3
-//   u32[8]   flags: texIndex(16) | animType(4) | facing(3) | reserved(9)
-//            (bit 23 was diagFlip; now lives in light[0] bit 29, per-relight
+//   u32[8]   flags: texIndex(16) | animType(4) | facing(3) | emissive(1) | unshaded(1) | reserved(7)
+//            (bit 23 was diagFlip; now lives in the meta word bit 16,
 //            Sodium hierarchical compare, see chunk-mesher.applyDiagFlipBit)
 //   u32[9]   meta:  aoPacked(16) | reserved(16)
 //            aoPacked = ao0Bits | (ao1Bits<<4) | (ao2Bits<<8) | (ao3Bits<<12),
@@ -48,25 +48,28 @@
 //   both baked by meshChunk in a single pass.
 
 import {
-    type ArrayTexture,
     abs,
     add,
-    arrayTexture,
     cameraProjectionMatrix,
     cameraViewMatrix,
+    clamp,
     cos,
+    Discard,
     d,
     dot,
+    dpdx,
+    dpdy,
     equal,
     Fn,
     f32,
     floor,
     fract,
-    type GpuBuffer,
     If,
     i32,
     index,
     instanceIndex,
+    length,
+    log2,
     Material,
     max,
     min,
@@ -79,6 +82,7 @@ import {
     sqrt,
     storage,
     sub,
+    texture,
     u32,
     Var,
     varying,
@@ -88,15 +92,18 @@ import {
     vec4f,
     vertexIndex,
 } from 'gpucat';
-import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { FLAGS_OFFSET, META_OFFSET, QUAD_META_DIAG_FLIP_BIT, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { ChunkInfo, VisibleQuad } from './voxel-arena';
+import { bindLightVolume, brightnessCurve, combineVoxelLight, lightAtFaceCorner } from './voxel-light-sample';
+import { ATLAS_MIP_LEVELS, type VoxelTextures } from './voxel-textures';
 
 // ── env constants ───────────────────────────────────────────────────
 
 const AMBIENT_MINIMUM: [number, number, number] = [0.04, 0.04, 0.06];
+
 const NIGHT_SKY_BRIGHTNESS = 0.05;
 const DAY_SKY_BRIGHTNESS = 0.9;
 const DISABLED_SKY_BRIGHTNESS = 1.0;
@@ -134,15 +141,6 @@ export function buildEnvSky(env: EnvironmentResources) {
     );
 
     return { sunDirection, sunIntensity, skyBrightness, ambientMinimum };
-}
-
-// Sodium-aligned brightness curve: ship raw 4-bit values per channel, apply
-// the polynomial (-0.5*x + 1.5)*x*x in the shader. Equivalent (within
-// rounding) to the legacy CPU-side LIGHT_LUT but skips the table and lets
-// `calculateCornerBrightness` average values in packed-byte parallel form.
-function brightnessCurve(x: Node<d.f32>) {
-    // f(x) = (-0.5 * x + 1.5) * x * x  on x ∈ [0, 1]
-    return mul(mul(add(mul(f32(-0.5), x), f32(1.5)), x), x);
 }
 
 export function unpackVoxelLight(lightNode: Node<d.u32>, skyBrightness: Node<d.f32>) {
@@ -204,6 +202,35 @@ export const decodeOct16 = Fn(
 //
 // 12 bytes laid out as bytes[0..11] across (u0, u1, u2). picks byte
 // `byteIdx` (0..11) and returns it as u32.
+
+/** one u16 out of six packed u32s, low half first: half index `corner*3 + axis`.
+ *  The position counterpart to `readByte`, which the u8 layout used before
+ *  positions widened to carry overhang past the chunk. */
+export const readHalf = Fn(
+    (w0, w1, w2, w3, w4, w5, halfIdx) => {
+        const which = halfIdx.shiftRight(u32(1)).toVar('halfWhich');
+        const bit = halfIdx.bitwiseAnd(u32(1)).mul(u32(16)).toVar('halfBit');
+        const pack = select(
+            select(select(w5, w4, which.equal(u32(4))), select(w3, w2, which.equal(u32(2))), which.lessThan(u32(4))),
+            select(w1, w0, which.equal(u32(0))),
+            which.lessThan(u32(2)),
+        ).toVar('halfPack');
+        return pack.shiftRight(bit).bitwiseAnd(u32(0xffff));
+    },
+    {
+        name: 'readHalf',
+        params: [
+            { name: 'w0', type: d.u32 },
+            { name: 'w1', type: d.u32 },
+            { name: 'w2', type: d.u32 },
+            { name: 'w3', type: d.u32 },
+            { name: 'w4', type: d.u32 },
+            { name: 'w5', type: d.u32 },
+            { name: 'halfIdx', type: d.u32 },
+        ],
+        return: d.u32,
+    },
+);
 
 export const readByte = Fn(
     (u0, u1, u2, byteIdx) => {
@@ -291,7 +318,7 @@ export const computeVertexAnimation = Fn(
 // matches the previous inlined version.
 
 /** vertInQuad (0..5) → corner index (0..3) via 2-bit LUT, picked by diagFlip.
- *  Caller pulls `diagFlip` from `light[realQuadId * 4 + 0]` bit 29 (set by
+ *  Caller pulls `diagFlip` from the quad's meta word, bit 16 (set by
  *  meshChunk's emitQuadLight* helpers, Sodium hierarchical compare). */
 export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
     const decode = select(u32(TRI_DECODE_FLIPPED), u32(TRI_DECODE_DEFAULT), diagFlip.equal(u32(0))).toVar('triDecode');
@@ -302,42 +329,46 @@ export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
 }
 
 /** flags word (u32[8]) → { texIndex, animType, emissive }. layout:
- *  texIndex(16) | animType(4) | facing(3) | emissive(1) | reserved(8).
- *  bit 23 (formerly the diagFlip, now in `light[0]` bit 29) is the
+ *  texIndex(16) | animType(4) | facing(3) | emissive(1) | unshaded(1) | reserved(7).
+ *  bit 23 (formerly the diagFlip, now the meta word bit 16) is the
  *  emissive flag, self-lit quads skip directional face-shade + AO so
  *  they glow uniformly. */
 export function decodeQuadFlags(flags: Node<d.u32>) {
     const texIndex = flags.bitwiseAnd(u32(0xffff)).toF32().toVar('texIndex');
     const animType = flags.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toVar('animType');
     const emissive = flags.shiftRight(u32(23)).bitwiseAnd(u32(1)).toVar('emissive');
-    return { texIndex, animType, emissive };
+    const unshaded = flags.shiftRight(u32(24)).bitwiseAnd(u32(1)).toVar('unshaded');
+    return { texIndex, animType, emissive, unshaded };
 }
 
 /** read u0..u3, uv0..uv3 for `realQuadId`, decode the per-corner position
- *  bytes, uv, and oct16 normal. caller applies the 16/255 voxel-space
- *  scale (inverse of mesher pos16's 255/16, byte 0 → 0, byte 255 → 16).
+ *  raw u16s, uv, and oct16 normal. caller applies `POS_DECODE_SCALE` and
+ *  `POS_DECODE_ORIGIN` to reach voxels (inverse of the mesher's `posEncode`).
  *  `u3` is returned so callers can read source-block bits 16..27 without
  *  re-fetching. */
 export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>, cornerIdx: Node<d.u32>) {
     const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('quadBase');
-    const u0 = index(quadBuf, add(base, u32(0))).toVar('qd0');
-    const u1 = index(quadBuf, add(base, u32(1))).toVar('qd1');
-    const u2 = index(quadBuf, add(base, u32(2))).toVar('qd2');
-    const u3 = index(quadBuf, add(base, u32(3))).toVar('qd3');
-    const uv0 = index(quadBuf, add(base, u32(4))).toVar('qdUv0');
-    const uv1 = index(quadBuf, add(base, u32(5))).toVar('qdUv1');
-    const uv2 = index(quadBuf, add(base, u32(6))).toVar('qdUv2');
-    const uv3 = index(quadBuf, add(base, u32(7))).toVar('qdUv3');
+    const p0 = index(quadBuf, add(base, u32(0))).toVar('qdP0');
+    const p1 = index(quadBuf, add(base, u32(1))).toVar('qdP1');
+    const p2 = index(quadBuf, add(base, u32(2))).toVar('qdP2');
+    const p3 = index(quadBuf, add(base, u32(3))).toVar('qdP3');
+    const p4 = index(quadBuf, add(base, u32(4))).toVar('qdP4');
+    const p5 = index(quadBuf, add(base, u32(5))).toVar('qdP5');
+    const u3 = index(quadBuf, add(base, u32(6))).toVar('qd6');
+    const uv0 = index(quadBuf, add(base, u32(7))).toVar('qdUv0');
+    const uv1 = index(quadBuf, add(base, u32(8))).toVar('qdUv1');
+    const uv2 = index(quadBuf, add(base, u32(9))).toVar('qdUv2');
+    const uv3 = index(quadBuf, add(base, u32(10))).toVar('qdUv3');
 
-    const byteBase = mul(cornerIdx, u32(3)).toVar('byteBase');
-    const bx = readByte(u0, u1, u2, byteBase).toF32().toVar('bx');
-    const by = readByte(u0, u1, u2, add(byteBase, u32(1)))
+    const halfBase = mul(cornerIdx, u32(3)).toVar('halfBase');
+    const bx = readHalf(p0, p1, p2, p3, p4, p5, halfBase).toF32().toVar('bx');
+    const by = readHalf(p0, p1, p2, p3, p4, p5, add(halfBase, u32(1)))
         .toF32()
         .toVar('by');
-    const bz = readByte(u0, u1, u2, add(byteBase, u32(2)))
+    const bz = readHalf(p0, p1, p2, p3, p4, p5, add(halfBase, u32(2)))
         .toF32()
         .toVar('bz');
-    const chunkLocalByte = vec3f(bx, by, bz).toVar('chunkLocalByte');
+    const chunkLocalByte = vec3f(bx, by, bz).toVar('chunkLocalHalf');
 
     const uvPacked = select(
         select(uv3, uv2, cornerIdx.equal(u32(2))),
@@ -353,37 +384,81 @@ export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node
     return { u3, chunkLocalByte, uv, modelNormal };
 }
 
-/** mean of the quad's 4 corner positions, chunk-local byte units (0..255).
- *  Reads only the 3 position words. The translucent sort's within-cell distance
- *  refinement keys off it (cross-cell order is the owner-cell L1 term). */
+/** mean of the quad's 4 corner positions, in chunk-local VOXELS. Reads only the 6
+ *  position words. The translucent sort's within-cell distance refinement keys off
+ *  it (cross-cell order is the owner-cell L1 term).
+ *
+ *  Returns voxels rather than raw units so callers need no scale of their own - the
+ *  encoding's origin offset would otherwise have to be undone at every call site,
+ *  and forgetting it shifts every centroid by 8 voxels. */
 export function decodeQuadCentroid(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>) {
     const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('centroidBase');
-    const u0 = index(quadBuf, add(base, u32(0))).toVar('cu0');
-    const u1 = index(quadBuf, add(base, u32(1))).toVar('cu1');
-    const u2 = index(quadBuf, add(base, u32(2))).toVar('cu2');
-    // 4 corners, 3 bytes each, little-endian across (u0,u1,u2): corner c at
-    // byte 3c (x), 3c+1 (y), 3c+2 (z). Sum then scale by 1/4 for the mean.
-    const sx = add(
-        add(readByte(u0, u1, u2, u32(0)), readByte(u0, u1, u2, u32(3))),
-        add(readByte(u0, u1, u2, u32(6)), readByte(u0, u1, u2, u32(9))),
-    ).toF32();
-    const sy = add(
-        add(readByte(u0, u1, u2, u32(1)), readByte(u0, u1, u2, u32(4))),
-        add(readByte(u0, u1, u2, u32(7)), readByte(u0, u1, u2, u32(10))),
-    ).toF32();
-    const sz = add(
-        add(readByte(u0, u1, u2, u32(2)), readByte(u0, u1, u2, u32(5))),
-        add(readByte(u0, u1, u2, u32(8)), readByte(u0, u1, u2, u32(11))),
-    ).toF32();
-    return vec3f(sx, sy, sz).mul(f32(0.25));
+    const p0 = index(quadBuf, add(base, u32(0))).toVar('cp0');
+    const p1 = index(quadBuf, add(base, u32(1))).toVar('cp1');
+    const p2 = index(quadBuf, add(base, u32(2))).toVar('cp2');
+    const p3 = index(quadBuf, add(base, u32(3))).toVar('cp3');
+    const p4 = index(quadBuf, add(base, u32(4))).toVar('cp4');
+    const p5 = index(quadBuf, add(base, u32(5))).toVar('cp5');
+    // 4 corners, 3 halves each: corner c at half 3c (x), 3c+1 (y), 3c+2 (z).
+    const at = (i: number) => readHalf(p0, p1, p2, p3, p4, p5, u32(i)).toF32();
+    const sx = add(add(at(0), at(3)), add(at(6), at(9)));
+    const sy = add(add(at(1), at(4)), add(at(7), at(10)));
+    const sz = add(add(at(2), at(5)), add(at(8), at(11)));
+    return vec3f(sx, sy, sz)
+        .mul(f32(0.25 * POS_DECODE_SCALE))
+        .sub(vec3f(f32(POS_DECODE_ORIGIN)));
 }
+
+/** inverse of the mesher's `posEncode`: `voxels = half * POS_DECODE_SCALE -
+ *  POS_DECODE_ORIGIN`. Kept here rather than imported as two constants so the pair
+ *  is read together - applying one without the other silently shifts the world. */
+export const POS_DECODE_SCALE = 1 / 2048;
+export const POS_DECODE_ORIGIN = 8;
+
+// ── atlas sampling: Sodium's `block_layer_opaque.fsh`, both paths ───
+//
+// The block atlas is one packed 2D texture sampled nearest-within-level. Two
+// sampling paths, as in Sodium: `sampleRGSS` (default) chooses the mip level
+// itself from the geometric mean of the UV derivatives and takes four
+// rotated-grid taps at that level, blended against `sampleNearest` by how many
+// texels a pixel covers; `sampleNearest` snaps the UV toward the texel centre by
+// the texel's screen size and lets the hardware pick the level from the
+// derivatives. Magnified surfaces stay hard pixel art on either path.
+
+/** Sodium's `u_UseRGSS`, on by default (`SodiumConfigBuilder`). */
+const USE_RGSS = true;
+
+/** Sodium discards on the blended (averaged) alpha. The sharp-tap alternative
+ *  is the one place this renderer used to diverge on purpose: averaged alpha
+ *  near the threshold flips per neighbour and a solid block disintegrates. The
+ *  bake's coverage-preserving mips are what keep averaged alpha away from the
+ *  threshold at distance; this flag is the A/B against the disintegration case. */
+const ALPHA_FROM_NEAREST_TAP = false;
+
+/** Sodium's `TINY` cutoff for the translucent layer. */
+const TRANSLUCENT_ALPHA_MIN = 0.0001;
+
+/** RGSS tap offsets in texels (`sampleRGSS`). */
+const RGSS_OFFSETS: [number, number][] = [
+    [0.125, 0.375],
+    [-0.125, -0.375],
+    [0.375, -0.125],
+    [-0.375, 0.125],
+];
+
+const round = (x: Node<d.vec2f>) => floor(x.add(vec2f(f32(0.5), f32(0.5))));
 
 // ── shared fragment graph ───────────────────────────────────────────
 
+/**
+ * Frame resolution runs in the vertex stage (everything here is wrapped in a
+ * flat varying): the rect of the current and next frame, and the mix between
+ * them. `texIndex` is the quad's vertex-stage texture index; frame `f` of a
+ * texture is rect `texIndex + f`.
+ */
 export function buildVoxelFragment(
-    atlas: ArrayTexture,
-    texAnimBuffer: GpuBuffer,
-    vTexIndex: Node<d.f32>,
+    textures: VoxelTextures,
+    texIndex: Node<d.f32>,
     vUv: Node<d.vec2f>,
     vLight: Node<d.vec3f>,
     vNormal: Node<d.vec3f>,
@@ -392,10 +467,10 @@ export function buildVoxelFragment(
     ambientMinimum: Node<d.vec3f>,
     elapsedTime: Node<d.f32>,
 ) {
-    // texture animation
-    const texAnimData = storage(texAnimBuffer, 'read');
-    const baseLayer = i32(vTexIndex).toVar('baseLayer');
-    const animInfo = texAnimData.element(baseLayer).toVar('animInfo');
+    // texture animation, per vertex
+    const entries = storage(textures.entriesBuffer, 'read');
+    const baseIndex = i32(texIndex).toVar('baseIndex');
+    const animInfo = entries.element(baseIndex).field('anim').toVar('animInfo');
     const frameCount = animInfo.x;
     const fps = animInfo.y;
     const doInterpolate = animInfo.z;
@@ -403,16 +478,84 @@ export function buildVoxelFragment(
     const t = mul(elapsedTime, fps).toVar('animT');
     const frameF = floor(t).mod(frameCount).toVar('frameF');
     const nextFrameF = add(frameF, f32(1.0)).mod(frameCount).toVar('nextFrameF');
+    const rectA = entries
+        .element(i32(add(texIndex, frameF)))
+        .field('rect')
+        .toVar('rectA');
+    const rectB = entries
+        .element(i32(add(texIndex, nextFrameF)))
+        .field('rect')
+        .toVar('rectB');
+    const mixFactor = mul(doInterpolate, fract(t)).toVar('mixFactor');
 
-    const layerA = i32(add(vTexIndex, frameF)).toVar('layerA');
-    const layerB = i32(add(vTexIndex, nextFrameF)).toVar('layerB');
-    const interpFrac = fract(t).toVar('interpFrac');
+    const vRectA = varying(rectA, 'vRectA').setInterpolation('flat');
+    const vRectB = varying(rectB, 'vRectB').setInterpolation('flat');
+    const vMixFactor = varying(mixFactor, 'vMixFactor').setInterpolation('flat');
 
-    const colorA = arrayTexture(atlas, layerA).sample(vUv).toVar('colorA');
-    const colorB = arrayTexture(atlas, layerB).sample(vUv).toVar('colorB');
+    // atlas-space UV. The quarter-texel shrink toward the quad's centre that
+    // keeps a nearest tap inside its own tile is already in vUv (the mesher).
+    const pixelSize = textures.texelSize;
+    const uvA = (vRectA.xy.add(vUv.mul(vRectA.zw)) as Node<d.vec2f>).toVar('uvA');
+    const uvB = (vRectB.xy.add(vUv.mul(vRectB.zw)) as Node<d.vec2f>).toVar('uvB');
 
-    const mixFactor = mul(doInterpolate, interpFrac).toVar('mixFactor');
-    const texColor = (mix(colorA, colorB, mixFactor) as Node<d.vec4f>).toVar('texColor');
+    // derivatives of the atlas UV. Both frames' rects are the same size, so
+    // one pair serves both.
+    const du = dpdx(uvA).toVar('vmDu');
+    const dv = dpdy(uvA).toVar('vmDv');
+    const texelScreen = max(sqrt(du.mul(du).add(dv.mul(dv))), vec2f(f32(1e-8), f32(1e-8))).toVar('vmTexelScreen');
+
+    const tex = texture(textures.atlas);
+
+    // `sampleNearest`: snap toward the texel centre by the texel's screen size,
+    // then let the hardware pick the level from the (unsnapped) derivatives.
+    const sampleNearest = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+        const uvTexel = uv.div(pixelSize).toVar(`${name}Texel`);
+        const texelCenter = round(uvTexel)
+            .sub(vec2f(f32(0.5), f32(0.5)))
+            .toVar(`${name}Center`);
+        const rawOffset = uvTexel.sub(texelCenter);
+        const snapped = clamp(
+            rawOffset
+                .sub(vec2f(f32(0.5), f32(0.5)))
+                .mul(pixelSize)
+                .div(texelScreen)
+                .add(vec2f(f32(0.5), f32(0.5))),
+            vec2f(f32(0), f32(0)),
+            vec2f(f32(1), f32(1)),
+        ).toVar(`${name}Offset`);
+        const snappedUv = texelCenter.add(snapped).mul(pixelSize).toVar(`${name}Uv`);
+        return tex.sample(snappedUv).grad(du, dv).toVar(`${name}Nearest`);
+    };
+
+    // `sampleRGSS`: explicit level from the geometric mean of the derivatives,
+    // four rotated-grid taps at it, blended in between one and two texels per
+    // pixel, which is exactly where minification starts to alias.
+    const maxTexelSize = max(texelScreen.x, texelScreen.y).toVar('vmMaxTexelSize');
+    const minPixelSize = min(pixelSize.x, pixelSize.y).toVar('vmMinPixelSize');
+    const rgssBlend = smoothstep(minPixelSize, minPixelSize.mul(f32(2)), maxTexelSize).toVar('vmRgssBlend');
+    const duLen = length(du).toVar('vmDuLen');
+    const dvLen = length(dv).toVar('vmDvLen');
+    const effectiveDerivative = sqrt(min(duLen, dvLen).mul(max(duLen, dvLen))).toVar('vmEffectiveDerivative');
+    // Sodium leaves the top clamp to the hardware; ours is explicit because a
+    // level past the chain reads as black with zero alpha.
+    const mipLevel = clamp(log2(effectiveDerivative.div(minPixelSize)), f32(0), f32(ATLAS_MIP_LEVELS)).toVar('vmMipLevel');
+
+    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+        const nearest = sampleNearest(uv, name);
+        if (!USE_RGSS) return nearest;
+        let rgss: Node<d.vec4f> | null = null;
+        for (const [ox, oy] of RGSS_OFFSETS) {
+            const tap = tex.sample(uv.add(vec2f(f32(ox), f32(oy)).mul(pixelSize))).level(mipLevel);
+            rgss = rgss ? rgss.add(tap) : tap;
+        }
+        const averaged = rgss!.mul(f32(0.25)).toVar(`${name}Rgss`);
+        const blended = mix(nearest, averaged, rgssBlend) as Node<d.vec4f>;
+        return (ALPHA_FROM_NEAREST_TAP ? vec4f(blended.rgb, nearest.a) : blended).toVar(name);
+    };
+
+    const colorA = sampleAtlas(uvA, 'colorA');
+    const colorB = sampleAtlas(uvB, 'colorB');
+    const texColor = (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
 
     // lighting, per-face directional shade is folded into vLight
     // vertex-side (see vertex shader's aoMul). sunShade and ambient
@@ -429,6 +572,25 @@ export function buildVoxelFragment(
     // albedo before lighting and floor in glow; the chunk path ignores it.
     return { fragColor, texColor, light };
 }
+
+/** the translucent pass drops fully transparent fragments (Sodium's `TINY`),
+ *  so an invisible texel never writes blend or sort work. */
+const translucentDiscard = Fn(
+    (c, a) => {
+        If(a.lessThan(f32(TRANSLUCENT_ALPHA_MIN)), () => {
+            Discard();
+        });
+        return c;
+    },
+    {
+        name: 'translucentDiscard',
+        return: d.vec4f,
+        params: [
+            { name: 'color', type: d.vec4f },
+            { name: 'alpha', type: d.f32 },
+        ],
+    },
+);
 
 // ── pass-specific Material wiring ───────────────────────────────────
 
@@ -460,7 +622,7 @@ export function makePassMaterial(opts: {
         return new Material({
             name,
             vertex: clipPos,
-            fragment,
+            fragment: fragment,
             cullMode: 'back',
             depthTest: true,
             depthWrite: true,
@@ -471,7 +633,7 @@ export function makePassMaterial(opts: {
     return new Material({
         name,
         vertex: clipPos,
-        fragment: fragColor,
+        fragment: translucentDiscard(fragColor, texColor.a),
         transparent: true,
         cullMode: 'none',
         depthTest: true,
@@ -506,39 +668,30 @@ function buildQuadShading(opts: {
     quads: Node<d.array<d.u32>>;
     realQuadId: Node<d.u32>;
     sectionOrigin: Node<d.vec3f>;
-    atlas: ArrayTexture;
-    texAnimBuffer: GpuBuffer;
+    textures: VoxelTextures;
     pass: VoxelPass;
     elapsedTime: Node<d.f32>;
     env: EnvironmentResources;
 }): Material {
-    const { quads, realQuadId, sectionOrigin, atlas, texAnimBuffer, pass, elapsedTime, env } = opts;
+    const { quads, realQuadId, sectionOrigin, textures, pass, elapsedTime, env } = opts;
 
     // vertexIndex is 0..5 directly (6 verts per instance).
     const vertInQuad = vertexIndex.toVar('vertInQuad');
 
     const headerBase = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('quadHeaderBase');
-    const flags = index(quads, add(headerBase, u32(8))).toVar('qdFlags');
+    const flags = index(quads, add(headerBase, u32(FLAGS_OFFSET))).toVar('qdFlags');
     const meta = index(quads, add(headerBase, u32(META_OFFSET))).toVar('qdMeta');
 
-    const { texIndex, animType, emissive } = decodeQuadFlags(flags);
+    const { texIndex, animType, emissive, unshaded } = decodeQuadFlags(flags);
 
-    // ── diagFlip from corner-0 of the per-corner light slot (bit 29) ─
-    // meshChunk's emitQuadLight* helpers write the Sodium hierarchical-
-    // compare decision there. needs to land before pickCornerIdx because
-    // it selects which corner this vertex pulls from.
-    const lightBase = add(headerBase, u32(QUAD_LIGHT_OFFSET)).toVar('lightBase');
-    const corner0Light = index(quads, lightBase).toVar('corner0Light');
-    const diagFlip = corner0Light.shiftRight(u32(29)).bitwiseAnd(u32(1)).toVar('diagFlip');
+    // diagFlip from the meta word (bit 16). Was corner-0 of the per-corner
+    // light slot, back when the mesher baked light into the quad stream.
+    const diagFlip = meta.shiftRight(u32(QUAD_META_DIAG_FLIP_BIT)).bitwiseAnd(u32(1)).toVar('diagFlip');
 
     const cornerIdx = pickCornerIdx(diagFlip, vertInQuad);
     const { u3, chunkLocalByte, uv, modelNormal: normal } = decodeQuadCorner(quads, realQuadId, cornerIdx);
     // inverse of mesher pos16's 255/16 scale: byte 0 → 0, byte 255 → 16.
-    const chunkLocal = chunkLocalByte.mul(f32(16.0 / 255.0)).toVar('chunkLocal');
-
-    // ── per-corner light from the trailing 4 u32 of this quad's slot ─
-    const cornerLightOffset = add(lightBase, cornerIdx).toVar('cornerLightOffset');
-    const cornerLight = index(quads, cornerLightOffset).toVar('cornerLight');
+    const chunkLocal = chunkLocalByte.mul(f32(POS_DECODE_SCALE)).sub(f32(POS_DECODE_ORIGIN)).toVar('chunkLocal');
 
     // ── per-corner AO: 4-bit quantized brightness from meta low 16 bits.
     //    bits → brightness via `bits/30 + 0.5`, mapping 0..15 → [0.5, 1.0].
@@ -593,20 +746,39 @@ function buildQuadShading(opts: {
     // proportion in lit and unlit scenes. Emissive quads (torch, glowstone)
     // opt out of both AO and directional face-shade so a self-lit block
     // glows uniformly instead of dimming its E/W/N/S faces to 0.6/0.8.
-    const rawLight = unpackVoxelLight(cornerLight, skyBrightness).toVar('rawLight');
-    const aoMul = emissive.equal(u32(1)).select(f32(1.0), mul(aoFactor, faceFactor)).toVar('aoMul');
+    // Corner light comes from the GPU light volume, not the quad stream, and is
+    // ANCHORED: it reads only the four cells on this face's own side, which is
+    // the mesher's centre/edgeA/edgeB/diagonal tap. A shared pre-blended corner
+    // value cannot work here, because a corner joins cells light cannot travel
+    // between (a sealed pocket and a lit shaft meeting only at a diagonal) and
+    // one number cannot be both.
+    const cornerChannels = lightAtFaceCorner(
+        bindLightVolume(env),
+        sectionOrigin.x.add(blockLocalX),
+        sectionOrigin.y.add(blockLocalY),
+        sectionOrigin.z.add(blockLocalZ),
+        floor(normal.x.add(f32(0.5))).toI32(),
+        floor(normal.y.add(f32(0.5))).toI32(),
+        floor(normal.z.add(f32(0.5))).toI32(),
+        worldPosBase.x,
+        worldPosBase.y,
+        worldPosBase.z,
+    ).toVar('cornerChannels');
+    const rawLight = combineVoxelLight(cornerChannels, skyBrightness).toVar('rawLight');
+    // `shade: false` quads (foliage planes) keep AO but drop the face shade,
+    // so a clump reads as one mass instead of lit cards.
+    const shadeMul = unshaded.equal(u32(1)).select(f32(1.0), faceFactor).toVar('shadeMul');
+    const aoMul = emissive.equal(u32(1)).select(f32(1.0), mul(aoFactor, shadeMul)).toVar('aoMul');
     const voxelLight = rawLight.mul(aoMul).toVar('voxelLightAo');
 
     // ── varyings ────────────────────────────────────────────────────
-    const vTexIndex = varying(texIndex, 'vTexIndex').setInterpolation('flat');
     const vUv = varying(uv, 'vUv');
     const vLight = varying(voxelLight, 'vLight');
     const vNormal = varying(normal, 'vNormal');
 
     const { fragColor, texColor } = buildVoxelFragment(
-        atlas,
-        texAnimBuffer,
-        vTexIndex,
+        textures,
+        texIndex,
         vUv,
         vLight,
         vNormal,
@@ -633,13 +805,12 @@ function buildQuadShading(opts: {
  * arenaBase + localIdx`. Byte-identical to the pre-split unified material.
  */
 export function createGpuQuadMaterial(opts: {
-    atlas: ArrayTexture;
-    texAnimBuffer: GpuBuffer;
+    textures: VoxelTextures;
     pass: VoxelPass;
     elapsedTime: Node<d.f32>;
     env: EnvironmentResources;
 }): Material {
-    const { atlas, texAnimBuffer, pass, elapsedTime, env } = opts;
+    const { textures, pass, elapsedTime, env } = opts;
 
     const quads = storage('quads', d.array(d.u32), 'read');
     const visibleQuads = storage('visibleQuads', d.array(VisibleQuad), 'read');
@@ -653,7 +824,7 @@ export function createGpuQuadMaterial(opts: {
     const arenaBase = info.field('arenaBase').toVar('arenaBase');
     const realQuadId = add(arenaBase, localIdx).toVar('realQuadId');
 
-    return buildQuadShading({ quads, realQuadId, sectionOrigin, atlas, texAnimBuffer, pass, elapsedTime, env });
+    return buildQuadShading({ quads, realQuadId, sectionOrigin, textures, pass, elapsedTime, env });
 }
 
 /**
@@ -663,13 +834,12 @@ export function createGpuQuadMaterial(opts: {
  * section-slot table the WebGL frame maintains. All read-only → auto-lowers.
  */
 export function createCpuQuadMaterial(opts: {
-    atlas: ArrayTexture;
-    texAnimBuffer: GpuBuffer;
+    textures: VoxelTextures;
     pass: VoxelPass;
     elapsedTime: Node<d.f32>;
     env: EnvironmentResources;
 }): Material {
-    const { atlas, texAnimBuffer, pass, elapsedTime, env } = opts;
+    const { textures, pass, elapsedTime, env } = opts;
 
     const quads = storage('quads', d.array(d.u32), 'read');
     const quadSlot = storage('quadSlot', d.array(d.u32), 'read');
@@ -679,5 +849,5 @@ export function createCpuQuadMaterial(opts: {
     const slot = index(quadSlot, realQuadId).toVar('slot');
     const sectionOrigin = chunkInfo.element(slot).field('origin').toVar('sectionOrigin');
 
-    return buildQuadShading({ quads, realQuadId, sectionOrigin, atlas, texAnimBuffer, pass, elapsedTime, env });
+    return buildQuadShading({ quads, realQuadId, sectionOrigin, textures, pass, elapsedTime, env });
 }

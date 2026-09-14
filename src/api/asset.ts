@@ -1,5 +1,5 @@
 // asset(rel, base) — a module-relative reference to a baked asset file, for the
-// `src` of blockTexture / model / sound / sprite. Pass `import.meta.url` as the
+// `src` of texture / tile / model / sound / sprite. Pass `import.meta.url` as the
 // base; the file resolves relative to the CALLING module, so a pack shipped under
 // node_modules references its own co-located assets wherever it's installed.
 //
@@ -11,7 +11,7 @@
 // files you want shipped + a URL for) use `?url` imports instead.
 // Declaring an asset ref is not itself an effect: the pipeline reads the resolved
 // path from the registry entry that holds it, so a declaration nothing references
-// need not be kept. Without this the whole `blockTexture(id, { src: asset(…) })`
+// need not be kept. Without this the whole `tile(id, { src: asset(…) })`
 // statement is impure and every kit declaration survives, referenced or not.
 /*#__NO_SIDE_EFFECTS__*/
 export function asset(rel: string, base: string): string {

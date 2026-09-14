@@ -127,6 +127,7 @@ export function createEmptyDef(modelId: string): ModelDef {
     return {
         modelId,
         name: modelId,
+        tags: [],
         src: '',
         bin: { client: '', server: '' },
         scene: createNode({ name: `__empty_${modelId}__` }),

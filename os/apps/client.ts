@@ -3,7 +3,7 @@ import { Channel, type ClientUser, type ResolvedAvatar } from 'bongle/interface'
 import { editorNetSim, frameLoop, inertPlatform } from '../../build/dev/host';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
-import type { App, AppInit, Env, Filesystem } from '../interface';
+import type { App, AppInit, BakedArtifacts, Env, Filesystem, PipelineReport } from '../interface';
 import { importEngine } from './engine';
 
 // The edit-mode client: render the game in an editable preview. The app is the
@@ -81,6 +81,10 @@ const client: App<AppInit> = async (env) => {
         graphics.handshakeStarted();
         await EngineClient.load(state);
         mark('loaded (device handshake + resources)');
+        // the client now holds the baked artifacts, so subscribe to what the pipeline
+        // bakes NEXT. Late on purpose: every consumer of a report exists by now.
+        const onArtifacts = artifactConsumer(EngineClient, EngineClientEditor, state);
+        await env.connect('pipeline', (m) => onArtifacts(m as PipelineReport));
         EngineClient.watchRegistry(state);
         env.onDispose(() => EngineClient.dispose(state));
 
@@ -116,7 +120,7 @@ const client: App<AppInit> = async (env) => {
         );
         progress('live');
 
-        watchProjectFs(fs, EngineClient, EngineClientEditor, state);
+        watchSceneFiles(fs, EngineClientEditor);
         log('client realm booted');
     } catch (bootErr) {
         const message = (bootErr as Error).message;
@@ -136,69 +140,62 @@ async function injectEngineStylesheet(fs: Filesystem): Promise<void> {
     }
 }
 
-/** react to fs edits: re-read the matching scene / baked resource. The change KIND
- *  matters: a deleted scene file is a list change (nothing to re-read), any other
- *  deletion isn't a refresh. Each refresh is a re-fetch plus a GPU/DOM rebuild and
- *  one bake writes several artifacts at once, so a batch is folded into a set of
- *  refreshes FIRST and applied once, never once per changed path. */
-function watchProjectFs(
-    fs: Filesystem,
+/**
+ * Apply the pipeline's artifact announcements to the live client. Every value is
+ * an identity: one that differs from what the client already holds means re-read
+ * that artifact.
+ *
+ * The first report is the one asymmetry, and it is the boot order that makes it
+ * so. `EngineClient.load` has just read the block/sprite/audio artifacts off disk,
+ * so the accept report describes what the renderer already holds — re-reading them
+ * would rebuild the GPU resources and remount the room's voxel visuals for nothing.
+ * Nothing has read the icon atlas, so that same report is what pulls it in.
+ *
+ * Subscribing this late is safe because the service replays its latest report on
+ * accept: an announcement made while the client was still booting is waiting on the
+ * wire, not lost. That replay is the property `fs.watch` never had — a write that
+ * lands before the watcher exists is invisible forever, which is what the icons
+ * used to need a boot poll to survive.
+ */
+function artifactConsumer(
     EngineClient: EngineClientApi,
     EngineClientEditor: EngineClientEditorApi,
     state: ClientState,
-): void {
-    type FsRefresh = {
-        /** the scene set changed (a file went away); re-list without re-reading. */
-        sceneList: boolean;
-        scenes: Set<string>;
-        prefabIcons: Set<string>;
-        blockIcons: boolean;
-        blocks: boolean;
-        sprites: boolean;
-        audio: boolean;
+): (r: PipelineReport) => void {
+    /** the artifacts this client holds; null until the accept report seeds it. */
+    let seen: BakedArtifacts | null = null;
+
+    return (r) => {
+        const prev = seen;
+        const next = r.artifacts;
+        seen = next;
+
+        if (next.blockIcons && next.blockIcons !== prev?.blockIcons) EngineClientEditor.reloadBlockIconAtlas();
+        // edge-shaped: the ids the bake re-rendered or pruned, not a whole set.
+        if (next.prefabIcons.length > 0) EngineClientEditor.invalidatePrefabIcons(next.prefabIcons);
+
+        if (!prev) return; // the accept report is the baseline `load` read, not a change
+        if (next.blocks !== prev.blocks) EngineClient.refreshBlockResources(state).catch(console.error);
+        if (next.sprites !== prev.sprites) EngineClient.refreshSpriteResources(state).catch(console.error);
+        if (next.audio !== prev.audio) EngineClient.refreshAudioResources(state).catch(console.error);
     };
-    const note = (refresh: FsRefresh, path: string) => {
-        if (path.startsWith('content/scenes/')) {
-            refresh.scenes.add(path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
-            return;
-        }
-        if (!path.startsWith('resources/client/')) return;
-        const prefabId = EngineClientEditor.prefabIdFromIconPath(path);
-        if (prefabId !== null) refresh.prefabIcons.add(prefabId);
-        else if (path.includes('voxels-icons')) refresh.blockIcons = true;
-        else if (path.includes('voxels-atlas')) refresh.blocks = true;
-        else if (path.includes('sprite')) refresh.sprites = true;
-        else if (path.includes('audio')) refresh.audio = true;
-        // anything else under resources/client/ (the prefab-icon manifest, model
-        // bins, scene barrels) is read on demand and needs no live refresh.
-    };
-    const apply = (refresh: FsRefresh) => {
-        if (refresh.sceneList || refresh.scenes.size > 0) EngineClientEditor.refreshBlueprints();
-        for (const id of refresh.scenes) EngineClientEditor.reloadBlueprint(id);
-        if (refresh.blockIcons) EngineClientEditor.reloadBlockIconAtlas();
-        if (refresh.prefabIcons.size > 0) EngineClientEditor.invalidatePrefabIcons([...refresh.prefabIcons]);
-        if (refresh.blocks) EngineClient.refreshBlockResources(state).catch(console.error);
-        if (refresh.sprites) EngineClient.refreshSpriteResources(state).catch(console.error);
-        if (refresh.audio) EngineClient.refreshAudioResources(state).catch(console.error);
-    };
+}
+
+/** react to fs edits: re-read the matching scene. USER files only — bake outputs
+ *  are announced by the pipeline (see `artifactConsumer`), never sniffed out of
+ *  `resources/`. The change KIND matters: a deleted scene file is a list change
+ *  (nothing to re-read), any other deletion isn't a refresh. */
+function watchSceneFiles(fs: Filesystem, EngineClientEditor: EngineClientEditorApi): void {
     fs.watch((changes) => {
-        const refresh: FsRefresh = {
-            sceneList: false,
-            scenes: new Set(),
-            prefabIcons: new Set(),
-            blockIcons: false,
-            blocks: false,
-            sprites: false,
-            audio: false,
-        };
+        let listChanged = false;
+        const scenes = new Set<string>();
         for (const c of changes) {
-            if (c.type === 'deleted') {
-                if (c.path.startsWith('content/scenes/')) refresh.sceneList = true;
-                continue;
-            }
-            note(refresh, c.path);
+            if (!c.path.startsWith('content/scenes/')) continue;
+            if (c.type === 'deleted') listChanged = true;
+            else scenes.add(c.path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
         }
-        apply(refresh);
+        if (listChanged || scenes.size > 0) EngineClientEditor.refreshBlueprints();
+        for (const id of scenes) EngineClientEditor.reloadBlueprint(id);
     });
 }
 
@@ -292,7 +289,7 @@ function clientResourceLoader(fs: Filesystem) {
 function fsSceneSource(fs: Filesystem) {
     return {
         listScenes: async (): Promise<string[]> => {
-            const entries = await fs.list('content/scenes', { recursive: true }).catch(() => []);
+            const entries = await fs.list('content/scenes').catch(() => []);
             return entries
                 .filter((e) => e.kind === 'file' && e.path.endsWith('.scene.json'))
                 .map((e) => e.path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));

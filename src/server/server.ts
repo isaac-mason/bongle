@@ -17,6 +17,7 @@ import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
+import * as RegistryStore from '../core/registry';
 import {
     buildInboundProtocol,
     clearPendingChanges,
@@ -25,7 +26,6 @@ import {
     registry,
     reindexRegistry,
     resolveConfig,
-    touch,
 } from '../core/registry';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
@@ -136,7 +136,8 @@ export function init(opts: InitOptions) {
         discovery,
         rpc,
         defaultRoomId: null as string | null,
-        metrics: Debug.createMetrics() as Debug.Metrics,
+        // nobody is watching at boot: enabled flips with the first panel subscribe.
+        profiler: Debug.createProfiler(false) as Debug.Profiler,
         /** monotonic server time (ms), the engine clock the per-connection ping RTT
          *  is measured in (NOT performance.now). connection-level, so server-global. */
         netTimeMs: 0,
@@ -239,7 +240,7 @@ export function onClientLeave(state: EngineServer, clientId: Client) {
     Clients.onLeave(state.clients, clientId);
     Discovery.removeClient(state.discovery, clientId);
     Discovery.invalidateRoomList(state.discovery);
-    Telemetry.dropClient(state.telemetry, clientId);
+    Telemetry.dropClient(state, clientId);
     // drop queued frames and any partial reassembly buffer held for this client.
     state.net.inbox.delete(clientId);
     state.net.reassemblers.delete(clientId);
@@ -267,7 +268,7 @@ export async function load(state: EngineServer) {
     // ContentManager during room creation below. sceneId = the path under
     // `content/scenes/` with `.scene.json` stripped.
     const sceneText = new TextDecoder();
-    for (const entry of await state.fs.list(ContentManager.SCENES_DIR, { recursive: true })) {
+    for (const entry of await state.fs.list(ContentManager.SCENES_DIR)) {
         if (entry.kind !== 'file') continue;
         const sceneId = ContentManager.sceneIdFromPath(entry.path);
         if (sceneId === null) continue;
@@ -311,7 +312,7 @@ export async function load(state: EngineServer) {
     // drop the `added` events accumulated on `pendingChanges` so the first
     // HMR flush only logs real deltas. (Symmetric with EngineClient.load.)
     clearPendingChanges([
-        registry.blockTextures,
+        registry.tiles,
         registry.blocks,
         registry.models,
         registry.prefabs,
@@ -337,12 +338,11 @@ export async function load(state: EngineServer) {
  *   - the server registry-dispatch scenes branch for `added` / `changed`.
  */
 export function applyScenePayload(state: EngineServer, id: string, payload: Content.ScenePayload): void {
-    const handle = registry.scenes.byId.get(id);
-    if (!handle) return;
-    handle._payload = payload;
+    const previous = registry.scenes.byId.get(id);
+    if (!previous) return;
     ContentManager.putScene(state.contentManager, id, ContentManager.serializeScenePayload(payload));
     Content.populateScene(state.content, registry.blockRegistry, id, payload, 'server');
-    touch(registry.scenes, id);
+    RegistryStore.setScenePayload(id, payload);
 }
 
 /**
@@ -351,10 +351,11 @@ export function applyScenePayload(state: EngineServer, id: string, payload: Cont
  * deletion) and the server registry-dispatch scenes branch for `removed`.
  */
 export function clearScene(state: EngineServer, id: string): void {
-    const handle = registry.scenes.byId.get(id);
-    if (handle) handle._payload = null;
+    const previous = registry.scenes.byId.get(id);
     Content.clearScene(state.content, id, 'server');
-    touch(registry.scenes, id);
+    if (previous) {
+        RegistryStore.setScenePayload(id, null);
+    }
 }
 
 export function processInbox(state: EngineServer) {
@@ -419,7 +420,7 @@ export function processInbox(state: EngineServer) {
                             break;
 
                         case 'metrics_subscribe':
-                            Telemetry.subscribeMetrics(state.telemetry, client, message.enabled);
+                            Telemetry.subscribeMetrics(state, client, message.enabled);
                             break;
 
                         case 'debug_subscribe':
@@ -483,7 +484,7 @@ export function processInbox(state: EngineServer) {
 }
 
 export function update(state: EngineServer, delta: number) {
-    Debug.begin(state.metrics, 'tick');
+    Debug.frameStart(state.profiler);
 
     // advance the server-global net clock first, so both the ping-ack RTT (in processInbox)
     // and the net_ping stamps sent below read the same "now" this tick.
@@ -491,13 +492,13 @@ export function update(state: EngineServer, delta: number) {
 
     // inbox drains client messages, joins/room-creates do scene instantiation here,
     // a one-frame spike source distinct from the per-room tick stages.
-    Debug.begin(state.metrics, 'inbox');
+    Debug.begin(state.profiler, 'inbox');
     processInbox(state);
-    Debug.end(state.metrics, 'inbox');
+    Debug.end(state.profiler, 'inbox');
 
     // tick all rooms
     for (const room of state.rooms.rooms.values()) {
-        Debug.begin(room.metrics, 'room');
+        Debug.begin(state.profiler, room.profileKey);
 
         room.tick++;
         Clock.tick(room.clock, delta);
@@ -514,82 +515,82 @@ export function update(state: EngineServer, delta: number) {
             serverClock: room.clock.serverSmoothed,
         });
 
-        Debug.begin(room.metrics, 'nodes/update');
-        SceneTree.runOnUpdate(room.scene, { delta }, room.metrics);
-        Debug.end(room.metrics, 'nodes/update');
+        Debug.begin(state.profiler, 'nodes/update');
+        SceneTree.runOnUpdate(room.scene, { delta }, state.profiler);
+        Debug.end(state.profiler, 'nodes/update');
 
         // game-script onTick, the usual home of game-logic spikes (ai, projectile
         // sweeps, the round reset). also timed per-script as `script/<key>`.
-        Debug.begin(room.metrics, 'nodes/tick');
-        SceneTree.runOnTick(room.scene, { delta }, room.metrics);
-        Debug.end(room.metrics, 'nodes/tick');
+        Debug.begin(state.profiler, 'nodes/tick');
+        SceneTree.runOnTick(room.scene, { delta }, state.profiler);
+        Debug.end(state.profiler, 'nodes/tick');
 
         // sample animations into rig TransformTraits before physics so the
         // teleport detector picks up the new pose this tick (matches client).
-        Debug.begin(room.metrics, 'animation');
+        Debug.begin(state.profiler, 'animation');
         Animation.tick(room.animations, state.resources, delta);
-        Debug.end(room.metrics, 'animation');
+        Debug.end(state.profiler, 'animation');
 
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
-        Debug.begin(room.metrics, 'nodes/post-animate');
-        SceneTree.runOnPostAnimate(room.scene, { delta }, room.metrics);
-        Debug.end(room.metrics, 'nodes/post-animate');
+        Debug.begin(state.profiler, 'nodes/post-animate');
+        SceneTree.runOnPostAnimate(room.scene, { delta }, state.profiler);
+        Debug.end(state.profiler, 'nodes/post-animate');
 
         // tick prefab system, discovers and re-instantiates stale prefab nodes
-        Debug.begin(room.metrics, 'prefab');
+        Debug.begin(state.profiler, 'prefab');
         Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'server');
-        Debug.end(room.metrics, 'prefab');
+        Debug.end(state.profiler, 'prefab');
 
-        Debug.begin(room.metrics, 'physics/pre');
+        Debug.begin(state.profiler, 'physics/pre');
         physics.preStep(room.physics, room.scene, state.resources, null, room.mode === 'play');
-        Debug.end(room.metrics, 'physics/pre');
+        Debug.end(state.profiler, 'physics/pre');
 
-        Debug.begin(room.metrics, 'physics');
+        Debug.begin(state.profiler, 'physics');
         physics.tick(room.physics, room.scene, delta);
-        Debug.end(room.metrics, 'physics');
+        Debug.end(state.profiler, 'physics');
 
-        Debug.begin(room.metrics, 'physics/post');
+        Debug.begin(state.profiler, 'physics/post');
         physics.postStep(room.physics, room.scene, null);
-        Debug.end(room.metrics, 'physics/post');
+        Debug.end(state.profiler, 'physics/post');
 
-        Telemetry.recordPhysicsStats(room.metrics, room.physics);
+        Telemetry.recordPhysicsStats(state.profiler, room.physics);
 
         // block hooks settle inline per write (see block-hooks.ts); nothing to
         // drain here. flush the tick's accumulated light recompute.
-        Debug.begin(room.metrics, 'lighting');
+        Debug.begin(state.profiler, 'lighting');
         Light.flushPendingLight(room.voxels);
-        Debug.end(room.metrics, 'lighting');
+        Debug.end(state.profiler, 'lighting');
 
-        Debug.begin(room.metrics, 'nodes/frame');
-        SceneTree.runOnFrame(room.scene, { delta }, room.metrics);
-        Debug.end(room.metrics, 'nodes/frame');
+        Debug.begin(state.profiler, 'nodes/frame');
+        SceneTree.runOnFrame(room.scene, { delta }, state.profiler);
+        Debug.end(state.profiler, 'nodes/frame');
 
         // drain chat inbox/outbox: parse queued `chat_input` lines from
         // clients (consumed by local handlers or promoted into outbox),
         // then broadcast every outbox entry as `chat_broadcast`.
-        Debug.begin(room.metrics, 'chat');
+        Debug.begin(state.profiler, 'chat');
         Chat.tick(room.chat, state.net, state.rooms, room, state.clients);
-        Debug.end(room.metrics, 'chat');
+        Debug.end(state.profiler, 'chat');
 
         // release per-tick physics scratch (voxel hit pool). MUST come after
         // every subShapeId consumer for this room, contact listeners,
         // getSurfaceNormal, getSupportingFace, has run.
         physics.flush(room.physics);
 
-        Debug.end(room.metrics, 'room');
+        Debug.end(state.profiler, room.profileKey);
     }
 
     // drain queued reset/stop requests now that no room is mid-tick.
-    Debug.begin(state.metrics, 'rooms/drain');
+    Debug.begin(state.profiler, 'rooms/drain');
     Rooms.drainPending(state);
-    Debug.end(state.metrics, 'rooms/drain');
+    Debug.end(state.profiler, 'rooms/drain');
 
     // flush discovery, runs diff detection per room (serialize once),
     // then distributes updates to clients based on per-client knowledge
-    Debug.begin(state.metrics, 'discovery');
-    const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.metrics);
-    const discoveryMs = Debug.end(state.metrics, 'discovery');
+    Debug.begin(state.profiler, 'discovery');
+    const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.profiler);
+    const discoveryMs = Debug.end(state.profiler, 'discovery');
 
     for (const [client, message] of pending) {
         Net.send(state.net, client, message);
@@ -601,13 +602,12 @@ export function update(state: EngineServer, delta: number) {
     // are already registered). see discovery.ts "RPC command ordering".
     Discovery.flushCommands(state.discovery, state.net, state.rooms);
 
-    // record discovery time on each room
-    for (const room of state.rooms.rooms.values()) {
-        Debug.record(room.metrics, 'discovery', discoveryMs);
-    }
+    // discovery is process-wide work, recorded once: every room's panel reads the
+    // same number, as it did when it was copied onto each room's bag.
+    Debug.record(state.profiler, 'discovery', discoveryMs, 'ms');
 
     Telemetry.pushDebugLogs(state);
-    Telemetry.pushRoomMetrics(state, delta);
+    Telemetry.pushRoomFrames(state, delta);
 
     // per-connection ping beacon: stamp each client with the server-global net clock (it
     // echoes it back via net_ping_ack) + hand it its current server-measured ping for the HUD.
@@ -618,20 +618,17 @@ export function update(state: EngineServer, delta: number) {
     }
 
     // pack typed outbox messages into Uint8Array packets for the runtime
-    Debug.begin(state.metrics, 'netflush');
+    Debug.begin(state.profiler, 'netflush');
     Net.flush(state.net, state.send);
-    Debug.end(state.metrics, 'netflush');
+    Debug.end(state.profiler, 'netflush');
 
-    // net throughput per room (global bytes split evenly across rooms) + process
-    // CPU/memory onto the global bag; both ride the room_metrics push.
+    // net throughput (global bytes split evenly across rooms, so each panel reads
+    // its share) + process CPU/memory into the frame; both ride the room_frames push.
     const netStats = Net.drainNetStats(state.net);
-    const roomCount = state.rooms.rooms.size || 1;
-    for (const room of state.rooms.rooms.values()) {
-        Telemetry.recordNetStats(room.metrics, netStats, delta, roomCount);
-    }
-    Telemetry.recordProcessStats(state.metrics, delta);
+    Telemetry.recordNetStats(state.profiler, netStats, delta, state.rooms.rooms.size || 1);
+    Telemetry.recordProcessStats(state.profiler, delta);
 
-    Debug.end(state.metrics, 'tick');
+    Debug.frameEnd(state.profiler);
 }
 
 /* ── dispose ── */

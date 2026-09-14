@@ -194,6 +194,8 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks)
     voxels.columns.clear();
     voxels.dirty.blocks.clear();
     voxels.dirty.light.clear();
+    voxels.dirty.lightVolume.clear();
+    voxels.dirty.lightVolumeUrgent.clear();
 
     for (const [key, sc] of Object.entries(saved.chunks)) {
         // parse chunk coords from key "cx,cy,cz"
@@ -266,6 +268,9 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks)
             compressedLight: null,
             neighbors: newNeighbors(),
             knownNeighbourCount: 0,
+            lightWaitSince: -1,
+            lightWanted: false,
+            lightUrgent: false,
         };
 
         voxels.chunks.set(chunkKey(cx, cy, cz), chunk);

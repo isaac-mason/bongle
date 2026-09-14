@@ -17,10 +17,10 @@ import { buildBlockRegistry, createBlockRegistry } from '../../../../src/core/vo
 import {
     type BlockDef,
     type BlockQuad,
-    type BlockTextureDef,
-    type BlockTextureHandle,
     CullType,
     MaterialType,
+    type TileDef,
+    type TileHandle,
 } from '../../../../src/core/voxels/blocks';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../../../src/core/voxels/chunk-mesher';
 import {
@@ -35,35 +35,35 @@ import {
 const SHOULD_RUN = process.env.PROFILE_MESH === '1';
 
 const SINGLE_STATE = { props: {}, totalStates: 1, encode: () => 0, decode: () => ({}) };
-function texDef(id: string): BlockTextureDef {
-    return { id, frames: [`textures/${id}.png`], fps: 1, interpolate: false };
+function texDef(id: string): TileDef {
+    return { id, frames: [{ registry: 'textures', id }], fps: 1, interpolate: false };
 }
 
 function buildBenchRegistry() {
     const defs = new Map<string, BlockDef>();
     const handles = new Map<string, any>();
-    const textures = new Map<string, BlockTextureDef>();
+    const tiles = new Map<string, TileDef>();
 
     type Entry = {
         id: string;
         cull?: CullType;
         material?: MaterialType;
         texId: string;
-        model?: (tex: BlockTextureHandle) => { type: 'cube'; textures: any } | { type: 'custom'; quads: BlockQuad[] };
+        model?: (tex: TileHandle) => { type: 'cube'; tiles: any } | { type: 'custom'; quads: BlockQuad[] };
     };
 
-    function slabModel(tex: BlockTextureHandle): BlockQuad[] {
-        return blockModel.box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+    function slabModel(tex: TileHandle): BlockQuad[] {
+        return blockModel.box([0, 0, 0], [1, 0.5, 1], { all: tex });
     }
-    function stairModel(tex: BlockTextureHandle): BlockQuad[] {
-        const lo = blockModel.box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
-        const hi = blockModel.box([0, 0.5, 0], [1, 1, 0.5], { all: { texture: tex } });
+    function stairModel(tex: TileHandle): BlockQuad[] {
+        const lo = blockModel.box([0, 0, 0], [1, 0.5, 1], { all: tex });
+        const hi = blockModel.box([0, 0.5, 0], [1, 1, 0.5], { all: tex });
         return [...lo, ...hi];
     }
-    function fenceModel(tex: BlockTextureHandle): BlockQuad[] {
-        const post = blockModel.box([0.375, 0, 0.375], [0.625, 1, 0.625], { all: { texture: tex } });
-        const armN = blockModel.box([0.4375, 0.375, 0], [0.5625, 0.5625, 0.375], { all: { texture: tex } });
-        const armS = blockModel.box([0.4375, 0.375, 0.625], [0.5625, 0.5625, 1], { all: { texture: tex } });
+    function fenceModel(tex: TileHandle): BlockQuad[] {
+        const post = blockModel.box([0.375, 0, 0.375], [0.625, 1, 0.625], { all: tex });
+        const armN = blockModel.box([0.4375, 0.375, 0], [0.5625, 0.5625, 0.375], { all: tex });
+        const armS = blockModel.box([0.4375, 0.375, 0.625], [0.5625, 0.5625, 1], { all: tex });
         return [...post, ...armN, ...armS];
     }
 
@@ -95,15 +95,16 @@ function buildBenchRegistry() {
 
     for (const b of blocks) {
         const tex = texDef(b.texId);
-        textures.set(b.texId, tex);
-        // block models take a TextureRef (a handle or an id string), while the
-        // registry builder takes defs — so wrap the def for the model side.
-        const texRef: BlockTextureHandle = { id: b.texId, dependency: { registry: 'blockTextures', id: b.texId }, def: tex };
+        tiles.set(b.texId, tex);
+        // block models take a TileHandle, while the registry builder takes defs —
+        // so wrap the def for the model side.
+        const texRef: TileHandle = { id: b.texId, dependency: { registry: 'tiles', id: b.texId }, def: tex };
         const def: BlockDef = {
             id: b.id,
             name: b.id,
+            tags: [],
             states: SINGLE_STATE as any,
-            model: b.model ? () => b.model!(texRef) : () => ({ type: 'cube' as const, textures: { all: { texture: texRef } } }),
+            model: b.model ? () => b.model!(texRef) : () => ({ type: 'cube' as const, tiles: { all: texRef } }),
             cull: b.cull ?? CullType.SOLID,
             material: b.material ?? MaterialType.OPAQUE,
         };
@@ -122,7 +123,7 @@ function buildBenchRegistry() {
         });
     }
     const registry = createBlockRegistry();
-    buildBlockRegistry(registry, defs, handles, textures);
+    buildBlockRegistry(registry, defs, handles, tiles);
     return registry;
 }
 

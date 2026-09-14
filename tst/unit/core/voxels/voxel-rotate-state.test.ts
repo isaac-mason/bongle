@@ -17,7 +17,7 @@ import { quat } from 'math';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { column, fence, stairs } from '../../../../src/core/voxels/block-presets';
 import { buildBlockRegistry, createBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
-import type { BlockDef, BlockHandle, BlockTextureDef, BlockTextureHandle } from '../../../../src/core/voxels/blocks';
+import type { BlockDef, BlockHandle, TileDef, TileHandle } from '../../../../src/core/voxels/blocks';
 import { rotateVoxelsByQuat } from '../../../../src/core/voxels/voxel-rotate';
 import { createVoxels, setBlock } from '../../../../src/core/voxels/voxels';
 
@@ -25,25 +25,25 @@ beforeAll(() => {
     registerAllShapes();
 });
 
-const oakTex: BlockTextureHandle = {
+const oakTex: TileHandle = {
     id: 'oak',
-    dependency: { registry: 'blockTextures', id: 'oak' },
-    def: { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'oak' },
+    def: { id: 'oak', frames: [{ registry: 'textures', id: 'oak' }], fps: 1, interpolate: false },
 };
-const oakEndTex: BlockTextureHandle = {
+const oakEndTex: TileHandle = {
     id: 'oak-end',
-    dependency: { registry: 'blockTextures', id: 'oak-end' },
-    def: { id: 'oak-end', frames: ['oak-end.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'oak-end' },
+    def: { id: 'oak-end', frames: [{ registry: 'textures', id: 'oak-end' }], fps: 1, interpolate: false },
 };
-const stoneTex: BlockTextureHandle = {
+const stoneTex: TileHandle = {
     id: 'stone',
-    dependency: { registry: 'blockTextures', id: 'stone' },
-    def: { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'stone' },
+    def: { id: 'stone', frames: [{ registry: 'textures', id: 'stone' }], fps: 1, interpolate: false },
 };
 
-const stairHandle = stairs('test:stairs', { textures: stoneTex }) as BlockHandle;
-const columnHandle = column('test:column', { textures: { end: oakEndTex, side: oakTex } }) as BlockHandle;
-const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
+const stairHandle = stairs('test:stairs', { tiles: stoneTex }) as BlockHandle;
+const columnHandle = column('test:column', { tiles: { end: oakEndTex, side: oakTex } }) as BlockHandle;
+const fenceHandle = fence('test:fence', { tiles: oakTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [stairHandle.id, stairHandle.def],
@@ -55,7 +55,7 @@ const handles = new Map<string, BlockHandle>([
     [columnHandle.id, columnHandle as BlockHandle],
     [fenceHandle.id, fenceHandle as BlockHandle],
 ]);
-const textures = new Map<string, BlockTextureDef>([
+const tiles = new Map<string, TileDef>([
     [oakTex.id, oakTex.def],
     [oakEndTex.id, oakEndTex.def],
     [stoneTex.id, stoneTex.def],
@@ -63,7 +63,7 @@ const textures = new Map<string, BlockTextureDef>([
 
 function makeVoxels() {
     const registry = createBlockRegistry();
-    buildBlockRegistry(registry, defs, handles, textures);
+    buildBlockRegistry(registry, defs, handles, tiles);
     return createVoxels(registry);
 }
 

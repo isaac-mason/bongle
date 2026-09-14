@@ -14,7 +14,7 @@ import {
     removeTrait,
     reparent,
 } from '../../../../src/core/scene/scene-tree';
-import { trait } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
 import { env } from '../../../../src/env';
 
 /* ── test traits ── */

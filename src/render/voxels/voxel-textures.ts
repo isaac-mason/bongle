@@ -1,307 +1,166 @@
 // ── voxel textures ──────────────────────────────────────────────────
 //
 // The voxel texture subsystem (see `VoxelTextures` at the foot of the file):
-// the block texture array + texture-animation metadata + atlas load lifecycle.
-// The primitives below build one gpucat ArrayTexture for the block registry's
-// texture list — each texture name becomes one layer in the array texture.
-// each texture name becomes one layer in the array texture.
+// the packed block atlas + per-texture rects + texture-animation metadata +
+// the atlas load lifecycle.
+//
+// The atlas is one 2D texture the bake packed (asset-pipeline/bake/tile-atlas):
+// tiles of any multiple-of-16 size in 16-aligned cells, with its mip chain
+// shipped as one PNG per level. A quad carries a texture index and tile-local
+// UVs; the material looks the index up in the `TextureEntry` table (normalised
+// atlas rect + animation per index) and samples the atlas at
+// `rect.xy + uv * rect.zw`. Animation is rect-index arithmetic, frame `f` of
+// texture `i` is entry `i + f`, so the atlas is never re-uploaded per tick.
 //
 // two-phase approach:
-//   1. createVoxelTextureArray(layerCount), sync, immediate. creates an
-//      array texture with magenta placeholder layers. the world renders
-//      instantly (with magenta blocks) while real textures load.
-//   2. loadBlockTextureAtlasIntoTextureArray(atlas, textureNames), async. fetches
-//      the server-built atlas PNG, extracts each tile, and writes it
-//      into the corresponding layer. progressive enhancement.
+//   1. createVoxelTextures(registry), sync, immediate. a 1x1 white atlas, every
+//      entry's rect covering it, so the world renders instantly (white blocks).
+//   2. loadVoxelTextures(...), async. fetches the baked atlas + levels + manifest
+//      and swaps them in: the Texture is resized in place, so every material
+//      that bound it keeps its binding.
 //
-// nearest magnification for crisp pixel art, with mipmaps + trilinear mip
-// blending to kill minification aliasing at distance. all layers are TILE_SIZE².
+// sampler: nearest within a level and linear between levels, the sampler
+// vanilla hands Sodium. The material adds Sodium's explicit-LOD supersampling
+// on top (voxel-material), which is what makes nearest-within-level read
+// cleanly at distance.
 
-import { ArrayTexture, createStorageBuffer, d, type GpuBuffer } from 'gpucat';
+import {
+    createStorageBuffer,
+    d,
+    type GpuBuffer,
+    layoutStrideOf,
+    Source,
+    struct,
+    Texture,
+    type UniformNode,
+    uniform,
+} from 'gpucat';
+import type { Region } from '../../core/atlas/skyline';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { Blocks } from '../../core/voxels/block-registry';
-import { buildVoxelMipPyramid } from './voxel-mip-pyramid';
 
 // ── constants ───────────────────────────────────────────────────────
-
-/** tile resolution in pixels. all textures are square. */
-const TILE_SIZE = 16;
 
 /** bytes per pixel (rgba8unorm). */
 const BPP = 4;
 
-/** bytes per tile layer. */
-const TILE_BYTES = TILE_SIZE * TILE_SIZE * BPP;
+/** the artifact format this loader reads; anything else is treated as missing. */
+const ATLAS_VERSION = 3;
 
-// ── atlas metadata (must match server format) ───────────────────────
+/** mip levels beyond 0 the bake ships. The material clamps its explicit LOD
+ *  here; the sampler's lodMaxClamp says the same thing to the hardware. */
+export const ATLAS_MIP_LEVELS = 4;
 
-export type BlockTextureAtlasMetadata = {
-    tileSize: number;
-    columns: number;
-    rows: number;
+/** what a texture index means: where the tile is, and how it animates.
+ *  `rect` is the normalised atlas rect `(u, v, w, h)`; `anim` is
+ *  `(frameCount, fps, interpolate, 0)`, the registry's `texAnimData` row. */
+export const TextureEntry = /* @__PURE__ */ struct('VoxelTextureEntry', {
+    rect: d.vec4f,
+    anim: d.vec4f,
+});
+/** floats per entry. */
+const ENTRY_F32S = layoutStrideOf(TextureEntry) / 4;
+const RECT_OFFSET = 0;
+const ANIM_OFFSET = 4;
+
+// ── atlas metadata (must match asset-pipeline/bake/tile-atlas) ──────
+
+export type TileAtlasMetadata = {
+    version: number;
     atlasWidth: number;
     atlasHeight: number;
+    mipLevels: number;
+    /** texture names in bake order; `rects[i]` is the rect of `textures[i]`. */
     textures: string[];
-    /** content hash from the bongle asset pipeline (sources + tile size). */
+    /** level-0 texel rects. */
+    rects: Region[];
+    /** content hash from the bongle asset pipeline (sources + version). */
     hash: string;
 };
-
-// ── create the array texture (sync, white placeholder) ──────────────
-
-/**
- * create a gpucat ArrayTexture with the given number of layers.
- * all layers are filled with white so the world reads neutral while
- * loadBlockTextureAtlasIntoTextureArray() streams in real textures.
- *
- * @param layerCount - number of layers (one per texture in the registry)
- * @returns the ArrayTexture, ready to use in a material
- */
-export function createVoxelTextureArray(layerCount: number): ArrayTexture {
-    const count = Math.max(layerCount, 1); // at least 1 layer
-    const totalBytes = count * TILE_BYTES;
-    const data = new Uint8Array(totalBytes).fill(255);
-
-    return new ArrayTexture(data, TILE_SIZE, TILE_SIZE, count, {
-        format: 'rgba8unorm-srgb',
-        magFilter: 'nearest', // crisp texels up close (pixel art, no blur)
-        minFilter: 'nearest', // within a mip level; the levels are pre-averaged
-        mipmapFilter: 'linear', // trilinear blend between levels, no LOD popping
-        wrapS: 'repeat',
-        wrapT: 'repeat',
-        // generateMipmaps reserves the full mip chain on the placeholder so the
-        // GPU texture is allocated with every level. The real chain is built on
-        // the CPU and uploaded as explicit `atlas.mipmaps` once the atlas loads
-        // (see writeBlockTextureAtlasIntoTextureArray), premultiplied RGB plus
-        // coverage-preserving alpha for cutout layers, which the naive GPU
-        // box filter can't do. Each tile is its own layer, so no cross-tile bleed.
-        generateMipmaps: true,
-    });
-}
-
-// ── async atlas loading ─────────────────────────────────────────────
-
-/**
- * fetch the atlas PNG and write each tile into the corresponding layer
- * of the existing ArrayTexture. Caller passes pre-fetched metadata so
- * the hash can be reused for cache decisions upstream.
- *
- * layers that fail to load keep their magenta placeholder. progressive
- * enhancement, the world renders immediately with placeholders, then
- * upgrades to real textures when the PNG arrives.
- *
- * @param atlas - the existing ArrayTexture (created by createVoxelTextureArray)
- * @param textureNames - registry.textures (string[])
- * @param meta - pre-fetched atlas metadata from fetchBlockTextureAtlasMetadata()
- * @param textureCutout - registry.textureCutout (1 per cutout layer)
- */
-export async function loadBlockTextureAtlasIntoTextureArray(
-    atlas: ArrayTexture,
-    textureNames: string[],
-    meta: BlockTextureAtlasMetadata,
-    textureCutout: Uint8Array,
-    pixelBytes: Promise<Uint8Array>,
-): Promise<void> {
-    // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
-    if (meta.textures.length === 0) return;
-    let fullPixels: Uint8Array;
-    try {
-        fullPixels = await decodeAtlasRgbaInBrowser(await pixelBytes, meta);
-    } catch {
-        return;
-    }
-    writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, fullPixels, textureCutout);
-}
-
-/**
- * Whole-atlas PNG bytes → tightly packed RGBA8, in the browser. (The asset
- * pipeline has no DOM and takes `loader.decodeImage` — sharp — instead; see
- * `writeAtlasPixels`.)
- *
- * WebCodecs first: it hands back raw RGBA with no canvas in the middle. The
- * canvas fallback is lossy for every partially transparent texel, because a 2D
- * backing store is premultiplied — drawImage premultiplies, getImageData
- * un-premultiplies, and the RGB of a low-alpha texel is quantised by the round
- * trip. A typical block atlas is ~10% partial alpha (glass, water, leaf edges).
- */
-async function decodeAtlasRgbaInBrowser(bytes: Uint8Array, meta: BlockTextureAtlasMetadata): Promise<Uint8Array> {
-    const tightBytes = meta.atlasWidth * meta.atlasHeight * BPP;
-    if (typeof ImageDecoder !== 'undefined') {
-        try {
-            const decoder = new ImageDecoder({ data: bytes, type: 'image/png' });
-            const { image } = await decoder.decode();
-            try {
-                if (image.allocationSize({ format: 'RGBA' }) !== tightBytes) throw new Error('unexpected atlas size');
-                const rgba = new Uint8Array(tightBytes);
-                const [plane] = await image.copyTo(rgba, { format: 'RGBA' });
-                // a padded stride would mean the rows don't line up with atlasWidth.
-                if (plane?.stride !== meta.atlasWidth * BPP) throw new Error('unexpected atlas stride');
-                return rgba;
-            } finally {
-                image.close();
-                decoder.close();
-            }
-        } catch {
-            // no PNG track, or no RGBA conversion on this engine: use the canvas.
-        }
-    }
-    // colorSpaceConversion 'none' skips colour management on decode; the atlas is
-    // authored in sRGB and the array texture is already srgb-typed.
-    const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]), { colorSpaceConversion: 'none' });
-    const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
-    const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
-    ctx2d.imageSmoothingEnabled = false;
-    ctx2d.drawImage(img, 0, 0);
-    img.close();
-    const { data } = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight);
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-}
 
 /** Load the atlas manifest. Client fetches it (assetUrl); the asset pipeline
  *  reads it off disk via the injected loader; the editor reads the vfs. A missing
  *  atlas (404 / parse fail) → null, so the world renders untextured. Shared by
  *  both backends' `load`/`refresh`. */
-export async function loadAtlasMeta(loader: ResourceLoader): Promise<BlockTextureAtlasMetadata | null> {
-    // JSON always goes through the injected loader; decodeImage only governs the
-    // IMAGE path (writeAtlasPixels).
+export async function loadAtlasMeta(loader: ResourceLoader): Promise<TileAtlasMetadata | null> {
     try {
         const bytes = await loader.loadBytes('voxels-atlas.json');
-        return JSON.parse(new TextDecoder().decode(bytes)) as BlockTextureAtlasMetadata;
+        return JSON.parse(new TextDecoder().decode(bytes)) as TileAtlasMetadata;
     } catch {
         return null;
     }
 }
 
-/** Decode + write the atlas pixels into the array texture. Client takes the
- *  browser fetch+canvas path; the asset pipeline reads disk bytes and decodes via
- *  its injected `decodeImage` (sharp) → RGBA (pre-decoded, so sharp never overlaps
- *  a Dawn compute compile). Shared by both backends' `load`. */
-export async function writeAtlasPixels(
-    atlas: ArrayTexture,
-    textureNames: string[],
-    textureCutout: Uint8Array,
-    meta: BlockTextureAtlasMetadata,
-    loader: ResourceLoader,
-    pixelBytes: Promise<Uint8Array>,
-): Promise<void> {
-    const decodeImage = loader.decodeImage;
-    if (decodeImage) {
-        const { rgba } = await decodeImage(await pixelBytes, 'image/png');
-        writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, rgba, textureCutout);
-        return;
-    }
-    return loadBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, textureCutout, pixelBytes);
-}
-
-/**
- * Pure (no DOM) variant of `loadBlockTextureAtlasIntoTextureArray` for offline / Node
- * callers, atlas pixels are passed in as a tightly-packed RGBA8
- * buffer of size `meta.atlasWidth * meta.atlasHeight * 4`. Same tile
- * extraction + layer-write logic, just sourced from the supplied buffer
- * instead of a canvas readback.
- */
-export function writeBlockTextureAtlasIntoTextureArray(
-    atlas: ArrayTexture,
-    textureNames: string[],
-    meta: BlockTextureAtlasMetadata,
-    pixels: Uint8Array,
-    textureCutout: Uint8Array,
-): void {
-    const metaIndexByName = new Map<string, number>();
-    for (let i = 0; i < meta.textures.length; i++) {
-        metaIndexByName.set(meta.textures[i]!, i);
-    }
-
-    const sourceData = atlas.image?.data;
-    if (!sourceData || !(sourceData instanceof Uint8Array)) return;
-
-    const atlasStride = meta.atlasWidth * BPP;
-
-    for (let layerIdx = 0; layerIdx < textureNames.length; layerIdx++) {
-        const name = textureNames[layerIdx]!;
-        const gridIdx = metaIndexByName.get(name);
-        if (gridIdx === undefined) continue;
-
-        const col = gridIdx % meta.columns;
-        const row = Math.floor(gridIdx / meta.columns);
-        const u = col * meta.tileSize;
-        const v = row * meta.tileSize;
-
-        const layerOffset = layerIdx * TILE_BYTES;
-        if (meta.tileSize === TILE_SIZE) {
-            // fast path, row-by-row copy out of the atlas buffer
-            for (let y = 0; y < TILE_SIZE; y++) {
-                const srcRow = (v + y) * atlasStride + u * BPP;
-                const dstRow = layerOffset + y * TILE_SIZE * BPP;
-                for (let i = 0; i < TILE_SIZE * BPP; i++) {
-                    sourceData[dstRow + i] = pixels[srcRow + i]!;
-                }
-            }
-        } else {
-            // slow path, nearest-neighbor resample
-            for (let y = 0; y < TILE_SIZE; y++) {
-                for (let x = 0; x < TILE_SIZE; x++) {
-                    const srcX = Math.floor((x / TILE_SIZE) * meta.tileSize);
-                    const srcY = Math.floor((y / TILE_SIZE) * meta.tileSize);
-                    const srcOffset = (v + srcY) * atlasStride + (u + srcX) * BPP;
-                    const dstOffset = layerOffset + (y * TILE_SIZE + x) * BPP;
-                    sourceData[dstOffset] = pixels[srcOffset]!;
-                    sourceData[dstOffset + 1] = pixels[srcOffset + 1]!;
-                    sourceData[dstOffset + 2] = pixels[srcOffset + 2]!;
-                    sourceData[dstOffset + 3] = pixels[srcOffset + 3]!;
-                }
-            }
-        }
-    }
-
-    // Build the CPU mip chain from the freshly-written level-0 data and upload
-    // it as explicit mips: premultiplied RGB everywhere (no transparent-texel
-    // fringe), coverage-preserving alpha on cutout layers (no foliage erosion).
-    // This replaces gpucat's naive box-filter generation for this texture.
-    atlas.mipmaps = buildVoxelMipPyramid(
-        sourceData,
-        atlas.depth,
-        TILE_SIZE,
-        (layer) => layer < textureCutout.length && textureCutout[layer] === 1,
-    );
-    atlas.generateMipmaps = false;
-
-    atlas.needsUpdate = true;
-}
-
 // ── voxel textures subsystem ────────────────────────────────────────
-//
-// The block texture array + per-layer texture-animation metadata + the atlas
-// load lifecycle, assembled as one subsystem both render backends compose
-// (alongside the arena and the mesher). `createVoxelTextures` builds it;
-// `loadVoxelTextures` fetches the server atlas and uploads the pixels, settling
-// `ready`. Backend-neutral — no producer or backend state leaks in here.
 
 export type VoxelTextures = {
-    /** gpucat array-texture atlas (one layer per block texture). */
-    atlas: ArrayTexture;
-    /** per-layer texture-animation metadata storage buffer. */
-    texAnimBuffer: GpuBuffer;
-    /** registry.texAnimData this was built against. */
+    /** the packed block atlas. */
+    atlas: Texture;
+    /** `TextureEntry` per texture index. The anim half is written here from the
+     *  registry; the rect half once the manifest loads. */
+    entriesBuffer: GpuBuffer;
+    /** `(1 / atlasWidth, 1 / atlasHeight)`, the material's texel size. */
+    texelSize: UniformNode<d.vec2f>;
+    /** registry.texAnimData this was built against (the HMR refresh compares it). */
     texAnimData: Float32Array;
     /** atlas manifest hash this was built against (null on fetch fail). */
     hash: string | null;
-    /** resolves once the atlas pixels finish uploading into the array texture. */
+    /** resolves once the atlas pixels finish uploading. */
     ready: Promise<void>;
     /** @internal settled by {@link loadVoxelTextures} once atlas pixels upload. */
     _resolveReady: () => void;
 };
 
-/** Build the voxel texture subsystem: the placeholder array texture + texAnim buffer
- *  + the atlas-ready gate. Pixels upload later via {@link loadVoxelTextures}. */
+/** Build the voxel texture subsystem: the placeholder atlas + rects + texAnim
+ *  buffers + the atlas-ready gate. Pixels upload later via {@link loadVoxelTextures}. */
 export function createVoxelTextures(registry: Blocks): VoxelTextures {
-    const atlas = createVoxelTextureArray(registry.textures.length);
-    const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
+    const atlas = new Texture(
+        { data: new Uint8Array([255, 255, 255, 255]), width: 1, height: 1 },
+        {
+            format: 'rgba8unorm-srgb',
+            magFilter: 'nearest',
+            minFilter: 'nearest',
+            mipmapFilter: 'linear',
+            wrapS: 'clamp-to-edge',
+            wrapT: 'clamp-to-edge',
+            generateMipmaps: false,
+        },
+    );
+    atlas._gpuSampler.lodMaxClamp = ATLAS_MIP_LEVELS;
+
+    // every rect covers the whole (white) placeholder until the manifest lands;
+    // the anim half is the registry's table, already padded to one entry.
+    const { texAnimData } = registry;
+    const entryCount = texAnimData.length / 4;
+    const entries = new Float32Array(entryCount * ENTRY_F32S);
+    for (let i = 0; i < entryCount; i++) {
+        const base = i * ENTRY_F32S;
+        entries[base + RECT_OFFSET + 2] = 1;
+        entries[base + RECT_OFFSET + 3] = 1;
+        entries[base + ANIM_OFFSET] = texAnimData[i * 4]!;
+        entries[base + ANIM_OFFSET + 1] = texAnimData[i * 4 + 1]!;
+        entries[base + ANIM_OFFSET + 2] = texAnimData[i * 4 + 2]!;
+        entries[base + ANIM_OFFSET + 3] = texAnimData[i * 4 + 3]!;
+    }
+    const entriesBuffer = createStorageBuffer(d.array(TextureEntry), entries);
+
+    const texelSize = uniform('voxelAtlasTexelSize', d.vec2f);
+    texelSize.value = [1, 1];
+
     const { promise: ready, resolve: _resolveReady } = Promise.withResolvers<void>();
-    return { atlas, texAnimBuffer, texAnimData: registry.texAnimData, hash: null, ready, _resolveReady };
+    return {
+        atlas,
+        entriesBuffer,
+        texelSize,
+        texAnimData,
+        hash: null,
+        ready,
+        _resolveReady,
+    };
 }
 
-/** Fetch the server-built atlas manifest + upload its pixels into the array texture,
- *  settling `textures.ready`. `meta` may be pre-fetched by a caller (e.g. a hash
+/** Fetch the server-built atlas manifest + upload its pixels, settling
+ *  `textures.ready`. `meta` may be pre-fetched by a caller (e.g. a hash
  *  compare); otherwise it is loaded here. By default the upload is fire-and-forget
  *  (`ready` settles on success or failure so callers never hang). With `serialize`,
  *  the returned promise awaits the pixel upload before resolving — the WebGPU backend
@@ -310,10 +169,10 @@ export async function loadVoxelTextures(
     textures: VoxelTextures,
     registry: Blocks,
     loader: ResourceLoader,
-    meta?: BlockTextureAtlasMetadata | null,
+    meta?: TileAtlasMetadata | null,
     serialize = false,
 ): Promise<void> {
-    // Start the pixel download before resolving the manifest. The PNG doesn't
+    // Start the level-0 download before resolving the manifest. The PNG doesn't
     // depend on the manifest, so awaiting the manifest first would stack two
     // serial round trips on a cold client. The pipeline emits no PNG when
     // nothing declares a texture, so skip it there rather than 404. A missing
@@ -321,11 +180,16 @@ export async function loadVoxelTextures(
     const pixelBytes = registry.textures.length > 0 ? loader.loadBytes('voxels-atlas.png') : null;
     pixelBytes?.catch(() => {});
 
-    const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(loader);
+    let resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(loader);
+    if (resolvedMeta && resolvedMeta.version !== ATLAS_VERSION) {
+        console.warn(`[voxel-textures] atlas manifest is version ${resolvedMeta.version}, need ${ATLAS_VERSION}; rebake`);
+        resolvedMeta = null;
+    }
     textures.hash = resolvedMeta?.hash ?? null;
+
     const atlasWrite =
-        resolvedMeta && pixelBytes
-            ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader, pixelBytes)
+        resolvedMeta && pixelBytes && resolvedMeta.textures.length > 0
+            ? writeAtlas(textures, registry, resolvedMeta, loader, pixelBytes)
             : Promise.resolve();
     if (serialize) {
         await atlasWrite.catch((e) => console.warn('[voxel-textures] atlas load failed:', e));
@@ -341,4 +205,122 @@ export async function loadVoxelTextures(
             console.warn('[voxel-textures] atlas load failed:', e);
             textures._resolveReady();
         });
+}
+
+/** decode level 0 and the baked levels, then swap them and the rects in. */
+async function writeAtlas(
+    textures: VoxelTextures,
+    registry: Blocks,
+    meta: TileAtlasMetadata,
+    loader: ResourceLoader,
+    pixelBytes: Promise<Uint8Array>,
+): Promise<void> {
+    const { atlasWidth, atlasHeight } = meta;
+    // the level fetches are named by the manifest, so they start here; the
+    // client prefetched them by their fixed names, so this is a cache hit.
+    const levelBytes: Promise<Uint8Array>[] = [];
+    for (let level = 1; level <= meta.mipLevels; level++) levelBytes.push(loader.loadBytes(`voxels-atlas.${level}.png`));
+    for (const p of levelBytes) p.catch(() => {});
+
+    const base = await decodeRgba(loader, await pixelBytes, atlasWidth, atlasHeight);
+
+    // A partial chain is worse than none: if any level is missing, let the GPU
+    // box-filter the whole chain (no coverage preservation, but no holes).
+    let levels: Source[] | null = null;
+    try {
+        levels = [];
+        for (let level = 1; level <= meta.mipLevels; level++) {
+            const width = Math.max(1, atlasWidth >> level);
+            const height = Math.max(1, atlasHeight >> level);
+            const data = await decodeRgba(loader, await levelBytes[level - 1]!, width, height);
+            levels.push(new Source({ data, width, height }));
+        }
+    } catch (e) {
+        console.warn('[voxel-textures] baked mip levels unavailable, generating on the GPU:', e);
+        levels = null;
+    }
+
+    const { atlas } = textures;
+    atlas.source = new Source({ data: base, width: atlasWidth, height: atlasHeight });
+    atlas.mipmaps = levels ?? [];
+    atlas.generateMipmaps = levels === null;
+    atlas.needsUpdate = true;
+
+    writeRects(textures, registry.textures, meta);
+}
+
+/** normalised rect per registry texture index, matched to the bake by name so a
+ *  registry the atlas has not caught up with (an HMR edit mid-bake) still maps
+ *  every texture the atlas does have. */
+function writeRects(textures: VoxelTextures, textureNames: string[], meta: TileAtlasMetadata): void {
+    const metaIndexByName = new Map<string, number>();
+    for (let i = 0; i < meta.textures.length; i++) metaIndexByName.set(meta.textures[i]!, i);
+
+    const entries = textures.entriesBuffer.array as Float32Array;
+    const invW = 1 / meta.atlasWidth;
+    const invH = 1 / meta.atlasHeight;
+    const entryCount = entries.length / ENTRY_F32S;
+    for (let i = 0; i < textureNames.length && i < entryCount; i++) {
+        const metaIdx = metaIndexByName.get(textureNames[i]!);
+        if (metaIdx === undefined) continue;
+        const { x, y, w, h } = meta.rects[metaIdx]!;
+        const base = i * ENTRY_F32S + RECT_OFFSET;
+        entries[base] = x * invW;
+        entries[base + 1] = y * invH;
+        entries[base + 2] = w * invW;
+        entries[base + 3] = h * invH;
+    }
+    textures.entriesBuffer.needsUpdate = true;
+    textures.texelSize.value = [invW, invH];
+}
+
+/** PNG bytes → tightly packed RGBA8 of the expected size. The asset pipeline
+ *  has no DOM and injects `loader.decodeImage` (sharp / skia); the browser path
+ *  is below. */
+async function decodeRgba(loader: ResourceLoader, bytes: Uint8Array, width: number, height: number): Promise<Uint8Array> {
+    const rgba = loader.decodeImage
+        ? (await loader.decodeImage(bytes, 'image/png')).rgba
+        : await decodeRgbaInBrowser(bytes, width, height);
+    if (rgba.length !== width * height * BPP) throw new Error(`atlas image is not ${width}x${height}`);
+    return rgba;
+}
+
+/**
+ * WebCodecs first: it hands back raw RGBA with no canvas in the middle. The
+ * canvas fallback is lossy for every partially transparent texel, because a 2D
+ * backing store is premultiplied — drawImage premultiplies, getImageData
+ * un-premultiplies, and the RGB of a low-alpha texel is quantised by the round
+ * trip. A typical block atlas is ~10% partial alpha (glass, water, leaf edges).
+ */
+async function decodeRgbaInBrowser(bytes: Uint8Array, width: number, height: number): Promise<Uint8Array> {
+    const tightBytes = width * height * BPP;
+    if (typeof ImageDecoder !== 'undefined') {
+        try {
+            const decoder = new ImageDecoder({ data: bytes, type: 'image/png' });
+            const { image } = await decoder.decode();
+            try {
+                if (image.allocationSize({ format: 'RGBA' }) !== tightBytes) throw new Error('unexpected atlas size');
+                const rgba = new Uint8Array(tightBytes);
+                const [plane] = await image.copyTo(rgba, { format: 'RGBA' });
+                // a padded stride would mean the rows don't line up with the width.
+                if (plane?.stride !== width * BPP) throw new Error('unexpected atlas stride');
+                return rgba;
+            } finally {
+                image.close();
+                decoder.close();
+            }
+        } catch {
+            // no PNG track, or no RGBA conversion on this engine: use the canvas.
+        }
+    }
+    // colorSpaceConversion 'none' skips colour management on decode; the atlas is
+    // authored in sRGB and the texture is already srgb-typed.
+    const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]), { colorSpaceConversion: 'none' });
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx2d.imageSmoothingEnabled = false;
+    ctx2d.drawImage(img, 0, 0);
+    img.close();
+    const { data } = ctx2d.getImageData(0, 0, width, height);
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }

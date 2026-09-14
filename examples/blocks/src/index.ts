@@ -1,34 +1,35 @@
 import {
-    block,
     BLOCK_AIR,
-    blockPreset,
-    blockTexture,
+    block,
+    type blockPreset,
+    CharacterControllerTrait,
     CullType,
-    setCharacterLook,
-    draw,
-    env,
-    MaterialType,
-    getTrait,
     config,
+    env,
+    getTrait,
+    MaterialType,
     onInit,
     onJoin,
     onTick,
     script,
     setBlock,
+    setCharacterLook,
     setDoorOpen,
     setPosition,
     TransformTrait,
+    texture,
+    tile,
+    tileFrame,
     trait,
-    CharacterControllerTrait,
 } from 'bongle';
-import { blocks, blockTextures, blockSoundPresets } from 'bongle/kit';
+import { blockSoundPresets, blocks, tiles } from 'bongle/kit';
 
 config({ server: { maxPlayers: 4 } });
 
 const {
     stone: Stone,
     dirt: Dirt,
-    grass: Grass,
+    shortGrass: ShortGrass,
     ice: Ice,
     cobblestone: Cobblestone,
     stoneStairs: StoneStairs,
@@ -47,8 +48,6 @@ const {
     greenTorch: GreenTorch,
     blueTorch: BlueTorch,
     mushroomRed: MushroomRed,
-    grassPlant1: GrassPlant1,
-    grassPlant2: GrassPlant2,
     oakLeaves: OakLeaves,
 } = blocks;
 
@@ -58,12 +57,12 @@ const {
 // ground-platform showcase.
 
 const WoodFloor = block('demo:wood_floor', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.oakPlanks } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.oakPlanks } }),
     sounds: blockSoundPresets.wood,
 });
 
 const SnowBlock = block('demo:snow_block', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.snow } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.snow } }),
     sounds: blockSoundPresets.snow,
 });
 
@@ -76,26 +75,26 @@ const SnowBlock = block('demo:snow_block', {
 // rather than a closure array so each colour bakes to a distinct texture.
 // CullType.SELF so touching cells of one colour read as a single shell.
 const stainedGlass = (id: string, r: number, g: number, b: number) => {
-    const tex = blockTexture(id, {
-        src: draw(
-            (c, _inputs, params) => {
-                const packed = params.rgb as number;
-                const pr = (packed >> 16) & 0xff;
-                const pg = (packed >> 8) & 0xff;
-                const pb = packed & 0xff;
-                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.5)`;
-                c.fillRect(0, 0, 16, 16);
-                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.85)`;
-                c.fillRect(0, 0, 16, 1);
-                c.fillRect(0, 15, 16, 1);
-                c.fillRect(0, 0, 1, 16);
-                c.fillRect(15, 0, 1, 16);
-            },
-            { size: [16, 16], params: { rgb: (r << 16) | (g << 8) | b } },
-        ),
+    const tex = texture(id, {
+        size: [16, 16],
+        params: { rgb: (r << 16) | (g << 8) | b },
+        fn: (c, _inputs, params) => {
+            const packed = params.rgb as number;
+            const pr = (packed >> 16) & 0xff;
+            const pg = (packed >> 8) & 0xff;
+            const pb = packed & 0xff;
+            c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.5)`;
+            c.fillRect(0, 0, 16, 16);
+            c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.85)`;
+            c.fillRect(0, 0, 16, 1);
+            c.fillRect(0, 15, 16, 1);
+            c.fillRect(0, 0, 1, 16);
+            c.fillRect(15, 0, 1, 16);
+        },
     });
+    const glassTile = tile(id, { frames: [tex] });
     return block(id, {
-        model: () => ({ type: 'cube', textures: { all: { texture: tex } } }),
+        model: () => ({ type: 'cube', tiles: { all: glassTile } }),
         cull: CullType.SELF,
         material: MaterialType.TRANSLUCENT,
         sounds: blockSoundPresets.glass,
@@ -107,13 +106,13 @@ const GlassGreen = stainedGlass('demo:glass_green', 60, 200, 90);
 const GlassBlue = stainedGlass('demo:glass_blue', 70, 110, 230);
 const GlassAmber = stainedGlass('demo:glass_amber', 235, 175, 60);
 
-// Number blocks, showing draw() composition. 10 blocks (0 to 9) whose top
-// texture is the kit dirt overlaid with a 3 by 5 pixel-font digit. Each
-// blockTexture's `src` is a `draw()` descriptor: the bake pass loads dirt.png,
-// blits it full-size, then stamps the digit pixels on top. This shows the asset
-// pipeline composing user fns over bundled kit textures, the same `draw()`
-// primitive `block()` uses to auto-derive `<id>:particle{0,1,2}` dust slices,
-// just hand-authored here for a visible side-by-side row.
+// Number blocks, showing texture composition. 10 blocks (0 to 9) whose tile is
+// the kit dirt texture overlaid with a 3 by 5 pixel-font digit. Each is a
+// computed `texture()` taking the kit dirt TEXTURE as an input: the bake pass
+// resolves that input, blits it full-size, then stamps the digit pixels on top.
+// The input is a handle, so the derived texture holds a real dep edge back to
+// dirt. This is the same primitive `block()` uses to auto-derive
+// `<id>:particle{0,1,2}` dust slices, hand-authored here for a visible row.
 
 // 3 by 5 pixel-font for digits 0 to 9. Each bit is one pixel, MSB first,
 // row-major from top-left to bottom-right. 15 bits per digit fits in one
@@ -132,32 +131,31 @@ const DIGIT_BITS = [
     0b111_101_111_001_111, // 9
 ];
 
+const DIRT_TEXTURE = tileFrame(tiles.dirt)!;
+
 const NumberBlocks = DIGIT_BITS.map((bits, n) => {
-    const tex = blockTexture(`demo:number_${n}`, {
-        src: draw(
-            (c, inputs, params) => {
-                c.drawImage(inputs.dirt, 0, 0, 16, 16);
-                const bm = params.bits as number;
-                // 3x5 centered in 16x16: top-left (7, 6) leaves a 5px top and
-                // 5px bottom margin (6 + 5 + 5 = 16) and a 6/7 px left/right margin.
-                const ox = 7;
-                const oy = 6;
-                c.fillStyle = '#fff';
-                for (let i = 0; i < 15; i++) {
-                    if ((bm >> (14 - i)) & 1) {
-                        c.fillRect(ox + (i % 3), oy + Math.floor(i / 3), 1, 1);
-                    }
+    const tex = texture(`demo:number_${n}`, {
+        size: [16, 16],
+        inputs: { dirt: DIRT_TEXTURE },
+        params: { digit: n, bits },
+        fn: (c, inputs, params) => {
+            c.drawImage(inputs.dirt, 0, 0, 16, 16);
+            const bm = params.bits as number;
+            // 3x5 centered in 16x16: top-left (7, 6) leaves a 5px top and
+            // 5px bottom margin (6 + 5 + 5 = 16) and a 6/7 px left/right margin.
+            const ox = 7;
+            const oy = 6;
+            c.fillStyle = '#fff';
+            for (let i = 0; i < 15; i++) {
+                if ((bm >> (14 - i)) & 1) {
+                    c.fillRect(ox + (i % 3), oy + Math.floor(i / 3), 1, 1);
                 }
-            },
-            {
-                size: [16, 16],
-                inputs: { dirt: blockTextures.dirt.frames[0]! },
-                params: { digit: n, bits },
-            },
-        ),
+            }
+        },
     });
+    const digitTile = tile(`demo:number_${n}`, { frames: [tex] });
     return block(`demo:number_${n}`, {
-        model: () => ({ type: 'cube', textures: { all: { texture: tex } } }),
+        model: () => ({ type: 'cube', tiles: { all: digitTile } }),
         sounds: blockSoundPresets.dirt,
     });
 });
@@ -216,7 +214,13 @@ script(GameplayTrait, 'session', (ctx) => {
         setBlock(ctx.voxels, ox + 6, baseY, oz + 0, StoneStairs.stateKey({ facing: 'north', half: 'bottom', shape: 'straight' }));
         setBlock(ctx.voxels, ox + 6, baseY, oz + 2, StoneStairs.stateKey({ facing: 'north', half: 'bottom', shape: 'straight' }));
         setBlock(ctx.voxels, ox + 7, baseY, oz + 2, StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }));
-        setBlock(ctx.voxels, ox + 6, baseY + 1, oz + 4, StoneStairs.stateKey({ facing: 'north', half: 'top', shape: 'straight' }));
+        setBlock(
+            ctx.voxels,
+            ox + 6,
+            baseY + 1,
+            oz + 4,
+            StoneStairs.stateKey({ facing: 'north', half: 'top', shape: 'straight' }),
+        );
 
         // Wood-stairs uvlock showcase (front-left, x<0 / z<0). Oak stairs use
         // the plank texture on every face, so their top tread grain makes
@@ -291,12 +295,12 @@ script(GameplayTrait, 'session', (ctx) => {
         // oak-leaves cube cluster (leaves render as a transparent cube, distinct
         // from the plant cross-mesh).
         for (let dz = 0; dz <= 4; dz++) {
-            setBlock(ctx.voxels, ox + 17, baseY - 1, oz + dz, Grass.defaultKey());
+            setBlock(ctx.voxels, ox + 17, baseY - 1, oz + dz, ShortGrass.defaultKey());
         }
         setBlock(ctx.voxels, ox + 17, baseY, oz + 0, MushroomRed.defaultKey());
-        setBlock(ctx.voxels, ox + 17, baseY, oz + 1, GrassPlant1.defaultKey());
-        setBlock(ctx.voxels, ox + 17, baseY, oz + 2, GrassPlant2.defaultKey());
-        setBlock(ctx.voxels, ox + 17, baseY, oz + 3, GrassPlant1.defaultKey());
+        setBlock(ctx.voxels, ox + 17, baseY, oz + 1, ShortGrass.defaultKey());
+        setBlock(ctx.voxels, ox + 17, baseY, oz + 2, ShortGrass.defaultKey());
+        setBlock(ctx.voxels, ox + 17, baseY, oz + 3, ShortGrass.defaultKey());
         setBlock(ctx.voxels, ox + 17, baseY, oz + 4, MushroomRed.defaultKey());
 
         // Oak leaves cluster (col 19..20): a small 2x2x2 canopy so the
@@ -313,14 +317,26 @@ script(GameplayTrait, 'session', (ctx) => {
         // cells from one click). Col 22 is a single door. Col 24 and 25 are a
         // double door, where adjacent leaves with opposite hinges meet flush.
         const placeDoor = (dx: number, hinge: 'left' | 'right') => {
-            setBlock(ctx.voxels, ox + dx, baseY, oz + 0, OakDoor.stateKey({ facing: 'north', half: 'lower', hinge, open: false }));
-            setBlock(ctx.voxels, ox + dx, baseY + 1, oz + 0, OakDoor.stateKey({ facing: 'north', half: 'upper', hinge, open: false }));
+            setBlock(
+                ctx.voxels,
+                ox + dx,
+                baseY,
+                oz + 0,
+                OakDoor.stateKey({ facing: 'north', half: 'lower', hinge, open: false }),
+            );
+            setBlock(
+                ctx.voxels,
+                ox + dx,
+                baseY + 1,
+                oz + 0,
+                OakDoor.stateKey({ facing: 'north', half: 'upper', hinge, open: false }),
+            );
         };
         placeDoor(22, 'left');
         placeDoor(24, 'left');
         placeDoor(25, 'right');
 
-        // Number-block row showing draw() composition: 10 cells at x=-5..4 on
+        // Number-block row showing texture composition: 10 cells at x=-5..4 on
         // z=4, right in front of spawn. Each block's top texture is dirt plus a
         // stamped 3 by 5 digit, baked at pipeline time by the draw fn declared above.
         for (let n = 0; n < 10; n++) {
@@ -340,15 +356,7 @@ script(GameplayTrait, 'session', (ctx) => {
         // hear each material's footstep set, sourced from each block's
         // `sounds.footstep` clip pool. Order runs soft to hard so the audible
         // texture changes obviously.
-        const groundMaterials = [
-            Grass,
-            Dirt,
-            SnowBlock,
-            Ice,
-            WoodFloor,
-            Cobblestone,
-            Stone,
-        ];
+        const groundMaterials = [Grass, Dirt, SnowBlock, Ice, WoodFloor, Cobblestone, Stone];
         const groundPatchWidth = 4;
         const groundMinZ = 11;
         const groundMaxZ = 15;
@@ -395,9 +403,12 @@ script(GameplayTrait, 'session', (ctx) => {
         // carved through the east wall. rgb torches mounted on three different
         // walls; the onTick step machine toggles them on/off so the per-channel
         // light flood visibly recolours the cave.
-        const cMinX = -22, cMaxX = -15;
-        const cMinZ = -3, cMaxZ = 3;
-        const cMinY = baseY, cMaxY = baseY + 2;
+        const cMinX = -22,
+            cMaxX = -15;
+        const cMinZ = -3,
+            cMaxZ = 3;
+        const cMinY = baseY,
+            cMaxY = baseY + 2;
         for (let wx = cMinX; wx <= cMaxX; wx++) {
             for (let wz = cMinZ; wz <= cMaxZ; wz++) {
                 // floor + ceiling
@@ -522,7 +533,10 @@ script(GameplayTrait, 'session', (ctx) => {
     // connection bitmask every step.
     //   bit 0 = N (z-1), 1 = S (z+1), 2 = E (x+1), 3 = W (x-1)
     const fenceNeighbourOffsets: ReadonlyArray<readonly [number, number]> = [
-        [0, -1], [0, 1], [1, 0], [-1, 0],
+        [0, -1],
+        [0, 1],
+        [1, 0],
+        [-1, 0],
     ];
     const fencePatterns: ReadonlyArray<number> = [
         0b0000, // post only
@@ -539,7 +553,10 @@ script(GameplayTrait, 'session', (ctx) => {
     //   step 2: west perpendicular present, so centre becomes inner-L (mirrored)
     //   step 3: both present, so centre back to straight
     const stairPattern: ReadonlyArray<readonly [boolean, boolean]> = [
-        [false, false], [true, false], [false, true], [true, true],
+        [false, false],
+        [true, false],
+        [false, true],
+        [true, true],
     ];
 
     onTick(ctx, ({ delta }) => {
@@ -577,8 +594,20 @@ script(GameplayTrait, 'session', (ctx) => {
         // stair perpendicular cycle: drives the centre stair's auto-L reshape
         // via its onNeighbourUpdate.
         const [eastOn, westOn] = stairPattern[demoStep % stairPattern.length]!;
-        setBlock(ctx.voxels, 1, demoBaseY, -11, eastOn ? StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }) : BLOCK_AIR);
-        setBlock(ctx.voxels, -1, demoBaseY, -11, westOn ? StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }) : BLOCK_AIR);
+        setBlock(
+            ctx.voxels,
+            1,
+            demoBaseY,
+            -11,
+            eastOn ? StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }) : BLOCK_AIR,
+        );
+        setBlock(
+            ctx.voxels,
+            -1,
+            demoBaseY,
+            -11,
+            westOn ? StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }) : BLOCK_AIR,
+        );
 
         // rgb cave torches: cycle through the 7 non-zero on/off patterns so each
         // channel and combination is visible.

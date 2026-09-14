@@ -1,7 +1,7 @@
 // Backend-neutral engine render pipeline.
 //
-// The single persistent post-chain — scene pass -> fxaa -> screen-tint -> overlay
-// composite -> renderOutput — built once per backend and reused for every active
+// The single persistent post-chain — scene pass -> fxaa ->
+// screen-tint -> overlay composite -> renderOutput — built once per backend and reused for every active
 // room (only `passNode.scene` + the camera + tint uniform rotate per frame). The
 // whole graph is gpucat node-DSL that compiles to BOTH WGSL and GLSL (fxaa, the
 // tint math, and the overlay's `sceneDepthNode.load()` occlusion all work on
@@ -18,6 +18,7 @@ import {
     fxaa,
     mix,
     mul,
+    type Node,
     type PassNode,
     type PerspectiveCamera,
     pass,
@@ -35,6 +36,69 @@ import type { Voxels } from '../core/voxels/voxels';
 /** the gpucat renderer either backend passes to `new RenderPipeline(...)` — its
  *  backend-neutral `Renderer` interface (WebGPURenderer / WebGLRenderer both fit). */
 type GpuRenderer = ConstructorParameters<typeof RenderPipeline>[0];
+
+/** the passes themselves, for the things that are not node math: rendering the
+ *  scene smaller (`scenePass.setResolutionScale`), or adding a second colour
+ *  attachment (`scenePass.setMRT` + `getTextureNode(name)`). */
+export type RenderParts = {
+    scenePass: PassNode;
+    overlayPass: PassNode;
+    camera: PerspectiveCamera;
+};
+
+/**
+ * Per-game overrides for the render chain, set with `setRenderPipeline`.
+ *
+ * Every stage is optional and defaults to the engine's own implementation, and
+ * they COMPOSE DOWNWARD: overriding `resolve` still gets correct tinting and
+ * overlay compositing, so a game replacing the resolve never has to learn that
+ * premultiplied-over compositing exists or get it subtly wrong.
+ *
+ * What the engine keeps whatever a game does: both passes and their per-room
+ * `scene` swap, the scene pass's depth staying the thing `dom-ui` samples for
+ * overlay occlusion, and termination of the graph. None of those can be broken
+ * from here.
+ *
+ * The stage ORDER is fixed, and a stage that does not exist cannot be inserted -
+ * a bloom chain lives inside `resolve` rather than beside it. `resolve` returns a
+ * node, so nothing stops it building further passes internally; the stage names
+ * describe intent, not a hard partition.
+ */
+export type RenderStages = {
+    /** runs before the graph is built, on the passes themselves. */
+    configure?: (parts: RenderParts) => void;
+    /** default: `fxaa(color)`. */
+    resolve?: (ctx: { color: Node<d.vec4f>; depth: DepthTextureNode; camera: PerspectiveCamera }) => Node<d.vec4f>;
+    /** default: mix toward the camera-in-block tint, a no-op at `tint.a == 0`. */
+    tint?: (ctx: { color: Node<d.vec4f>; tint: Node<d.vec4f> }) => Node<d.vec4f>;
+    /** default: premultiplied-over. `overlay` is the CanvasTrait / HUD pass. */
+    composite?: (ctx: { color: Node<d.vec4f>; overlay: Node<d.vec4f> }) => Node<d.vec4f>;
+    /** default: `renderOutput(color)`, i.e. tone mapping and colour space. */
+    output?: (ctx: { color: Node<d.vec4f> }) => Node<d.vec4f>;
+};
+
+let activeStages: RenderStages = {};
+/** bumped on every `setRenderPipeline`; a pipeline built from an older version
+ *  rebuilds itself on the next frame. */
+let stagesVersion = 0;
+
+/**
+ * Override the render chain for this game.
+ *
+ * Call it at module scope beside `config()`. Calling it again REBUILDS the graph
+ * before the next frame, which is what makes it survive HMR: a game module that
+ * re-evaluates re-declares its stages, and the pipeline follows.
+ *
+ * The rebuild discards the passes and makes new ones rather than reusing them.
+ * That is deliberate - `configure` mutates pass state, and there is no generic
+ * way to undo an arbitrary mutation, so reusing passes would strand the previous
+ * declaration's `setMRT` or `setResolutionScale` with each reload compounding the
+ * last. Starting clean is the only version that stays correct under repeated HMR.
+ */
+export function setRenderPipeline(stages: RenderStages): void {
+    activeStages = stages;
+    stagesVersion++;
+}
 
 /**
  * the engine's single, persistent render pipeline. one set per backend, built
@@ -63,6 +127,10 @@ export type EngineRenderPipeline = {
     camera: PerspectiveCamera;
     /** rgba tint uniform, set w=0 for no tint. */
     screenTint: Uniform<d.vec4f>;
+    /** kept so the pipeline can rebuild itself when the stages change. */
+    renderer: GpuRenderer;
+    /** the `stagesVersion` this graph was built from. */
+    builtFrom: number;
     /**
      * the overlay pass: renders the active room's `overlayScene` (crisp CanvasTrait
      * panels, future world-space HUD) *after* fxaa, so overlays are never blurred
@@ -89,15 +157,16 @@ export function createRenderPipeline(renderer: GpuRenderer, camera: PerspectiveC
     // placeholder and mutate `passNode.scene = activeRoom.scene` each frame. the
     // placeholder is never rendered.
     const placeholderScene = new Scene();
+    // NO MSAA, and it cannot be added here. Multisampling makes the depth
+    // attachment multisampled, and WebGPU has no way to resolve depth - but this
+    // pass's depth is SAMPLED downstream, by dom-ui's overlay occlusion, which
+    // bind it as an ordinary texture_depth_2d. Enabling `samples` fails bind-group
+    // validation for that reason, not through misconfiguration.
     const scenePass = pass(placeholderScene, camera, { label: 'scene' });
-    const fxaaPass = fxaa(scenePass.getTextureNode());
-
-    const screenTint = new Uniform(d.vec4f, [0, 0, 0, 0]);
-    const tintNode = uniform(screenTint);
-    const tinted = vec4f(mix(fxaaPass.rgb, tintNode.rgb, tintNode.a), fxaaPass.a).toVar('tinted');
 
     // overlay pass: renders the active room's overlay scene composited over the
-    // tinted scene, *after* fxaa (so CanvasTrait text/images stay crisp). its
+    // tinted scene, *after* the scene resolve (so CanvasTrait text/images stay
+    // crisp). its
     // `scene` starts as the placeholder and rotates per room in `setActiveScene`.
     // empty overlay collapses to the tinted input (overlayTex.a == 0). occlusion
     // by world geometry is per-material: overlay materials sample `sceneDepthNode`
@@ -106,24 +175,67 @@ export function createRenderPipeline(renderer: GpuRenderer, camera: PerspectiveC
     // the overlay blends against a transparent-black clear with straight-alpha
     // factors (src-alpha / one-minus-src-alpha), so its texture is *premultiplied*
     // (rgb already × a). composite premultiplied-over: out = bg·(1−a) + rgb.
-    const sceneDepthNode = scenePass.getDepthTextureNode();
     const overlayPass = pass(placeholderScene, camera, {
         label: 'overlay',
         clearColor: [0, 0, 0, 0],
     });
+
+    // BOTH passes exist before `configure` runs, so a game can reach either one -
+    // and it runs before anything reads from them, so `setMRT` and
+    // `setResolutionScale` land before the graph is shaped around their results.
+    const stages = activeStages;
+    stages.configure?.({ scenePass, overlayPass, camera });
+
+    // fxaa over the scene texture, resolved straight into the tint.
+    const sceneColor = scenePass.getTextureNode();
+    const sceneDepthNode = scenePass.getDepthTextureNode();
+    const resolved = (
+        stages.resolve ? stages.resolve({ color: sceneColor, depth: sceneDepthNode, camera }) : fxaa(sceneColor)
+    ).toVar('resolved');
+
+    const screenTint = new Uniform(d.vec4f, [0, 0, 0, 0]);
+    const tintNode = uniform(screenTint);
+    const tinted = (
+        stages.tint
+            ? stages.tint({ color: resolved, tint: tintNode })
+            : vec4f(mix(resolved.rgb, tintNode.rgb, tintNode.a), resolved.a)
+    ).toVar('tinted');
+
     const overlayTex = overlayPass.getTextureNode();
     const overRgb = add(mul(tinted.rgb, sub(f32(1), overlayTex.a)), overlayTex.rgb);
-    const composited = vec4f(overRgb, tinted.a).toVar('overlayComposite');
+    const composited = (
+        stages.composite ? stages.composite({ color: tinted, overlay: overlayTex }) : vec4f(overRgb, tinted.a)
+    ).toVar('overlayComposite');
 
-    const outputNode = renderOutput(composited);
-    return {
+    const outputNode = stages.output ? stages.output({ color: composited }) : renderOutput(composited);
+    const engine: EngineRenderPipeline = {
         pipeline: new RenderPipeline(renderer, outputNode),
         passNode: scenePass,
         overlayPassNode: overlayPass,
         sceneDepthNode,
         camera,
         screenTint,
+        renderer,
+        builtFrom: stagesVersion,
     };
+    return engine;
+}
+
+/**
+ * Rebuild the graph if `setRenderPipeline` has been called since it was built.
+ *
+ * Driven from the top of each backend's `render`, before `setActiveScene`, so the
+ * room re-binds on the same frame - `setActiveScene` already runs every frame, so
+ * a fresh pass picks the active scene up with nothing extra to do.
+ *
+ * The engine object is mutated IN PLACE rather than replaced, because the client
+ * and both backends hold references to it that would otherwise go stale.
+ */
+export function rebuildRenderPipelineIfStale(engine: EngineRenderPipeline): void {
+    if (engine.builtFrom === stagesVersion) return;
+    const previous = engine.pipeline;
+    Object.assign(engine, createRenderPipeline(engine.renderer, engine.camera));
+    previous.dispose?.();
 }
 
 /**

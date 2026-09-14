@@ -1,6 +1,6 @@
 import type { Client, JsonValue, User } from 'bongle/interface';
 import type { ContactManifold, ContactSettings, RigidBody } from 'crashcat';
-import type { Dashboard } from 'dashcat';
+import type { Dashboard } from '../../client/debug';
 import type { Scene } from 'gpucat';
 import type * as Scripts from 'packcat';
 import type { EngineClient } from '../../client/client';
@@ -11,13 +11,11 @@ import type { Room } from '../../server/rooms';
 import type { EngineServer } from '../../server/server';
 import type { Avatar } from '../avatar/avatar';
 import type { DepHandle } from '../capture/dep-graph';
-import { setDeps } from '../capture/dep-graph';
-import { recordScript } from '../capture/module-scope';
 import type { ClientId } from '../client';
 import type { Clock } from '../clock';
 import type { Physics } from '../physics/physics';
 import type { PlayerMode, RoomMode } from '../protocol';
-import { declare, registry } from '../registry';
+import { registry, traitStore } from '../registry';
 import type { Resources } from '../resources';
 import type { CommandHandle } from '../rpc';
 import * as Rpc from '../rpc';
@@ -27,7 +25,7 @@ import type { Voxels } from '../voxels/voxels';
 import type { Condition, ConditionArgs, ConditionArgsToConditions } from './conditions';
 import * as SceneTree from './scene-tree';
 import { logScriptError } from './script-errors';
-import type { TraitBase, TraitHandle } from './traits';
+import { scriptsById, type TraitBase, type TraitHandle } from './traits';
 
 export type Unsubscribe = () => void;
 
@@ -36,7 +34,7 @@ export type Unsubscribe = () => void;
  * plain state bag (no methods) — ergonomics live in the `debug.*` api helpers.
  */
 export type ClientDebugState = {
-    /** the shared dashcat dashboard; games dock panels here. */
+    /** the shared debug dashboard; games dock panels here. */
     readonly dashboard: Dashboard;
 };
 
@@ -126,10 +124,10 @@ export type ClientContext = {
     clientId: ClientId | undefined;
 
     /**
-     * client debug surface. `dashboard` is the shared dashcat Dashboard —
+     * client debug surface. `dashboard` is the shared `Dashboard` —
      * games dock their own panels on it (or via the scoped `debug.panel(ctx, …)`
      * helper, which auto-cleans on script dispose). the raw handle is the
-     * escape hatch for full dashcat control. built lazily on first access.
+     * escape hatch for full dashboard control. built lazily on first access.
      *
      * future home for the client-global metrics/logs handles + open flag
      * that currently live on the store / ClientRoom.
@@ -401,73 +399,6 @@ export type ScriptDef = ScriptBody & {
     dependency: { registry: 'scripts'; id: string };
 };
 
-/**
- * register a script (behavior) on a trait. callable multiple times per trait,
- * each call appends to the trait def's `scripts` array. attaching the trait to
- * a live node instantiates one ScriptInstance per registered script. the
- * factory runs at attach time with `ctx.trait` typed for the handle.
- *
- * `id` is a stable user-supplied string (without trait prefix). the runtime
- * identifier becomes `${trait.id}.${id}`, used as the instance map key,
- * DepGraph dependency key, and error message label.
- *
- * @example
- * ```ts
- * const Gamemode = trait('gamemode');
- * script(Gamemode, 'tick', (ctx) => {
- *     onTick(ctx, () => { /* ctx.trait is TraitInstance<typeof Gamemode> *\/ });
- * });
- * ```
- */
-export function script<T extends TraitBase>(
-    handle: TraitHandle<T>,
-    scriptId: string,
-    factory: ScriptFactory<T>,
-    opts?: ScriptOptions,
-): ScriptDef {
-    const target = handle.def;
-    const key = `${handle.id}.${scriptId}`;
-    const def: ScriptDef = {
-        traitId: handle.id,
-        scriptId,
-        key,
-        dependency: { registry: 'scripts', id: key },
-        factory: factory as unknown as ScriptFactory,
-        editor: opts?.editor === true,
-    };
-    // upsert into the trait def's script list: reuse the slot if this id already
-    // exists, else append (`scripts[length] = def` extends the array). re-
-    // registration is normal under HMR, a built-in trait like WorldTrait keeps
-    // its def (and `scriptsById`) across a user-file reload, so the same
-    // `script()` call re-runs against a populated map; latest factory wins.
-    const existing = handle.scriptsById.get(scriptId);
-    const index = existing ? existing.index : target.scripts.length;
-    target.scripts[index] = def;
-    handle.scriptsById.set(scriptId, { reg: def, index });
-    // into the per-kind store so HMR detects individual script factory edits
-    // without flipping the parent trait hash; dispatch turns these pendingChanges
-    // into a targeted applyTraitSwap. Nothing holds the minted handle today — see
-    // `control()` for why it still goes through `declare`.
-    declare(
-        registry.scripts,
-        key,
-        () => def,
-        (d) => ({ id: key, dependency: { registry: 'scripts' as const, id: key }, def: d }),
-    );
-    // record this script key into the owning module's snapshot so the
-    // patch/invalidate diff sees which scripts the module declares this run.
-    // the diff is set-based: an unchanged key set means only factory bodies
-    // moved (swapped in place below), while an added/removed/renamed key is a
-    // shape change that invalidates, which is what disposes a script the
-    // user deleted or renamed, even on a persistent (built-in) trait def.
-    recordScript(key);
-    // wire dep edges so the dirty set covers scripts whose closed-over
-    // producers changed even when the factory body itself is unchanged
-    // (e.g. a referenced model handle reloaded). dispatch uses these to
-    // target only the dirty scripts on applyTraitSwap.
-    setDeps({ registry: 'scripts', id: key }, opts?.deps ? opts.deps.map((d) => d.dependency) : []);
-    return def;
-}
 
 /* helpers */
 
@@ -1326,14 +1257,24 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * `instantiateTraitScripts` won't re-create it. `scripts[]` slots are
  * positional, so rebuild + reindex from the surviving entries.
  */
+/**
+ * Scripts are the second kind the HMR module boundary diffs. A script's key is
+ * its binding identity (instance-map key and registry id), so an unchanged key
+ * SET means only factory bodies moved — swapped in place via the flush path —
+ * while an added, removed or renamed key is a shape change that must invalidate,
+ * which is what disposes a script the user deleted even on a built-in trait def.
+ * Presence is the whole shape, hence the constant.
+ */
+
 export function pruneRemovedScript(def: ScriptDef): void {
-    const traitHandle = registry.traits.handles.get(def.traitId);
-    if (!traitHandle?.scriptsById.delete(def.scriptId)) return;
-    const remaining = [...traitHandle.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
-    traitHandle.def.scripts = remaining;
-    remaining.forEach((reg, index) => {
-        traitHandle.scriptsById.set(reg.scriptId, { reg, index });
-    });
+    const traitHandle = traitStore.handles.get(def.traitId);
+    if (!traitHandle) return;
+    const scripts = traitHandle.def.scripts;
+    const at = scripts.findIndex((s) => s.scriptId === def.scriptId);
+    if (at === -1) return;
+    // the def's array is the one record; the by-id view is derived from it and
+    // re-derives itself, so there is no second structure to keep in step.
+    scripts.splice(at, 1);
 }
 
 export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
@@ -1342,8 +1283,8 @@ export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: Readon
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;
             const { traitId, scriptId } = oldInstance.def;
 
-            const newTraitHandle = registry.traits.handles.get(traitId);
-            const newDef = newTraitHandle?.scriptsById.get(scriptId)?.reg;
+            const newTraitHandle = traitStore.handles.get(traitId);
+            const newDef = newTraitHandle && scriptsById(newTraitHandle).get(scriptId)?.reg;
 
             if (!newDef) {
                 disposeScriptInstance(oldInstance);

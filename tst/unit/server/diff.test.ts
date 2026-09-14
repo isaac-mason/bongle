@@ -11,7 +11,8 @@ import {
     getTrait,
     removeTrait,
 } from '../../../src/core/scene/scene-tree';
-import { control, sync, trait } from '../../../src/core/scene/traits';
+import { trait } from '../../../src/core/registry';
+import { control, sync } from '../../../src/core/registry';
 import { runDiffDetection } from '../../../src/server/discovery';
 
 /* ── test traits ── */

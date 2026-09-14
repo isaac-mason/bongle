@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
 import { cube, fence, pane } from '../../../../src/core/voxels/block-presets';
 import { AIR, buildBlockRegistry, createBlockRegistry } from '../../../../src/core/voxels/block-registry';
-import type { BlockDef, BlockHandle, BlockTextureDef, BlockTextureHandle } from '../../../../src/core/voxels/blocks';
+import type { BlockDef, BlockHandle, TileDef, TileHandle } from '../../../../src/core/voxels/blocks';
 import {
     clearVoxelChanges,
     createVoxels,
@@ -24,25 +24,25 @@ beforeAll(() => {
 
 // ── shared registry ─────────────────────────────────────────────────
 
-const glassTex: BlockTextureHandle = {
+const glassTex: TileHandle = {
     id: 'glass',
-    dependency: { registry: 'blockTextures', id: 'glass' },
-    def: { id: 'glass', frames: ['glass.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'glass' },
+    def: { id: 'glass', frames: [{ registry: 'textures', id: 'glass' }], fps: 1, interpolate: false },
 };
-const oakTex: BlockTextureHandle = {
+const oakTex: TileHandle = {
     id: 'oak',
-    dependency: { registry: 'blockTextures', id: 'oak' },
-    def: { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'oak' },
+    def: { id: 'oak', frames: [{ registry: 'textures', id: 'oak' }], fps: 1, interpolate: false },
 };
-const stoneTex: BlockTextureHandle = {
+const stoneTex: TileHandle = {
     id: 'stone',
-    dependency: { registry: 'blockTextures', id: 'stone' },
-    def: { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false },
+    dependency: { registry: 'tiles', id: 'stone' },
+    def: { id: 'stone', frames: [{ registry: 'textures', id: 'stone' }], fps: 1, interpolate: false },
 };
 
-const paneHandle = pane('test:pane', { textures: glassTex }) as BlockHandle;
-const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
-const stoneHandle = cube('test:stone', { textures: stoneTex }) as BlockHandle;
+const paneHandle = pane('test:pane', { tiles: glassTex }) as BlockHandle;
+const fenceHandle = fence('test:fence', { tiles: oakTex }) as BlockHandle;
+const stoneHandle = cube('test:stone', { tiles: stoneTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [paneHandle.id, paneHandle.def],
@@ -54,7 +54,7 @@ const handles = new Map<string, BlockHandle>([
     [fenceHandle.id, fenceHandle as BlockHandle],
     [stoneHandle.id, stoneHandle as BlockHandle],
 ]);
-const textures = new Map<string, BlockTextureDef>([
+const tiles = new Map<string, TileDef>([
     [glassTex.id, glassTex.def],
     [oakTex.id, oakTex.def],
     [stoneTex.id, stoneTex.def],
@@ -62,7 +62,7 @@ const textures = new Map<string, BlockTextureDef>([
 
 function makeVoxels() {
     const registry = createBlockRegistry();
-    buildBlockRegistry(registry, defs, handles, textures);
+    buildBlockRegistry(registry, defs, handles, tiles);
     const voxels = createVoxels(registry);
     voxels.authority = createVoxelsAuthority();
     return voxels;

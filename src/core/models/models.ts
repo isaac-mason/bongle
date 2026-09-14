@@ -1,7 +1,7 @@
 // model registration, module-scope api for declaring gltf models.
 //
-// follows the same pattern as block() / blockTexture(): called at module
-// scope, returns a typed ModelHandle. parallels how blockTextures → atlas
+// follows the same pattern as block() / tile(): called at module
+// scope, returns a typed ModelHandle. parallels how tiles → atlas
 // works (the atlas is downstream-derived state, not its own registry).
 // `modelsRegistry` is the single source of truth, the user module that
 // called `model('id', ...)` owns the entry, and the codegen barrel
@@ -31,17 +31,13 @@
 //     `PLACEHOLDER_OWNER`-owned entry via `upsertPlaceholder`. The
 //     first user `model()` call promotes ownership via `claimOwnership`.
 
-import { recordModel } from '../capture/module-scope';
-import { declare, registry, touch, upsertPlaceholder } from '../registry';
+import type { AssetMeta, ResolvedAssetMeta } from '../asset-meta';
 import { createNode } from '../scene/scene-tree';
-import type { ModelDef, ModelHandle } from './handle';
+import type { ModelDef } from './handle';
 
 /* ── types ── */
 
-export type ModelOptions = {
-    /** human-readable display name for editor UIs (inventory, picker).
-     *  falls back to the string id when omitted. */
-    name?: string;
+export type ModelOptions = AssetMeta & {
     /**
      * source .gltf/.glb: either a string path relative to project root, or a
      * module-relative `asset('./model.glb', import.meta.url)` ref. The `asset()`
@@ -73,35 +69,6 @@ export interface ModelHandleMap {}
 /* ── codegen-seeded registry ── */
 
 /**
- * Called by the per-project barrel `src/generated/models.ts` at module-
- * eval to populate each handle's runtime fields. Barrel does not own
- * registry entries, see file header. Mutates the existing payload in
- * place so user code refs stay valid, then `touch()`es so consumers
- * (renderer, animator, prefab deps) react via the dispatch path.
- *
- * If no entry exists (cold start where the barrel ran before any user
- * `model()` call), the payload is registered under `PLACEHOLDER_OWNER`;
- * the first user `model()` call promotes ownership.
- *
- * Re-runs on every barrel re-import (hot reload). Pass through `touch`
- * is what bumps `revision` so the cli's flush handler picks up bin-url
- * changes for codegen.
- */
-export function _registerModelDef(id: string, def: ModelDef): void {
-    const handle = registry.models.handles.get(id);
-    if (registry.models.byId.has(id)) {
-        // codegen caught up with a declaration already in the registry: swap the def
-        // wholesale and re-point the handle user code is holding.
-        registry.models.byId.set(id, def);
-        if (handle) handle.def = def;
-        touch(registry.models, id);
-        return;
-    }
-    upsertPlaceholder(registry.models, id, def);
-    if (handle) handle.def = def;
-}
-
-/**
  * Build a per-id placeholder handle. Used by `model()` when the user
  * declares a model before codegen has run for it, the placeholder sits
  * in the registry so the cli can discover the declaration (`.src` is
@@ -109,10 +76,11 @@ export function _registerModelDef(id: string, def: ModelDef): void {
  * in place once codegen catches up, preserving the user-held reference. No
  * scene graph/tree dependencies.
  */
-function createPlaceholderDef(id: string, src: string, name: string): ModelDef {
+export function createModelPlaceholderDef(id: string, src: string, meta: ResolvedAssetMeta): ModelDef {
     return {
         modelId: id,
-        name,
+        name: meta.name,
+        tags: meta.tags,
         src,
         bin: { client: '', server: '' },
         scene: createNode({ name: `__placeholder_${id}__` }),
@@ -125,65 +93,3 @@ function createPlaceholderDef(id: string, src: string, name: string): ModelDef {
 }
 
 /* ── registration ── */
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * Declare a model. Called at module scope.
- *
- * Returns the codegen'd `ModelHandle` (typed via `ModelHandleMap` if the
- * cli has emitted the registry barrel yet, generic `ModelHandle` otherwise).
- *
- * ```ts
- * import { model } from 'bongle';
- * const wizard = model('wizard', { src: 'characters/wizard.glb' });
- * // wizard.scene, wizard.nodes.Body, wizard.meshes.Head, wizard.animations.idle
- * ```
- */
-export function model<const Id extends string>(
-    id: Id,
-    options: ModelOptions,
-): Id extends keyof ModelHandleMap ? ModelHandleMap[Id] : ModelHandle {
-    const src = options.src;
-    const name = options.name ?? id;
-    // minting a placeholder is the normal cold-start path, not a warning case: the
-    // user-entry shim wipes `src/generated/models.ts` on every dev start
-    // (schema-drift protection in `resetGeneratedBarrels`), so EVERY declared model
-    // hits it before the pipeline's first flush populates the barrel.
-    const handle = declare(
-        registry.models,
-        id,
-        // codegen owns everything but `src` / `name`, so merge onto whatever the
-        // barrel already registered rather than replacing it.
-        (previous): ModelDef => (previous ? { ...previous, src, name } : createPlaceholderDef(id, src, name)),
-        (def): ModelHandle => ({
-            id,
-            dependency: { registry: 'models', id },
-            def,
-            // forwarding accessors; see the ModelHandle doc for why these are
-            // getters rather than copied fields.
-            get name() {
-                return this.def.name;
-            },
-            get src() {
-                return this.def.src;
-            },
-            get scene() {
-                return this.def.scene;
-            },
-            get aabb() {
-                return this.def.aabb;
-            },
-            get nodes() {
-                return this.def.nodes;
-            },
-            get meshes() {
-                return this.def.meshes;
-            },
-            get animations() {
-                return this.def.animations;
-            },
-        }),
-    );
-    recordModel(id);
-    return handle as never;
-}

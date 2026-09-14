@@ -9,7 +9,7 @@ import { ChatPanel, useChatPanel } from '../../client/ui/chat/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
 import { addEditorDebugOptions } from '../debug-options';
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
-import { useEditor } from '../editor-store';
+import { type EditorStore, useEditor } from '../editor-store';
 import { loadEditorAssets } from '../icons';
 import { installEditorClientListeners, setEditorEnabledForRoom } from '../lens';
 import { stopRoom } from '../session';
@@ -78,7 +78,7 @@ function ControlModeWidget() {
                     onClick={() => setControlMode('fly')}
                     title="fly"
                 >
-                    <Icons.Send size={14} />
+                    <Icons.Send size={24} />
                 </button>
                 <button
                     type="button"
@@ -86,7 +86,7 @@ function ControlModeWidget() {
                     onClick={() => setControlMode('orbit')}
                     title="orbit"
                 >
-                    <Icons.Orbit size={14} />
+                    <Icons.Orbit size={24} />
                 </button>
                 <button
                     type="button"
@@ -94,7 +94,7 @@ function ControlModeWidget() {
                     onClick={() => setControlMode('character')}
                     title="character"
                 >
-                    <Icons.PersonStanding size={14} />
+                    <Icons.PersonStanding size={24} />
                 </button>
             </div>
         </div>
@@ -113,7 +113,7 @@ function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggl
             title={collapsed ? 'show panel' : 'hide panel'}
             className="absolute top-1/2 -translate-y-1/2 right-0 z-10 flex items-center justify-center w-5 py-4 bg-surface border border-r-0 border-border text-fg-muted hover:bg-surface-muted hover:text-fg pointer-events-auto"
         >
-            <Icons.ChevronRight size={14} className={collapsed ? 'rotate-180' : ''} />
+            <Icons.ChevronRight size={12} className={collapsed ? 'rotate-180' : ''} />
         </button>
     );
 }
@@ -140,18 +140,20 @@ const RIGHT_PANEL_MIN = 180;
 const RIGHT_PANEL_MAX = 600;
 const RIGHT_PANEL_DEFAULT = 350;
 
+// whether editor chrome (toolbars, panels, tools) is showing for the active
+// room. no lens: the editor script is on the player node itself, so the
+// player POV *is* the editor POV. with a lens, only the 'edit' POV exposes
+// the UI; switching to 'play' POV keeps the lens warm but hides chrome.
+function editorChromeVisible(s: EditorStore): boolean {
+    if (!s.room) return false;
+    if (!s.playerEditStores[s.room.playerId]) return false;
+    if (!s.lenses.get(s.room.playerId)) return true;
+    return s.playerToView.get(s.room.playerId) === 'edit';
+}
+
 function EditUI() {
     const engine = useEngineClient();
-    const editorEnabled = useEditor((s) => {
-        if (!s.room) return false;
-        if (!s.playerEditStores[s.room.playerId]) return false;
-        // no lens → the editor script is on the player node itself, so the
-        // player POV *is* the editor POV. with a lens, only the 'edit' POV
-        // exposes the UI; switching to 'play' POV keeps the lens warm but
-        // hides editor chrome.
-        if (!s.lenses.get(s.room.playerId)) return true;
-        return s.playerToView.get(s.room.playerId) === 'edit';
-    });
+    const editorEnabled = useEditor(editorChromeVisible);
     const showOrientationCube = useEditor((s) => s.showOrientationCube);
     const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_DEFAULT);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
@@ -213,10 +215,12 @@ function EditUI() {
 
             if (isInputFocused()) return;
 
-            // plain backtick toggles the debug panel. in EDIT rooms the editor's
-            // onInput chord owns it (tap = toggle, hold+digit = switch tab); that
-            // input loop runs for edit players only, so play rooms toggle here.
-            if (e.key === '`' && !e.shiftKey && useEditor.getState().roomMode === 'play') {
+            // plain backtick toggles the debug panel, for every room the editor
+            // hosts. the SINGLE owner of the key here: the editor's own input loop
+            // used to toggle it too, and a Shift+` lens on a play room runs both
+            // (the lens attaches EditorTrait locally), which toggled it twice in
+            // one press and left the panel looking dead.
+            if (e.key === '`' && !e.shiftKey) {
                 e.preventDefault();
                 useClient.getState().toggleDebugOpen();
                 return;
@@ -243,11 +247,11 @@ function EditUI() {
                 }
             }
 
-            // in edit mode, Enter is reserved for inline editing affordances
-            // (rename, accept), only `/` opens chat. in play mode either key
-            // works.
-            const { roomMode } = useEditor.getState();
-            const opensChat = e.key === '/' || (e.key === 'Enter' && roomMode !== 'edit');
+            // while editor chrome is showing (edit room, or a lensed play room
+            // on the edit POV) Enter belongs to the tools: rename, accept,
+            // box-select and placement commit. only `/` opens chat there.
+            // without chrome either key works, matching the play client.
+            const opensChat = e.key === '/' || (e.key === 'Enter' && !editorChromeVisible(useEditor.getState()));
             if (opensChat && !useChatPanel.getState().isOpen) {
                 e.preventDefault();
                 useChatPanel.getState().open({ seed: e.key === '/' ? '/' : '' });
@@ -273,7 +277,7 @@ function EditUI() {
                 <div className="flex-1 relative overflow-hidden flex flex-col">
                     <Viewport />
 
-                    {/* debug dashboard is vanilla dashcat mounted straight to
+                    {/* debug dashboard is plain DOM mounted straight to
                         the DOM (client/ui/dashboard.ts), toggled by ` via the
                         `debugOpen` store bit — nothing to render here. */}
 

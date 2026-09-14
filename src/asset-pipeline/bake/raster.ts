@@ -45,6 +45,10 @@ export type Raster = {
     scaleTo(src: RasterImage | RasterCanvas, w: number, h: number): RasterCanvas;
     /** raw rgba pixels of a surface (whole area). */
     canvasPixels(c: RasterCanvas): Uint8ClampedArray;
+    /** a new w x h surface holding `rgba` verbatim (straight alpha, no
+     *  premultiply round trip), the inverse of `canvasPixels`. For pixels the
+     *  bake computed itself, such as mip levels, which have no image to draw. */
+    putPixels(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): RasterCanvas;
     /** encode a surface to png bytes. */
     encodePng(c: RasterCanvas): Promise<Uint8Array>;
 };

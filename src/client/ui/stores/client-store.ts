@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import type { PlayerId } from '../../../core/client';
 import type * as Debug from '../../../core/debug';
 import type { RoomInfo } from '../../../core/protocol';
+import type { Renderer } from '../../../render/backend';
 import type { InputManager } from '../../input';
 import type { ClientRoom } from '../../rooms';
 
@@ -37,7 +38,7 @@ export type ClientStore = {
     setInputMode: (mode: InputMode) => void;
 
     // debug dashboard, backtick toggles `debugOpen`. the dashboard itself is
-    // vanilla dashcat (client/ui/dashboard.ts), driven off this bit; the
+    // plain DOM (client/ui/dashboard.ts), driven off this bit; the
     // gpucat Inspector overlay is shown alongside it while open.
     debugOpen: boolean;
     setDebugOpen: (open: boolean) => void;
@@ -48,10 +49,15 @@ export type ClientStore = {
     showGpucatInspector: boolean;
     setShowGpucatInspector: (show: boolean) => void;
 
-    /** global client-tick metrics (state.metrics on EngineClient).
-     *  measured across all rooms, useful for spotting whole-frame regressions. */
-    clientGlobalMetrics: Debug.Metrics | null;
-    setClientGlobalMetrics: (m: Debug.Metrics | null) => void;
+    /** the client's frame profiler (state.profiler on EngineClient): one ring of
+     *  per-frame span trees for the page, covering every room the loop touches. */
+    clientProfiler: Debug.Profiler | null;
+    setClientProfiler: (profiler: Debug.Profiler | null) => void;
+
+    /** the render backend (state.renderer on EngineClient), once the device
+     *  handshake has picked one; the debug dashboard reads its atlases. */
+    renderer: Renderer | null;
+    setRenderer: (renderer: Renderer | null) => void;
 
     /** every ClientRoom the engine is currently observing, keyed by playerId.
      *  mirrored from `Rooms.rooms` via `setRoom` / `removeRoom`. The map identity
@@ -95,8 +101,11 @@ export const useClient = create<ClientStore>((set) => ({
     showGpucatInspector: false,
     setShowGpucatInspector: (showGpucatInspector) => set({ showGpucatInspector }),
 
-    clientGlobalMetrics: null,
-    setClientGlobalMetrics: (clientGlobalMetrics) => set({ clientGlobalMetrics }),
+    clientProfiler: null,
+    setClientProfiler: (clientProfiler) => set({ clientProfiler }),
+
+    renderer: null,
+    setRenderer: (renderer) => set({ renderer }),
 
     rooms: new Map(),
     setRoom: (playerId, room) =>

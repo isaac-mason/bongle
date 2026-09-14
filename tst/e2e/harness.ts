@@ -12,7 +12,8 @@
 //
 // usage:
 //   const harness = await createTestHarness((root) => {
-//       block('stone', { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+//       const stoneTile = tile('stone', { src: 'textures/stone.png' });
+//       block('stone', { model: () => ({ type: 'cube', tiles: { all: stoneTile } }) });
 //       const Gameplay = trait('gameplay', {}, { persist: false });
 //       script(Gameplay, 'session', (ctx) => onJoin(ctx, ...));
 //
@@ -106,7 +107,8 @@ type StoreSnap = {
 };
 
 const STORE_NAMES = [
-    'blockTextures',
+    'tiles',
+    'textures',
     'blocks',
     'models',
     'traits',

@@ -20,8 +20,6 @@
  */
 
 import type { Config } from '../../os/interface';
-import { recordConfig } from './capture/module-scope';
-import { declare, registry } from './registry';
 
 export type { Config };
 
@@ -67,32 +65,3 @@ export function serverMaxPlayers(c: Config): number | null {
     return c.server?.maxPlayers ?? DEFAULT_MAX_PLAYERS;
 }
 
-/**
- * declare per-game config. call once at module scope, before
- * scripts/traits/etc. only the first call wins, a second call throws so
- * conflicts don't sit hidden.
- */
-export function config(c: Config): Config {
-    // truthy narrows away `false` and `undefined`, leaving the { maxPlayers } arm.
-    const server = c.server;
-    if (server) {
-        const maxPlayers = server.maxPlayers;
-        if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > HARD_MAX_PLAYERS_PER_ROOM) {
-            throw new Error(
-                `config({ server: { maxPlayers } }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`,
-            );
-        }
-    }
-    // The payload is the CALLER'S OWN object, so unlike every other kind there is
-    // nothing for the engine to mint an identity for — `config()` hands `c` straight
-    // back. It still goes through `declare` so the singleton is stored, hashed and
-    // change-detected exactly like the rest; the handle is bookkeeping nobody reads.
-    declare(
-        registry.config,
-        CONFIG_ID,
-        () => c,
-        (def) => ({ id: CONFIG_ID, dependency: { registry: 'config' as const, id: CONFIG_ID }, def }),
-    );
-    recordConfig(CONFIG_ID);
-    return c;
-}

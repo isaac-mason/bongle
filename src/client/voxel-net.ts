@@ -133,6 +133,11 @@ function applyOneChunkFull(
 
     Voxels.resolveChunk(chunk, voxels.registry);
     Voxels.markChunkDirty(voxels, chunk);
+    // server light lands here WITHOUT going through propagateAllLight, so the
+    // light volume would otherwise never hear about it. Apron-fanned: this
+    // chunk's cells sit in its neighbours' padded bake regions, so their shared
+    // boundary planes are stale until they rebake too.
+    Voxels.markLightVolumeDirty(voxels, chunk);
     dirtyAllNeighbors(voxels, chunk);
 }
 
@@ -268,13 +273,16 @@ export function applyChunkOps(voxels: Voxels.Voxels, message: Protocol.VoxelChun
 
         chunk.version++;
         Voxels.markChunkDirty(voxels, chunk);
+        Voxels.markLightVolumeDirty(voxels, chunk);
     }
 }
 
 function dirtyTouchedNeighbors(voxels: Voxels.Voxels, entry: ChunkCoord, faces: number): void {
     const dirty = (dx: number, dy: number, dz: number): void => {
         const c = voxels.chunks.get(Voxels.chunkKey(entry.cx + dx, entry.cy + dy, entry.cz + dz));
-        if (c) Voxels.markChunkDirty(voxels, c);
+        if (!c) return;
+        Voxels.markChunkDirty(voxels, c);
+        voxels.dirty.lightVolume.add(c);
     };
     if (faces & 1) dirty(-1, 0, 0);
     if (faces & 2) dirty(1, 0, 0);
@@ -293,6 +301,7 @@ export function applyChunkLight(voxels: Voxels.Voxels, message: Protocol.VoxelCh
     chunk.version++;
 
     Voxels.markChunkDirty(voxels, chunk);
+    Voxels.markLightVolumeDirty(voxels, chunk);
     dirtyAllNeighbors(voxels, chunk);
 }
 
@@ -333,6 +342,10 @@ export function applyChunkLightDelta(voxels: Voxels.Voxels, message: Protocol.Vo
 
     chunk.version++;
     Voxels.markChunkDirty(voxels, chunk);
+    // this chunk's own tile, plus the PRECISE apron below. `neighbourCellMask`
+    // already says which neighbours the changed cells reach, so a delta costs
+    // 1-7 rebakes rather than the blanket 27 a whole-chunk relight implies.
+    voxels.dirty.lightVolume.add(chunk);
 
     for (let i = 0; i < 27; i++) {
         if (i === 13) continue;
@@ -341,6 +354,11 @@ export function applyChunkLightDelta(voxels: Voxels.Voxels, message: Protocol.Vo
         const dy = (((i / 3) | 0) % 3) - 1;
         const dz = ((i / 9) | 0) - 1;
         const nc = voxels.chunks.get(Voxels.chunkKey(message.cx + dx, message.cy + dy, message.cz + dz));
-        if (nc) Voxels.markChunkDirty(voxels, nc);
+        if (nc) {
+            Voxels.markChunkDirty(voxels, nc);
+            // a neighbour's lattice reads one cell into this chunk, so its
+            // shared boundary plane is stale even though its own light is not.
+            voxels.dirty.lightVolume.add(nc);
+        }
     }
 }

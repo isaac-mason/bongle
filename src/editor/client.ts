@@ -23,6 +23,7 @@ import {
 import * as ClientChat from '../client/chat';
 import type { EngineClient } from '../client/client';
 import {
+    getCursor,
     isKeyDown,
     isKeyJustDown,
     isModDown,
@@ -31,7 +32,7 @@ import {
     type MouseKeyboardInput,
 } from '../client/input';
 import { type ClientRoom, resolveRoomCamera } from '../client/rooms';
-import { useClient } from '../client/ui/stores/client-store';
+import { script } from '../core/registry';
 import { addTrait, getNodeById, getTrait, hasTrait, removeTrait } from '../core/scene/scene-tree';
 import {
     type ClientContext,
@@ -43,7 +44,6 @@ import {
     onPrePhysicsStep,
     onTick,
     type ScriptContext,
-    script,
 } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
@@ -61,8 +61,8 @@ import { isInputFocused } from './input';
 import { activeBlockKeyOf } from './inventory';
 import { lensOf } from './lens';
 import * as NodeBodies from './node-bodies';
-import { createPointerState, disposePointerState, type PointerState, pointerFlush } from './pointer-state';
 import { parsePattern } from './scene/pattern';
+import { playDeselected } from './sounds';
 import { findCategoryByTool, TOOL_CATEGORIES } from './tool-categories';
 import { clearBoxSelect, updateBoxSelect } from './tools/box-select';
 import { createBrushState, updateBrush } from './tools/brush-build';
@@ -175,7 +175,7 @@ script(
                 hideVisuals(s.visuals, transform);
                 return;
             }
-            showVisuals(s.visuals);
+            showVisuals(s.visuals, transform);
 
             // the active POV camera, resolved once per frame: tools read it for
             // raycasts, nudge basis and projection, and the gizmo is patched with it
@@ -188,7 +188,7 @@ script(
 
             NodeBodies.update(s.nodeBodies, room.physics, room.scene, store, client.state!.resources);
             updateWorldVisuals(s.visuals, s);
-            updateHover(s.pointer, camera, ctx, store);
+            updateHover(client.input.mouseKeyboard, camera, ctx, store);
 
             // force-release any active grab when we leave transform/grab. covers
             // tool switches and transformMode flips between frames, when
@@ -210,7 +210,6 @@ script(
                     transform,
                     s.visuals.pivot,
                     s.visuals.selection,
-                    s.pointer,
                     camera,
                 );
                 redrawInspectMesh(s.visuals, s, time);
@@ -243,7 +242,6 @@ type Session = {
     client: ClientContext;
     room: ClientRoom;
     store: EditRoomStoreApi;
-    pointer: PointerState;
     transform: TransformTool.TransformToolState;
     nodeBodies: NodeBodies.NodeBodies;
     visuals: Visuals;
@@ -259,7 +257,6 @@ function openSession(ctx: ScriptContext): Session {
     const client = ctx.client!;
     const room = client.room!;
     const canvas = client.state!.renderer.canvas;
-    const pointer = createPointerState(canvas);
 
     // forward-ref: the store references the transform tool in its closures
     // (paste/cut, placement pivot, ...), and the gizmo closures inside the tool
@@ -295,7 +292,6 @@ function openSession(ctx: ScriptContext): Session {
         client,
         room,
         store,
-        pointer,
         transform,
         nodeBodies,
         visuals: initVisuals(client.render.scene),
@@ -311,7 +307,6 @@ function closeSession(s: Session): void {
     useEditor.getState().registerEditRoomStore(s.room, null);
     NodeBodies.dispose(s.nodeBodies, s.room.physics);
     TransformTool.disposeTransformTool(s.transform);
-    disposePointerState(s.client.state!.renderer.canvas, s.pointer);
     disposeVisuals(s.visuals, s.client.render.scene);
 }
 
@@ -320,11 +315,16 @@ function povCamera(s: Session): PerspectiveCamera | null {
     return resolveRoomCamera(s.client.state!.renderer.camera, s.room) as PerspectiveCamera | null;
 }
 
-/** editor visuals + tools only run when the POV is the editor's camera. for a
- *  play room that means the lens is up AND the user is on the inspect-client
- *  sub-tab (client.subject is the lens); for an edit room the player node IS
- *  the editor camera. */
+/** editor visuals + tools only run when this room is the active room AND the POV
+ *  is the editor's camera. for a play room that means the lens is up AND the
+ *  user is on the inspect-client sub-tab (client.subject is the lens); for an
+ *  edit room the player node IS the editor camera.
+ *
+ *  an inactive room's Input reads zero structurally (the engine routes DOM
+ *  events only into the active room), so the active-room check here is about
+ *  visuals and the gizmo, not about clicks leaking across rooms. */
 function editorViewActive(room: ClientRoom): boolean {
+    if (room.client.state!.rooms.activePlayerId !== room.playerId) return false;
     const lens = lensOf(room);
     return room.playerMode === 'edit' || (lens !== null && room.client.subject === lens.subject);
 }
@@ -385,10 +385,15 @@ function hideVisuals(v: Visuals, transform: TransformTool.TransformToolState): v
     setSelectionMeshesVisible(v.selection, false);
     const helper = transform.gizmo.getHelper?.();
     if (helper) (helper as { visible: boolean }).visible = false;
+    // the gizmo owns its own canvas pointer listeners (gpucat TransformControls),
+    // outside the engine's per-room input routing. a hidden helper still hit-tests,
+    // so disable it too or a play-room drag across a handle moves an edit-room node.
+    transform.gizmo.enabled = false;
 }
 
-function showVisuals(v: Visuals): void {
+function showVisuals(v: Visuals, transform: TransformTool.TransformToolState): void {
     setSelectionMeshesVisible(v.selection, true);
+    transform.gizmo.enabled = true;
 }
 
 /** the world-space overlays that follow the scene rather than the tool: prefab
@@ -456,14 +461,15 @@ function initStrokes(): Strokes {
 
 /* ── hover: where the pointer's ray lands, published to the store each frame ── */
 
-/** always active regardless of tool. pointer.ndcX/Y is auto-frozen to (0,0)
+/** always active regardless of tool. the cursor's ndc is pinned to (0,0)
  *  under pointer lock, so this implicitly fires from the crosshair. the hover
  *  AABB hugs the block's collider shape (slabs, stairs, fences) rather than the
  *  full cell; cube colliders and the synthesized air-mode hover use the unit
  *  cube. */
-function updateHover(pointer: PointerState, camera: PerspectiveCamera, ctx: ScriptContext, store: EditRoomStoreApi): void {
-    unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
-    unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
+function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: ScriptContext, store: EditRoomStoreApi): void {
+    const cursor = getCursor(mk);
+    unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
+    unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
     vec3.subtract(_rayDir, _farWorld, _nearWorld);
     vec3.normalize(_rayDir, _rayDir);
     raycastVoxels(
@@ -561,9 +567,6 @@ function updateShortcuts(
     // held modifier doesn't trigger letter-key tool shortcuts.
     if (isModDown(mk)) return;
 
-    // backtick: toggle the debug dashboard
-    if (isKeyJustDown(mk, 'Backquote')) useClient.getState().toggleDebugOpen();
-
     // tool category chord (V/M/B + digit jump, tap to cycle)
     if (sc.heldCategory === null) {
         for (const cat of TOOL_CATEGORIES) {
@@ -607,16 +610,14 @@ function updateShortcuts(
     // library toggle (E)
     if (isKeyJustDown(mk, LIBRARY_KEYS.toggleLibrary)) store.getState().toggleLibrary();
 
-    // hotbar 1..9 (suppressed while a chord prefix is held)
+    // hotbar 1..9 (suppressed while a chord prefix is held). binding a hovered
+    // library tile to a slot is the library's own DOM handler (ui/library.tsx);
+    // it stops the event before it reaches the engine, so a digit read here is
+    // always a plain slot select.
     if (sc.heldCategory === null) {
         for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
             if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
-                const s = store.getState();
-                if (s.libraryOpen && s.hoveredInventoryItem) {
-                    useEditor.getState().setHotbarSlot(i, s.hoveredInventoryItem);
-                } else {
-                    s.setActiveSlot(i);
-                }
+                store.getState().setActiveSlot(i);
                 break;
             }
         }
@@ -667,47 +668,45 @@ function updateGrabRotate(s: Session): void {
 /* ── the voxel tools and the keys that act on a selection ── */
 
 function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
-    const { store, ctx, pointer, client, room, nodeBodies, transform, strokes } = s;
+    const { store, ctx, client, room, nodeBodies, transform, strokes } = s;
     const mk = client.input.mouseKeyboard;
     const { activeTool } = store.getState();
 
     if (activeTool === 'build') {
-        updateBuild(store, ctx, pointer, client.input, ctx.voxels, transform, camera);
+        updateBuild(store, ctx, client.input, ctx.voxels, transform, camera);
     }
     if (activeTool === 'box-select') {
         const boxNudge = !isInputFocused() ? readNudgeDelta(client.input, camera.quaternion) : null;
         const boxEnter = !isInputFocused() && isKeyJustDown(mk, 'Enter');
-        updateBoxSelect(store, ctx, pointer, client.input, room.physics, nodeBodies, boxNudge, boxEnter);
+        updateBoxSelect(store, ctx, client.input, room.physics, nodeBodies, boxNudge, boxEnter);
     }
     if (activeTool === 'magic-select') {
-        updateMagicSelect(store, pointer, client.input, ctx.voxels, ctx.blocks);
+        updateMagicSelect(store, ctx, client.input, ctx.voxels, ctx.blocks);
     }
     if (activeTool === 'lasso-select') {
-        updateLassoSelect(store, pointer, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.scene);
+        updateLassoSelect(store, ctx, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.scene);
     }
     // right-click context menu for dedicated selection tools. inspect handles its
     // own inside updateInspect; build / paint / brush / smooth / elevation +
     // transform use right-click for tool semantics (erase, place commit).
     if (activeTool === 'box-select' || activeTool === 'magic-select' || activeTool === 'lasso-select') {
-        openViewportContextMenu(store, client, room, ctx, nodeBodies, pointer, camera);
+        openViewportContextMenu(store, client, room, ctx, nodeBodies, camera);
     }
     if (activeTool === 'brush-select') {
-        updateBrushSelect(strokes.brushSelect, store, ctx, pointer, client.input, ctx.voxels);
+        updateBrushSelect(strokes.brushSelect, store, ctx, client.input, ctx.voxels);
     }
     if (activeTool === 'paint') {
-        updatePainter(strokes.paint, store, ctx, pointer, client.input, ctx.voxels);
+        updatePainter(strokes.paint, store, ctx, client.input, ctx.voxels);
     }
     if (activeTool === 'brush') {
-        updateBrush(strokes.brush, store, ctx, pointer, client.input, ctx.voxels);
+        updateBrush(strokes.brush, store, ctx, client.input, ctx.voxels);
     }
     if (activeTool === 'smooth') {
-        updateSmooth(strokes.smooth, store, ctx, pointer, client.input, ctx.voxels);
+        updateSmooth(strokes.smooth, store, ctx, client.input, ctx.voxels);
     }
     if (activeTool === 'elevation') {
-        updateElevation(strokes.elevation, store, ctx, pointer, client.input, ctx.voxels);
+        updateElevation(strokes.elevation, store, ctx, client.input, ctx.voxels);
     }
-
-    pointerFlush(pointer);
 }
 
 /** R resets / cancels, Escape cascades, F / Shift+F fill / replace with the
@@ -747,6 +746,7 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
             clearLassoStroke(store);
         } else if (hasSelection) {
             store.setState({ selection: Selection.create(), inspectedVoxel: null });
+            playDeselected(s.ctx);
         } else if (hasInspectedVoxel) {
             store.setState({ inspectedVoxel: null });
         } else {

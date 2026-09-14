@@ -47,21 +47,6 @@ export function prefabIconRelPath(prefabId: string): string {
     return `prefab-icons/${encodeURIComponent(prefabId)}.png`;
 }
 
-/** Inverse of `prefabIconRelPath`: the prefab id a baked icon path belongs to,
- *  or null when the path isn't one. Takes the resources/client-relative form or
- *  the project-relative one the fs watcher reports. */
-export function prefabIdFromIconPath(path: string): string | null {
-    const rel = path.startsWith('resources/client/') ? path.slice('resources/client/'.length) : path;
-    if (!rel.startsWith('prefab-icons/') || !rel.endsWith('.png')) return null;
-    const encoded = rel.slice('prefab-icons/'.length, -'.png'.length);
-    if (!encoded || encoded.includes('/')) return null;
-    try {
-        return decodeURIComponent(encoded);
-    } catch {
-        return null;
-    }
-}
-
 /** Render one prefab into an RGBA8 icon tile, in-browser. Returns null when the
  *  prefab id is unknown or the instantiated content is empty (nothing to draw). */
 export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): Promise<PrefabIcon | null> {
@@ -138,22 +123,14 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         // unlit for the flat icon read.
         for (const [meshTrait] of query(room.scene, [MeshTrait])) {
             meshTrait.unlit = true;
-            meshTrait._version++;
         }
         for (const [vmTrait] of query(room.scene, [VoxelMeshTrait])) {
             vmTrait.unlit = true;
         }
 
         // model + voxel-mesh visuals (register cull entries; offline pass draws all).
-        MeshVisuals.update(
-            room.modelVisuals,
-            deps.modelResources.batch,
-            deps.modelResources,
-            deps.resources,
-            room.visibility,
-            room.voxels,
-        );
-        VoxelMeshVisuals.update(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.voxels, room.visibility);
+        MeshVisuals.update(room.modelVisuals, deps.modelResources.batch, deps.modelResources, deps.resources, room.visibility);
+        VoxelMeshVisuals.update(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
 
         // ── frame + render ──
         const aabb = computeSceneAabb(room, deps);

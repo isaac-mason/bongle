@@ -1,5 +1,6 @@
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from '../../../../icons';
+import { termsMatch } from '../../../core/asset-meta';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
 /**
@@ -10,12 +11,15 @@ import { Popover, PopoverContent, PopoverTrigger } from './popover';
  * underneath the label in a smaller, dimmer mono font, for displaying the
  * stable id beneath a human-readable name. `leading` is an optional
  * thumbnail/icon shown before the label. `badge` is an optional trailing label
- * (e.g. "(missing)").
+ * (e.g. "(missing)"). `keywords` are extra words the search hits (an asset's
+ * tags); the query is matched against label, sublabel and keywords together,
+ * every word of it somewhere, the rule `assetMatches` applies everywhere.
  */
 export type SearchableSelectItem<T extends string | number = string> = {
     id: T;
     label: string;
     sublabel?: string;
+    keywords?: readonly string[];
     leading?: ReactNode;
     badge?: ReactNode;
     disabled?: boolean;
@@ -67,9 +71,9 @@ export function SearchableSelect<T extends string | number = string>({
     const [activeIndex, setActiveIndex] = useState(0);
 
     const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
+        const q = query.trim();
         if (!q) return items;
-        return items.filter((it) => it.label.toLowerCase().includes(q));
+        return items.filter((it) => termsMatch([it.label, it.sublabel ?? '', ...(it.keywords ?? [])], q));
     }, [items, query]);
 
     useEffect(() => {
@@ -169,7 +173,7 @@ const DefaultSelectTrigger = forwardRef<HTMLButtonElement, ComponentProps<'butto
             className={`flex items-center justify-between gap-1 w-full bg-surface-muted border border-border px-1.5 py-0.5 text-[10px] font-mono text-fg outline-none hover:border-fg-muted cursor-pointer ${className ?? ''}`}
         >
             <span className="truncate">{label}</span>
-            <ChevronDown size={10} className="shrink-0 text-fg-muted" />
+            <ChevronDown size={12} className="shrink-0 text-fg-muted" />
         </button>
     ),
 );

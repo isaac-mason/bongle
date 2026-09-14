@@ -21,15 +21,14 @@
 // crashcat broadphase for editor node bodies.
 
 import type { Input } from '../../client/input';
-import { isKeyDown } from '../../client/input';
+import { isKeyDown, isMouseJustDown } from '../../client/input';
 import type { Physics } from '../../core/physics/physics';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { EditRoomStoreApi, SelectionBehavior, SelectTarget } from '../edit-room-store';
 import type { NodeBodies } from '../node-bodies';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown } from '../pointer-state';
 import { rebuildNodeSelection } from '../scene/node-selection';
+import { playAnchored, playSelected } from '../sounds';
 
 // scratch region used to host the box's voxel rasterisation when querying
 // nodes via origin-in-selection (kept across commits to skip the alloc).
@@ -51,7 +50,6 @@ export function clearBoxSelect(store: EditRoomStoreApi): void {
 export function updateBoxSelect(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    pointer: PointerState,
     input: Input,
     physics: Physics | null,
     nodeBodies: NodeBodies | null,
@@ -92,6 +90,7 @@ export function updateBoxSelect(
             store.setState({
                 boxSelect: { cornerA: [...after.cursor!], previewB: [...after.cursor!], locked: true },
             });
+            playAnchored(ctx);
         } else if (after.boxSelect.previewB) {
             const mk = input.mouseKeyboard;
             const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
@@ -103,7 +102,7 @@ export function updateBoxSelect(
     }
 
     // ── mouse-driven flow ──────────────────────────────────────────
-    const justDown = pointerJustDown(pointer, input);
+    const justDown = isMouseJustDown(input.mouseKeyboard, 'left');
 
     if (!justDown) {
         // update preview each frame so the overlay tracks the cursor (unless keyboard-locked)
@@ -126,6 +125,7 @@ export function updateBoxSelect(
         store.setState({
             boxSelect: { cornerA: [hv[0], hv[1], hv[2]], previewB: [hv[0], hv[1], hv[2]], locked: false },
         });
+        playAnchored(ctx);
     } else {
         // second click, commit selection.
         // when locked (keyboard-driven), use the nudged previewB; otherwise use hover voxel.
@@ -185,4 +185,5 @@ export function commitBoxSelect(
         selection: next,
         boxSelect: undefined,
     });
+    playSelected(ctx, selectionBehavior === 'add');
 }

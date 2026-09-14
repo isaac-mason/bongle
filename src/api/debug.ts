@@ -1,4 +1,4 @@
-import type { Panel, PanelOptions } from 'dashcat';
+import type { Panel, PanelOptions } from '../client/debug';
 import * as Debug from '../core/debug';
 import { onDispose, type ScriptContext } from '../core/scene/scripts';
 
@@ -67,7 +67,7 @@ export function error(ctx: ScriptContext, ...args: unknown[]): void {
 /**
  * open a floating debug panel on the shared dashboard, scoped to this script: it
  * is closed automatically when the script instance disposes (room teardown, node
- * removal, hot-reload), so game debug UI can't leak. the returned dashcat `Panel`
+ * removal, hot-reload), so game debug UI can't leak. the returned `Panel`
  * takes the full control surface — `add` (options), `monitor`, `graph`, `log`,
  * `stat`, `tabs`, etc. — alongside the engine's panels.
  *

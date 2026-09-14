@@ -68,12 +68,14 @@ function countLiquidFaces(mesh: ChunkMeshResult | null, pass: 'opaque' | 'transl
     return countCubeFaces(mesh, pass);
 }
 
-/** decode the Y component of a corner (0..3) of a quad. quad header bytes
- *  0..11 of u32[0..2] are [x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3] at 1/16 voxel. */
+/** decode the Y component of a corner (0..3) of a quad. quad header halves 0..11
+ *  of u32[0..5] are [x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3], each a u16 encoding
+ *  `(voxels + 8) * 2048`. */
 function cornerY(quads: Uint32Array, quadIdx: number, corner: number): number {
-    const u32 = quads[quadIdx * QUAD_STRIDE_U32S + ((corner * 3 + 1) >> 2)]!;
-    const byte = (u32 >>> (((corner * 3 + 1) & 3) * 8)) & 0xff;
-    return byte / 16;
+    const halfIdx = corner * 3 + 1;
+    const word = quads[quadIdx * QUAD_STRIDE_U32S + (halfIdx >> 1)]!;
+    const half = (word >>> ((halfIdx & 1) * 16)) & 0xffff;
+    return half / 2048 - 8;
 }
 
 function maxLiquidVertexY(mesh: ChunkMeshResult, pass: 'opaque' | 'translucent'): number {

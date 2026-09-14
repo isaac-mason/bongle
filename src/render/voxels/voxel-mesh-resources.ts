@@ -19,11 +19,10 @@
 //
 // CPU frustum cull: voxel-mesh-visuals reads each instance's own
 // `cull.visible` (written by the room culler). per-corner
-// light lives in the trailing 4 u32 of each quad's stride-14 slot in
+// light is sampled from the GPU light volume per instance, not baked into
 // `meshQuads`, written by `meshChunk`'s `emitQuadLight*` helpers.
 
 import {
-    type ArrayTexture,
     add,
     BufferLifecycle,
     cameraProjectionMatrix,
@@ -54,7 +53,7 @@ import {
     vertexIndex,
 } from 'gpucat';
 import type { Vec3 } from 'math';
-import { QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { FLAGS_OFFSET, META_OFFSET, QUAD_META_DIAG_FLIP_BIT, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
 import { shadeTinted } from '../dsl/shade';
 import type { TimeResources } from '../time';
@@ -66,8 +65,9 @@ import {
     decodeQuadCorner,
     decodeQuadFlags,
     makePassMaterial,
+    POS_DECODE_ORIGIN,
+    POS_DECODE_SCALE,
     pickCornerIdx,
-    unpackVoxelLight,
 } from './voxel-material';
 
 // ── gpu structs ─────────────────────────────────────────────────────
@@ -77,10 +77,6 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
     tint: d.vec4f,
     /** transient overlay, rgb is the colour, a the strength (lerp). */
     flash: d.vec4f,
-    /** per-instance light floor [sky, r, g, b] sampled at the instance
-     *  origin. combined as a floor on the per-corner `meshLight` so a
-     *  moving instance never goes darker than its origin cell. */
-    light: d.vec4f,
     glow: d.f32,
     /** 0 = lit, 1 = bypass all lighting (f32 so the shader mixes). */
     unlit: d.f32,
@@ -360,14 +356,11 @@ export type VoxelMeshResources = {
 
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
+import { bindLightVolume, sampleWorldLight } from './voxel-light-sample';
+import type { VoxelTextures } from './voxel-textures';
 
-export function init(
-    atlas: ArrayTexture,
-    texAnimBuffer: GpuBuffer<any>,
-    time: TimeResources,
-    env: EnvironmentResources,
-): VoxelMeshResources {
-    const material = createBakedMeshMaterial(atlas, texAnimBuffer, time.elapsedTime, env);
+export function init(textures: VoxelTextures, time: TimeResources, env: EnvironmentResources): VoxelMeshResources {
+    const material = createBakedMeshMaterial(textures, time.elapsedTime, env);
     const batch = createVoxelMeshBatch(material);
     return { material, batch };
 }
@@ -379,12 +372,7 @@ export function dispose(resources: VoxelMeshResources): void {
 
 // ── material ────────────────────────────────────────────────────────
 
-function createBakedMeshMaterial(
-    atlas: ArrayTexture,
-    texAnimBuffer: GpuBuffer<any>,
-    elapsedTime: Node<d.f32>,
-    env: EnvironmentResources,
-): Material {
+function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f32>, env: EnvironmentResources): Material {
     // per-name storage bindings
     const meshQuads = storage('meshQuads', d.array(d.u32), 'read');
     const instanceDataStorage = storage('instanceData', d.array(ModelInstance), 'read');
@@ -412,17 +400,14 @@ function createBakedMeshMaterial(
     const realQuadId = add(quadStart, drawnQuadId).toVar('realQuadId');
 
     const headerBase = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('quadHeaderBase');
-    const flags = index(meshQuads, add(headerBase, u32(8))).toVar('qdFlags');
+    const flags = index(meshQuads, add(headerBase, u32(FLAGS_OFFSET))).toVar('qdFlags');
 
     const { texIndex, animType } = decodeQuadFlags(flags);
 
-    // diagFlip is written by meshChunk's per-quad emitQuadLight* helpers
-    // (Sodium hierarchical compare) into corner-0's light word at bit 29.
-    // Pull it before picking the corner since it controls the triangulation
-    // diagonal.
-    const lightBase = add(headerBase, u32(QUAD_LIGHT_OFFSET)).toVar('lightBase');
-    const corner0Light = index(meshQuads, lightBase).toVar('corner0Light');
-    const diagFlip = corner0Light.shiftRight(u32(29)).bitwiseAnd(u32(1)).toVar('diagFlip');
+    // diagFlip is baked by meshChunk into the meta word (bit 16). Pull it
+    // before picking the corner since it controls the triangulation diagonal.
+    const meta = index(meshQuads, add(headerBase, u32(META_OFFSET))).toVar('vmMeta');
+    const diagFlip = meta.shiftRight(u32(QUAD_META_DIAG_FLIP_BIT)).bitwiseAnd(u32(1)).toVar('diagFlip');
 
     const cornerIdx = pickCornerIdx(diagFlip, vertInQuad);
     const { chunkLocalByte, uv, modelNormal } = decodeQuadCorner(meshQuads, realQuadId, cornerIdx);
@@ -430,7 +415,7 @@ function createBakedMeshMaterial(
     // matches chunk shader so sub-chunk boundaries within a baked mesh
     // meet seamlessly, the old 1/16 scale left a ~0.0625-voxel gap at
     // every byte=255 corner.
-    const chunkLocal = chunkLocalByte.mul(f32(16.0 / 255.0)).toVar('chunkLocal');
+    const chunkLocal = chunkLocalByte.mul(f32(POS_DECODE_SCALE)).sub(f32(POS_DECODE_ORIGIN)).toVar('chunkLocal');
 
     // chunk-local → model-local → world (before animation)
     const modelLocal = add(subOrigin, chunkLocal).toVar('modelLocal');
@@ -467,20 +452,13 @@ function createBakedMeshMaterial(
     // env-derived sky/sun
     const { sunDirection, sunIntensity, skyBrightness, ambientMinimum } = buildEnvSky(env);
 
-    // per-corner light pulled from the trailing 4 u32 of the quad's
-    // stride-14 slot in `meshQuads`. mirrors chunk path: same packed-byte
-    // layout, same unpack curve. meshChunk's emitQuadLight* helpers write
-    // these directly (Sodium-blended per-corner brightness with diagFlip
-    // in corner-0's bit 29).
-    const cornerLightOffset = add(lightBase, cornerIdx).toVar('cornerLightOffset');
-    const cornerLight = index(meshQuads, cornerLightOffset).toVar('cornerLight');
-    const rawLight = unpackVoxelLight(cornerLight, skyBrightness).toVar('rawLight');
-
-    // per-instance light floor: [sky, r, g, b] sampled at the origin (or
-    // inherited from a ModelTrait ancestor). expand sky→skyBrightness and
+    // per-instance light: [sky, r, g, b] sampled from the GPU light volume at
+    // the instance origin. expand sky->skyBrightness and
     // combine with block RGB the same way `unpackVoxelLight` does so the
     // two paths live on the same scale. max(perCorner, perInstance).
-    const instLight = instParams.field('light').toVar('instLight');
+    // per-instance light floor, sampled in the shader at the instance origin
+    // (where the CPU used to sample it) rather than uploaded per frame.
+    const instLight = sampleWorldLight(bindLightVolume(env), worldMatrix.element(u32(3)).xyz).toVar('instLight');
     const instSkyContrib = vec3f(
         mul(instLight.x, skyBrightness),
         mul(instLight.x, skyBrightness),
@@ -490,10 +468,13 @@ function createBakedMeshMaterial(
 
     const instLitMin = instParams.field('litMin').toVar('instLitMin');
     const litMinFloor = vec3f(instLitMin, instLitMin, instLitMin).toVar('litMinFloor');
-    const voxelLight = max(max(rawLight, instFloor), litMinFloor).toVar('voxelLight');
+    // A block model is an ENTITY: it moves, so per-corner light baked at mesh
+    // time would be wrong the moment it did. The per-instance volume sample is
+    // the only live source, so it IS the light rather than a floor under a
+    // baked value.
+    const voxelLight = max(instFloor, litMinFloor).toVar('voxelLight');
 
     // varyings
-    const vTexIndex = varying(texIndex, 'vmTexIndex').setInterpolation('flat');
     const vUv = varying(uv, 'vmUv');
     const vLight = varying(voxelLight, 'vmLight');
     const vNormal = varying(worldNormal, 'vmNormal');
@@ -504,9 +485,8 @@ function createBakedMeshMaterial(
     const vDither = varying(instParams.field('dither'), 'vmDither').setInterpolation('flat');
 
     const { texColor, light } = buildVoxelFragment(
-        atlas,
-        texAnimBuffer,
-        vTexIndex,
+        textures,
+        texIndex,
         vUv,
         vLight,
         vNormal,

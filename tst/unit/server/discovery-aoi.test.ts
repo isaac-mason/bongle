@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { setPosition, TransformTrait, type TransformTrait as TransformTraitType } from '../../../src/builtins/transform';
 import * as Debug from '../../../src/core/debug';
 import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
+import { block, tile } from '../../../src/core/registry';
 import * as Resources from '../../../src/core/resources';
 import { addChild, addTrait, createNode, getTrait, type Node } from '../../../src/core/scene/scene-tree';
-import { block } from '../../../src/core/voxels/blocks';
 import { CHUNK_SIZE, setBlock } from '../../../src/core/voxels/voxels';
 import { nodeZstd } from '../../../src/node/zstd';
 import * as Discovery from '../../../src/server/discovery';
@@ -29,7 +29,8 @@ const FAKE_CLIENT: Client = 1;
 // solid block for the occupied-chunk cases. imported from src (not 'bongle') so it
 // registers into the same registry instance createTestServer reads.
 const AOI_BLOCK = 'aoi-stone';
-block(AOI_BLOCK, { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+const stoneTex = tile('stone', { src: 'textures/stone.png' });
+block(AOI_BLOCK, { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
 
 function setup() {
     const server = createTestServer({ mode: 'play' });
@@ -52,7 +53,7 @@ function setup() {
 }
 
 function flush(discovery: Discovery.Discovery, rooms: Rooms.Rooms, resources: Resources.Resources) {
-    return Discovery.flush(discovery, rooms, resources, Debug.createMetrics(false));
+    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false));
 }
 
 /** all scene_sync updates for a client across one flush result (default: FAKE_CLIENT). */

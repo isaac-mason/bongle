@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { getWorldPosition, setPosition, TransformTrait } from '../../../src/builtins/transform';
 import * as Debug from '../../../src/core/debug';
 import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
+import { block, tile } from '../../../src/core/registry';
 import * as Resources from '../../../src/core/resources';
 import {
     addChild,
@@ -14,7 +15,6 @@ import {
     reparent,
     setRealm,
 } from '../../../src/core/scene/scene-tree';
-import { block } from '../../../src/core/voxels/blocks';
 import { chunkToRegionCoord, REGION_CHUNKS_PER_AXIS, setBlock, toChunkCoord } from '../../../src/core/voxels/voxels';
 import { nodeZstd } from '../../../src/node/zstd';
 import * as Discovery from '../../../src/server/discovery';
@@ -28,7 +28,8 @@ const FAKE_CLIENT: Client = 1;
 
 // register a solid block once for the fairness suite (global registry singleton).
 const FAIRNESS_BLOCK = 'fairness-stone';
-block(FAIRNESS_BLOCK, { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+const stoneTex = tile('stone', { src: 'textures/stone.png' });
+block(FAIRNESS_BLOCK, { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
 
 /** per-player voxel knowledge for assertions (queue sizes, etc.). */
 function voxelKnowledge(discovery: Discovery.Discovery, client: Client, playerId: number) {
@@ -145,7 +146,7 @@ function takeJoinRoom(net: Net.ServerNet, client: Client) {
 }
 
 function flushUntilQuiet(discovery: Discovery.Discovery, rooms: Rooms.Rooms, resources: Resources.Resources) {
-    return Discovery.flush(discovery, rooms, resources, Debug.createMetrics(false));
+    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false));
 }
 
 /* ── tests ── */

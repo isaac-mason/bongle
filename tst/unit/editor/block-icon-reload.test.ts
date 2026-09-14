@@ -1,15 +1,13 @@
 // @vitest-environment happy-dom
 //
-// ── block-icon atlas reload coalescing ──────────────────────────────────
+// ── block-icon atlas loading ────────────────────────────────────────────
 //
-// The icon bake writes `voxels-icons.png` and `voxels-icons.json` as two
-// separate writes, and the editor fs emits one change event per write — so the
-// edit client calls `reloadBlockIconAtlas` TWICE per bake, the second while the
-// first is still reading. The first read can catch the new png against the
-// previous pass's coords, which leaves a newly-declared block in the palette
-// with no icon; the second notification is the only thing that corrects it.
-// Dropping it (the in-flight guard used to) made that state permanent until the
-// pipeline was restarted by hand.
+// The atlas is a png plus a coords sidecar, written one after the other. The
+// editor never goes looking for that pair: the asset pipeline announces it once
+// both halves are on disk, and the host calls `reloadBlockIconAtlas`. So this
+// module must (a) read nothing on its own — the boot poll it used to run raced
+// the bake's two writes and published a new png against the previous pass's
+// coords — and (b) let the newest read win when two announcements overlap.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditor } from '../../../src/editor/editor-store';
@@ -19,17 +17,17 @@ type Icons = { coords: Record<string, [number, number]>; cols: number; rows: num
 
 const encode = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
 
-/** an editor client whose loader hands back whatever `disk` currently holds, one
- *  macrotask later — the async window the two fs notifications land inside. */
+const ONE_BLOCK: Icons = { coords: { 'game/stone': [0, 0] }, cols: 1, rows: 1, iconPx: 128 };
+const TWO_BLOCKS: Icons = { coords: { 'game/stone': [0, 0], 'game/copper': [1, 0] }, cols: 2, rows: 1, iconPx: 128 };
+
+/** an editor client whose loader hands back whatever `disk` holds when the read
+ *  OPENS, one macrotask later — the async window two announcements land inside. */
 function fakeClient(disk: { icons: Icons }, reads: string[]) {
     return {
         resources: {
             loader: {
                 loadBytes: async (name: string) => {
                     reads.push(name);
-                    // snapshot at read START, not at resolution: a read opened before the
-                    // bake's second write lands sees the sidecar as it was, which is the
-                    // whole reason the second notification has to be honoured.
                     const seen = disk.icons;
                     await new Promise((r) => setTimeout(r, 0));
                     return name.endsWith('.json') ? encode(seen) : new Uint8Array([1, 2, 3]);
@@ -41,28 +39,46 @@ function fakeClient(disk: { icons: Icons }, reads: string[]) {
     };
 }
 
-describe('reloadBlockIconAtlas', () => {
+describe('block icon atlas', () => {
     beforeEach(() => {
         vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:icons', revokeObjectURL: () => {} });
+        useEditor.setState({ blockIconAtlasUrl: null, blockIconCoords: {}, blockIconCols: 0, blockIconRows: 0 });
     });
 
-    it('replays a reload requested while one is in flight', async () => {
-        const oneBlock: Icons = { coords: { 'game/stone': [0, 0] }, cols: 1, rows: 1, iconPx: 128 };
-        const twoBlocks: Icons = { coords: { 'game/stone': [0, 0], 'game/copper': [1, 0] }, cols: 2, rows: 1, iconPx: 128 };
-        const disk = { icons: oneBlock };
+    it('reads nothing until the bake announces an atlas', async () => {
         const reads: string[] = [];
-        loadEditorAssets(fakeClient(disk, reads) as never);
-        await vi.waitFor(() => expect(useEditor.getState().blockIconCoords).toHaveProperty('game/stone'));
+        loadEditorAssets(fakeClient({ icons: ONE_BLOCK }, reads) as never);
 
-        // the png notification: the load starts against the OLD sidecar, exactly as
-        // it does when the bake is mid-way between its two writes.
+        await new Promise((r) => setTimeout(r, 10));
+        expect(reads).toEqual([]);
+        expect(useEditor.getState().blockIconAtlasUrl).toBeNull();
+    });
+
+    it('publishes the atlas the announcement points at', async () => {
+        const reads: string[] = [];
+        loadEditorAssets(fakeClient({ icons: ONE_BLOCK }, reads) as never);
+
         reloadBlockIconAtlas();
-        // the json notification, arriving while that read is still open. This is the
-        // one carrying the new block's tile.
-        disk.icons = twoBlocks;
+
+        await vi.waitFor(() => expect(useEditor.getState().blockIconCoords).toHaveProperty('game/stone'));
+        expect(useEditor.getState().blockIconCols).toBe(1);
+    });
+
+    it('lets the newest read win when two announcements overlap', async () => {
+        const disk = { icons: ONE_BLOCK };
+        loadEditorAssets(fakeClient(disk, []) as never);
+
+        reloadBlockIconAtlas();
+        // a second bake lands while that read is still open: its result is the one
+        // that must survive, whichever order the two reads happen to resolve in.
+        disk.icons = TWO_BLOCKS;
         reloadBlockIconAtlas();
 
         await vi.waitFor(() => expect(useEditor.getState().blockIconCoords).toHaveProperty('game/copper'));
+        expect(useEditor.getState().blockIconCols).toBe(2);
+
+        // and the stale read never publishes behind it.
+        await new Promise((r) => setTimeout(r, 10));
         expect(useEditor.getState().blockIconCols).toBe(2);
     });
 });

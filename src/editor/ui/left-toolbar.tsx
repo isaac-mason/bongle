@@ -1,11 +1,28 @@
 import { useRef, useState } from 'react';
-import { MonitorPlay, ShoppingBag } from '../../../icons';
+import { Debug, ShoppingBag } from '../../../icons';
 import { Button } from '../../client/ui/components';
 import { useClient } from '../../client/ui/stores/client-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
 import { TOOL_CATEGORIES, type ToolCategory, type ToolDef } from '../tool-categories';
 import { Kbd } from './kbd';
+
+/**
+ * the tool's slot digit — the number you press after holding the category key.
+ * A white tag hung off the button's bottom-right corner, outset far enough to
+ * clear the glyph: inside the button it either sat on the icon's own pixels or,
+ * filled in the border colour, fused with the border and lost its edges.
+ *
+ * The outset is why the tool list below carries horizontal padding — `overflow-y`
+ * forces `overflow-x: auto`, so without it the scroll box clips the tag.
+ */
+function SlotBadge({ digit }: { digit: number }) {
+    return (
+        <span className="pointer-events-none absolute right-[-3px] bottom-[-3px] inline-flex h-[12px] min-w-[12px] select-none items-center justify-center bg-fg px-[2px] font-pixel text-[8px] text-desktop leading-none">
+            {digit}
+        </span>
+    );
+}
 
 function ToolButton({
     def,
@@ -45,16 +62,8 @@ function ToolButton({
                 title={showSlot ? `${def.label}  (${categoryKeyLabel}·${slotDigit})` : `${def.label}  (${categoryKeyLabel})`}
                 className="relative"
             >
-                <Icon size={15} />
-                {showSlot && (
-                    <span
-                        className={`absolute bottom-0.5 right-0.5 text-[8px] font-mono leading-none select-none pointer-events-none ${
-                            active ? 'text-on-accent' : 'text-fg-muted'
-                        }`}
-                    >
-                        {slotDigit}
-                    </span>
-                )}
+                <Icon size={24} />
+                {showSlot && <SlotBadge digit={slotDigit} />}
             </Button>
 
             {/* hover popover — fixed so the toolbar's scroll clip can't cut it off */}
@@ -99,7 +108,7 @@ function InventoryButton() {
                 onClick={toggleLibrary}
                 title={`inventory  (${keyLabel})`}
             >
-                <ShoppingBag size={15} />
+                <ShoppingBag size={24} />
             </Button>
             <div className="w-6 h-px bg-border mt-1" />
         </div>
@@ -107,7 +116,7 @@ function InventoryButton() {
 }
 
 // debug dashboard toggle, pinned to the bottom of the strip. mirrors the `
-// backtick chord that opens the same perf/logs panel.
+// backtick key that opens the same perf/logs panel.
 function DebugButton() {
     const debugOpen = useClient((s) => s.debugOpen);
     const toggleDebug = useClient((s) => s.toggleDebugOpen);
@@ -117,7 +126,7 @@ function DebugButton() {
             <div className="w-6 h-px bg-border mb-1" />
             <Kbd size="xs">{'`'}</Kbd>
             <Button size="icon" tone={debugOpen ? 'active' : 'default'} onClick={toggleDebug} title="debug panel  (`)">
-                <MonitorPlay size={15} />
+                <Debug size={24} />
             </Button>
         </div>
     );
@@ -135,7 +144,7 @@ export function LeftToolbar() {
             {/* tools, grouped by category. each group has a small header like
                 "scene v", the category name plus its hotkey. per-tool slot
                 digits appear in the bottom-right corner of each icon. */}
-            <div className="flex flex-col items-stretch gap-1 min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex flex-col items-stretch gap-1 min-h-0 flex-1 overflow-y-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {TOOL_CATEGORIES.map((category: ToolCategory, ci) => {
                     const CategoryIcon = category.icon;
                     return (

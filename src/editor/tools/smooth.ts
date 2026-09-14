@@ -20,8 +20,8 @@ import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
 import type { EditRoomStoreApi } from '../edit-room-store';
-import type { PointerState } from '../pointer-state';
 import { type Mask, testMask } from '../scene/mask';
+import { playBulkEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
@@ -56,11 +56,10 @@ export function updateSmooth(
     state: SmoothState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    pointer: PointerState,
     input: Input,
     voxels: Voxels,
 ): void {
-    advanceBrushStroke(state.brush, store, pointer, input, store.getState().smoothOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, input, store.getState().smoothOptions, (accumulated) => {
         const { iterations, heightmapMask } = store.getState().smoothOptions;
         const { forward, reverse } = runSmooth(voxels, accumulated, iterations, heightmapMask);
         if (forward.length > 0) {
@@ -68,9 +67,11 @@ export function updateSmooth(
                 label: 'smooth',
                 do() {
                     sendOps(ctx, forward);
+                    playBulkEdit(ctx, forward, reverse);
                 },
                 undo() {
                     sendOps(ctx, reverse);
+                    playBulkEdit(ctx, reverse, forward);
                 },
             });
         }

@@ -11,7 +11,7 @@
 //     stable instanceData slot, the resolved modelEntry, this instance's
 //     own frustum-cull entry (`cull`, seeded from the model's local AABB
 //     and registered with the room culler), and the optional ModelTrait
-//     ancestor used as the shared-light home.
+//     ancestor used for inherited visibility.
 //   - per frame: walk alive states, skip when `cull.visible` is false,
 //     write instanceData (transform + params), bucket by (modelEntry,
 //     sourceChunkIdx). then walk buckets, write slotMap entries (packed
@@ -42,9 +42,7 @@ import { Optional, type Src, Up } from '../../core/scene/conditions';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../core/voxels/chunk-mesher';
-import { sampleVoxelLight } from '../../core/voxels/light';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
-import type { Voxels } from '../../core/voxels/voxels';
 import * as Visibility from '../visibility/visibility';
 import { arenaAlloc, arenaFree, arenaWrite } from './voxel-arena';
 import {
@@ -53,6 +51,7 @@ import {
     freeSlot,
     growVoxelMeshBatch,
     growVoxelMeshBuckets,
+    INSTANCE_PARAMS_STRIDE,
     InstanceParams,
     MODEL_INSTANCE_PARAMS_OFFSET,
     MODEL_INSTANCE_STRIDE,
@@ -82,10 +81,7 @@ export type VoxelMeshState = {
      *  Visibility culler at alloc, seeded from the VoxelModel's local AABB.
      *  The culler writes `cull.visible`. */
     cull: Visibility.CullState;
-    /** optional ModelTrait ancestor used as a shared-light home. mirrors
-     *  mesh-visuals: present ⇒ read model.light, absent ⇒ sample voxel
-     *  light at the instance origin. fed into the shader as a floor on the
-     *  per-corner `meshLight` buffer. */
+    /** optional ModelTrait ancestor, for inherited visibility. */
     model: ModelTrait | null;
     /** frame counter for stale-state sweep. */
     lastSeenFrame: number;
@@ -130,17 +126,16 @@ export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree):
 
 // ── update ──────────────────────────────────────────────────────────
 
-export function update(
-    visuals: VoxelMeshVisuals,
-    batch: VoxelMeshBatch,
-    voxels: Voxels,
-    visibility: Visibility.Visibility,
-): void {
+export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibility: Visibility.Visibility): void {
     const q = visuals._query;
     const frameId = ++visuals.frameId;
 
     let instArr = batch.instanceDataBuf.array as Float32Array;
-    let instanceDataDirty = false;
+    // touched-slot span, widened per write and uploaded as ONE range in the draw pack below.
+    // slots come from a free-list allocator so they can scatter; a span then re-sends a few
+    // untouched slots in the middle, still far short of the whole capacity allocation.
+    let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
+    let dirtyMaxSlot = -1;
 
     // ── phase 1: allocate / refresh states ──────────────────────────
     for (const [vmTrait, transformTrait, modelAncestor] of q) {
@@ -231,36 +226,22 @@ export function update(
         if (transformVersion !== state.transformVersionAtUpload) {
             for (let j = 0; j < 16; j++) instArr[slotBase + j] = worldMatrix[j]!;
             state.transformVersionAtUpload = transformVersion;
-            instanceDataDirty = true;
+            if (slot < dirtyMinSlot) dirtyMinSlot = slot;
+            if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
         }
 
         // ── lighting + params, written every visible frame ──
         // per-corner light (`meshLight`, sampled in the VS) is the primary
-        // source. instParams.light is a per-instance floor sampled at the
-        // origin, useful while baked-mesh light is placeholder and for
-        // instances drifting between cells. shared-light home: ModelTrait
-        // ancestor's light if present, else sample the room's voxel light.
-        const light = trait.light;
-        if (state.model !== null) {
-            const src = state.model.light;
-            light[0] = src[0]!;
-            light[1] = src[1]!;
-            light[2] = src[2]!;
-            light[3] = src[3]!;
-        } else {
-            sampleVoxelLight(voxels, worldMatrix[12]!, worldMatrix[13]!, worldMatrix[14]!, light);
-        }
-
         packTo(InstanceParams, instArr, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
             tint: trait.tint,
             flash: trait.flash,
-            light,
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
             dither: trait.dither,
         });
-        instanceDataDirty = true;
+        if (slot < dirtyMinSlot) dirtyMinSlot = slot;
+        if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
 
         // ── bucket by (model entry, source-chunk idx) ─────────────
         const chunkAllocs = entry.chunkAllocs;
@@ -342,8 +323,17 @@ export function update(
     // trim the reused draw array to this frame's active bucket count.
     draws.length = bucketId;
 
-    if (bucketId > 0) batch.slotMapBuf.needsUpdate = true;
-    if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
+    // only [0, firstInstance) of slotMap was written and only that prefix is indexed by the
+    // draws, so upload the prefix rather than the whole capacity-sized allocation.
+    if (bucketId > 0) {
+        batch.slotMapBuf.addUpdateRange(0, firstInstance);
+        batch.slotMapBuf.needsUpdate = true;
+    }
+    if (dirtyMaxSlot >= 0) {
+        const base = dirtyMinSlot * MODEL_INSTANCE_STRIDE_F32;
+        batch.instanceDataBuf.addUpdateRange(base, (dirtyMaxSlot - dirtyMinSlot + 1) * MODEL_INSTANCE_STRIDE_F32);
+        batch.instanceDataBuf.needsUpdate = true;
+    }
 }
 
 // ── dispose ─────────────────────────────────────────────────────────
@@ -403,16 +393,19 @@ function destroyInstance(
     Visibility.remove(visibility, state.cull);
     const slot = state.slot;
     // zero per-slot params so a reused slot doesn't briefly inherit
-    // stale tint/light before the first write lands.
+    // stale tint before the first write lands.
     packTo(InstanceParams, batch.instanceDataBuf.array!, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
         tint: [0, 0, 0, 0],
         flash: [0, 0, 0, 0],
-        light: [0, 0, 0, 0],
         glow: 0,
         unlit: 0,
         litMin: 0,
         dither: 0,
     });
+    batch.instanceDataBuf.addUpdateRange(
+        slot * MODEL_INSTANCE_STRIDE_F32 + MODEL_INSTANCE_PARAMS_OFFSET / 4,
+        INSTANCE_PARAMS_STRIDE / 4,
+    );
     batch.instanceDataBuf.needsUpdate = true;
 
     freeSlot(batch.instanceAllocator, slot);

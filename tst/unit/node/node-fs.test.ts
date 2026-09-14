@@ -24,7 +24,7 @@ describe('openNodeFs + scene conventions', () => {
 
     it('lists scenes recursively with root-relative paths + kind', async () => {
         const fs = openNodeFs(root);
-        const entries = await fs.list(SCENES_DIR, { recursive: true });
+        const entries = await fs.list(SCENES_DIR);
         const files = entries.filter((e) => e.kind === 'file').map((e) => e.path);
         expect(files).toContain('content/scenes/main.scene.json');
         expect(files).toContain('content/scenes/sub/nested.scene.json');
@@ -34,7 +34,7 @@ describe('openNodeFs + scene conventions', () => {
 
     it('round-trips sceneId ↔ path against listed entries', async () => {
         const fs = openNodeFs(root);
-        const ids = (await fs.list(SCENES_DIR, { recursive: true }))
+        const ids = (await fs.list(SCENES_DIR))
             .filter((e) => e.kind === 'file')
             .map((e) => sceneIdFromPath(e.path))
             .filter((id): id is string => id !== null)
@@ -60,6 +60,6 @@ describe('openNodeFs + scene conventions', () => {
 
     it('list of a missing dir is empty, not a throw', async () => {
         const fs = openNodeFs(root);
-        expect(await fs.list('content/nope', { recursive: true })).toEqual([]);
+        expect(await fs.list('content/nope')).toEqual([]);
     });
 });

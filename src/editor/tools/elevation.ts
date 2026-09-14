@@ -23,6 +23,7 @@
 // stroke so the cursor never climbs the hill it's building.
 
 import type { Input } from '../../client/input';
+import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -31,10 +32,9 @@ import type { VoxelOp } from '../blueprint';
 import type { EditRoomStoreApi, ElevationFalloff, ElevationImage, ElevationOptions } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
-import type { PointerState } from '../pointer-state';
-import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../pointer-state';
 import { testMask } from '../scene/mask';
 import { samplePattern } from '../scene/pattern';
+import { playBulkEdit } from '../sounds';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
 import { commitVoxelOps } from '../voxel-edit';
 
@@ -153,14 +153,14 @@ export function updateElevation(
     state: ElevationState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    pointer: PointerState,
     input: Input,
     voxels: Voxels,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
-    const held = pointerHeld(pointer, input);
-    const justUp = pointerJustUp(pointer, input);
-    const cancel = pointerJustRight(input);
+    const mk = input.mouseKeyboard;
+    const justDown = isMouseJustDown(mk, 'left');
+    const held = isMouseDown(mk, 'left');
+    const justUp = isMouseJustUp(mk, 'left');
+    const cancel = isMouseJustDown(mk, 'right');
     const s = store.getState();
     const opts = s.elevationOptions;
     const hv = s.hoverVoxel;
@@ -231,9 +231,11 @@ export function updateElevation(
                 label: 'elevation',
                 do() {
                     sendOps(ctx, forward);
+                    playBulkEdit(ctx, forward, reverse);
                 },
                 undo() {
                     sendOps(ctx, reverse);
+                    playBulkEdit(ctx, reverse, forward);
                 },
             });
         }

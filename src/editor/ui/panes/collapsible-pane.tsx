@@ -48,7 +48,7 @@ export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, chil
                 className="flex items-center justify-between px-2 py-1.5 text-[10px] font-mono font-semibold text-fg-muted uppercase tracking-wide hover:bg-surface-muted cursor-pointer select-none flex-shrink-0 bg-surface-muted"
             >
                 {title}
-                {open ? <Icons.ChevronDown size={11} /> : <Icons.ChevronRight size={11} />}
+                {open ? <Icons.ChevronDown size={12} /> : <Icons.ChevronRight size={12} />}
             </button>
 
             {open && (

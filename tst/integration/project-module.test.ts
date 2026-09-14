@@ -20,11 +20,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { registry, reindexRegistry } from '../../src/core/registry';
-import { CLIENT_TO_SERVER, command } from '../../src/core/rpc';
+import { CLIENT_TO_SERVER } from '../../src/core/rpc';
+import { command } from '../../src/core/registry';
 import { pack } from '../../src/core/scene/pack';
 import { packSceneTree, unpackSceneTree } from '../../src/core/scene/scene-pack';
 import { addChild, addTrait, createNode } from '../../src/core/scene/scene-tree';
-import { trait } from '../../src/core/scene/traits';
+import { trait } from '../../src/core/registry';
 import { createTestServer } from './server-integration-test';
 
 /* ── module-scope declarations for test (a) ── */

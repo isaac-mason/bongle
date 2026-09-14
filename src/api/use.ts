@@ -6,7 +6,7 @@ let _kept = 0;
 /**
  * Keep a handle alive through bundler tree-shaking.
  *
- * `block()` / `model()` / `sound()` / `blockTexture()` register into the
+ * `block()` / `model()` / `sound()` / `tile()` register into the
  * engine's registries when their declaration is evaluated. If a game
  * never references a handle in code (e.g. blocks listed only in a
  * scene's voxel palette, models referenced only by prefab id), prod

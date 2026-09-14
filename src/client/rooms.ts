@@ -26,7 +26,6 @@ import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resou
 import * as Environment from '../render/environment/environment';
 import type * as MeshResourcesNs from '../render/mesh/mesh-resources';
 import * as MeshVisuals from '../render/mesh/mesh-visuals';
-import * as ModelLighting from '../render/model-lighting';
 import type { OfflineRenderer } from '../render/offline';
 import * as Particles from '../render/particles/particles';
 import * as Visibility from '../render/visibility/visibility';
@@ -140,11 +139,23 @@ export type ClientRoom = {
      */
     client: ClientContext;
 
-    /** locally measured client-side metrics (tick, mesh, physics, net) */
-    clientMetrics: Debug.Metrics;
+    /** whether the host has already been told this room is up (see
+     *  `ClientDriver.ready`). Per room, because a host that switched rooms raised
+     *  its loading screen again and needs telling again. */
+    readyReported: boolean;
 
-    /** server-side metrics received via room_metrics messages */
-    serverMetrics: Debug.Metrics;
+    /** seconds this room has spent as the rendered room, counted only until it
+     *  reports ready. A world that streams from the server has no chunks at all
+     *  for the first frames after the join, which is indistinguishable from a game
+     *  that has no voxels — so an empty world is given this long to turn out to be
+     *  a voxel one before it counts as drawn. */
+    renderedTimeS: number;
+
+    /** the server's frame profile for this room, mirrored from `room_frames`
+     *  packets while the panel is subscribed. client-side timing is NOT here:
+     *  there is one client frame loop for the page, so it profiles into the one
+     *  ring on EngineClient. */
+    serverProfiler: Debug.Profiler;
 
     /** client-side log buffer, `log(ctx, ...)` calls in client scripts land here. */
     clientLogs: Debug.Logs;
@@ -172,7 +183,6 @@ export type ClientRoom = {
     /** per-room model lighting, samples voxel light at each visible model's
      *  world-space AABB centroid and writes it into `ModelTrait.light`. Runs
      *  after `Visibility.update` so off-screen models skip the sample. */
-    modelLighting: ModelLighting.ModelLighting;
 
     /** per-room animation state, caches the [AnimatorTrait] query consumed by
      *  `Animation.tick`. */
@@ -664,18 +674,14 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     const syncSnapshots = Replication.createSyncSnapshots();
 
-    // metrics seed from the current debugOpen so rooms created mid-session pick
-    // up the right state; engine-client's subscription flips them on later toggles.
-    const metricsEnabled = useClient.getState().debugOpen;
-
-    const clientMetrics = Debug.createMetrics(metricsEnabled);
-    const serverMetrics = Debug.createMetrics(metricsEnabled);
+    // the mirror seeds from the current debugOpen so rooms created mid-session pick
+    // up the right state; engine-client's subscription flips it on later toggles.
+    const serverProfiler = Debug.createProfiler(useClient.getState().debugOpen);
     const clientLogs = Debug.createLogs();
     const serverLogs = Debug.createLogs();
 
     const particles = Particles.init();
     const visibility = Visibility.init();
-    const modelLighting = ModelLighting.init(nodes);
     const animations = Animation.init(nodes);
 
     const room: ClientRoom = {
@@ -699,13 +705,13 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         playerNode,
         cameraNode,
         client,
-        clientMetrics,
-        serverMetrics,
+        readyReported: false,
+        renderedTimeS: 0,
+        serverProfiler,
         clientLogs,
         serverLogs,
         particles,
         visibility,
-        modelLighting,
         animations,
         input,
         viewport,

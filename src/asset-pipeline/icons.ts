@@ -74,8 +74,11 @@ export type BlockIconAtlasMetadata = {
 export type IconBakePlan = {
     /** the block-icon atlas needs a (re)render. */
     blockAtlasStale: boolean;
-    /** content hash over the block-icon render inputs; written into the sidecar. */
-    blockIconsHash: string;
+    /** content hash over the block-icon render inputs; written into the sidecar,
+     *  and the identity this pass leaves on disk for consumers to compare against
+     *  (`BakedArtifacts.blockIcons`). Null when nothing is renderable — there is
+     *  no atlas to read, so a consumer must not go looking for one. */
+    blockIconsHash: string | null;
     /** prefab ids whose icon needs a (re)render. */
     stalePrefabs: string[];
     /** prefab ids whose icon file should be pruned (no longer registered). */
@@ -85,7 +88,7 @@ export type IconBakePlan = {
 };
 
 export type PlanOpts = {
-    /** content hash of the baked block-texture atlas (`AssetPipeline.run`'s
+    /** content hash of the baked tile atlas (`AssetPipeline.run`'s
      *  `atlasHash`) — block AND prefab icons draw with it, so it's part of both
      *  cache keys. Null when no atlas has been baked. */
     atlasHash: string | null;
@@ -148,11 +151,11 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
     const { atlasHash, cache } = opts;
     const blocks = registry.blockRegistry;
     const states = renderableBlockStates(blocks);
-    const blockIconsHash = await hashBlockIconInputs(blocks, states, atlasHash);
     // nothing renderable → no atlas to draw, and the render would bail on an empty
     // grid anyway. Saying so here is what keeps a block-less project off the GPU.
+    const blockIconsHash = states.length > 0 ? await hashBlockIconInputs(blocks, states, atlasHash) : null;
     const blockAtlasStale =
-        states.length > 0 &&
+        blockIconsHash !== null &&
         (!cache || (await readArtifactHash(fs, BLOCK_ICON_JSON)) !== blockIconsHash || !(await fs.exists(BLOCK_ICON_PNG)));
 
     let prev: PrefabIconManifest = { atlas: '', icons: {} };
@@ -202,8 +205,11 @@ export function iconBakeIsNoop(plan: IconBakePlan): boolean {
 export type IconBakeResult = {
     /** the block-icon atlas was re-rendered (false = skipped or empty). */
     blockAtlas: boolean;
-    /** prefab icons re-rendered this pass. */
-    prefabs: number;
+    /** prefab ids whose icon file actually MOVED this pass — rewritten with new
+     *  bytes, or pruned. Not the ids the plan considered: a re-render that
+     *  reproduces identical bytes invalidates nothing, and this list is announced
+     *  to consumers as the set to drop. */
+    prefabs: string[];
 };
 
 /**
@@ -222,7 +228,7 @@ export async function runIconBake(
     encodePng: (pixels: Uint8Array, width: number, height: number) => Promise<Uint8Array>,
 ): Promise<IconBakeResult> {
     let blockAtlas = false;
-    if (plan.blockAtlasStale) {
+    if (plan.blockAtlasStale && plan.blockIconsHash !== null) {
         const atlas = await renderBlockIconAtlas(deps);
         if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
             const metadata: BlockIconAtlasMetadata = {
@@ -240,18 +246,19 @@ export async function runIconBake(
         }
     }
 
-    let prefabs = 0;
+    const prefabs: string[] = [];
     for (const id of plan.stalePrefabs) {
         const icon = await renderPrefabIcon(deps, id);
         if (!icon) continue;
-        await fs.writeIfChanged(
+        const wrote = await fs.writeIfChanged(
             `resources/client/${prefabIconRelPath(id)}`,
             await encodePng(icon.pixels, icon.pxSize, icon.pxSize),
         );
-        prefabs++;
+        if (wrote) prefabs.push(id);
     }
     for (const id of plan.removedPrefabs) {
         await fs.remove(`resources/client/${prefabIconRelPath(id)}`).catch(() => {});
+        prefabs.push(id);
     }
     await fs.writeIfChanged(PREFAB_ICON_MANIFEST, JSON.stringify(plan.prefabManifest));
 

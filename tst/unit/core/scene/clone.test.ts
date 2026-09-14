@@ -13,7 +13,9 @@ import {
     type Node,
     query,
 } from '../../../../src/core/scene/scene-tree';
-import { control, sync, type TraitType, trait } from '../../../../src/core/scene/traits';
+import { type TraitType } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
+import { control, sync } from '../../../../src/core/registry';
 import { createTestServer } from '../../../integration/server-integration-test';
 
 /* ── test traits ── */

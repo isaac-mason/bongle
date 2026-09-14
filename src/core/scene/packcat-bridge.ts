@@ -30,13 +30,19 @@ export type SyncCodec = {
  * positional array of per-sync codecs, parallel to `def.syncDefs`.
  * returns null when the trait has no syncs registered.
  */
-export function getSyncCodecs(handle: TraitHandle): SyncCodec[] | null {
-    const cached = handle.syncCodecs;
-    if (cached !== null) return cached;
+const syncCodecs = new WeakMap<TraitDef, { codecs: SyncCodec[] | null }>();
 
-    const result = buildSyncCodecs(handle.def);
-    handle.syncCodecs = result;
-    return result;
+export function getSyncCodecs(handle: TraitHandle): SyncCodec[] | null {
+    // memoised on def identity, so a re-declaration (which mints a fresh def)
+    // rebuilds these with nothing to remember to invalidate. Boxed because the
+    // built value is legitimately `null` for a trait with no syncs.
+    const def = handle.def;
+    let entry = syncCodecs.get(def);
+    if (entry === undefined) {
+        entry = { codecs: buildSyncCodecs(def) };
+        syncCodecs.set(def, entry);
+    }
+    return entry.codecs;
 }
 
 function buildSyncCodecs(def: TraitDef): SyncCodec[] | null {
@@ -132,13 +138,16 @@ export type ControlCodec = {
  * positional array of per-control codecs, parallel to `def.controls`.
  * returns null when the trait has no controls registered.
  */
-export function getControlCodecs(handle: TraitHandle): ControlCodec[] | null {
-    const cached = handle.controlCodecs;
-    if (cached !== null) return cached;
+const controlCodecs = new WeakMap<TraitDef, { codecs: ControlCodec[] | null }>();
 
-    const result = buildControlCodecs(handle.def);
-    handle.controlCodecs = result;
-    return result;
+export function getControlCodecs(handle: TraitHandle): ControlCodec[] | null {
+    const def = handle.def;
+    let entry = controlCodecs.get(def);
+    if (entry === undefined) {
+        entry = { codecs: buildControlCodecs(def) };
+        controlCodecs.set(def, entry);
+    }
+    return entry.codecs;
 }
 
 function buildControlCodecs(def: TraitDef): ControlCodec[] | null {

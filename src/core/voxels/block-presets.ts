@@ -3,6 +3,8 @@
 // don't have to assemble the shape + model + cull + collision themselves.
 // drop down to block() directly when a preset doesn't fit.
 
+import type { Vec2 } from 'math';
+import { block } from '../registry';
 import * as blockShape from './block-collider';
 import * as blockModel from './block-model';
 import {
@@ -11,6 +13,7 @@ import {
     BLOCK_FLAG_DOOR,
     BLOCK_FLAG_FENCE,
     BLOCK_FLAG_PANE,
+    BLOCK_FLAG_SUPPORTS_HANGING,
     BLOCK_FLAG_WALL,
     parseKey,
 } from './block-registry';
@@ -20,12 +23,14 @@ import {
     type BlockOptions,
     type BlockPlaceCtx,
     type BlockQuad,
-    block,
-    type CubeTextures,
+    type CubeFaceRotation,
+    type CubeFaceSpec,
+    type CubeTiles,
     CullType,
+    faceTile,
     MaterialType,
     type ScreenTintSpec,
-    type TextureRef,
+    type TileHandle,
     VertexAnimation,
 } from './blocks';
 
@@ -48,16 +53,17 @@ import {
  * (inventory, hotbar, inspector); it falls back to the string id when
  * omitted. `sounds` wires a `blockSoundPresets.*` bundle. `material`
  * overrides the preset's default render pass (most presets default OPAQUE;
- * `plant`, `leaves`, `pane`, `ladder`, `door` default TRANSPARENT).
+ * `cross`, `leaves`, `pane`, `ladder`, `door` default TRANSPARENT).
  *
  * Individual presets narrow this further with `Omit` for any field they
- * set themselves (e.g. `stairs`/`slab` fix `cull`, `plant` fixes
+ * set themselves (e.g. `stairs`/`slab` fix `cull`, `cross` fixes
  * `collision` / `lightOpacity` / `vertexAnimation`), so a caller can't pass
  * a value the preset would silently ignore.
  */
 type PresetOptions = Pick<
     BlockOptions,
     | 'name'
+    | 'tags'
     | 'sounds'
     | 'material'
     | 'cull'
@@ -89,52 +95,118 @@ import {
 } from './block-place';
 import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
 
-// A cube-shaped preset accepts either a full per-face `CubeTextures` map or,
-// as shorthand, a bare `TextureRef` meaning "this texture on all faces". A
-// `BlockTextureDef` handle never carries an `all`/`top` key, so those keys
-// unambiguously mark a `CubeTextures` map vs. a bare ref.
-type CubeTexturesInput = CubeTextures | TextureRef;
+// A cube-shaped preset accepts either a full per-face `CubeTiles` map or, as
+// shorthand, a bare `TileHandle` meaning "this tile on all faces". A tile
+// handle never carries an `all`/`top` key, so those keys unambiguously mark a
+// `CubeTiles` map vs. a bare handle.
+type CubeTilesInput = CubeTiles | TileHandle;
 
-function resolveCubeTextures(input: CubeTexturesInput): CubeTextures {
-    if (typeof input === 'string') return { all: { texture: input } };
-    if ('all' in input || 'top' in input) return input;
-    return { all: { texture: input } };
+/** the four y rotations, in order. */
+const QUARTER_TURNS: readonly CubeFaceRotation[] = [0, 90, 180, 270];
+
+function resolveCubeTiles(input: CubeTilesInput): CubeTiles {
+    if ('all' in input || 'top' in input) return input as CubeTiles;
+    return { all: input as TileHandle };
 }
 
 // Per-preset option bags. Each mirrors `block()`'s single-config-object shape:
-// the required `textures` for the preset's geometry plus the `PresetOptions`
+// the required `tiles` for the preset's geometry plus the `PresetOptions`
 // tuning knobs the preset leaves caller-settable (each `Omit`s the fields it
 // owns itself). Named per preset so signatures stay legible and consumers can
 // name the type; a preset can also narrow its own knobs later without touching
 // the others.
 
-export type CubePresetOptions = PresetOptions & { textures: CubeTexturesInput };
-export type ColumnPresetOptions = PresetOptions & { textures: { end: TextureRef; side: TextureRef } };
-export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'> & { textures: CubeTexturesInput };
-export type FencePresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type PanePresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type WallPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
-export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
-    textures: TextureRef;
+export type CubePresetOptions = PresetOptions & {
+    tiles: CubeTilesInput;
+    /**
+     * draw this cube at one of the four y rotations, picked from its world
+     * position, so a large flat expanse does not sit on a visible 16px grid.
+     * Minecraft does exactly this for grass_block, dirt, sand, podzol, mycelium
+     * and all sixteen concrete powders.
+     *
+     * For a cube whose four sides match — every block that wants this — a y
+     * rotation only turns the top and bottom faces, so it costs four UV sets and
+     * no extra geometry.
+     *
+     * The choice is a pure function of world position, NOT random: it is stable
+     * across remeshes and identical on every client. That is why this is not
+     * called `randomRotation`.
+     *
+     * A boolean rather than a list of angles because every texture that wants
+     * this is an isotropic noise field, where all four turns are equally good.
+     * An anisotropic one (visible grain or strata on its top face) would want
+     * half turns only, to keep the grain running one way; that widens this to
+     * `true | readonly QuarterTurn[]` without breaking any caller, so it can
+     * wait until something actually needs it.
+     */
+    varyRotation?: boolean;
 };
-export type CropPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
-    /** one texture per growth stage, youngest first. */
-    textures: TextureRef[];
+export type ColumnPresetOptions = PresetOptions & { tiles: { end: TileHandle; side: TileHandle } };
+export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'> & {
+    tiles: CubeTilesInput;
+    /**
+     * add four crossed, overhanging, unshaded, leaning planes so the canopy
+     * does not end on a hard cube edge. costs 8 extra quads per block with no
+     * culling, so it is opt-in per leaf type rather than the default. see
+     * `blockModel.fluff`.
+     *
+     * Pass the TILE the planes sample: the round masked 32x32 leaf blob
+     * (`textures.leavesFluff`). A square leaf tile here reads as a green card
+     * stuck through the block rather than as foliage.
+     */
+    fluff?: TileHandle;
+    /**
+     * draw the block at one of the four y rotations, picked from its world
+     * position, so a canopy is not the same shape repeated. Odd rotations also
+     * mirror the planes' lean, so the four read as eight.
+     */
+    varyRotation?: boolean;
 };
-export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & { textures: TextureRef };
-export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & { textures: TextureRef };
-export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & { textures: TextureRef };
-export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & { textures: { top: TextureRef; bottom: TextureRef } };
+export type FencePresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type PanePresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type LitterPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one tile, or several picked per world position (see `cross`). */
+    tiles: TileHandle | readonly TileHandle[];
+    /** draw at one of four y rotations, picked per world position, so a
+     *  scattering of litter is not one sprite repeated. default true. */
+    varyRotation?: boolean;
+};
+export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type WallPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: CubeTilesInput };
+export type CrossPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    /** one tile, or several: with a list the mesher picks one per world
+     *  position, so a meadow is not one sprite stamped on a grid. */
+    tiles: TileHandle | readonly TileHandle[];
+    /** per-position offset, `xz` in blocks either way and `y` downward (see
+     *  `BlockOptions.jitter`). vanilla's short grass uses `{ xz: 0.25, y: 0.2 }`. */
+    jitter?: BlockOptions['jitter'];
+    /** plane height in blocks (default 1). Taller planes reach into the cell
+     *  above and want a tile `ceil(height)` blocks tall (see `blockModel.cross`). */
+    height?: number;
+    /** how many blocks tall the tile is, when the plane is shorter than it. */
+    tileBlocks?: number;
+    /** selection shape, for a plant smaller than the default 12x13x12 box:
+     *  a low flower wants a short box so the ground behind it can be aimed at. */
+    shape?: BlockOptions['shape'];
+};
+export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & { tiles: TileHandle };
+export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & { tiles: TileHandle };
+export type ChainPresetOptions = Omit<PresetOptions, 'cull' | 'lightOpacity'> & { tiles: TileHandle };
+export type LanternPresetOptions = Omit<PresetOptions, 'cull' | 'lightOpacity' | 'emissive'> & {
+    /** the lit sheet (animate it for a flicker) and the sheet shown when out. */
+    tiles: { lit: TileHandle; unlit: TileHandle };
+};
+export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & { tiles: TileHandle };
+export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & { tiles: { top: TileHandle; bottom: TileHandle } };
 
 // liquids are collision:false and assemble their config by hand (no spread),
 // so only the generic fields they actually forward are exposed; the shape /
 // light / surface behaviour is driven by the liquid-specific options below.
-export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
-    textures: CubeTexturesInput;
+export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'tags' | 'sounds' | 'material'> & {
+    tiles: CubeTilesInput;
     viscosity?: number;
     translucent?: boolean;
     levels?: number;
@@ -152,16 +224,35 @@ export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'mater
 
 // ── cube ────────────────────────────────────────────────────────────
 //
-// the most basic block: a full opaque cube with the given textures. drop
+// the most basic block: a full opaque cube with the given tiles. drop
 // down to block() directly if you need to override cull, friction, or any
 // other field, this preset deliberately keeps the surface small.
 
 /*#__NO_SIDE_EFFECTS__*/
-export function cube(id: string, { textures: texturesInput, ...options }: CubePresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function cube(id: string, { tiles: tilesInput, varyRotation, ...options }: CubePresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
+    // a y rotation of a cube whose sides match is a rotation of its top and
+    // bottom faces; the sides are carried through untouched.
+    const rotated = (rotation: CubeFaceRotation): CubeTiles => {
+        const top = faceTile('all' in tiles ? tiles.all : tiles.top);
+        const bottom = faceTile('all' in tiles ? tiles.all : tiles.bottom);
+        const side = (face: 'north' | 'south' | 'east' | 'west'): CubeFaceSpec =>
+            'all' in tiles ? tiles.all : 'sides' in tiles ? tiles.sides : tiles[face];
+        return {
+            top: { tile: top, rotation },
+            bottom: { tile: bottom, rotation },
+            north: side('north'),
+            south: side('south'),
+            east: side('east'),
+            west: side('west'),
+        };
+    };
     return block(id, {
         ...options,
-        model: () => ({ type: 'cube' as const, textures }),
+        model: () =>
+            varyRotation
+                ? QUARTER_TURNS.map((rotation) => ({ type: 'cube' as const, tiles: rotated(rotation) }))
+                : { type: 'cube' as const, tiles },
         material: options?.material ?? MaterialType.OPAQUE,
     });
 }
@@ -187,9 +278,9 @@ const AXIS_REMAP: Record<'x' | 'y' | 'z', Record<'x' | 'y' | 'z', 'x' | 'y' | 'z
 };
 
 /*#__NO_SIDE_EFFECTS__*/
-export function column(id: string, { textures, ...options }: ColumnPresetOptions) {
-    const end = textures.end;
-    const side = textures.side;
+export function column(id: string, { tiles, ...options }: ColumnPresetOptions) {
+    const end = tiles.end;
+    const side = tiles.side;
     let handle: BlockHandle<typeof ColumnState.props>;
     handle = block(id, {
         ...options,
@@ -204,36 +295,32 @@ export function column(id: string, { textures, ...options }: ColumnPresetOptions
             if (axis === 'y') {
                 return {
                     type: 'cube' as const,
-                    textures: {
-                        top: { texture: end },
-                        bottom: { texture: end },
-                        sides: { texture: side },
-                    },
+                    tiles: { top: end, bottom: end, sides: side },
                 };
             }
             if (axis === 'x') {
                 return {
                     type: 'cube' as const,
-                    textures: {
-                        top: { texture: side, rotation: 90 },
-                        bottom: { texture: side, rotation: 90 },
-                        north: { texture: side, rotation: 90 },
-                        south: { texture: side, rotation: 90 },
-                        east: { texture: end },
-                        west: { texture: end },
+                    tiles: {
+                        top: { tile: side, rotation: 90 },
+                        bottom: { tile: side, rotation: 90 },
+                        north: { tile: side, rotation: 90 },
+                        south: { tile: side, rotation: 90 },
+                        east: end,
+                        west: end,
                     },
                 };
             }
             // axis === 'z'
             return {
                 type: 'cube' as const,
-                textures: {
-                    top: { texture: side },
-                    bottom: { texture: side },
-                    north: { texture: end },
-                    south: { texture: end },
-                    east: { texture: side, rotation: 90 },
-                    west: { texture: side, rotation: 90 },
+                tiles: {
+                    top: side,
+                    bottom: side,
+                    north: end,
+                    south: end,
+                    east: { tile: side, rotation: 90 },
+                    west: { tile: side, rotation: 90 },
                 },
             };
         },
@@ -350,7 +437,7 @@ function reflectQuadsY(quads: BlockQuad[]): BlockQuad[] {
         return {
             verts: [rv(3), rv(2), rv(1), rv(0)],
             normal: [q.normal[0], -q.normal[1], q.normal[2]],
-            texture: q.texture,
+            tile: q.tile,
             uvs: q.uvs ? [q.uvs[3], q.uvs[2], q.uvs[1], q.uvs[0]] : undefined,
             cullFace: cf,
             material: q.material,
@@ -358,9 +445,8 @@ function reflectQuadsY(quads: BlockQuad[]): BlockQuad[] {
     });
 }
 
-function pickTopTexture(textures: CubeTextures): TextureRef {
-    if ('all' in textures) return textures.all.texture;
-    return textures.top.texture;
+function pickTopTile(tiles: CubeTiles): TileHandle {
+    return faceTile('all' in tiles ? tiles.all : tiles.top);
 }
 
 function stairBoxes(p: { half: StairHalf; shape: StairShape }) {
@@ -369,16 +455,16 @@ function stairBoxes(p: { half: StairHalf; shape: StairShape }) {
     return p.half === 'top' ? boxes.map(reflectAabbY) : boxes;
 }
 
-function stairQuads(textures: CubeTextures, topTex: TextureRef, p: { half: StairHalf; shape: StairShape }): BlockQuad[] {
+function stairQuads(tiles: CubeTiles, topTex: TileHandle, p: { half: StairHalf; shape: StairShape }): BlockQuad[] {
     const quads: BlockQuad[] = [
         // bottom slab (top face emitted separately as exposed quads). local uvs
         // so each partial face samples its world-footprint sub-rect at 1:1 texel
         // density (a full-texture stretch squishes the 1×0.5 sides).
-        ...blockModel.box([0, 0, 0], [1, 0.5, 1], textures, { exclude: ['up'], uvs: 'local' }),
+        ...blockModel.box([0, 0, 0], [1, 0.5, 1], tiles, { exclude: ['up'], uvs: 'local' }),
     ];
     for (const b of stairUpperBoxes(p.shape)) {
         // upper step boxes rest on the slab top, exclude their down face.
-        quads.push(...blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], textures, { exclude: ['down'], uvs: 'local' }));
+        quads.push(...blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], tiles, { exclude: ['down'], uvs: 'local' }));
     }
     for (const r of stairExposedTopRects(p.shape)) {
         // top quad on the part of the slab that isn't covered by a step box.
@@ -417,9 +503,9 @@ function readStairAt(
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function stairs(id: string, { textures: texturesInput, ...options }: StairsPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
-    const topTex = pickTopTexture(textures);
+export function stairs(id: string, { tiles: tilesInput, ...options }: StairsPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
+    const topTex = pickTopTile(tiles);
     let handle: BlockHandle<typeof StairState.props>;
     handle = block(id, {
         ...options,
@@ -429,7 +515,7 @@ export function stairs(id: string, { textures: texturesInput, ...options }: Stai
         shape: (p) => blockShape.rotateY(blockShape.aabbs(stairBoxes(p)), (4 - FACING4_STEPS[p.facing]) % 4),
         model: (p) => ({
             type: 'custom' as const,
-            quads: blockModel.rotateY(stairQuads(textures, topTex, p), (4 - FACING4_STEPS[p.facing]) % 4, { uvlock: true }),
+            quads: blockModel.rotateY(stairQuads(tiles, topTex, p), (4 - FACING4_STEPS[p.facing]) % 4, { uvlock: true }),
         }),
         cull: CullType.PARTIAL,
         place: (ctx, io) => {
@@ -527,8 +613,8 @@ const SLAB_BOTTOM_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 0.5, 1]]);
 const SLAB_TOP_SHAPE = blockShape.aabbs([[0, 0.5, 0, 1, 1, 1]]);
 
 /*#__NO_SIDE_EFFECTS__*/
-export function slab(id: string, { textures: texturesInput, ...options }: SlabPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function slab(id: string, { tiles: tilesInput, ...options }: SlabPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     let handle: BlockHandle<typeof SlabState.props>;
     handle = block(id, {
         ...options,
@@ -539,10 +625,10 @@ export function slab(id: string, { textures: texturesInput, ...options }: SlabPr
             return p.half === 'top' ? SLAB_TOP_SHAPE : SLAB_BOTTOM_SHAPE;
         },
         model: (p) => {
-            if (p.half === 'double') return { type: 'cube' as const, textures };
+            if (p.half === 'double') return { type: 'cube' as const, tiles };
             const from: [number, number, number] = p.half === 'top' ? [0, 0.5, 0] : [0, 0, 0];
             const to: [number, number, number] = p.half === 'top' ? [1, 1, 1] : [1, 0.5, 1];
-            return { type: 'custom' as const, quads: blockModel.box(from, to, textures) };
+            return { type: 'custom' as const, quads: blockModel.box(from, to, tiles) };
         },
         cull: (p) => (p.half === 'double' ? CullType.SOLID : CullType.PARTIAL),
         place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ half: halfFromPlaceCtx(ctx) })),
@@ -557,13 +643,35 @@ export function slab(id: string, { textures: texturesInput, ...options }: SlabPr
     return handle;
 }
 
-// ── plant (flowers, grass, saplings) ────────────────────────────────
+// ── cross (flowers, grass, saplings) ────────────────────────────────
+//
+// two diagonal planes, an `x` seen from above. the shape every engine reaches
+// for on scattered vegetation: cubyz calls its model `cubyz:cross`, minecraft
+// `block/cross`, luanti documents it as the "x" plantlike meshoption.
+//
+// what vanilla does not have is texture variants per position: it varies
+// grass only by offset (`OffsetType.XYZ`). several tiles here become one
+// custom model each, and the mesher's position hash picks between them.
+
+// the selection box: vanilla's grass and flowers use a 12x13x12 box centred
+// in the cell, so a ray past the plant's edge reaches the ground it stands on.
+// Height caps at the cell whatever the planes do; the top of a tall plant is
+// not where anyone aims.
+const CROSS_SHAPE = blockShape.aabbs([[2 / 16, 0, 2 / 16, 14 / 16, 13 / 16, 14 / 16]]);
 
 /*#__NO_SIDE_EFFECTS__*/
-export function plant(id: string, { textures: texture, ...options }: PlantPresetOptions) {
+export function cross(id: string, { tiles, height, tileBlocks, shape, ...options }: CrossPresetOptions) {
+    const variants = Array.isArray(tiles) ? (tiles as readonly TileHandle[]) : [tiles as TileHandle];
     return block(id, {
         ...options,
-        model: () => ({ type: 'custom' as const, quads: blockModel.cross(texture) }),
+        shape: shape ?? CROSS_SHAPE,
+        model: () => {
+            const models = variants.map((tile) => ({
+                type: 'custom' as const,
+                quads: blockModel.cross(tile, { height, tileBlocks }),
+            }));
+            return models.length === 1 ? models[0]! : models;
+        },
         cull: CullType.SELF,
         collision: false,
         // sparse cross-quads, don't filter light. without this, CullType.SELF
@@ -572,61 +680,47 @@ export function plant(id: string, { textures: texture, ...options }: PlantPreset
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
     });
-}
-
-// ── crop ────────────────────────────────────────────────────────────
-//
-// a plant that grows through numbered stages. same cross-quad shape as
-// `plant()`, but carries an `age` state selecting one texture per stage, so a
-// single block id covers the whole life of the crop:
-//
-//   Wheat.stage(1)   // just sown
-//   Wheat.ripe()     // ready to harvest
-//
-// stages are 1-based to match how the textures are named on disk.
-
-export type CropHandle = BlockHandle & {
-    /** state key for a growth stage (1..stages). */
-    stage(n: number): string;
-    /** state key for the final stage. */
-    ripe(): string;
-};
-
-/*#__NO_SIDE_EFFECTS__*/
-export function crop(id: string, { textures, ...options }: CropPresetOptions): CropHandle {
-    if (textures.length === 0) throw new Error(`crop ${id} needs at least one stage texture`);
-    const stages = textures.length;
-    const AgeState = blockState.create({ age: blockState.int(1, stages) });
-
-    const handle = block(id, {
-        ...options,
-        states: AgeState,
-        defaultState: { age: 1 },
-        model: ({ age }) => ({ type: 'custom' as const, quads: blockModel.cross(textures[age - 1]) }),
-        cull: CullType.SELF,
-        collision: false,
-        // sparse cross-quads, don't filter light. without this, CullType.SELF
-        // would default to opacity 1 (like leaves/glass) and dim what's behind.
-        lightOpacity: 0,
-        material: options?.material ?? MaterialType.TRANSPARENT,
-        vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
-    });
-
-    const cropHandle = handle as unknown as CropHandle;
-    cropHandle.stage = (n: number) => handle.stateKey({ age: Math.min(Math.max(n, 1), stages) });
-    cropHandle.ripe = () => handle.stateKey({ age: stages });
-    return cropHandle;
 }
 
 // ── leaves ──────────────────────────────────────────────────────────
+//
+// A cutout cube, optionally with overhanging foliage planes:
+//
+//   - PARTIAL: the faces between two adjacent leaf blocks are drawn. Vanilla
+//     leaves are `noOcclusion`, so a cullface against a leaf neighbour never
+//     fires and the canopy has depth behind its cutout holes. This is where
+//     the quads go; the transparent pass truncates silently past
+//     MAX_QUADS_PER_PASS, so watch for leaves missing from one side.
+//   - `fluff`: four crossed, unshaded, leaning planes per block
+//     (`blockModel.fluff`), at four y rotations with `varyRotation`, the odd
+//     rotations with the lean mirrored, so a canopy is not one shape repeated.
+//   - light opacity 1, vanilla's value for leaves. PARTIAL would default it
+//     to 0 (see `BlockOptions.lightOpacity`), and a canopy that filters no
+//     light reads as a hollow shell.
+//
+// The two faces on a leaf-leaf boundary are coplanar with opposite windings,
+// so the transparent pass's back-face cull draws exactly one of them.
 
 /*#__NO_SIDE_EFFECTS__*/
-export function leaves(id: string, { textures: texturesInput, ...options }: LeavesPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function leaves(id: string, { tiles: tilesInput, fluff, varyRotation, ...options }: LeavesPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
+    const rotations = varyRotation ? [0, 1, 2, 3] : [0];
     return block(id, {
         ...options,
-        model: () => ({ type: 'cube' as const, textures }),
-        cull: CullType.SELF,
+        model: () => {
+            // plain cube when neither option is on, so the mesher's cube fast
+            // path still applies to every ordinary leaf block.
+            if (!fluff && !varyRotation) return { type: 'cube' as const, tiles };
+            const cube = blockModel.box([0, 0, 0], [1, 1, 1], tiles);
+            const models = rotations.map((steps) => {
+                const lean = steps % 2 === 0 ? blockModel.FLUFF_LEAN_DEG : -blockModel.FLUFF_LEAN_DEG;
+                const quads = [...cube, ...(fluff ? blockModel.fluff(fluff, { lean }) : [])];
+                return { type: 'custom' as const, quads: blockModel.rotateY(quads, steps) };
+            });
+            return models.length === 1 ? models[0]! : models;
+        },
+        cull: CullType.PARTIAL,
+        lightOpacity: options.lightOpacity ?? 1,
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.WAVE,
     });
@@ -652,7 +746,7 @@ const LadderFacingState = blockState.create({
 });
 
 /*#__NO_SIDE_EFFECTS__*/
-export function ladder(id: string, { textures: texture, ...options }: LadderPresetOptions) {
+export function ladder(id: string, { tiles: tile, ...options }: LadderPresetOptions) {
     let handle: BlockHandle<typeof LadderFacingState.props>;
     handle = block(id, {
         ...options,
@@ -678,7 +772,7 @@ export function ladder(id: string, { textures: texture, ...options }: LadderPres
                         [1, 1, z],
                     ],
                     [0, 0, -1],
-                    texture,
+                    tile,
                 ),
             ];
             return {
@@ -742,8 +836,8 @@ export type LiquidHandle = BlockHandle & {
 };
 
 /*#__NO_SIDE_EFFECTS__*/
-export function liquid(id: string, { textures: texturesInput, ...options }: LiquidPresetOptions): LiquidHandle {
-    const textures = resolveCubeTextures(texturesInput);
+export function liquid(id: string, { tiles: tilesInput, ...options }: LiquidPresetOptions): LiquidHandle {
+    const tiles = resolveCubeTiles(tilesInput);
     const levels = Math.max(1, options?.levels ?? 1);
     const translucent = options?.translucent === true;
     const group = options?.fluidGroup ?? id;
@@ -752,7 +846,8 @@ export function liquid(id: string, { textures: texturesInput, ...options }: Liqu
 
     const baseConfig = {
         name: options?.name,
-        model: () => ({ type: 'cube' as const, textures }),
+        tags: options?.tags,
+        model: () => ({ type: 'cube' as const, tiles }),
         cull: translucent ? CullType.SELF : CullType.SOLID,
         material: translucent ? MaterialType.TRANSLUCENT : MaterialType.OPAQUE,
         collision: false,
@@ -842,12 +937,12 @@ function fenceShape(p: { north: boolean; east: boolean; south: boolean; west: bo
     return blockShape.aabbs(boxes);
 }
 
-function fenceArmQuads(textures: CubeTextures, side: 'north' | 'south' | 'east' | 'west'): BlockQuad[] {
+function fenceArmQuads(tiles: CubeTiles, side: 'north' | 'south' | 'east' | 'west'): BlockQuad[] {
     // two thin rails per arm (top + bottom), 2/16 wide × 3/16 tall.
     // local UVs so the texture isn't stretched across the narrow rails.
     const quads: BlockQuad[] = [];
     const rail = (from: [number, number, number], to: [number, number, number]) =>
-        blockModel.box(from, to, textures, { uvs: 'local' });
+        blockModel.box(from, to, tiles, { uvs: 'local' });
     if (side === 'north') {
         quads.push(...rail([7 / 16, 12 / 16, 0], [9 / 16, 15 / 16, 6 / 16]));
         quads.push(...rail([7 / 16, 6 / 16, 0], [9 / 16, 9 / 16, 6 / 16]));
@@ -875,8 +970,8 @@ function hasGroupConnection(voxels: import('./voxels').Voxels, wx: number, wy: n
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function fence(id: string, { textures: texturesInput, ...options }: FencePresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function fence(id: string, { tiles: tilesInput, ...options }: FencePresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     let handle: BlockHandle<typeof FenceState.props>;
     handle = block(id, {
         ...options,
@@ -885,11 +980,11 @@ export function fence(id: string, { textures: texturesInput, ...options }: Fence
         defaultState: { north: true, south: true, east: true, west: true },
         shape: (p) => fenceShape(p),
         model: (p) => {
-            const quads = [...blockModel.box([6 / 16, 0, 6 / 16], [10 / 16, 1, 10 / 16], textures, { uvs: 'local' })];
-            if (p.north) quads.push(...fenceArmQuads(textures, 'north'));
-            if (p.south) quads.push(...fenceArmQuads(textures, 'south'));
-            if (p.east) quads.push(...fenceArmQuads(textures, 'east'));
-            if (p.west) quads.push(...fenceArmQuads(textures, 'west'));
+            const quads = [...blockModel.box([6 / 16, 0, 6 / 16], [10 / 16, 1, 10 / 16], tiles, { uvs: 'local' })];
+            if (p.north) quads.push(...fenceArmQuads(tiles, 'north'));
+            if (p.south) quads.push(...fenceArmQuads(tiles, 'south'));
+            if (p.east) quads.push(...fenceArmQuads(tiles, 'east'));
+            if (p.west) quads.push(...fenceArmQuads(tiles, 'west'));
             return { type: 'custom' as const, quads };
         },
         cull: CullType.PARTIAL,
@@ -947,8 +1042,8 @@ function paneShape(p: { north: boolean; east: boolean; south: boolean; west: boo
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function pane(id: string, { textures: texturesInput, ...options }: PanePresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function pane(id: string, { tiles: tilesInput, ...options }: PanePresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     let handle: BlockHandle<typeof PaneState.props>;
     handle = block(id, {
         ...options,
@@ -957,11 +1052,11 @@ export function pane(id: string, { textures: texturesInput, ...options }: PanePr
         material: options?.material ?? MaterialType.TRANSPARENT,
         shape: (p) => paneShape(p),
         model: (p) => {
-            const quads = [...blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 1, 9 / 16], textures, { uvs: 'local' })];
-            if (p.north) quads.push(...blockModel.box([7 / 16, 0, 0], [9 / 16, 1, 7 / 16], textures, { uvs: 'local' }));
-            if (p.south) quads.push(...blockModel.box([7 / 16, 0, 9 / 16], [9 / 16, 1, 1], textures, { uvs: 'local' }));
-            if (p.east) quads.push(...blockModel.box([9 / 16, 0, 7 / 16], [1, 1, 9 / 16], textures, { uvs: 'local' }));
-            if (p.west) quads.push(...blockModel.box([0, 0, 7 / 16], [7 / 16, 1, 9 / 16], textures, { uvs: 'local' }));
+            const quads = [...blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 1, 9 / 16], tiles, { uvs: 'local' })];
+            if (p.north) quads.push(...blockModel.box([7 / 16, 0, 0], [9 / 16, 1, 7 / 16], tiles, { uvs: 'local' }));
+            if (p.south) quads.push(...blockModel.box([7 / 16, 0, 9 / 16], [9 / 16, 1, 1], tiles, { uvs: 'local' }));
+            if (p.east) quads.push(...blockModel.box([9 / 16, 0, 7 / 16], [1, 1, 9 / 16], tiles, { uvs: 'local' }));
+            if (p.west) quads.push(...blockModel.box([0, 0, 7 / 16], [7 / 16, 1, 9 / 16], tiles, { uvs: 'local' }));
             return { type: 'custom' as const, quads };
         },
         cull: CullType.PARTIAL,
@@ -1004,17 +1099,53 @@ export function pane(id: string, { textures: texturesInput, ...options }: PanePr
 const CARPET_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 1 / 16, 1]]);
 
 /*#__NO_SIDE_EFFECTS__*/
-export function carpet(id: string, { textures: texturesInput, ...options }: CarpetPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function carpet(id: string, { tiles: tilesInput, ...options }: CarpetPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     return block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         shape: CARPET_SHAPE,
         model: () => ({
             type: 'custom' as const,
-            quads: blockModel.box([0, 0, 0], [1, 1 / 16, 1], textures),
+            quads: blockModel.box([0, 0, 0], [1, 1 / 16, 1], tiles),
         }),
         cull: CullType.PARTIAL,
+    });
+}
+
+// ── litter (leaf litter, petals) ────────────────────────────────────
+//
+// a cutout layer lying on the ground: one up-facing quad a hair above the
+// cell floor (1/32, so it never shares a plane with the block below's top
+// face), no thickness, no collision. vanilla's `leaf_litter` and
+// `pink_petals`, minus their per-quadrant segment states. transparent because
+// the texture is mostly holes, and PARTIAL with no cullFace: nothing above
+// or beside it can hide it, only what is under it, and that is exactly the
+// block it is drawn over.
+
+const LITTER_HEIGHT = 1 / 32;
+const LITTER_SHAPE = blockShape.aabbs([[0, 0, 0, 1, LITTER_HEIGHT, 1]]);
+
+/*#__NO_SIDE_EFFECTS__*/
+export function litter(id: string, { tiles, varyRotation = true, ...options }: LitterPresetOptions) {
+    const variants = Array.isArray(tiles) ? (tiles as readonly TileHandle[]) : [tiles as TileHandle];
+    const rotations = varyRotation ? [0, 1, 2, 3] : [0];
+    return block(id, {
+        ...options,
+        shape: LITTER_SHAPE,
+        model: () => {
+            const models = variants.flatMap((tile) =>
+                rotations.map((steps) => ({
+                    type: 'custom' as const,
+                    quads: blockModel.rotateY(blockModel.layer(tile, LITTER_HEIGHT), steps),
+                })),
+            );
+            return models.length === 1 ? models[0]! : models;
+        },
+        cull: CullType.PARTIAL,
+        collision: false,
+        lightOpacity: 0,
+        material: options?.material ?? MaterialType.TRANSPARENT,
     });
 }
 
@@ -1053,36 +1184,36 @@ function trapdoorShape(p: { facing: 'north' | 'east' | 'south' | 'west'; half: '
 }
 
 function trapdoorQuads(
-    textures: CubeTextures,
+    tiles: CubeTiles,
     p: { facing: 'north' | 'east' | 'south' | 'west'; half: 'bottom' | 'top'; open: boolean },
 ): BlockQuad[] {
     const opts = { uvs: 'local' as const };
     if (!p.open) {
-        if (p.half === 'bottom') return blockModel.box([0, 0, 0], [1, TRAPDOOR_DEPTH, 1], textures, opts);
-        return blockModel.box([0, 1 - TRAPDOOR_DEPTH, 0], [1, 1, 1], textures, opts);
+        if (p.half === 'bottom') return blockModel.box([0, 0, 0], [1, TRAPDOOR_DEPTH, 1], tiles, opts);
+        return blockModel.box([0, 1 - TRAPDOOR_DEPTH, 0], [1, 1, 1], tiles, opts);
     }
     switch (p.facing) {
         case 'north':
-            return blockModel.box([0, 0, 0], [1, 1, TRAPDOOR_DEPTH], textures, opts);
+            return blockModel.box([0, 0, 0], [1, 1, TRAPDOOR_DEPTH], tiles, opts);
         case 'south':
-            return blockModel.box([0, 0, 1 - TRAPDOOR_DEPTH], [1, 1, 1], textures, opts);
+            return blockModel.box([0, 0, 1 - TRAPDOOR_DEPTH], [1, 1, 1], tiles, opts);
         case 'east':
-            return blockModel.box([1 - TRAPDOOR_DEPTH, 0, 0], [1, 1, 1], textures, opts);
+            return blockModel.box([1 - TRAPDOOR_DEPTH, 0, 0], [1, 1, 1], tiles, opts);
         case 'west':
-            return blockModel.box([0, 0, 0], [TRAPDOOR_DEPTH, 1, 1], textures, opts);
+            return blockModel.box([0, 0, 0], [TRAPDOOR_DEPTH, 1, 1], tiles, opts);
     }
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function trapdoor(id: string, { textures: texturesInput, ...options }: TrapdoorPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function trapdoor(id: string, { tiles: tilesInput, ...options }: TrapdoorPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     let handle: BlockHandle<typeof TrapdoorState.props>;
     handle = block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: TrapdoorState,
         shape: (p) => trapdoorShape(p),
-        model: (p) => ({ type: 'custom' as const, quads: trapdoorQuads(textures, p) }),
+        model: (p) => ({ type: 'custom' as const, quads: trapdoorQuads(tiles, p) }),
         cull: CullType.PARTIAL,
         // placement opens closed: half from where the player clicked, facing
         // toward the placer. open can be toggled later via interaction.
@@ -1143,7 +1274,7 @@ function plateShape(pressed: boolean) {
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function plate(id: string, { textures: texture, ...options }: PlatePresetOptions) {
+export function plate(id: string, { tiles: tile, ...options }: PlatePresetOptions) {
     return block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
@@ -1156,7 +1287,7 @@ export function plate(id: string, { textures: texture, ...options }: PlatePreset
                 quads: blockModel.box(
                     [PLATE_INSET, 0, PLATE_INSET],
                     [1 - PLATE_INSET, h, 1 - PLATE_INSET],
-                    { all: { texture } },
+                    { all: tile },
                     { uvs: 'local' },
                 ),
             };
@@ -1202,22 +1333,22 @@ function wallShape(p: { north: boolean; east: boolean; south: boolean; west: boo
 }
 
 function wallQuads(
-    textures: CubeTextures,
+    tiles: CubeTiles,
     p: { north: boolean; east: boolean; south: boolean; west: boolean; up: boolean },
 ): BlockQuad[] {
     const opts = { uvs: 'local' as const };
     const postTop = p.up ? 1 : WALL_POST_SHORT;
-    const quads = [...blockModel.box([4 / 16, 0, 4 / 16], [12 / 16, postTop, 12 / 16], textures, opts)];
-    if (p.north) quads.push(...blockModel.box([5 / 16, 0, 0], [11 / 16, WALL_POST_SHORT, 4 / 16], textures, opts));
-    if (p.south) quads.push(...blockModel.box([5 / 16, 0, 12 / 16], [11 / 16, WALL_POST_SHORT, 1], textures, opts));
-    if (p.east) quads.push(...blockModel.box([12 / 16, 0, 5 / 16], [1, WALL_POST_SHORT, 11 / 16], textures, opts));
-    if (p.west) quads.push(...blockModel.box([0, 0, 5 / 16], [4 / 16, WALL_POST_SHORT, 11 / 16], textures, opts));
+    const quads = [...blockModel.box([4 / 16, 0, 4 / 16], [12 / 16, postTop, 12 / 16], tiles, opts)];
+    if (p.north) quads.push(...blockModel.box([5 / 16, 0, 0], [11 / 16, WALL_POST_SHORT, 4 / 16], tiles, opts));
+    if (p.south) quads.push(...blockModel.box([5 / 16, 0, 12 / 16], [11 / 16, WALL_POST_SHORT, 1], tiles, opts));
+    if (p.east) quads.push(...blockModel.box([12 / 16, 0, 5 / 16], [1, WALL_POST_SHORT, 11 / 16], tiles, opts));
+    if (p.west) quads.push(...blockModel.box([0, 0, 5 / 16], [4 / 16, WALL_POST_SHORT, 11 / 16], tiles, opts));
     return quads;
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function wall(id: string, { textures: texturesInput, ...options }: WallPresetOptions) {
-    const textures = resolveCubeTextures(texturesInput);
+export function wall(id: string, { tiles: tilesInput, ...options }: WallPresetOptions) {
+    const tiles = resolveCubeTiles(tilesInput);
     let handle: BlockHandle<typeof WallState.props>;
     handle = block(id, {
         ...options,
@@ -1225,7 +1356,7 @@ export function wall(id: string, { textures: texturesInput, ...options }: WallPr
         states: WallState,
         defaultState: { north: true, south: true, east: true, west: true, up: true },
         shape: (p) => wallShape(p),
-        model: (p) => ({ type: 'custom' as const, quads: wallQuads(textures, p) }),
+        model: (p) => ({ type: 'custom' as const, quads: wallQuads(tiles, p) }),
         cull: CullType.PARTIAL,
         flags: BLOCK_FLAG_WALL,
         onNeighbourUpdate(ctx) {
@@ -1327,8 +1458,8 @@ const TORCH_WALL_STEPS = { north: 0, west: 1, south: 2, east: 3 } as const;
 // the top the lit neck under the flame (rows 6-8). a local-UV cap keys off
 // x/z, not height, so both caps would sample the bright texture-centre rows
 // and read as "fire on the bottom of the torch".
-function torchPostQuads(texture: TextureRef): BlockQuad[] {
-    const tex: CubeTextures = { all: { texture } };
+function torchPostQuads(tile: TileHandle): BlockQuad[] {
+    const tex: CubeTiles = { all: tile };
     // cull:false, the post is free-standing, no face sits on a boundary.
     const sides = blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 10 / 16, 9 / 16], tex, {
         uvs: 'local',
@@ -1343,7 +1474,7 @@ function torchPostQuads(texture: TextureRef): BlockQuad[] {
             [9 / 16, 10 / 16, 7 / 16],
         ],
         [0, 1, 0],
-        texture,
+        tile,
         {
             uvs: [
                 [7 / 16, 6 / 16],
@@ -1361,7 +1492,7 @@ function torchPostQuads(texture: TextureRef): BlockQuad[] {
             [9 / 16, 0, 9 / 16],
         ],
         [0, -1, 0],
-        texture,
+        tile,
         {
             uvs: [
                 [7 / 16, 15 / 16],
@@ -1374,8 +1505,8 @@ function torchPostQuads(texture: TextureRef): BlockQuad[] {
     return [...sides, up, down];
 }
 
-function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'south' | 'west'): BlockQuad[] {
-    const post = torchPostQuads(texture);
+function torchQuads(tile: TileHandle, mount: 'floor' | 'north' | 'east' | 'south' | 'west'): BlockQuad[] {
+    const post = torchPostQuads(tile);
     if (mount === 'floor') return post;
     // wall: shift the post back against the wall (z=0), shear its top out over
     // +z for a grid-aligned lean, lift it up the wall, then rotate to the
@@ -1427,14 +1558,14 @@ function torchMountFromPlaceCtx(ctx: BlockPlaceCtx): TorchMount {
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function torch(id: string, { textures: texture, ...options }: TorchPresetOptions) {
+export function torch(id: string, { tiles: tile, ...options }: TorchPresetOptions) {
     let handle: BlockHandle<typeof TorchState.props>;
     handle = block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: TorchState,
         shape: (p) => torchShape(p.mount),
-        model: (p) => ({ type: 'custom' as const, quads: torchQuads(texture, p.mount) }),
+        model: (p) => ({ type: 'custom' as const, quads: torchQuads(tile, p.mount) }),
         cull: CullType.PARTIAL,
         collision: false,
         emissive: true,
@@ -1471,6 +1602,260 @@ export function torch(id: string, { textures: texture, ...options }: TorchPreset
         },
     });
     return handle;
+}
+
+// ── hanging support ─────────────────────────────────────────────────
+//
+// what a hanging block may hang from: a block that stops the player (a full
+// or partial solid) or one that says so itself (a chain, `BLOCK_FLAG_SUPPORTS_
+// HANGING`). vanilla's `canSupportCenter`, with the chain special case as a
+// flag any block can opt into rather than an id compare.
+
+function supportsHanging(voxels: Voxels, wx: number, wy: number, wz: number): boolean {
+    const id = getBlockState(voxels, wx, wy, wz);
+    if (id === AIR) return false;
+    return (voxels.registry.flags[id]! & (BLOCK_FLAG_COLLISION | BLOCK_FLAG_SUPPORTS_HANGING)) !== 0;
+}
+
+// ── chain ───────────────────────────────────────────────────────────
+//
+// a 3px link chain along an axis: two 3/16-wide planes the block tall,
+// crossed at 45 degrees like vanilla's, sampling the 3-texel strip at the
+// left of a 16x16 tile. `axis` like a log (placed along the clicked face),
+// so chains hang from ceilings and run along walls. A chain supports a
+// hanging block below it.
+
+const CHAIN_HALF = 1.5 / 16;
+const CHAIN_SHAPE_Y = blockShape.aabbs([[0.5 - CHAIN_HALF, 0, 0.5 - CHAIN_HALF, 0.5 + CHAIN_HALF, 1, 0.5 + CHAIN_HALF]]);
+const CHAIN_SHAPE_X = blockShape.aabbs([[0, 0.5 - CHAIN_HALF, 0.5 - CHAIN_HALF, 1, 0.5 + CHAIN_HALF, 0.5 + CHAIN_HALF]]);
+const CHAIN_SHAPE_Z = blockShape.aabbs([[0.5 - CHAIN_HALF, 0.5 - CHAIN_HALF, 0, 0.5 + CHAIN_HALF, 0.5 + CHAIN_HALF, 1]]);
+const CHAIN_STRIP_U = 3 / 16;
+
+/** two crossed vertical planes, `width` wide, from `y0` to `y1`, sampling the
+ *  tile's left `CHAIN_STRIP_U` strip over `v0..v1`, swung 45 degrees like the
+ *  vanilla chain and lantern handle so they never sit on a cell boundary. */
+function chainLinkQuads(tile: TileHandle, y0: number, y1: number, v0: number, v1: number): BlockQuad[] {
+    const lo = 0.5 - CHAIN_HALF;
+    const hi = 0.5 + CHAIN_HALF;
+    const front: [Vec2, Vec2, Vec2, Vec2] = [
+        [0, v1],
+        [CHAIN_STRIP_U, v1],
+        [CHAIN_STRIP_U, v0],
+        [0, v0],
+    ];
+    const back: [Vec2, Vec2, Vec2, Vec2] = [
+        [0, v0],
+        [CHAIN_STRIP_U, v0],
+        [CHAIN_STRIP_U, v1],
+        [0, v1],
+    ];
+    const opts = (uvs: [Vec2, Vec2, Vec2, Vec2]) => ({ uvs });
+    const planes = [
+        blockModel.quad(
+            [
+                [lo, y0, 0.5],
+                [hi, y0, 0.5],
+                [hi, y1, 0.5],
+                [lo, y1, 0.5],
+            ],
+            [0, 0, 1],
+            tile,
+            opts(front),
+        ),
+        blockModel.quad(
+            [
+                [lo, y1, 0.5],
+                [hi, y1, 0.5],
+                [hi, y0, 0.5],
+                [lo, y0, 0.5],
+            ],
+            [0, 0, -1],
+            tile,
+            opts(back),
+        ),
+        blockModel.quad(
+            [
+                [0.5, y0, hi],
+                [0.5, y0, lo],
+                [0.5, y1, lo],
+                [0.5, y1, hi],
+            ],
+            [1, 0, 0],
+            tile,
+            opts(front),
+        ),
+        blockModel.quad(
+            [
+                [0.5, y1, hi],
+                [0.5, y1, lo],
+                [0.5, y0, lo],
+                [0.5, y0, hi],
+            ],
+            [-1, 0, 0],
+            tile,
+            opts(back),
+        ),
+    ];
+    return blockModel.rotateAxis(planes, 'y', 45, [0.5, 0.5, 0.5]);
+}
+
+/*#__NO_SIDE_EFFECTS__*/
+export function chain(id: string, { tiles: tile, ...options }: ChainPresetOptions) {
+    let handle: BlockHandle<typeof ColumnState.props>;
+    const upright = () => chainLinkQuads(tile, 0, 1, 0, 1);
+    handle = block(id, {
+        ...options,
+        material: options?.material ?? MaterialType.TRANSPARENT,
+        states: ColumnState,
+        defaultState: { axis: 'y' },
+        shape: ({ axis }) => (axis === 'x' ? CHAIN_SHAPE_X : axis === 'z' ? CHAIN_SHAPE_Z : CHAIN_SHAPE_Y),
+        model: ({ axis }) => ({
+            type: 'custom' as const,
+            quads:
+                axis === 'y'
+                    ? upright()
+                    : axis === 'x'
+                      ? blockModel.rotateAxis(upright(), 'z', 90, [0.5, 0.5, 0.5])
+                      : blockModel.rotateAxis(upright(), 'x', 90, [0.5, 0.5, 0.5]),
+        }),
+        cull: CullType.PARTIAL,
+        lightOpacity: 0,
+        flags: BLOCK_FLAG_SUPPORTS_HANGING,
+        place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ axis: axisFromPlaceCtx(ctx) })),
+        rotate: (stateId, axis) => {
+            const p = handle.def.states.decode(stateId - handle._baseStateId);
+            return handle.stateId({ axis: AXIS_REMAP[axis][p.axis as 'x' | 'y' | 'z'] });
+        },
+    });
+    return handle;
+}
+
+// ── lantern ─────────────────────────────────────────────────────────
+//
+// vanilla's lantern: a 6x7x6 body with a 4x2x4 cap and a crossed-plane
+// handle, standing on the floor or, with `hanging`, lifted one texel and
+// hung from a handle that reaches the ceiling. Placement takes the clicked
+// face: a ceiling hangs it, anything else stands it. When its support goes
+// (or was never there) it re-homes to the other side if that one holds, else
+// stays where it is, the way the kit's torch does rather than dropping as
+// vanilla's would. `lit` swaps the sheet and the light; flip it with
+// setLanternLit.
+//
+// The tile is vanilla's 16x16 layout so its face uvs can be used as they
+// are: body sides at (0,2)-(6,9), body ends at (0,9)-(6,15), cap sides at
+// (1,0)-(5,2), cap top at (1,10)-(5,14), the handle strip at (11,1)-(14,12).
+// Give it three frames for the flicker.
+
+const LanternState = blockState.create({ hanging: blockState.bool(), lit: blockState.bool() });
+type LanternProps = { hanging: boolean; lit: boolean };
+const LANTERN_FLOOR_SHAPE = blockShape.aabbs([
+    [5 / 16, 0, 5 / 16, 11 / 16, 7 / 16, 11 / 16],
+    [6 / 16, 7 / 16, 6 / 16, 10 / 16, 9 / 16, 10 / 16],
+]);
+const LANTERN_HANGING_SHAPE = blockShape.aabbs([
+    [5 / 16, 1 / 16, 5 / 16, 11 / 16, 8 / 16, 11 / 16],
+    [6 / 16, 8 / 16, 6 / 16, 10 / 16, 10 / 16, 10 / 16],
+]);
+
+const px = (a: number, b: number, c: number, d: number): [Vec2, Vec2, Vec2, Vec2] => [
+    [a / 16, d / 16],
+    [c / 16, d / 16],
+    [c / 16, b / 16],
+    [a / 16, b / 16],
+];
+
+function lanternQuads(tile: TileHandle, hanging: boolean): BlockQuad[] {
+    const lift = hanging ? 1 / 16 : 0;
+    const t: CubeTiles = { all: tile };
+    const quads: BlockQuad[] = [];
+    // body and cap as boxes with vanilla's face rects: sides 6x7 at (0,2),
+    // ends 6x6 at (0,9); cap sides 4x2 at (1,0), cap top 4x4 at (1,10)
+    const body = blockModel.box([5 / 16, lift, 5 / 16], [11 / 16, lift + 7 / 16, 11 / 16], t, { cull: false });
+    const cap = blockModel.box([6 / 16, lift + 7 / 16, 6 / 16], [10 / 16, lift + 9 / 16, 10 / 16], t, { cull: false });
+    for (const q of body) q.uvs = q.normal[1] === 0 ? px(0, 2, 6, 9) : px(0, 9, 6, 15);
+    for (const q of cap) q.uvs = q.normal[1] === 0 ? px(1, 0, 5, 2) : px(1, 10, 5, 14);
+    quads.push(...body, ...cap);
+    // the handle: crossed planes on the chain strip, 2 texels tall on the
+    // floor, reaching the ceiling when hanging
+    const y0 = lift + 9 / 16;
+    const y1 = hanging ? 1 : 11 / 16;
+    const rows = (y1 - y0) * 16;
+    quads.push(
+        ...chainLinkQuads(tile, y0, y1, 1 / 16, (1 + rows) / 16).map((q) => ({ ...q, uvs: q.uvs && shiftU(q.uvs, 11 / 16) })),
+    );
+    return quads;
+}
+
+/** slide a quad's uvs along u: the handle samples the strip at x 11..14, not
+ *  the chain's x 0..3. */
+function shiftU(uvs: [Vec2, Vec2, Vec2, Vec2], du: number): [Vec2, Vec2, Vec2, Vec2] {
+    return [
+        [uvs[0][0] + du, uvs[0][1]],
+        [uvs[1][0] + du, uvs[1][1]],
+        [uvs[2][0] + du, uvs[2][1]],
+        [uvs[3][0] + du, uvs[3][1]],
+    ];
+}
+
+function lanternSupported(voxels: Voxels, wx: number, wy: number, wz: number, hanging: boolean): boolean {
+    return hanging ? supportsHanging(voxels, wx, wy + 1, wz) : supportsHanging(voxels, wx, wy - 1, wz);
+}
+
+/*#__NO_SIDE_EFFECTS__*/
+export function lantern(id: string, { tiles, ...options }: LanternPresetOptions) {
+    let handle: BlockHandle<typeof LanternState.props>;
+    const emission = options?.lightEmission;
+    const litEmission = (props: LanternProps): [number, number, number] =>
+        typeof emission === 'function' ? emission(props) : (emission ?? [15, 13, 8]);
+    handle = block(id, {
+        ...options,
+        material: options?.material ?? MaterialType.TRANSPARENT,
+        states: LanternState,
+        defaultState: { hanging: false, lit: true },
+        shape: ({ hanging }) => (hanging ? LANTERN_HANGING_SHAPE : LANTERN_FLOOR_SHAPE),
+        model: ({ hanging, lit }) => ({ type: 'custom' as const, quads: lanternQuads(lit ? tiles.lit : tiles.unlit, hanging) }),
+        cull: CullType.PARTIAL,
+        lightOpacity: 0,
+        emissive: ({ lit }) => lit,
+        lightEmission: (props) => (props.lit ? litEmission(props) : [0, 0, 0]),
+        // a ceiling click hangs it, anything else stands it. `place` sees keys,
+        // not the registry, so support is not checked here: onNeighbourUpdate
+        // runs once on placement and re-homes it if that side has none.
+        place: (ctx, io) =>
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ hanging: ctx.normalY < -0.5, lit: true })),
+        onNeighbourUpdate(ctx) {
+            const { hanging, lit } = handle.def.states.decode(ctx.stateId - handle._baseStateId);
+            if (lanternSupported(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ, hanging)) return ctx.stateId;
+            if (lanternSupported(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ, !hanging))
+                return handle.stateId({ hanging: !hanging, lit });
+            return ctx.stateId;
+        },
+    });
+    return handle;
+}
+
+function lanternAt(voxels: Voxels, x: number, y: number, z: number): { idx: number; p: LanternProps } | null {
+    const stateId = getBlockState(voxels, x, y, z);
+    if (stateId === AIR) return null;
+    const reg = voxels.registry;
+    const idx = reg.stateToBlockIndex[stateId]!;
+    const handle = reg.handles[idx]!;
+    if (handle.def.states !== LanternState) return null;
+    return { idx, p: LanternState.decode(stateId - handle._baseStateId) as LanternProps };
+}
+
+/** whether the lantern at (x,y,z) is lit. false if the cell isn't a lantern. */
+export function getLanternLit(voxels: Voxels, x: number, y: number, z: number): boolean {
+    return lanternAt(voxels, x, y, z)?.p.lit ?? false;
+}
+
+/** light or put out the lantern at (x,y,z), keeping how it hangs. no-op if the
+ *  cell isn't a lantern or already matches.
+ *  toggle = `setLanternLit(v, x, y, z, !getLanternLit(v, x, y, z))`. */
+export function setLanternLit(voxels: Voxels, x: number, y: number, z: number, lit: boolean): void {
+    const found = lanternAt(voxels, x, y, z);
+    if (!found || found.p.lit === lit) return;
+    setBlock(voxels, x, y, z, voxels.registry.handles[found.idx]!.stateKey({ ...found.p, lit }));
 }
 
 // ── door ────────────────────────────────────────────────────────────
@@ -1516,7 +1901,7 @@ function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
 }
 
 /*#__NO_SIDE_EFFECTS__*/
-export function door(id: string, { textures, ...options }: DoorPresetOptions) {
+export function door(id: string, { tiles, ...options }: DoorPresetOptions) {
     let handle: BlockHandle<typeof DoorState.props>;
     handle = block(id, {
         ...options,
@@ -1530,13 +1915,8 @@ export function door(id: string, { textures, ...options }: DoorPresetOptions) {
             // model the left door always; mirror across X for the right hinge so
             // the handle/panel, and the open swing, land on the correct side.
             const b = doorBox('left', p.open);
-            const texture = p.half === 'lower' ? textures.bottom : textures.top;
-            let quads = blockModel.box(
-                [b[0], b[1], b[2]],
-                [b[3], b[4], b[5]],
-                { all: { texture } },
-                { uvs: 'local', cull: false },
-            );
+            const tile = p.half === 'lower' ? tiles.bottom : tiles.top;
+            let quads = blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], { all: tile }, { uvs: 'local', cull: false });
             if (p.hinge === 'right') quads = blockModel.mirrorX(quads);
             return { type: 'custom' as const, quads: blockModel.rotateY(quads, (4 - FACING4_STEPS[p.facing]) % 4) };
         },

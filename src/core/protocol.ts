@@ -241,11 +241,12 @@ export const SetActiveRoom = pack.object({
 });
 
 /**
- * Client toggles server-side metrics streaming. when enabled, the server
- * pushes `room_metrics` snapshots (server-side throttled) for every room the
+ * Client toggles server-side frame profiling. when enabled, the server records
+ * its tick and pushes `room_frames` (server-side throttled) for every room the
  * client holds a Player in. flat per-client bit, mirrors `debug_subscribe`.
  * Sent on the debug-panel open/close edge; unsubscribing on close (plus the
- * server's disconnect cleanup) means a closed panel streams nothing.
+ * server's disconnect cleanup) means a closed panel streams nothing — and, with
+ * no subscriber left, the server stops recording at all.
  */
 export const MetricsSubscribe = pack.object({
     type: pack.literal('metrics_subscribe'),
@@ -823,16 +824,37 @@ export const VoxelRegionDel = pack.object({
 
 export type VoxelRegionDel = pack.SchemaType<typeof VoxelRegionDel>;
 
-/** server pushes a latest-values metrics snapshot for a room to subscribers
- *  (see `metrics_subscribe`), on the server's own throttle. */
-export const RoomMetrics = pack.object({
-    type: pack.literal('room_metrics'),
+/**
+ * server pushes one profiled tick for a room to subscribers (see
+ * `metrics_subscribe`), on the server's own throttle: the worst frame since the
+ * last push, sliced to this room (other rooms' subtrees dropped) and stripped of
+ * sub-millisecond noise. see server/telemetry's `pushRoomFrames`.
+ *
+ * spans are flattened in enter (preorder) order, one entry per column, so a
+ * span's subtree is the run of following entries with a greater depth. scope
+ * names are interned: `keys`/`units` carry only the names minted since this
+ * client's last packet, appended in id order.
+ */
+export const RoomFrames = pack.object({
+    type: pack.literal('room_frames'),
     roomId: pack.string(),
-    /** flat record of metric id → latest value */
-    values: pack.record(pack.float32()),
+    /** newly interned key names, in id order, appended to what the client holds. */
+    keys: pack.list(pack.string()),
+    /** display unit per new key ('' when unset), parallel to `keys`. */
+    units: pack.list(pack.string()),
+    /** wall duration of the whole server tick (ms). */
+    duration: pack.float32(),
+    /** span columns: interned key id, nesting depth, start/end in ms from tick start. */
+    spanKey: pack.uint16Array(),
+    spanDepth: pack.uint8Array(),
+    spanStart: pack.float32Array(),
+    spanEnd: pack.float32Array(),
+    /** scalars recorded during the tick: interned key id → value. */
+    counterKey: pack.uint16Array(),
+    counterValue: pack.float32Array(),
 });
 
-export type RoomMetrics = pack.SchemaType<typeof RoomMetrics>;
+export type RoomFrames = pack.SchemaType<typeof RoomFrames>;
 
 /**
  * source attribution for a single log entry. mirrors core/debug.LogSource.
@@ -884,7 +906,7 @@ export const DEBUG_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>([
     'metrics_subscribe',
     'debug_subscribe',
     // server → client
-    'room_metrics',
+    'room_frames',
     'debug_logs',
 ]);
 
@@ -903,7 +925,7 @@ export const ServerMessage = pack.union('type', [
     VoxelChunkLight,
     VoxelChunkLightDelta,
     VoxelRegionDel,
-    RoomMetrics,
+    RoomFrames,
     DebugLogs,
     NetMessage,
     WireTable,

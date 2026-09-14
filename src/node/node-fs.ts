@@ -31,7 +31,7 @@ export function openNodeFs(root: string): Filesystem {
             await mkdir(dirname(f), { recursive: true });
             await writeFile(f, bytes);
         },
-        async list(dir, opts) {
+        async list(dir) {
             const out: FsEntry[] = [];
             const walk = (d: string) => {
                 let entries: Dirent<string>[] = [];
@@ -44,11 +44,11 @@ export function openNodeFs(root: string): Filesystem {
                     const rel = d ? `${d}/${e.name}` : e.name;
                     const kind = e.isDirectory() ? 'dir' : 'file';
                     out.push({ path: rel, kind });
-                    if (kind === 'dir' && opts?.recursive) walk(rel);
+                    if (kind === 'dir') walk(rel);
                 }
             };
             walk(dir);
-            return out;
+            return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
         },
         async remove(p) {
             await rm(abs(p), { force: true });

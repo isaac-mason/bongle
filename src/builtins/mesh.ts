@@ -5,14 +5,15 @@
 // streams worldMatrix + atlas region into the GPU instance buffer.
 //
 // meshId is a compound { modelId, meshName } struct (replicated). The
-// visual fields (tint/light/glow) are client-only, set by user scripts,
+// visual fields (tint/glow) are client-only, set by user scripts,
 // not synced, not editor-editable, not persisted.
 
-import { type Vec4, vec4 } from 'math';
+import type { Vec4 } from 'math';
 import type { MeshId } from '../core/models/handle';
+import { control, sync, trait } from '../core/registry';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
-import { control, sync, type TraitType, trait } from '../core/scene/traits';
+import type { TraitType } from '../core/scene/traits';
 import type { MeshVisualState } from '../render/mesh/mesh-visuals';
 
 export const MeshTrait = trait('mesh', {
@@ -37,18 +38,6 @@ export const MeshTrait = trait('mesh', {
      * For damage flashes, charge-ups. [0,0,0,0] = none (default). Client-only.
      */
     flash: [0, 0, 0, 0] as Vec4,
-
-    /**
-     * Voxel light contribution [sky, r, g, b], each 0-1. Client-only.
-     *
-     * Auto-sampled each frame by the renderer from the room's voxel light
-     * grid at the node's world position, so meshes shade like adjacent
-     * voxels. Combined in-shader as `max(blockRGB, sky*skyBrightness)`,
-     * then modulated by sun-shading with an ambient floor, same formula
-     * as the voxel material. User code can override via `setMeshLight()`
-     * but the next frame's auto-sample will overwrite it.
-     */
-    light: [0, 0, 0, 0] as Vec4,
 
     /**
      * Self-illumination 0-1. Client-only. Raises the lighting floor so the
@@ -80,18 +69,45 @@ export const MeshTrait = trait('mesh', {
     dither: 0,
 
     /**
+     * Per-instance outline, drawn as an expanded shell behind the mesh and
+     * masked by a stencil so it only shows where the mesh itself did not.
+     *
+     * `width` is in SCREEN pixels, held constant with distance: a world-space
+     * width goes sub-pixel far away and the outline silently disappears, which
+     * is the opposite of what an outline is for.
+     *
+     * `enabled` rather than `width: 0` so a configured width survives being
+     * toggled off, which is what a hover or selection highlight wants.
+     * Client-only.
+     */
+    outline: {
+        enabled: false,
+        /** thickness, in the units `space` selects. */
+        width: 1,
+        /**
+         * What `width` measures.
+         *
+         * 'screen' holds the outline at a constant PIXEL thickness however far away
+         * the mesh is, which keeps it readable and is what a highlight or a
+         * pixel-art look wants.
+         *
+         * 'world' measures in world units, so the outline shrinks with distance
+         * like real geometry and scales with the object - a large mesh gets a
+         * proportionally larger outline. This is what Godot's `grow` does.
+         *
+         * Note the two read `width` on completely different scales: 2 is a
+         * comfortable outline in pixels and an enormous one in world units.
+         */
+        space: 'screen' as 'screen' | 'world',
+        color: [0, 0, 0, 1] as Vec4,
+    },
+
+    /**
      * Whether this mesh renders. false = skip; the slot stays allocated
      * (no re-upload churn on toggle). applies to the whole mesh slot,
      * not to individual sub-meshes within `meshId`. client-only.
      */
     visible: true,
-
-    /**
-     * version counter, bumped by the setters when tint/light/glow change.
-     * the renderer caches the version observed at last upload and re-uploads
-     * only on mismatch.
-     */
-    _version: 0,
 
     /** renderer-internal allocation state (includes the frustum-cull entry,
      *  see `MeshVisualState.cull`). */
@@ -116,48 +132,3 @@ sync(MeshTrait, 'meshId', {
         t.meshId = v;
     },
 });
-
-/** set per-instance tint (rgb target, a intensity) and flag the renderer
- *  to re-upload params. */
-export function setMeshTint(t: MeshTrait, v: Vec4): void {
-    vec4.copy(t.tint, v);
-    t._version++;
-}
-
-/** set the transient flash overlay [r,g,b,a] (rgb colour, a strength) and
- *  flag the renderer to re-upload params. */
-export function setMeshFlash(t: MeshTrait, v: Vec4): void {
-    vec4.copy(t.flash, v);
-    t._version++;
-}
-
-/** set per-instance voxel light contribution and flag the renderer. */
-export function setMeshLight(t: MeshTrait, v: Vec4): void {
-    vec4.copy(t.light, v);
-    t._version++;
-}
-
-/** set per-instance self-illumination (0-1; lights the mesh in its own colour,
- *  no white wash) and flag the renderer. */
-export function setMeshGlow(t: MeshTrait, v: number): void {
-    t.glow = v;
-    t._version++;
-}
-
-/** opt out of voxel + sun lighting; render the texture flat. */
-export function setMeshUnlit(t: MeshTrait, v: boolean): void {
-    t.unlit = v;
-    t._version++;
-}
-
-/** set the voxel-light floor (0-1). 0 = no floor; 1 = effectively self-lit. */
-export function setMeshLitMin(t: MeshTrait, v: number): void {
-    t.litMin = v;
-    t._version++;
-}
-
-/** set the screen-door fade (0-1). 0 = solid; 1 = fully invisible. */
-export function setMeshDither(t: MeshTrait, v: number): void {
-    t.dither = v;
-    t._version++;
-}

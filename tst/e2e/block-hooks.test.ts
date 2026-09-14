@@ -15,6 +15,7 @@ import {
     onJoin,
     script,
     setBlock,
+    tile,
     trait,
 } from 'bongle';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -31,7 +32,8 @@ describe('block hook observers (e2e)', () => {
     it('onBlockBuild fires when air becomes a block', async () => {
         const onBuild = vi.fn();
         harness = await createTestHarness((root) => {
-            const Stone = block('stone', { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+            const stoneTex = tile('stone', { src: 'textures/stone.png' });
+            const Stone = block('stone', { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
             const Gameplay = trait('gameplay', {}, { persist: false });
             script(Gameplay, 'session', (ctx) => {
                 onBlockBuild(ctx, Stone, onBuild);
@@ -55,7 +57,8 @@ describe('block hook observers (e2e)', () => {
     it('onBlockBreak fires when a block becomes air', async () => {
         const onBreak = vi.fn();
         harness = await createTestHarness((root) => {
-            const Stone = block('stone', { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+            const stoneTex = tile('stone', { src: 'textures/stone.png' });
+            const Stone = block('stone', { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
             const Gameplay = trait('gameplay', {}, { persist: false });
             script(Gameplay, 'session', (ctx) => {
                 onBlockBreak(ctx, Stone, onBreak);
@@ -80,8 +83,10 @@ describe('block hook observers (e2e)', () => {
         const dirtBuild = vi.fn();
         const dirtBreak = vi.fn();
         harness = await createTestHarness((root) => {
-            const Stone = block('stone', { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
-            const Dirt = block('dirt', { model: () => ({ type: 'cube', textures: { all: { texture: 'dirt' } } }) });
+            const stoneTex = tile('stone', { src: 'textures/stone.png' });
+            const Stone = block('stone', { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
+            const dirtTex = tile('dirt', { src: 'textures/dirt.png' });
+            const Dirt = block('dirt', { model: () => ({ type: 'cube', tiles: { all: dirtTex } }) });
             const Gameplay = trait('gameplay', {}, { persist: false });
             script(Gameplay, 'session', (ctx) => {
                 onBlockBuild(ctx, Stone, stoneBuild);
@@ -110,9 +115,10 @@ describe('block hook observers (e2e)', () => {
         const onState = vi.fn();
         const result = await createTestHarness((root) => {
             const LampState = blockState.create({ lit: blockState.bool() });
+            const lampTex = tile('lamp', { src: 'textures/lamp.png' });
             const Lamp = block('lamp', {
                 states: LampState,
-                model: () => ({ type: 'cube', textures: { all: { texture: 'lamp' } } }),
+                model: () => ({ type: 'cube', tiles: { all: lampTex } }),
             });
             const Gameplay = trait('gameplay', {}, { persist: false });
             script(Gameplay, 'session', (ctx) => {

@@ -1,0 +1,24 @@
+PLACEHOLDERS. Replace before this ships.
+
+editor-select.ogg and editor-deselect.ogg are decaying sine blips generated with ffmpeg
+for this repo. They are ours, under the same terms as the rest of the
+engine source, and carry no third-party obligation. They exist so the
+editor's selection sfx path is wired and testable, not because they sound
+good.
+
+The intended replacements are from Kenney's UI / interface audio packs,
+which are CC0 (https://kenney.nl/assets - "Interface Sounds"). CC0 needs
+no attribution and no share-alike, which is why they were picked over the
+Minetest-derived clips in src/kit/assets/sounds (CC BY-SA 3.0). Keep it
+that way: do NOT copy a kit clip in here to stand in, or this directory
+inherits an obligation the NOTICE next door describes.
+
+The `editor-` prefix is not decoration: scripts/bongle-asset-rewrite.ts
+flattens every asset dir to dist/assets/<path-after-last-/assets/>, so
+these land in the same dist/assets/sounds/ as all 89 kit clips. Keep the
+prefix, or a name that collides with one fails the build.
+
+Swapping them is a file drop. The ids, the play sites, and the mix live in
+src/editor/sounds.ts and neither depends on the clip's contents; only keep
+them short (roughly under 120ms), since a brush-select drag retriggers
+`editor:select` for as long as it lasts.

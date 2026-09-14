@@ -8,6 +8,7 @@
 
 export type {
     CanvasTouch,
+    Cursor,
     Input,
     JoystickState,
     MouseButton,
@@ -20,6 +21,7 @@ export {
     getCanvasTouch,
     getCanvasTouches,
     getCanvasTouchesJustEnded,
+    getCursor,
     getJoystick,
     getPinchDelta,
     getPinchScale,

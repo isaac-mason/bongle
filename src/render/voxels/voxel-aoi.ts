@@ -14,6 +14,10 @@ import type { Vec3 } from 'math';
 import { CHUNK_SIZE, type Chunk, chunkKey, NEIGHBOR_COUNT, type Voxels } from '../../core/voxels/voxels';
 import { isInFlight, type Mesher, queueMesh } from './mesher';
 import { hasNoVisibleSurface } from './voxel-arena';
+import { type LightVolume, lookupPayload, withinLightGrid } from './voxel-light-volume';
+
+/** camera chunk coords, reused per scan. */
+const _camChunk: Vec3 = [0, 0, 0];
 
 /** frames a chunk can sit dirty before starvation boost kicks in. */
 const STARVATION_GRACE_FRAMES = 30;
@@ -60,7 +64,8 @@ export function reDirtyLost(dispatcher: Mesher, voxels: Voxels): void {
  * URGENT_REMESH_RADIUS Chebyshev of the camera or under the room-swap burst;
  * otherwise normal-tier with starvation spill. Streaming chunks defer until their
  * full 26-neighbourhood has arrived (so they mesh once with correct boundary AO),
- * unless urgent or past NEIGHBOURHOOD_GRACE_FRAMES. Empty / fully-occluded chunks are
+ * unless urgent or past NEIGHBOURHOOD_GRACE_FRAMES. A chunk with no light tile yet
+ * is queued for the light drain and deferred, never meshed unlit. Empty / fully-occluded chunks are
  * staged onto `toForget` (arena-free) for the consumer to evict. Each successful
  * enqueue clears the chunk's dirty bit + drops it from `voxels.dirty.blocks`; results
  * stage in `dispatcher.results` for the producer.
@@ -75,6 +80,7 @@ export function scheduleDirtyChunks(
     aoi: VoxelAoiState,
     dispatcher: Mesher,
     voxels: Voxels,
+    lightVolume: LightVolume,
     cameraPos: Vec3,
     deferIncomplete: boolean,
     toForget: string[],
@@ -107,6 +113,9 @@ export function scheduleDirtyChunks(
     const camCx = Math.floor(cx / CHUNK_SIZE);
     const camCy = Math.floor(cy / CHUNK_SIZE);
     const camCz = Math.floor(cz / CHUNK_SIZE);
+    _camChunk[0] = camCx;
+    _camChunk[1] = camCy;
+    _camChunk[2] = camCz;
     for (let i = 0; i < remeshCandidates.length; i++) {
         const { key, chunk } = remeshCandidates[i]!;
 
@@ -117,6 +126,11 @@ export function scheduleDirtyChunks(
             chunk.dirty = false;
             voxels.dirty.blocks.delete(chunk);
             aoi.dirtyFirstSeen.delete(key);
+            // the AOI granted light admission, so the AOI revokes it: the consumer
+            // frees the tile with the mesh, and a stale flag would let a
+            // non-AOI mark re-create it.
+            chunk.lightWanted = false;
+            voxels.dirty.lightVolume.delete(chunk);
             toForget.push(key); // arena-free: the consumer evicts these
             continue;
         }
@@ -137,6 +151,29 @@ export function scheduleDirtyChunks(
         if (deferIncomplete && !urgent && chunk.knownNeighbourCount < NEIGHBOR_COUNT) {
             const waited = firstSeen !== undefined && aoi.frame - firstSeen > NEIGHBOURHOOD_GRACE_FRAMES;
             if (!waited) continue;
+        }
+
+        // LIGHT BEFORE MESH. A quad samples the light volume by chunk, so a chunk
+        // must be resident there before its mesh can exist. Same shape as the
+        // neighbourhood defer: queue the bake and retry next frame. Urgency does
+        // NOT bypass this one - a mesh drawn against a missing tile is wrong,
+        // where a mesh drawn a frame late is merely late.
+        //
+        // This is also the ONLY place a chunk is ADMITTED to the light pool.
+        // Marking from anywhere else (light propagation, a chunk arriving, the
+        // apron) can refresh a tile but never create one, so the pool's working
+        // set is the AOI's and cannot exceed the mesh budget. Two independently
+        // sized residency systems thrashed against each other.
+        if (lookupPayload(lightVolume, chunk.cx, chunk.cy, chunk.cz) === 0) {
+            // BOUNDED BY THE GRID, not just by the tile pool. The residency grid
+            // wraps, so a chunk outside its radius aliases onto a nearer chunk's
+            // cell and the two clobber each other forever. A local room has no
+            // streaming to spread admission out - every loaded chunk is dirty at
+            // once - so without this it admits the whole world and churns.
+            if (!withinLightGrid(lightVolume, chunk.cx, chunk.cy, chunk.cz, _camChunk)) continue;
+            chunk.lightWanted = true;
+            voxels.dirty.lightVolume.add(chunk);
+            continue;
         }
 
         // a starving normal-tier chunk spills off its (saturated) affinity worker to

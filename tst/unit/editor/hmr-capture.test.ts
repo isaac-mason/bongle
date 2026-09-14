@@ -8,8 +8,8 @@ import { registerFlushHandler } from '../../../src/core/capture/flush';
 import { owningModule, _reset as resetModuleScope } from '../../../src/core/capture/module-scope';
 import { registry } from '../../../src/core/registry';
 import type { ScriptDef } from '../../../src/core/scene/scripts';
-import { script } from '../../../src/core/scene/scripts';
-import { trait } from '../../../src/core/scene/traits';
+import { script } from '../../../src/core/registry';
+import { trait } from '../../../src/core/registry';
 import { __bongle } from '../../../src/internal-runtime';
 
 // The capture bracket composed with shakeup's HMR, for real: the dev server transforms a user

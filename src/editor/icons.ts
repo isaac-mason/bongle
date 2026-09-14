@@ -1,76 +1,46 @@
 // editor/icons.ts, the pipeline-baked icon loaders: the block-icon atlas and the
 // per-prefab thumbnails, read through the engine resource loader and published to
-// the editor store for the inventory + inspector. `loadEditorAssets(state)` binds the
-// loader (mountEditUI calls it); the edit host calls the reload/invalidate entries
-// when a baked icon file changes on the fs.
+// the editor store for the inventory + inspector. `loadEditorAssets(state)` binds
+// the loader (mountEditUI calls it); the host calls the reload/invalidate entries
+// when the asset pipeline ANNOUNCES that an icon artifact moved. This module never
+// goes looking for an artifact on its own — no fs watching, no polling.
 
 import type { EngineClient } from '../client/client';
 import { prefabIconRelPath } from '../client/prefab-icons';
 import { useEditor } from './editor-store';
 
-/**
- * fetch the pre-built block icon atlas (written by the offline renderer
- * during dev) into the global editor store. project-wide asset; loaded once
- * per page and shared across every editor activation. fire-and-forget, late
- * resolution onto a doomed store at page teardown is harmless.
- *
- * The block atlas is the only icon artifact fetched into the store: scene +
- * prefab icons are per-file PNGs the UI loads by direct URL, so they need no
- * store state and no refetch.
- */
+/** the object URL the store currently holds, revoked when it is replaced. */
 let currentBlockIconUrl: string | null = null;
-let blockIconRenderInFlight = false;
-/** a reload requested while one was in flight, replayed when it finishes. */
-let blockIconReloadQueued = false;
+/** bumped by every block-atlas load; one that resolves stale drops its result
+ *  instead of publishing behind a newer one. */
+let blockIconGeneration = 0;
 const prefabIconInFlight = new Set<string>();
 /** bumped by every prefab-icon invalidation; a load that resolves against a stale
  *  generation drops its result instead of publishing a url nothing revokes. */
 let prefabIconGeneration = 0;
 
+/**
+ * Bind the engine resource loader the icon readers go through. The icons
+ * THEMSELVES are not fetched here: the asset pipeline announces them (the host's
+ * 'pipeline' subscription), and the host calls the reload entries below. Nothing
+ * waits on the filesystem or polls for an artifact to appear.
+ */
 export function loadEditorAssets(state: EngineClient): void {
     useEditor.setState({ resources: state.resources });
-    // Icons are baked by the asset pipeline into resources/client/ (block atlas +
-    // per-id prefab pngs) and read back here through the engine resource loader.
-    // The boot poll picks up the first bake; later reloads come from the edit
-    // client calling `reloadBlockIconAtlas` / `invalidatePrefabIcons` when a baked
-    // icon file changes on the fs.
-    void loadBakedBlockIconsWhenReady();
-}
-
-/** Re-read the pipeline-baked block-icon atlas. Called by the edit client when
- *  `voxels-icons.{png,json}` changes on the fs. */
-export function reloadBlockIconAtlas(): void {
-    void reloadBlockIconAtlasLoop();
 }
 
 /**
- * The icon bake writes the atlas png and its coords sidecar as two separate
- * `writeIfChanged` calls, and the fs emits one change per write — so this is
- * called TWICE per bake, and the png notification arrives while the json is
- * still being written. That first load can therefore publish a fresh atlas
- * against the previous pass's coords, and the json notification (the one
- * carrying the new block's tile) is the one that has to correct it. Dropping an
- * overlapping request left exactly that state stuck: a block in the palette with
- * no icon, unfixable short of a pipeline restart. So coalesce onto a trailing
- * re-run instead — the replay reads both artifacts settled.
+ * Re-read the pipeline-baked block-icon atlas into the store, for the inventory,
+ * the hotbar and the inspector. Called by the host when the bake announces a new
+ * one — never speculatively: the atlas is a png plus a coords sidecar written one
+ * after the other, and the announcement is what guarantees both halves are the
+ * same pass's.
+ *
+ * The block atlas is the only icon artifact held in the store: scene + prefab
+ * icons are per-file PNGs the UI loads by direct URL.
  */
-async function reloadBlockIconAtlasLoop(): Promise<boolean> {
-    if (blockIconRenderInFlight) {
-        blockIconReloadQueued = true;
-        return false;
-    }
-    blockIconRenderInFlight = true;
-    try {
-        let loaded = false;
-        do {
-            blockIconReloadQueued = false;
-            loaded = await loadBakedBlockIcons();
-        } while (blockIconReloadQueued);
-        return loaded;
-    } finally {
-        blockIconRenderInFlight = false;
-        blockIconReloadQueued = false;
-    }
+export function reloadBlockIconAtlas(): void {
+    void loadBakedBlockIcons();
 }
 
 /** Wrap PNG bytes (a baked artifact) in a blob object URL for CSS/img use. */
@@ -82,24 +52,10 @@ function pngBytesToObjectUrl(bytes: Uint8Array): string {
     return URL.createObjectURL(new Blob([blobSource], { type: 'image/png' }));
 }
 
-/** The first pipeline bake writes the icon atlas asynchronously after boot, so it
- *  may not exist on the first attempt. Retry a few frames until the load succeeds;
- *  registry-change events drive later reloads. */
-async function loadBakedBlockIconsWhenReady(attempt = 0): Promise<void> {
-    if (!useEditor.getState().resources) return;
-    const ok = await reloadBlockIconAtlasLoop();
-    if (!ok && attempt < 600) requestAnimationFrame(() => void loadBakedBlockIconsWhenReady(attempt + 1));
-}
-
-/**
- * Load the pipeline-baked block-icon atlas (`resources/client/voxels-icons.{png,json}`)
- * through the engine resource loader and publish it to the editor store for the
- * inventory + inspector. Returns false (quietly) if the artifact isn't baked yet.
- * Serialized by `reloadBlockIconAtlasLoop`, the only caller.
- */
-async function loadBakedBlockIcons(): Promise<boolean> {
+async function loadBakedBlockIcons(): Promise<void> {
     const resources = useEditor.getState().resources;
-    if (!resources) return false;
+    if (!resources) return;
+    const generation = ++blockIconGeneration;
     try {
         const { loader } = resources;
         const [png, jsonBytes] = await Promise.all([loader.loadBytes('voxels-icons.png'), loader.loadBytes('voxels-icons.json')]);
@@ -109,6 +65,7 @@ async function loadBakedBlockIcons(): Promise<boolean> {
             rows: number;
             iconPx: number;
         };
+        if (generation !== blockIconGeneration) return; // a newer load is already publishing
         const url = pngBytesToObjectUrl(png);
         if (currentBlockIconUrl) URL.revokeObjectURL(currentBlockIconUrl);
         currentBlockIconUrl = url;
@@ -119,11 +76,10 @@ async function loadBakedBlockIcons(): Promise<boolean> {
             blockIconCols: meta.cols,
             blockIconRows: meta.rows,
         });
-        return true;
-    } catch {
-        // not baked yet (or fetch failed) — the caller retries / a later registry
-        // change reloads.
-        return false;
+    } catch (err) {
+        // the bake said the artifact was there, so a failure here is real, not a
+        // race with a write — say so rather than leaving an empty palette.
+        console.error('[editor] block icon atlas failed to load', err);
     }
 }
 

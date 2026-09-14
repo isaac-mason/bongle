@@ -208,11 +208,11 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return { k: 'start', ref, init, projectName: opts.projectName, module: def.module, surface };
     }
 
-    // the transferred conduits every start frame carries: the runner, and
-    // (guest OS only) an fsrpc port — else the shim opens the local disk.
+    // the transferred conduits every start frame carries: the runner, and the
+    // process's fs port when the host serves one (else the shim opens the disk).
     function startPorts(ref: string, pid: number): MessagePort[] {
         const ports = [io.openRunner(ref, pid)];
-        const fsPort = io.openFs?.(ref, pid);
+        const fsPort = io.openFs(ref, pid);
         if (fsPort) ports.push(fsPort);
         return ports;
     }

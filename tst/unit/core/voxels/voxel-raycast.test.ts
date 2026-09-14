@@ -2,6 +2,7 @@
 
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { tile } from '../../../../src/core/registry';
 import { aabbs } from '../../../../src/core/voxels/block-collider';
 import { box } from '../../../../src/core/voxels/block-model';
 import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_SELECTION } from '../../../../src/core/voxels/block-registry';
@@ -201,8 +202,8 @@ describe('raycastVoxels', () => {
 
     describe('custom model blocks', () => {
         it('hits a custom model (full box)', () => {
-            const tex = 'stone';
-            const tris = box([0, 0, 0], [1, 1, 1], { all: { texture: tex } });
+            const tex = tile('stone', { src: 'textures/stone.png' });
+            const tris = box([0, 0, 0], [1, 1, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 {
@@ -228,9 +229,9 @@ describe('raycastVoxels', () => {
         });
 
         it('ray passes through gap above a slab (no explicit shape — unit box default)', () => {
-            const tex = 'stone';
+            const tex = tile('stone', { src: 'textures/stone.png' });
             // half-slab: [0,0,0] to [1,0.5,1]
-            const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+            const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 {
@@ -257,9 +258,9 @@ describe('raycastVoxels', () => {
         });
 
         it('ray passes through gap above a slab (explicit shape — precise collision)', () => {
-            const tex = 'stone';
+            const tex = tile('stone', { src: 'textures/stone.png' });
             // half-slab: [0,0,0] to [1,0.5,1]
-            const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+            const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 {
@@ -284,8 +285,8 @@ describe('raycastVoxels', () => {
         });
 
         it('ray hits the slab when aimed at it', () => {
-            const tex = 'stone';
-            const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+            const tex = tile('stone', { src: 'textures/stone.png' });
+            const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 {
@@ -311,8 +312,8 @@ describe('raycastVoxels', () => {
         });
 
         it('ray hits slab when aimed above visual model (no explicit shape — unit box default)', () => {
-            const tex = 'stone';
-            const slabTris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+            const tex = tile('stone', { src: 'textures/stone.png' });
+            const slabTris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 { id: 'stone', texId: 'stone' },
@@ -339,8 +340,8 @@ describe('raycastVoxels', () => {
         });
 
         it('ray hits block behind slab gap (explicit shape — precise collision)', () => {
-            const tex = 'stone';
-            const slabTris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+            const tex = tile('stone', { src: 'textures/stone.png' });
+            const slabTris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
             const registry = buildTestRegistry([
                 { id: 'stone', texId: 'stone' },

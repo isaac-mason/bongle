@@ -45,8 +45,6 @@ import { box3 } from 'math/shapes';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { getTrait, query, type SceneTree } from '../../core/scene/scene-tree';
-import { sampleVoxelLight } from '../../core/voxels/light';
-import type { Voxels } from '../../core/voxels/voxels';
 import * as Visibility from '../visibility/visibility';
 import {
     acquireGeometry,
@@ -141,7 +139,6 @@ export function update(
     visuals: ExtrudedSpriteVisuals,
     batch: ExtrudedSpriteBatch,
     resources: ExtrudedSpriteResources,
-    voxels: Voxels,
     visibility: Visibility.Visibility,
 ): void {
     const frameId = ++visuals.frameId;
@@ -149,7 +146,11 @@ export function update(
     const spriteResources = resources.spriteResources;
 
     let instArr = batch.instanceDataBuf.array as Float32Array;
-    let instanceDataDirty = false;
+    // touched-slot span, widened per write and uploaded as ONE range in phase 4. slots come
+    // from a free-list allocator so they can scatter; a span then re-sends a few untouched
+    // slots in the middle, which is still far short of the whole capacity allocation.
+    let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
+    let dirtyMaxSlot = -1;
 
     // ── phase 1: allocate / refresh states ──────────────────────────
     for (const [trait, _transform] of visuals._query) {
@@ -245,28 +246,23 @@ export function update(
 
         // light sample. unlit skips the work and the material flag
         // routes around the lighting path in the shader.
-        if (!trait.unlit) {
-            sampleVoxelLight(voxels, worldMat[12]!, worldMat[13]!, worldMat[14]!, trait.light);
-        }
-
         // material, flipbook frame selection + per-instance tint/light.
         const frameCount = state.entry.frames.length;
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const frame = state.entry.frames[frameIdx]!;
         const tint = trait.tint;
         const flash = trait.flash;
-        const light = trait.light;
         packTo(InstanceMaterial, instArr, slot * EXTRUDED_INSTANCE_STRIDE + EXTRUDED_INSTANCE_MATERIAL_OFFSET, {
             uvRect: [frame.u, frame.v, frame.w, frame.h],
             tint: [tint[0], tint[1], tint[2], tint[3]],
             flash: [flash[0], flash[1], flash[2], flash[3]],
-            light: [light[0], light[1], light[2], light[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
             dither: trait.dither,
         });
-        instanceDataDirty = true;
+        if (slot < dirtyMinSlot) dirtyMinSlot = slot;
+        if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
 
         // ── bucket by geomSlot.bucketKey ─────────────────────────
         const key = geomSlot.bucketKey;
@@ -319,8 +315,17 @@ export function update(
     // trim the reused draw array to this frame's active count.
     draws.length = writtenDraws;
 
-    if (writtenDraws > 0) batch.slotMapBuf.needsUpdate = true;
-    if (instanceDataDirty) batch.instanceDataBuf.needsUpdate = true;
+    // only [0, firstInstance) of slotMap was written and only that prefix is indexed by the
+    // draws, so upload the prefix rather than the whole capacity-sized allocation.
+    if (writtenDraws > 0) {
+        batch.slotMapBuf.addUpdateRange(0, firstInstance);
+        batch.slotMapBuf.needsUpdate = true;
+    }
+    if (dirtyMaxSlot >= 0) {
+        const base = dirtyMinSlot * EXTRUDED_INSTANCE_STRIDE_F32;
+        batch.instanceDataBuf.addUpdateRange(base, (dirtyMaxSlot - dirtyMinSlot + 1) * EXTRUDED_INSTANCE_STRIDE_F32);
+        batch.instanceDataBuf.needsUpdate = true;
+    }
 }
 
 /**

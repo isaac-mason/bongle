@@ -27,9 +27,11 @@ import {
 } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { findByName, getTrait } from '../api/scene-tree';
-import { onDispose, onFrame, script } from '../api/scripts';
+import { onDispose, onFrame } from '../api/scripts';
+import { script } from '../core/registry';
 import { getCamera, getSubject } from '../api/subject';
-import { type TraitType, trait } from '../api/traits';
+import { type TraitType } from '../api/traits';
+import { trait } from '../core/registry';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { env } from '../env';
 import { CameraTrait } from './camera';

@@ -66,7 +66,8 @@ export type FsEntry = { path: string; kind: 'file' | 'dir' };
 export type Filesystem = {
     read(path: string): Promise<Uint8Array>;
     write(path: string, bytes: Uint8Array): Promise<void>;
-    list(dir: string, opts?: { recursive?: boolean }): Promise<FsEntry[]>;
+    /** the whole subtree under `dir` (dirs included); a missing dir is empty. */
+    list(dir: string): Promise<FsEntry[]>;
     remove(path: string): Promise<void>;
 };
 

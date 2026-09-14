@@ -34,14 +34,12 @@
 
 import {
     block,
-    blockTexture,
     CullType,
+    config,
     control,
-    draw,
     env,
     getTrait,
     MaterialType,
-    config,
     onInit,
     onJoin,
     onTick,
@@ -50,6 +48,8 @@ import {
     setBlock,
     setPosition,
     TransformTrait,
+    texture,
+    tile,
     trait,
 } from 'bongle';
 import { blockSoundPresets, blocks } from 'bongle/kit';
@@ -62,26 +62,26 @@ const stoneKey = Stone.defaultKey();
 // Translucent stained glass, the same recipe as examples/blocks. These are
 // alpha-blended cubes, and CullType.SELF so only same-colour neighbours cull.
 const stainedGlass = (id: string, r: number, g: number, b: number) => {
-    const tex = blockTexture(id, {
-        src: draw(
-            (c, _inputs, params) => {
-                const packed = params.rgb as number;
-                const pr = (packed >> 16) & 0xff;
-                const pg = (packed >> 8) & 0xff;
-                const pb = packed & 0xff;
-                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.5)`;
-                c.fillRect(0, 0, 16, 16);
-                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.85)`;
-                c.fillRect(0, 0, 16, 1);
-                c.fillRect(0, 15, 16, 1);
-                c.fillRect(0, 0, 1, 16);
-                c.fillRect(15, 0, 1, 16);
-            },
-            { size: [16, 16], params: { rgb: (r << 16) | (g << 8) | b } },
-        ),
+    const tex = texture(id, {
+        size: [16, 16],
+        params: { rgb: (r << 16) | (g << 8) | b },
+        fn: (c, _inputs, params) => {
+            const packed = params.rgb as number;
+            const pr = (packed >> 16) & 0xff;
+            const pg = (packed >> 8) & 0xff;
+            const pb = packed & 0xff;
+            c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.5)`;
+            c.fillRect(0, 0, 16, 16);
+            c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.85)`;
+            c.fillRect(0, 0, 16, 1);
+            c.fillRect(0, 15, 16, 1);
+            c.fillRect(0, 0, 1, 16);
+            c.fillRect(15, 0, 1, 16);
+        },
     });
+    const glassTile = tile(id, { frames: [tex] });
     return block(id, {
-        model: () => ({ type: 'cube', textures: { all: { texture: tex } } }),
+        model: () => ({ type: 'cube', tiles: { all: glassTile } }),
         cull: CullType.SELF,
         material: MaterialType.TRANSLUCENT,
         sounds: blockSoundPresets.glass,

@@ -11,7 +11,7 @@
  * cheap; branches clear their own queues; one final `bumpVersion` marks
  * the flush boundary.
  *
- * blockTextures + blocks drain together via one wholesale BlockRegistry
+ * tiles + blocks drain together via one wholesale BlockRegistry
  * rebuild + per-room rewire. server has no atlas / GPU work; chunks just
  * remesh on next tick. the freshly-derived BlockRegistry is read via
  * `registry.blockRegistry` (lazy, keyed on the source kinds' revisions).
@@ -66,7 +66,7 @@ export function seedModels(state: EngineServer): void {
 
 export function applyRegistryChanges(state: EngineServer): void {
     const allStores = [
-        registry.blockTextures,
+        registry.tiles,
         registry.blocks,
         registry.models,
         registry.prefabs,
@@ -113,14 +113,14 @@ export function applyRegistryChanges(state: EngineServer): void {
     // server has no atlas / GPU work, chunks just remesh on next tick. read
     // the rebuilt registry once via the lazy `blockRegistry` getter so every
     // room points at the same instance.
-    if (registry.blocks.pendingChanges.length > 0 || registry.blockTextures.pendingChanges.length > 0) {
+    if (registry.blocks.pendingChanges.length > 0 || registry.tiles.pendingChanges.length > 0) {
         const blockRegistry = registry.blockRegistry;
         for (const room of state.rooms.rooms.values()) {
             room.voxels.registry = blockRegistry;
             resolveAllChunks(room.voxels);
         }
         registry.blocks.pendingChanges.length = 0;
-        registry.blockTextures.pendingChanges.length = 0;
+        registry.tiles.pendingChanges.length = 0;
     }
 
     if (registry.models.pendingChanges.length > 0) {

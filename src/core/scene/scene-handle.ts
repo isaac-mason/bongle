@@ -11,6 +11,7 @@
 // `cloneVoxels(handle.voxels)` to get a writable copy. clone children of
 // `handle.node` with `cloneNode()` before attaching them anywhere.
 
+import { type AssetMeta, resolveAssetMeta } from '../asset-meta';
 import type { DepKey } from '../capture/dep-graph';
 import type { ScenePayload } from '../content/scene-store';
 import type { Voxels } from '../voxels/voxels';
@@ -49,11 +50,7 @@ export function extractScenePrefabDeps(payload: ScenePayload): DepKey[] {
     return out;
 }
 
-export type SceneOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
+export type SceneOptions = AssetMeta & {
     /** push to clients. default: true. set false for server-only scenes (navmeshes, AI lookups). */
     client?: boolean;
     /** load on server. default: true. set false for client-only scenes. */
@@ -67,6 +64,8 @@ export type SceneDef = {
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    tags: readonly string[];
     /** does this scene reach the client? */
     readonly client: boolean;
     /** does this scene get loaded on the server? */
@@ -129,19 +128,21 @@ export type SceneHandle = {
 export function createSceneDef(id: string, options?: SceneOptions): SceneDef {
     return {
         id,
-        name: options?.name ?? id,
+        ...resolveAssetMeta(id, options),
         client: options?.client !== false,
         server: options?.server !== false,
         _payload: null,
     };
 }
 
-export function createSceneHandle(def: SceneDef): SceneHandle {
+/** The empty container for `id`. `node`, `voxels` and `version` are filled in by
+ *  `Content.populateScene` off the def's `_payload`, so they are established once
+ *  here and never rewritten by a re-declaration. */
+export function createSceneHandle(id: string): Omit<SceneHandle, 'def'> {
     return {
-        id: def.id,
-        dependency: { registry: 'scenes', id: def.id },
-        def,
-        node: createNode({ name: `__scene_handle:${def.id}` }),
+        id,
+        dependency: { registry: 'scenes', id },
+        node: createNode({ name: `__scene_handle:${id}` }),
         voxels: null,
         version: 0,
     };

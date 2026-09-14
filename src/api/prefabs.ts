@@ -33,11 +33,12 @@
  *   const blueMage = createPrefab(ctx, Mage, { args: { color: 'blue' } })
  */
 
-import { type DepHandle, setDeps } from '../core/capture/dep-graph';
-import { recordPrefab } from '../core/capture/module-scope';
-import { type PrefabDef as CapturedPrefabDef, declare, type PrefabHandle, registry } from '../core/registry';
+import type { AssetMeta } from '../core/asset-meta';
+import type { DepHandle } from '../core/capture/dep-graph';
+import type { PrefabHandle } from '../core/registry';
 
 export type { PrefabHandle } from '../core/registry';
+export { prefab } from '../core/registry';
 
 import type { PrefabApplyContext } from '../core/scene/prefab';
 import type { Schema, SchemaType } from '../core/scene/prop/prop';
@@ -73,10 +74,7 @@ export type PrefabDef<Args = unknown> = {
     apply: (ctx: PrefabApplyContext, args: Args) => void;
 };
 
-export type PrefabOptions<T extends PrefabType, S extends Schema> = {
-    /** human-readable display name for editor UIs (prefab picker,
-     *  inventory). falls back to the string id when omitted. */
-    name?: string;
+export type PrefabOptions<T extends PrefabType, S extends Schema> = AssetMeta & {
     /** what this prefab produces, voxels, nodes, or both. required. */
     type: T;
     /**
@@ -97,61 +95,8 @@ export type PrefabOptions<T extends PrefabType, S extends Schema> = {
     node?: { realm?: Realm };
 };
 
-const emptyArgsSchema = prop.object({});
-const noopApply = () => {};
-
-/**
- * declare a prefab def at module scope.
- */
-// generic (args-bearing) overload MUST come first: TS contextually types an
-// un-annotated `fn` param from the first matching overload, so if the no-args
-// overload led, `fn`'s `args` would get pinned to `Record<string, never>` and
-// then fail the args-bearing call. see the two-overload note above.
-export function prefab<T extends PrefabType, S extends Schema>(
-    id: string,
-    options: PrefabOptions<T, S>,
-): PrefabHandle<SchemaType<S>>;
-export function prefab<T extends PrefabType>(
-    id: string,
-    options: {
-        type: T;
-        deps?: ReadonlyArray<DepHandle>;
-        node?: { realm?: Realm };
-        fn?: (ctx: PrefabApplyContext<T>, args: Record<string, never>) => void;
-    },
-): PrefabHandle<Record<string, never>>;
-export function prefab<T extends PrefabType, S extends Schema>(
-    id: string,
-    options: PrefabOptions<T, S>,
-): PrefabHandle<SchemaType<S>> {
-    const type = options.type;
-    const name = options.name ?? id;
-    const deps = options.deps ?? [];
-    const argsSchema = (options.args?.schema ?? emptyArgsSchema) as S;
-    const defaultArgs = (options.args?.default ?? {}) as SchemaType<S>;
-    const apply = options.fn ?? noopApply;
-    const node = options.node;
-
-    const args = options.args ? { schema: argsSchema, default: defaultArgs } : undefined;
-    const applyFn = apply as (ctx: unknown, args: unknown) => void;
-
-    const handle = declare(
-        registry.prefabs,
-        id,
-        (): CapturedPrefabDef => ({ id, name, type, deps, args, node, apply: applyFn }),
-        (def): PrefabHandle => ({ id, dependency: { registry: 'prefabs', id }, def, __args: null! }),
-    );
-    recordPrefab(id);
-    // wire user-supplied deps into the DepGraph (replace semantics).
-    // the AST wrap unions AST-detected deps on top via __addDeps/addDeps,
-    // so wipe-and-rewire on re-eval stays correct: factory's setDeps
-    // resets, then the wrap re-unions fresh AST-detected refs.
-    setDeps(
-        { registry: 'prefabs', id },
-        deps.map((d) => d.dependency),
-    );
-    return handle as PrefabHandle<SchemaType<S>>;
-}
+export const emptyArgsSchema = prop.object({});
+export const noopApply = () => {};
 
 /* ── createPrefab ── */
 

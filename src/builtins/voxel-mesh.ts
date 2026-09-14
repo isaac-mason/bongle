@@ -9,7 +9,8 @@
 // params, same as MeshTrait.
 
 import type { Vec4 } from 'math';
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 import { VoxelModel } from '../core/voxels/voxel-model';
 import type { Voxels } from '../core/voxels/voxels';
 import type { VoxelMeshState } from '../render/voxels/voxel-mesh-visuals';

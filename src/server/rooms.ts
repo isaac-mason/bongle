@@ -3,7 +3,7 @@ import { addPlayerTraits } from '../builtins/player-node';
 import { attachWorldTrait } from '../builtins/world';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
-import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
+import { createLogs, type Logs } from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type * as Protocol from '../core/protocol';
 import type { PlayerMode, RoomMode } from '../core/protocol';
@@ -92,8 +92,10 @@ export type Room = {
     /** per-room server-side chat: command registry + broadcast transport. */
     chat: ChatServer;
 
-    /** per-room performance metrics. */
-    metrics: Metrics;
+    /** this room's scope key in the server's one profiler (`room:<id>`). the
+     *  room's whole tick is a span under it, which is also the slice a panel in
+     *  this room receives. built once, the tick loop opens it every frame. */
+    profileKey: string;
 
     /** per-room log buffer, script logs and tagged engine logs land here. */
     logs: Logs;
@@ -284,7 +286,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         clock,
         animations: Animation.init(sceneGraph),
         chat,
-        metrics: createMetrics(),
+        profileKey: `room:${id}`,
         logs: createLogs(),
         tick: 0,
         namespace,

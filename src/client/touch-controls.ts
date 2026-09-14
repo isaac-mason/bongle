@@ -223,8 +223,8 @@ export type CreateTouchButtonOpts = {
     width: number;
     height: number;
     label?: string;
-    /** a Lucide icon's inner SVG markup (its `<path>`s), rendered as a crisp
-     *  currentColor-stroked glyph — device-stable, unlike a unicode/emoji `label`.
+    /** an icon's inner SVG markup (its `<path>`s), rendered as a crisp
+     *  currentColor-filled glyph — device-stable, unlike a unicode/emoji `label`.
      *  takes precedence over `label`. */
     icon?: string;
     /** also rotate the camera while held, slide the finger to aim. the button
@@ -233,9 +233,16 @@ export type CreateTouchButtonOpts = {
     look?: boolean;
 };
 
-/** wrap Lucide icon inner-SVG (its paths) in the standard 24×24 currentColor stroke svg. */
-function lucideSvg(inner: string, px: number): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${inner}</svg>`;
+/** wrap an icon's inner-SVG (its paths) in the standard 24x24 currentColor fill svg. */
+function iconSvg(inner: string, px: number): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="currentColor" shape-rendering="crispEdges" style="display:block">${inner}</svg>`;
+}
+
+/** the glyphs are 24x24 pixel art, so they only land on whole pixels when the box
+ *  is a multiple of 24 css px. Size the button's icon off that ladder rather than
+ *  off a raw fraction of the button, which lands mid-pixel and renders uneven. */
+function iconPxForButton(width: number, height: number): number {
+    return Math.max(24, Math.round((Math.min(width, height) * 0.34) / 24) * 24);
 }
 
 export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButtonOpts): { dispose(): void } | null {
@@ -262,7 +269,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     root.style.touchAction = 'none';
     root.style.pointerEvents = 'auto';
     root.style.userSelect = 'none';
-    if (opts.icon) root.innerHTML = lucideSvg(opts.icon, Math.round(Math.min(opts.width, opts.height) * 0.34));
+    if (opts.icon) root.innerHTML = iconSvg(opts.icon, iconPxForButton(opts.width, opts.height));
     else if (opts.label) root.textContent = opts.label;
     applyEdges(root, opts);
 

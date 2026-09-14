@@ -297,7 +297,7 @@ function ListEditor({
                             onChange(next);
                         }}
                     >
-                        <Icons.X size={10} />
+                        <Icons.X size={12} />
                     </IconButton>
                 </div>
             ))}
@@ -306,7 +306,7 @@ function ListEditor({
                 onClick={() => onChange([...value, null])}
                 className="flex items-center gap-1 text-[10px] font-mono text-fg hover:text-fg"
             >
-                <Icons.Plus size={10} /> Add
+                <Icons.Plus size={12} /> Add
             </button>
         </div>
     );
@@ -530,7 +530,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
             const def = prefabDefs.get(id);
             const name = def?.name ?? id;
             const leading = <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />;
-            return { id, label: name, sublabel: name === id ? undefined : id, leading };
+            return { id, label: name, sublabel: name === id ? undefined : id, keywords: def?.tags, leading };
         }),
     ];
     return (
@@ -574,7 +574,7 @@ function BlockRefEditor({ value, onChange }: { value: string; schema: BlockRefSc
                     />
                 ) : null;
             const name = def.name ?? def.id;
-            return { id: def.id, label: name, sublabel: name === def.id ? undefined : def.id, leading };
+            return { id: def.id, label: name, sublabel: name === def.id ? undefined : def.id, keywords: def.tags, leading };
         }),
     ];
     return (
@@ -625,7 +625,7 @@ function RecordEditor({
                             onChange(next);
                         }}
                     >
-                        <Icons.X size={10} />
+                        <Icons.X size={12} />
                     </IconButton>
                 </div>
             ))}
@@ -637,7 +637,7 @@ function RecordEditor({
                 }}
                 className="flex items-center gap-1 text-[10px] font-mono text-fg hover:text-fg"
             >
-                <Icons.Plus size={10} /> Add
+                <Icons.Plus size={12} /> Add
             </button>
         </div>
     );
@@ -722,7 +722,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
         <div className="border border-border">
             <div className="flex items-center justify-between px-2 py-1 bg-surface-muted">
                 <span className="text-[11px] font-mono font-semibold text-fg">{handle.def.id}</span>
-                {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-fg-muted" />}
+                {node.scene && isEditorOwned && <Icons.Lock size={12} className="text-fg-muted" />}
                 {node.scene && !isEditorOwned && (
                     <IconButton
                         variant="danger"
@@ -840,7 +840,7 @@ function SectionDivider({ label, action }: { label: string; action?: ReactNode }
  */
 const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
     <Button ref={ref} size="icon-sm" className={`shrink-0 ${className ?? ''}`} {...props}>
-        <Icons.Plus size={13} />
+        <Icons.Plus size={12} />
     </Button>
 ));
 SectionAddButton.displayName = 'SectionAddButton';
@@ -854,8 +854,8 @@ SectionAddButton.displayName = 'SectionAddButton';
  */
 const AddPrefabTriggerButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
     <Button ref={ref} size="xs" className={className ?? ''} {...props}>
-        <Icons.Layers size={11} />
-        <Icons.Plus size={11} />
+        <Icons.Layers size={12} />
+        <Icons.Plus size={12} />
     </Button>
 ));
 AddPrefabTriggerButton.displayName = 'AddPrefabTriggerButton';

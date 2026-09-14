@@ -28,18 +28,13 @@ import {
     saveSceneTree,
     serializeNode,
 } from '../../../../src/core/scene/scene-tree';
-import {
-    applyTraitSwap,
-    onDispose,
-    onInit,
-    pruneRemovedScript,
-    script,
-    onQueryEnter as scriptOnQueryEnter,
-    onQueryExit as scriptOnQueryExit,
-    query as scriptQuery,
-} from '../../../../src/core/scene/scripts';
-import { control, type TraitType, trait } from '../../../../src/core/scene/traits';
+import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, onQueryEnter as scriptOnQueryEnter, onQueryExit as scriptOnQueryExit, query as scriptQuery } from '../../../../src/core/scene/scripts';
+import { script } from '../../../../src/core/registry';
+import { type TraitType } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
+import { control } from '../../../../src/core/registry';
 import { createTestServer } from '../../../integration/server-integration-test';
+import { scriptsById } from '../../../../src/core/scene/traits';
 
 /* ── test traits ── */
 
@@ -968,7 +963,7 @@ describe('script removal on reload', () => {
         addTrait(node, HmrTrait);
 
         expect(initCount).toBe(1);
-        expect(HmrTrait.scriptsById.has('sys')).toBe(true);
+        expect(scriptsById(HmrTrait).has('sys')).toBe(true);
         expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys')).toBe(true);
 
         // the add was already flushed in a real session; isolate the removal.
@@ -989,7 +984,7 @@ describe('script removal on reload', () => {
 
         // instance disposed (onDispose fired) and the def no longer lists it.
         expect(disposeCount).toBe(1);
-        expect(HmrTrait.scriptsById.has('sys')).toBe(false);
+        expect(scriptsById(HmrTrait).has('sys')).toBe(false);
         expect(HmrTrait.def.scripts.some((s) => s.scriptId === 'sys')).toBe(false);
         expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys') ?? false).toBe(false);
 

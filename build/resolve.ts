@@ -43,7 +43,8 @@ export type ResolveFs = {
  *  node-fs adapter for a future `bongle build` CLI. */
 export type BuildFs = ResolveFs & {
     read(path: string): Promise<Uint8Array>;
-    list(dir?: string, opts?: { recursive?: boolean }): Promise<{ path: string; kind: 'file' | 'dir' }[]>;
+    /** the whole subtree under `dir`; a missing dir is empty. */
+    list(dir?: string): Promise<{ path: string; kind: 'file' | 'dir' }[]>;
     /** Deref a symlinked id to its real path. OPTIONAL: the editor's vfs is a flat
      *  seeded tree with no symlinks and omits it. A host over a real node_modules must
      *  provide it — pnpm reaches a transitive dep only from its dependent's real path,

@@ -32,6 +32,7 @@ function testOS(apps: Record<string, App>) {
             throw new Error('no frames in unit tests');
         },
         openRunner: () => new MessageChannel().port2,
+        openFs: () => null,
         mount() {},
         stdout: (ref, _pid, line, isErr) => logs.push({ ref, line, isErr }),
     };
@@ -246,6 +247,7 @@ describe('createOS + runApp', () => {
                 throw new Error('no frames in unit tests');
             },
             openRunner: () => new MessageChannel().port2,
+            openFs: () => null,
             mount() {},
             stdout: () => {},
         };

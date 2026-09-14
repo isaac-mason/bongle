@@ -22,6 +22,7 @@ import {
 import { vec3 } from 'math';
 import type { Box3 } from 'math/shapes';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { tile } from '../../../../src/core/registry';
 import { aabbs } from '../../../../src/core/voxels/block-collider';
 import { box } from '../../../../src/core/voxels/block-model';
 import { CullType } from '../../../../src/core/voxels/blocks';
@@ -156,8 +157,8 @@ describe('voxelPhysicsShape castRay', () => {
     });
 
     it('hits a custom model slab', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -210,8 +211,8 @@ describe('voxelPhysicsShape castRay', () => {
     });
 
     it('ray hits unit box above slab visual (no explicit shape — unit box default)', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -263,8 +264,8 @@ describe('voxelPhysicsShape castRay', () => {
     });
 
     it('ray passes through gap above a slab (explicit shape — precise collision)', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -580,8 +581,8 @@ describe('voxelPhysicsShape collidePoint', () => {
     });
 
     it('detects point inside a custom model slab (within AABB)', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -628,8 +629,8 @@ describe('voxelPhysicsShape collidePoint', () => {
     });
 
     it('detects point above slab visual (no explicit shape — unit box default)', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -886,8 +887,8 @@ describe('voxelPhysicsShape collideShape', () => {
     });
 
     it('box overlapping a slab custom model produces contact', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {
@@ -947,8 +948,8 @@ describe('voxelPhysicsShape collideShape', () => {
     });
 
     it('box above slab gap produces no contact', () => {
-        const tex = 'stone';
-        const tris = box([0, 0, 0], [1, 0.5, 1], { all: { texture: tex } });
+        const tex = tile('stone', { src: 'textures/stone.png' });
+        const tris = box([0, 0, 0], [1, 0.5, 1], { all: tex });
 
         const registry = buildTestRegistry([
             {

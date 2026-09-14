@@ -314,7 +314,7 @@ function RoomTab({
                               : 'bg-surface text-fg-muted border-dashed border-border hover:text-fg hover:bg-surface-muted'
                     } ${canClose ? 'pl-2 pr-1.5 border-r-0' : 'px-2'}`}
                 >
-                    {isPlay ? <Icons.Play size={10} /> : <Icons.Wrench size={10} />}
+                    {isPlay ? <Icons.Play size={12} /> : <Icons.Wrench size={12} />}
                     {`${isPlay ? 'play' : 'edit'}: ${info.sceneId}`}
                     {isLocal && <span className="opacity-60">(local)</span>}
                 </button>
@@ -342,7 +342,7 @@ function RoomTab({
                                 : 'stop room'
                     }
                 >
-                    {room && !isPlay ? <Icons.X size={10} /> : <Icons.Square size={10} />}
+                    {room && !isPlay ? <Icons.X size={12} /> : <Icons.Square size={12} />}
                 </button>
             )}
         </div>

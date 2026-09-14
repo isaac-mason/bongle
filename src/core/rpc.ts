@@ -1,6 +1,5 @@
-import { recordCommand } from './capture/module-scope';
 import type { NetMessage } from './protocol';
-import { declare, get, type ProtocolTable, registry } from './registry';
+import { get, registry, type ProtocolTable } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 
@@ -193,39 +192,4 @@ export type CommandDef = {
 
 /* ── command() ─────────────────────────────────────────────────────── */
 
-/**
- * define a command. commands are typed network messages.
- *
- * direction determines where send() can be called and where listen() receives:
- * - CLIENT_TO_SERVER: client sends to server (routed via room), server listens per-room
- * - SERVER_TO_CLIENT: server sends/broadcasts to client, client listens
- *
- * handlers are NOT in the definition, they are registered in scripts via listen().
- *
- * ```ts
- * const placeBlock = command('place_block', CLIENT_TO_SERVER, p.object({
- *   x: p.int32(),
- *   y: p.int32(),
- *   z: p.int32(),
- *   blockId: p.string(),
- * }))
- *
- * // in client script:
- * send(ctx, placeBlock, { x: 0, y: 0, z: 0, blockId: 'stone' })
- *
- * // in server script:
- * listen(ctx, placeBlock, (args, from) => { ... })
- * ```
- */
-export function command<S extends pack.Schema, D extends RpcDirection>(id: string, direction: D, schema: S): CommandHandle<S, D> {
-    const serdes = pack.build(schema);
 
-    const handle = declare(
-        registry.commands,
-        id,
-        (): CommandDef => ({ id, direction, schema, serdes: serdes as CommandDef['serdes'] }),
-        (def): CommandHandle<pack.Schema, RpcDirection> => ({ id, dependency: { registry: 'commands', id }, def }),
-    );
-    recordCommand(id);
-    return handle as unknown as CommandHandle<S, D>;
-}

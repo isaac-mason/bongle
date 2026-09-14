@@ -66,6 +66,7 @@ import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
+import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 
 // ── runtime LUT shape, pixel uvs normalized into 0..1 sampler space ──
 
@@ -105,7 +106,6 @@ export const InstanceMaterial = struct('SpriteInstanceMaterial', {
     tint: d.vec4f,
     // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
-    light: d.vec4f,
     glow: d.f32,
     unlit: d.f32,
     litMin: d.f32,
@@ -493,11 +493,15 @@ function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { mate
     const uvRect = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: M, offset: 0 }).toVar('svUvRect');
     const tint = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: M, offset: 16 }).toVar('svTint');
     const flashF = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: M, offset: 32 }).toVar('svFlash');
-    const lightF = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: M, offset: 48 }).toVar('svLight');
-    const glowF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 64 }).toVar('svGlow');
-    const unlitF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 68 }).toVar('svUnlit');
-    const litMinF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 72 }).toVar('svLitMin');
-    const ditherF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 76 }).toVar('svDither');
+    const glowF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 48 }).toVar('svGlow');
+    const unlitF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 52 }).toVar('svUnlit');
+    const litMinF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 56 }).toVar('svLitMin');
+    const ditherF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 60 }).toVar('svDither');
+
+    // sampled at the billboard's world origin, where the CPU used to sample it.
+    // Unconditional: `unlit` is applied downstream in `shadeTinted`, so an unlit
+    // sprite pays a few taps rather than needing a branch here.
+    const lightF = sampleWorldLight(bindLightVolume(env), posWorld).toVar('svLight');
 
     const sampledU = add(uvRect.x, mul(aUv.x, uvRect.z)).toVar('svSampledU');
     const sampledV = add(uvRect.y, mul(aUv.y, uvRect.w)).toVar('svSampledV');

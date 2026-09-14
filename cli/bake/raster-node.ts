@@ -33,6 +33,15 @@ export function createNodeRaster(): Raster {
             const ctx = (c as unknown as Canvas).getContext('2d');
             return ctx.getImageData(0, 0, c.width, c.height).data;
         },
+        putPixels(rgba, w, h) {
+            // putImageData writes straight alpha; drawImage would premultiply and
+            // quantise every partly transparent texel on the way through.
+            const { canvas, ctx } = makeCanvas(w, h);
+            const image = ctx.createImageData(w, h);
+            image.data.set(rgba);
+            ctx.putImageData(image, 0, 0);
+            return canvas as unknown as RasterCanvas;
+        },
         async encodePng(c) {
             return new Uint8Array((c as unknown as Canvas).toBufferSync('png'));
         },

@@ -5,21 +5,26 @@
 //   resources/client/sprites-atlas.png, the atlas image
 //   resources/client/sprites-atlas.json, per-sprite uvRects + sizePx
 //
-// shape mirrors block-texture-atlas: content-hash sidecar gates rebuild,
-// missing sources get a magenta placeholder, atlas size starts at 256 and
-// doubles up to 4096 until all frames fit.
+// shape mirrors tile-atlas: content-hash sidecar gates rebuild, missing
+// sources get a magenta placeholder, and the shared packer (core/atlas/pack)
+// grows the atlas from 256 up to 4096 until all frames fit. Sprites pack at
+// texel alignment with their declared padding and ship no mips; that is why
+// they are their own atlas rather than tiles in the block one, whose cells are
+// 16-aligned so its mip chain stays clean.
 //
-// DrawSource frames are baked upstream by `draw-textures.ts` and threaded in
-// via `bakedDraws` as raster surfaces; the composite draws them directly.
+// computed textures are baked upstream by `bake-textures.ts` and threaded in
+// via `bakedTextures` as raster surfaces; the composite draws them directly.
 
 import type { Filesystem } from '../../../os/interface';
-import { addSkylineLevel, emptySkyline, findBestFit, type Region } from '../../core/atlas/skyline';
+import { packAtlas } from '../../core/atlas/pack';
+import type { Region } from '../../core/atlas/skyline';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SpriteAtlasEntry, SpriteAtlasMetadata, SpriteFrameRect } from '../../core/sprites/atlas';
-import type { DrawSource, NormalizedImageSource, SpriteDef } from '../../core/sprites/sprites';
+import type { SpriteDef } from '../../core/sprites/sprites';
+import type { TextureDef } from '../../core/textures/textures';
+import type { BakedTextures } from './bake-textures';
 import { readArtifactHash } from './cache';
-import type { BakedDraws } from './draw-textures';
 import type { Raster, RasterCanvas, RasterImage } from './raster';
 import { sha256HexParts } from './raster';
 
@@ -30,9 +35,11 @@ const ATLAS_PNG = 'resources/client/sprites-atlas.png';
 const ATLAS_JSON = 'resources/client/sprites-atlas.json';
 
 export type BuildSpriteAtlasOptions = {
-    /** in-memory canvases for any DrawSource frames in spritesRegistry, keyed
-     *  by descriptor identity. produced by `bakeDrawTextures`. missing → magenta. */
-    bakedDraws: BakedDraws;
+    /** computed textures baked upstream by `bakeTextures`, keyed by texture id.
+     *  missing entries → magenta. */
+    bakedTextures: BakedTextures;
+    /** the texture store, for resolving each frame's source. */
+    textures: KindStore<TextureDef>;
     /** consult the on-disk hash sidecar and skip the build when it matches. */
     cache: boolean;
     /** bake-input byte loader (host-provided; see pipeline InitCtx). */
@@ -49,7 +56,7 @@ export type BuildSpriteAtlasOptions = {
  * skipped because nothing changed.
  */
 export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, opts: BuildSpriteAtlasOptions): Promise<boolean> {
-    const { bakedDraws, cache, loader, fs, raster } = opts;
+    const { bakedTextures, textures, cache, loader, fs, raster } = opts;
 
     const handles = [...spritesRegistry.byId.values()];
 
@@ -68,7 +75,7 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
     const items = handles.flatMap(collectFrames);
 
     // load every frame up front: bitmap/canvas source + dimensions + hash part.
-    const loaded = await Promise.all(items.map((it) => loadFrame(it, bakedDraws, loader, raster)));
+    const loaded = await Promise.all(items.map((it) => loadFrame(it, textures, bakedTextures, loader, raster)));
 
     const hash = await computeBuildHash(handles, loaded);
     if (cache) {
@@ -79,17 +86,19 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
     const buildStart = performance.now();
     console.log(`[bongle] building sprite atlas (${handles.length} sprites, ${items.length} frames)...`);
 
-    // skyline-pack at increasing sizes until everything fits.
-    let atlasSize = INITIAL_ATLAS_SIZE;
-    let packed: PackedFrame[] | null = null;
-    while (atlasSize <= MAX_ATLAS_SIZE) {
-        packed = tryPack(loaded, atlasSize);
-        if (packed) break;
-        atlasSize *= 2;
-    }
-    if (!packed) {
+    // padding reserves `padding` texels on each side; the frame is drawn at the
+    // interior rect the packer reports.
+    const result = packAtlas(
+        loaded.map((f) => ({ w: f.w, h: f.h, padding: f.padding })),
+        1,
+        INITIAL_ATLAS_SIZE,
+        MAX_ATLAS_SIZE,
+    );
+    if (!result) {
         throw new Error(`[bongle] sprite atlas: ${items.length} frames don't fit in ${MAX_ATLAS_SIZE}x${MAX_ATLAS_SIZE}`);
     }
+    const { atlasSize } = result;
+    const packed: PackedFrame[] = loaded.map((f, i) => ({ ...f, ...result.rects[i]! }));
 
     const { canvas: atlas, ctx } = raster.makeCanvas(atlasSize, atlasSize);
     for (const p of packed) {
@@ -105,7 +114,7 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
     const sprites: Record<string, SpriteAtlasEntry> = {};
     let cursor = 0;
     for (const h of handles) {
-        const frameCount = Array.isArray(h.src) ? h.src.length : 1;
+        const frameCount = h.frames.length;
         const frames: SpriteFrameRect[] = [];
         for (let i = 0; i < frameCount; i++) {
             const p = packed[cursor++]!;
@@ -128,8 +137,8 @@ type FrameItem = {
     spriteId: string;
     frameIdx: number;
     padding: number;
-    /** raw registry ref (URL / project-relative) or DrawSource descriptor. */
-    source: string | DrawSource;
+    /** the texture this frame comes from. */
+    textureId: string;
 };
 
 type LoadedFrame = FrameItem & {
@@ -144,57 +153,47 @@ type LoadedFrame = FrameItem & {
 type PackedFrame = LoadedFrame & Region;
 
 function collectFrames(def: SpriteDef): FrameItem[] {
-    const srcs: NormalizedImageSource[] = Array.isArray(def.src) ? def.src : [def.src];
-    return srcs.map((s, frameIdx) => ({ spriteId: def.spriteId, frameIdx, padding: def.padding, source: s }));
+    return def.frames.map((dep, frameIdx) => ({
+        spriteId: def.spriteId,
+        frameIdx,
+        padding: def.padding,
+        textureId: dep.id,
+    }));
 }
 
-async function loadFrame(item: FrameItem, bakedDraws: BakedDraws, loader: ResourceLoader, raster: Raster): Promise<LoadedFrame> {
-    if (typeof item.source !== 'string') {
-        const canvas = bakedDraws.get(item.source);
+async function loadFrame(
+    item: FrameItem,
+    textures: KindStore<TextureDef>,
+    baked: BakedTextures,
+    loader: ResourceLoader,
+    raster: Raster,
+): Promise<LoadedFrame> {
+    const def = textures.byId.get(item.textureId);
+    if (def === undefined) {
+        console.warn(
+            `[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} texture '${item.textureId}' is not declared (magenta)`,
+        );
+        return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: `missing:${item.textureId}` };
+    }
+    if (def.from === 'computed') {
+        const canvas = baked.get(item.textureId);
         if (!canvas) {
-            console.warn(`[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} DrawSource has no baked canvas (magenta)`);
+            console.warn(
+                `[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} texture '${item.textureId}' has no baked canvas (magenta)`,
+            );
             return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: 'magenta' };
         }
         return { ...item, drawSource: canvas, w: canvas.width, h: canvas.height, hashPart: raster.canvasPixels(canvas) };
     }
     let bytes: Uint8Array;
     try {
-        bytes = await loader.loadBytes(item.source);
+        bytes = await loader.loadBytes(def.src);
     } catch {
-        console.warn(`[bongle] sprite source not found: ${item.source} (magenta)`);
-        return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: `missing:${item.source}` };
+        console.warn(`[bongle] sprite source not found: ${def.src} (magenta)`);
+        return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: `missing:${def.src}` };
     }
     const bitmap = await raster.decodeBitmap(bytes);
     return { ...item, drawSource: bitmap, w: bitmap.width, h: bitmap.height, hashPart: bytes };
-}
-
-/**
- * Skyline-pack at `atlasSize`. Returns null on overflow so the caller can
- * retry at a larger size. Padding reserves `padding` pixels on each side; the
- * frame is drawn at the inset position and the recorded uv rect points at the
- * frame interior.
- */
-function tryPack(frames: LoadedFrame[], atlasSize: number): PackedFrame[] | null {
-    // pack tallest-first for skyline efficiency; preserve original order so
-    // the caller can recombine frames per sprite without losing position.
-    const indices = frames.map((_, i) => i);
-    indices.sort((a, b) => frames[b]!.h + frames[b]!.padding * 2 - (frames[a]!.h + frames[a]!.padding * 2));
-
-    const skyline = emptySkyline(atlasSize);
-    const out: PackedFrame[] = new Array(frames.length);
-    for (const idx of indices) {
-        const f = frames[idx]!;
-        const padW = f.w + f.padding * 2;
-        const padH = f.h + f.padding * 2;
-        if (padW > atlasSize || padH > atlasSize) return null;
-
-        const fit = findBestFit(skyline, atlasSize, padW, padH);
-        if (!fit) return null;
-        addSkylineLevel(skyline, fit.nodeIdx, fit.x, fit.y, padW, padH);
-
-        out[idx] = { ...f, x: fit.x + f.padding, y: fit.y + f.padding, w: f.w, h: f.h };
-    }
-    return out;
 }
 
 async function computeBuildHash(defs: SpriteDef[], frames: LoadedFrame[]): Promise<string> {

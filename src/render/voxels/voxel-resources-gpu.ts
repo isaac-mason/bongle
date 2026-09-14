@@ -97,12 +97,14 @@ import {
     VisibleQuad,
     type VoxelArenaBudget,
 } from './voxel-arena';
+import { lightVolumeConfigOf, routeLightVolumeBuffers } from './voxel-light-sample';
+import { createLightVolume, evictChunkLightByKey, type LightVolume } from './voxel-light-volume';
 import { createGpuQuadMaterial, decodeOct16, decodeQuadCentroid, type VoxelPass } from './voxel-material';
 import {
-    type BlockTextureAtlasMetadata,
     createVoxelTextures,
     loadAtlasMeta,
     loadVoxelTextures,
+    type TileAtlasMetadata,
     type VoxelTextures,
 } from './voxel-textures';
 
@@ -472,9 +474,10 @@ export function createTranslucentExpandCompute(): ComputeNode {
         const qi = localId.x.toVar('qi');
         While(qi.lessThan(dataCount), () => {
             const realQuadId = add(arenaBase, qi).toVar('realQuadId');
-            // word 3 packs both the oct16 normal (low 16) and the owner block's
-            // chunk-local cell (bits 16..27) — one load feeds cellL1 and facing.
-            const w3 = index(quads, add(realQuadId.mul(u32(QUAD_STRIDE_U32S)), u32(3))).toVar('w3');
+            // word 6 packs both the oct16 normal (low 16) and the owner block's
+            // chunk-local cell (bits 16..27) - one load feeds cellL1 and facing.
+            // Word 6, not 3: positions widened to u16 and now occupy 0..5.
+            const w3 = index(quads, add(realQuadId.mul(u32(QUAD_STRIDE_U32S)), u32(6))).toVar('w3');
             // cellL1 = |owner cell − camera cell|₁ (the exact cross-cell term).
             const ownDx = abs(w3.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toF32().sub(camCellX)).toVar('ownDx');
             const ownDy = abs(w3.shiftRight(u32(20)).bitwiseAnd(u32(0xf)).toF32().sub(camCellY)).toVar('ownDy');
@@ -485,7 +488,8 @@ export function createTranslucentExpandCompute(): ComputeNode {
             const cellKey = sub(u32(TSORT_CELL_LEVELS - 1), cellL1).toVar('cellKey');
             // intraDist = normalised centroid distance (within-cell refinement).
             const centroidByte = decodeQuadCentroid(quads, realQuadId).toVar('cb');
-            const camRel = relOrigin.add(centroidByte.mul(f32(CHUNK_SIZE / 255))).toVar('camRel');
+            // `decodeQuadCentroid` already returns voxels, so no scale here.
+            const camRel = relOrigin.add(centroidByte).toVar('camRel');
             const dist = length(camRel).toVar('dist');
             const norm = clamp(div(sub(dist, nearDist), distSpan), f32(0), f32(1)).toVar('norm');
             const distLevel = min(floor(norm.mul(f32(TSORT_DIST_LEVELS))).toU32(), u32(TSORT_DIST_LEVELS - 1)).toVar('distLevel');
@@ -1306,7 +1310,11 @@ function createPassRender(arenas: GpuVoxelArena): Record<VoxelPass, PassRender> 
     return out;
 }
 
-function createGeometries(arenas: GpuVoxelArena, passRender: Record<VoxelPass, PassRender>): Record<VoxelPass, Geometry> {
+function createGeometries(
+    arenas: GpuVoxelArena,
+    passRender: Record<VoxelPass, PassRender>,
+    lightVolume: LightVolume,
+): Record<VoxelPass, Geometry> {
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
@@ -1318,6 +1326,8 @@ function createGeometries(arenas: GpuVoxelArena, passRender: Record<VoxelPass, P
         // ChunkInfo: per-slot {origin, arenaBase}. VS uses chunkInfo[slot]
         // to resolve worldspace origin and the arena base for realQuadId.
         g.setBuffer('chunkInfo', arenas.tables[pass].buffer);
+        // per-chunk light tiles + residency grid, sampled per corner in the VS.
+        routeLightVolumeBuffers(g, lightVolume);
         // env (envConfig) bound by name so the engine-global material
         // resolves the engine-global env config (the active room's
         // shadow is flushed into this buffer by Environment.tick).
@@ -1347,6 +1357,13 @@ export type VoxelResources = {
     arenas: GpuVoxelArena;
     /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
     meshDispatcher: Mesher | null;
+    /** GPU-resident per-chunk light tiles + residency grid. Light is the ROOT
+     *  residency fact: a chunk may be lit without a mesh, never meshed without
+     *  light. So it is NOT released when the mesh is evicted (`packerEvictChunk`,
+     *  `toForget`) - only when the CHUNK itself is gone from `voxels.chunks`.
+     *  The `toForget` case matters: those are all-air chunks, exactly where
+     *  entities stand and still need lighting. */
+    lightVolume: LightVolume;
 
     /** engine-global GPU cull compute. one node dispatched once per frame over
      *  `packer.cullRecordsBuffer`; compacts visible chunks into `visibleChunks`
@@ -1432,22 +1449,24 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     console.log(`[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
     const textures = createVoxelTextures(registry);
-    const { atlas, texAnimBuffer } = textures;
 
     const { promise: computeReady, resolve: _resolveComputeReady } = Promise.withResolvers<void>();
 
     const elapsedTime = time.elapsedTime;
     const quadMaterials: Record<VoxelPass, Material> = {
-        opaque: createGpuQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque', elapsedTime, env }),
-        transparent: createGpuQuadMaterial({ atlas, texAnimBuffer, pass: 'transparent', elapsedTime, env }),
-        translucent: createGpuQuadMaterial({ atlas, texAnimBuffer, pass: 'translucent', elapsedTime, env }),
+        opaque: createGpuQuadMaterial({ textures, pass: 'opaque', elapsedTime, env }),
+        transparent: createGpuQuadMaterial({ textures, pass: 'transparent', elapsedTime, env }),
+        translucent: createGpuQuadMaterial({ textures, pass: 'translucent', elapsedTime, env }),
     };
 
     // arenas first: the radix kernels bake the histogram row stride (maxBlocks,
     // derived from the arena's slot capacity) into their compiled graphs.
     const arenas = createGpuVoxelArena(budget);
     const passRender = createPassRender(arenas);
-    const geometries = createGeometries(arenas, passRender);
+    // built before the geometries: they bind its buffers by name.
+    const lightVolume = createLightVolume(budget.lightGridChunkRadius, budget.maxLightTiles);
+    env.lightVolumeConfig.value = lightVolumeConfigOf(lightVolume);
+    const geometries = createGeometries(arenas, passRender, lightVolume);
     const sortCap = arenas.quadArena.slotCount;
     const maxRadixBlocks = Math.ceil(sortCap / RADIX_BLOCK);
 
@@ -1542,6 +1561,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     });
 
     return {
+        lightVolume,
         quadMaterials,
         cull,
         emit,
@@ -1595,7 +1615,7 @@ export async function load(
     workerQueueDepth: number,
     resources: Resources,
     renderer?: WebGPURenderer,
-    meta?: BlockTextureAtlasMetadata | null,
+    meta?: TileAtlasMetadata | null,
 ): Promise<void> {
     // Compile the cull compute pipeline (awaited at the end so the first render
     // never binds a still-null cached pipeline). Timing relative to the atlas
@@ -1705,7 +1725,7 @@ function f32Equal(a: Float32Array, b: Float32Array): boolean {
 
 export function dispose(state: VoxelResources): void {
     state.textures.atlas.dispose();
-    state.textures.texAnimBuffer.dispose();
+    state.textures.entriesBuffer.dispose();
     state.quadMaterials.opaque.dispose();
     state.quadMaterials.transparent.dispose();
     state.quadMaterials.translucent.dispose();
@@ -2037,10 +2057,21 @@ export function upsertChunk(res: VoxelResources, key: string, chunk: Chunk, mesh
     packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
 }
 
-/** remove a chunk from this backend's arena (e.g. the chunk unloaded from `voxels`). */
+/**
+ * Remove a chunk from this backend's arena, and release its light tile with it.
+ *
+ * ONE residency decision. The light pool used to outlive the mesh, on the theory
+ * that light can exist without a mesh (an all-air chunk is where entities stand).
+ * In practice that made the pool a SECOND residency system with a different
+ * working set from the AOI's: it filled with chunks nothing renders, hit
+ * capacity, and then evicted by distance while the AOI immediately re-requested
+ * what it had just dropped. Tying the two together bounds the pool by the mesh
+ * budget, which is what that budget was sized for.
+ */
 export function removeChunk(res: VoxelResources, key: string): void {
     const packer = res.arenas;
     if (packerHas(packer, key)) packerEvictChunk(packer, key);
+    evictChunkLightByKey(res.lightVolume, key);
 }
 
 /** Synchronously mesh a chunk (unless all-air or fully occluded) and place it in
@@ -2090,7 +2121,10 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
 
     // evict meshes for chunks the server dropped (voxel_region_del queued their keys).
     if (voxels.dirty.removed.size > 0) {
-        for (const key of voxels.dirty.removed) removeChunk(res, key);
+        for (const key of voxels.dirty.removed) {
+            removeChunk(res, key);
+            evictChunkLightByKey(res.lightVolume, key);
+        }
         voxels.dirty.removed.clear();
     }
 
@@ -2099,7 +2133,10 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
 
     // evict any arena-held chunk the server has dropped from voxels.chunks.
     for (const key of packer.residentKeys) {
-        if (!voxels.chunks.has(key)) packerEvictChunk(packer, key);
+        if (!voxels.chunks.has(key)) {
+            packerEvictChunk(packer, key);
+            evictChunkLightByKey(res.lightVolume, key);
+        }
     }
 
     // self-heal: re-dirty any chunk lost to memory pressure so it re-meshes.

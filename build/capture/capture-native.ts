@@ -30,7 +30,8 @@ const BONGLE_PACKAGE = 'bongle';
 const PRODUCER_FACTORIES: Record<string, { registry: string; fixedId?: string }> = {
     scene: { registry: 'scenes' },
     block: { registry: 'blocks' },
-    blockTexture: { registry: 'blockTextures' },
+    tile: { registry: 'tiles' },
+    texture: { registry: 'textures' },
     trait: { registry: 'traits' },
     command: { registry: 'commands' },
     model: { registry: 'models' },

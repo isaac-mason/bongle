@@ -69,9 +69,9 @@ export function tick(persist: RoomPersist, delta: number): void {
     persist.since += delta;
     if (persist.since < AUTOSAVE_INTERVAL_S) return;
     persist.since = 0;
-    Debug.begin(persist.state.metrics, 'save');
+    Debug.begin(persist.state.profiler, 'save');
     flush(persist);
-    Debug.end(persist.state.metrics, 'save');
+    Debug.end(persist.state.profiler, 'save');
 }
 
 /** serialize + store + write one edit room; returns whether the stored scene changed.

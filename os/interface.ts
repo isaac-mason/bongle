@@ -8,39 +8,49 @@
 
 export type FsPath = string;
 
-export type FsStat = { path: FsPath; kind: 'file' | 'dir'; size: number; mtime: number };
+export type FsKind = 'file' | 'dir';
 
-export type FsChange = { type: 'created' | 'modified' | 'deleted' | 'moved'; path: FsPath; from?: FsPath };
+/** enumeration: what is there. Never carries metadata, so listing is never
+ *  expensive (no file is opened to produce it). */
+export type FsEntry = { path: FsPath; kind: FsKind };
+
+/** metadata for one path. Producing it may open the file; ask per path. */
+export type FsStat = { path: FsPath; kind: FsKind; size: number; mtime: number };
+
+/** one change to the tree. `path` is always the path the change is about (a
+ *  move's destination). Every structural variant carries `kind`, so a consumer
+ *  holding a replica of the tree can apply it without asking the disk. */
+export type FsChange =
+    | { type: 'created'; path: FsPath; kind: FsKind }
+    | { type: 'modified'; path: FsPath }
+    | { type: 'deleted'; path: FsPath; kind: FsKind }
+    | { type: 'moved'; path: FsPath; from: FsPath; kind: FsKind };
 
 export type FsWatchHandle = { close(): void };
-
-/** frozen, synchronously-readable view of a subtree. */
-export type FilesystemSnapshot = {
-    read(path: FsPath): Uint8Array;
-    readText(path: FsPath): string;
-    exists(path: FsPath): boolean;
-    list(): FsPath[];
-};
 
 /** the project disk. Paths are POSIX, root-relative, no leading slash. */
 export type Filesystem = {
     read(path: FsPath): Promise<Uint8Array>;
     readText(path: FsPath): Promise<string>;
     stat(path: FsPath): Promise<FsStat | null>;
-    list(dir?: FsPath, opts?: { recursive?: boolean }): Promise<FsStat[]>;
-    /** immediate children as name -> kind — the cheap enumeration primitive. */
-    readDir(dir?: FsPath): Promise<Map<string, 'file' | 'dir'>>;
     exists(path: FsPath): Promise<boolean>;
+    /** immediate children as name -> kind. A missing dir is an empty map. */
+    readDir(dir?: FsPath): Promise<Map<string, FsKind>>;
+    /** the whole subtree under `dir` (dirs included), sorted by path. A missing
+     *  dir is an empty list. */
+    list(dir?: FsPath): Promise<FsEntry[]>;
     write(path: FsPath, data: Uint8Array | string): Promise<void>;
     /** write only when bytes differ; true if written (emitters rely on it). */
     writeIfChanged(path: FsPath, data: Uint8Array | string): Promise<boolean>;
     remove(path: FsPath, opts?: { recursive?: boolean }): Promise<void>;
     move(from: FsPath, to: FsPath): Promise<void>;
-    /** change events, batched per flush — from ALL contexts of the project
-     *  (another realm's writes fire here too; apps rely on this to self-watch
-     *  bake outputs and edits, there is no push channel). */
-    watch(cb: (changes: FsChange[]) => void): FsWatchHandle;
-    snapshot(dir?: FsPath): Promise<FilesystemSnapshot>;
+    /** every change to the project, from every context that holds it, in the
+     *  order they landed, one batch per operation, delivered after the change is
+     *  visible to read/list/stat on this same object.
+     *  USER files only: bake outputs are announced by the producer on the
+     *  'pipeline' service (see `BakedArtifacts`), because a watcher observes an
+     *  artifact's files one at a time and races writes made before it existed. */
+    watch(cb: (changes: readonly FsChange[]) => void): FsWatchHandle;
 };
 
 // ── apps ─────────────────────────────────────────────────────────────────────
@@ -90,8 +100,37 @@ export type AppInit = {
  *  re-exports this as its `Config` (src/core/config.ts); one definition. */
 export type Config = { server?: false | { maxPlayers: number } };
 
-/** what the 'pipeline' service sends: on accept, and after every bake. */
-export type PipelineReport = { config: Config | null };
+/**
+ * Identity of each artifact the bake has left in `resources/`, as of this report.
+ * The bake ANNOUNCES its outputs here so consumers re-read on change instead of
+ * sniffing the filesystem for them: `fs.watch` is the source of truth for USER
+ * files, never for bake outputs (an artifact is several files written one at a
+ * time, so a watcher observes torn pairs and races the writes it was registered
+ * to catch).
+ *
+ * Each value is the artifact's sidecar hash, null when it isn't baked. Compare
+ * against the one you last read; a different value means re-read it.
+ * `prefabIcons` is a list of ids instead, because those are fetched lazily per
+ * prefab: a consumer holds no whole-set state to compare, it needs to know which
+ * ones moved.
+ */
+export type BakedArtifacts = {
+    /** voxels-atlas.json — the block texture atlas. */
+    blocks: string | null;
+    /** sprites-atlas.json. */
+    sprites: string | null;
+    /** audio-manifest.json (its own sidecar). */
+    audio: string | null;
+    /** voxels-icons.json — the block-icon atlas the editor palette reads. */
+    blockIcons: string | null;
+    /** prefab ids whose icon png was re-rendered or removed this pass. */
+    prefabIcons: string[];
+};
+
+/** what the 'pipeline' service sends: on accept, and after every bake. The icon
+ *  render lands after the data bake (it is deliberately not awaited), so one bake
+ *  sends more than one report — the later one carries the icon artifacts. */
+export type PipelineReport = { config: Config | null; artifacts: BakedArtifacts };
 
 /** an app's whole syscall surface. */
 export type Env<TInit = unknown> = {
@@ -233,17 +272,17 @@ export type Window = {
     readonly closed: Promise<void>;
 };
 
-/** host primitives createOS runs on; fs is opened per-app in the host shim. */
+/** host primitives createOS runs on. */
 export type IO = {
     spawnWorker(): Link;
     spawnFrame(): { link: Link; element: HTMLIFrameElement };
     /** a runner conduit keyed to this process's module graph, transferred in
      *  the start message. */
     openRunner(ref: string, pid: number): MessagePort;
-    /** an fsrpc conduit for this process's disk. A guest OS serves one from the
-     *  host's fs over the relay; a LOCAL OS omits this method entirely and the shim
-     *  opens the project disk itself (OPFS). */
-    openFs?(ref: string, pid: number): MessagePort;
+    /** an fs conduit for this process's disk, transferred in the start message,
+     *  or null when the process opens the project disk itself (a local host whose
+     *  storage every context can reach). A guest OS serves one from the host's fs. */
+    openFs(ref: string, pid: number): MessagePort | null;
     mount(win: Window): void;
     stdout(ref: string, pid: number, line: string, isErr: boolean): void;
 };

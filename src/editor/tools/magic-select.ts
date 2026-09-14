@@ -6,19 +6,19 @@
 // further shape the expansion.
 //
 // called each frame from EditorScript.onFrame (client only).
-// uses the shared PointerState for click detection and editor.hoverVoxel
+// uses the room's mouse input for click detection and editor.hoverVoxel
 // for the seed voxel (raycast runs once per frame in editor/client.ts).
 
 import type { Input } from '../../client/input';
-import { isKeyDown } from '../../client/input';
+import { isKeyDown, isMouseJustDown } from '../../client/input';
+import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Blocks } from '../../core/voxels/block-registry';
 import { AIR } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
 import { getBlockState } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi, MagicSelectOptions } from '../edit-room-store';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown } from '../pointer-state';
+import { playSelected } from '../sounds';
 
 // ── neighbour generation ───────────────────────────────────────────
 //
@@ -165,12 +165,12 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
 
 export function updateMagicSelect(
     store: EditRoomStoreApi,
-    pointer: PointerState,
+    ctx: ScriptContext,
     input: Input,
     voxels: Voxels,
     blocks: Blocks,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
+    const justDown = isMouseJustDown(input.mouseKeyboard, 'left');
     if (!justDown) return;
 
     // magic-select is voxel-only, skip when target restricts to nodes
@@ -198,4 +198,5 @@ export function updateMagicSelect(
     }
 
     store.setState({ selection: next });
+    playSelected(ctx, effectiveBehavior === 'add');
 }

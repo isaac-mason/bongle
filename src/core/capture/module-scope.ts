@@ -9,7 +9,7 @@
  * the stack handles nested module evaluation under esm, child modules
  * evaluate fully (push + body + pop) before the parent's body resumes.
  *
- * per-module snapshots: every declarative api (block, blockTexture, model,
+ * per-module snapshots: every declarative api (block, tile, texture, model,
  * sound, sprite, particle, prefab, scene, command, config, trait, script) records
  * into the current module's snapshot during evaluation. on a second
  * evaluation, the previous snapshot is diffed against the new one to decide
@@ -61,7 +61,7 @@ export function __pushModule(id: string): string | null {
     const norm = normalizeModuleId(id);
     const prev = stack.length ? stack[stack.length - 1] : null;
     stack.push(norm);
-    rotateSnapshot(norm);
+    beginRun(norm);
     for (const fn of pushHooks) fn(norm);
     return prev;
 }
@@ -69,6 +69,7 @@ export function __pushModule(id: string): string | null {
 export function __popModule(_prev: string | null): void {
     const id = stack.pop();
     if (id === undefined) return;
+    endRun(id);
     for (const fn of popHooks) fn(id);
 }
 
@@ -114,191 +115,107 @@ export function onModulePop(fn: (moduleId: string) => void): void {
     popHooks.push(fn);
 }
 
-/* ── per-module snapshot ────────────────────────────────────────── */
+/* ── per-module declaration signatures ──────────────────────────── */
 
 /**
- * registration record for one user module.
+ * What each module declared, for the kinds the module boundary cares about:
+ * `moduleId → kind → id → signature`. This is the structure the reload decision
+ * diffs — the same job the old per-kind `ModuleSnapshot` did, minus the ten
+ * buckets nothing read.
  *
- * the framework for what each field tracks: a resource contributes to the
- * patch-vs-invalidate diff only if user code (or engine consumers) captures
- * its content **by value** at evaluation time. resources captured by
- * **stable reference** (handle mutated in place by the engine, scenes,
- * models) or looked up **by id at use time** (prefabs, atlas) are presence-
- * only and propagate via wholesale registry flush; their stale closures
- * see new data through the same reference, or fetch fresh on next call.
- *
- *   presence-only sets, blockTextures, blocks, models, prefabs, scenes,
- *     config, commands. recorded for visibility
- *     (debug overlays, "what does this file declare?") but not read by
- *     diffSnapshots. block content edits propagate via the flush path:
- *     `applyRegistryChanges` rebuilds BlockRegistry, refreshes the atlas,
- *     repoints per-room `voxels.registry`, and `resolveAllChunks` triggers
- *     a remesh on the next tick. Stale BlockHandle references in script
- *     closures keep their old state encoder, accepted limitation, since
- *     invalidating on block edits would cascade past userSrcDir into the
- *     .bongle bootstrap entry (no self-accept there) and force a full
- *     page reload.
- *   traits, `bodyHash` over the entire trait body. scripts destructure
- *     trait params by name, capturing field shape; any body delta is an
- *     api contract change → invalidate.
- *   scripts, set of declared keys (`${traitId}.${scriptId}`). the key is a
- *     script's binding identity (instance map key + registry id); set
- *     equality means only factory bodies changed (swapped in place via the
- *     flush path), any key delta is a shape change → invalidate.
- *   commands, wire indexing is decoupled from registration order via
- *     explicit protocol negotiation (server pushes the ordered command
- *     list on connect and on registry change); `send`/`broadcast` resolve
- *     serdes by id from the live `commandsRegistry` rather than embedding
- *     it in `CommandHandle`. presence-only.
+ * Written by `registry-store`'s `commit`, from the one place a declaration
+ * lands, so no call site has an extra step to remember and no kind can end up
+ * half-tracked. It lives HERE rather than beside `commit` so the dependency
+ * stays one-way — `registry-store` imports this module for the owning-module
+ * stack, and the hook arrays above exist precisely to keep it from having to
+ * import back.
  */
-export type ModuleSnapshot = {
-    blockTextures: Set<string>;
-    blocks: Set<string>;
-    models: Set<string>;
-    sounds: Set<string>;
-    sprites: Set<string>;
-    particles: Set<string>;
-    prefabs: Set<string>;
-    scenes: Set<string>;
-    config: Set<string>;
-    traits: Map<string, { bodyHash: string }>;
-    /** declared script keys (`${traitId}.${scriptId}`); set equality ⇒ patch, see shape note above. */
-    scripts: Set<string>;
-    commands: Set<string>;
+type ModuleSignatures = Map<string, Map<string, string>>;
+
+type RunRecord = {
+    /** signatures recorded during the run currently in progress. */
+    current: ModuleSignatures;
+    /** the last run that COMPLETED, i.e. what this run is compared against. */
+    previous: ModuleSignatures | null;
+    /** did the in-progress run's body reach `__popModule`? */
+    completed: boolean;
 };
 
-type SnapshotPair = {
-    previous: ModuleSnapshot | null;
-    current: ModuleSnapshot;
-};
+const runs = new Map<string, RunRecord>();
 
-const snapshots = new Map<string, SnapshotPair>();
-
-function emptySnapshot(): ModuleSnapshot {
-    return {
-        blockTextures: new Set(),
-        blocks: new Set(),
-        models: new Set(),
-        sounds: new Set(),
-        sprites: new Set(),
-        particles: new Set(),
-        prefabs: new Set(),
-        scenes: new Set(),
-        config: new Set(),
-        traits: new Map(),
-        scripts: new Set(),
-        commands: new Set(),
-    };
-}
-
-/**
- * called by __pushModule on every (re-)evaluation. rotates current →
- * previous and starts a fresh current. subsequent record* calls during
- * module-body execution populate the new current snapshot.
- */
-function rotateSnapshot(id: string): void {
-    const existing = snapshots.get(id);
-    if (existing) {
-        snapshots.set(id, { previous: existing.current, current: emptySnapshot() });
-    } else {
-        snapshots.set(id, { previous: null, current: emptySnapshot() });
+function runFor(moduleId: string): RunRecord {
+    let record = runs.get(moduleId);
+    if (!record) {
+        record = { current: new Map(), previous: null, completed: false };
+        runs.set(moduleId, record);
     }
+    return record;
 }
 
 /**
- * read-only access to the latest snapshot. useful for debug overlays
- * that want to list what a module declared without touching registry
- * internals. returns `null` if the module hasn't evaluated yet.
+ * Start a run: the previous run's signatures become the baseline, but ONLY if
+ * that run actually finished.
+ *
+ * `__popModule` is the POSTLUDE and does not run when a module body throws, so
+ * a failed run leaves `current` holding a half-recorded set. Adopting that as
+ * the baseline would mean the developer's fix-up run gets compared against the
+ * broken one — a body change made in the broken edit and kept in the fix would
+ * read as "unchanged" and patch, leaving importers on stale closures.
  */
-export function getModuleSnapshot(id: string): ModuleSnapshot | null {
-    return snapshots.get(id)?.current ?? null;
+function beginRun(moduleId: string): void {
+    const record = runFor(moduleId);
+    if (record.completed) record.previous = record.current;
+    record.current = new Map();
+    record.completed = false;
+}
+
+function endRun(moduleId: string): void {
+    const record = runs.get(moduleId);
+    if (record) record.completed = true;
+}
+
+/** record one declaration's signature against the module that made it. */
+export function recordDeclaration(owner: string, kindName: string, id: string, signature: string): void {
+    const byKind = runFor(owner).current;
+    let byId = byKind.get(kindName);
+    if (!byId) {
+        byId = new Map();
+        byKind.set(kindName, byId);
+    }
+    byId.set(id, signature);
+}
+
+/** has this module a completed earlier run to compare against? */
+function hasPreviousRun(moduleId: string): boolean {
+    return runs.get(moduleId)?.previous != null;
+}
+
+/** true when this run's signatures match the previous completed run's. */
+function signaturesUnchanged(moduleId: string): boolean {
+    const record = runs.get(moduleId);
+    if (!record?.previous) return false;
+    return sameSignatures(record.previous, record.current);
+}
+
+function sameSignatures(a: ModuleSignatures, b: ModuleSignatures): boolean {
+    if (a.size !== b.size) return false;
+    for (const [kindName, aIds] of a) {
+        const bIds = b.get(kindName);
+        if (!bIds || aIds.size !== bIds.size) return false;
+        for (const [id, signature] of aIds) {
+            if (bIds.get(id) !== signature) return false;
+        }
+    }
+    return true;
 }
 
 /**
- * tests only, drop the module stack + all per-module snapshots so the
- * next test starts with no "previous" snapshot poisoning the patch/invalidate
- * diff. paired with `registry.__resetForTests` from tst/e2e/harness.ts.
+ * tests only, drop the module stack + recorded signatures so the next test
+ * starts with no previous run poisoning the patch/invalidate diff.
  */
 export function _reset(): void {
     stack.length = 0;
-    snapshots.clear();
-}
-
-/* ── snapshot recorders ─────────────────────────────────────────── */
-
-function currentSnapshot(): ModuleSnapshot | null {
-    const owner = owningModule();
-    const pair = snapshots.get(owner);
-    return pair ? pair.current : null;
-}
-
-export function recordBlockTexture(id: string): void {
-    currentSnapshot()?.blockTextures.add(id);
-}
-
-export function recordBlock(id: string): void {
-    currentSnapshot()?.blocks.add(id);
-}
-
-export function recordModel(id: string): void {
-    currentSnapshot()?.models.add(id);
-}
-
-export function recordSound(id: string): void {
-    currentSnapshot()?.sounds.add(id);
-}
-
-export function recordSprite(id: string): void {
-    currentSnapshot()?.sprites.add(id);
-}
-
-export function recordParticle(id: string): void {
-    currentSnapshot()?.particles.add(id);
-}
-
-export function recordPrefab(id: string): void {
-    currentSnapshot()?.prefabs.add(id);
-}
-
-export function recordScene(id: string): void {
-    currentSnapshot()?.scenes.add(id);
-}
-
-/**
- * record one command registration (presence only). commands are patch-safe
- * via explicit protocol negotiation (server pushes the ordered command list)
- * + serdes-lookup-at-use (send/broadcast resolve serdes from the live
- * registry by id), so commands do not participate in diffSnapshots.
- */
-export function recordCommand(id: string): void {
-    currentSnapshot()?.commands.add(id);
-}
-
-export function recordConfig(id: string): void {
-    currentSnapshot()?.config.add(id);
-}
-
-/**
- * record one trait registration's shape. bodyHash is a structural hash over
- * the entire body (literals by value, factories by toString). any change to
- * the body, added/removed key, default value tweak, factory swap, flips
- * the hash and forces importer cascade. rationale: a default value change
- * can silently be a type change (number → string, vec3 factory → quat
- * factory), so we treat any body delta as needing fresh script closures.
- */
-export function recordTrait(id: string, bodyHash: string): void {
-    currentSnapshot()?.traits.set(id, { bodyHash });
-}
-
-/**
- * record one script registration by its key (`${traitId}.${scriptId}`). the
- * diff is set-based: a script's identity is its key (also the instance map
- * key and registry id), so the patch-vs-invalidate decision only cares which
- * keys exist this run, not their order or factory bodies. body changes
- * propagate via the registry flush path (`applyTraitSwap`), not the snapshot.
- */
-export function recordScript(key: string): void {
-    currentSnapshot()?.scripts.add(key);
+    runs.clear();
 }
 
 /* ── reload decision ────────────────────────────────────────────── */
@@ -328,15 +245,15 @@ export type ReloadDecision = 'initial' | 'patch' | 'invalidate';
  * nothing) is vacuously all-handle and stays surgically patchable.
  */
 export function __decideReload(id: string, newModule?: Record<string, unknown>): ReloadDecision {
-    const pair = snapshots.get(normalizeModuleId(id));
-    if (!pair?.previous) return 'initial';
+    const moduleId = normalizeModuleId(id);
+    if (!hasPreviousRun(moduleId)) return 'initial';
     if (newModule && hasNonHandleExport(newModule)) return 'invalidate';
-    return diffSnapshots(pair.previous, pair.current) ? 'patch' : 'invalidate';
+    return signaturesUnchanged(moduleId) ? 'patch' : 'invalidate';
 }
 
 /**
  * true if the module namespace has any export that isn't an engine handle.
- * Every declarative handle (trait, block, blockTexture, model, scene, prefab,
+ * Every declarative handle (trait, block, tile, texture, model, scene, prefab,
  * sound, sprite, particle, command, script) carries a DepGraph
  * `dependency: { registry, id }` stamp — that stamp is the shared brand we
  * test for. Anything without it (functions, constants, plain objects) is
@@ -358,42 +275,4 @@ function isHandle(value: unknown): value is DepHandle {
         typeof (dep as DepKey).registry === 'string' &&
         typeof (dep as DepKey).id === 'string'
     );
-}
-
-/**
- * returns true if shapes are equal (→ patch is safe). false → invalidate.
- *
- *   1. trait id sets equal AND every shared trait's bodyHash identical.
- *   2. declared script-key sets equal (a script's key is its binding
- *      identity, same set means only factory bodies changed, which the
- *      registry flush path swaps in place; a key added/removed/renamed or
- *      reparented to another trait is a shape change → invalidate).
- *
- * everything else (blockTextures, blocks, models, prefabs,
- * scenes, commands, config) is presence-only and propagates via the
- * flush path, `applyRegistryChanges` does a wholesale rebuild on
- * `blocksRegistry.pendingChanges` / `blockTexturesRegistry.pendingChanges`:
- * BlockRegistry rebuilt, atlas refreshed (short-circuits on hash equality),
- * per-room `voxels.registry` repointed, `resolveAllChunks` marks every
- * chunk dirty for the next mesher tick. Stale BlockHandle references in
- * script-factory closures keep their old state encoder, which is an
- * accepted limitation (script-factory swaps are the trait/script path,
- * not the block path), invalidating on block edits would cascade past
- * the userSrcDir boundary into the .bongle bootstrap entry, which has
- * no self-accept and forces a full page reload.
- */
-function diffSnapshots(prev: ModuleSnapshot, curr: ModuleSnapshot): boolean {
-    if (prev.traits.size !== curr.traits.size) return false;
-    for (const [id, prevShape] of prev.traits) {
-        const currShape = curr.traits.get(id);
-        if (!currShape) return false;
-        if (prevShape.bodyHash !== currShape.bodyHash) return false;
-    }
-
-    if (prev.scripts.size !== curr.scripts.size) return false;
-    for (const key of prev.scripts) {
-        if (!curr.scripts.has(key)) return false;
-    }
-
-    return true;
 }

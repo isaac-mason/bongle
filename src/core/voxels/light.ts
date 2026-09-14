@@ -34,6 +34,9 @@ import {
     chunkLight,
     EMPTY_LIGHT_MASK,
     getChunkAt,
+    markLightVolumeDirty,
+    markLightVolumeDirtyForCell,
+    markLightVolumeUrgent,
     rebuildSpatialIndexes,
     setLight,
     toLocalCoord,
@@ -288,12 +291,17 @@ function resolveNeighbor(chunk: Chunk, lx: number, ly: number, lz: number, dir: 
 
 function writeChunkLight(voxels: Voxels, chunk: Chunk, index: number, value: number): void {
     setLight(chunk, index, value);
-    // markChunkDirty is guarded, but writeChunkLight is only called during
-    // seeding (small number of calls), so inline the dirty bits here too.
+    // `markChunkDirty` is guarded, so the dirty bits are inlined here instead.
+    // This is the INCREMENTAL block-change path (`updateLightBatch`), which is
+    // what a client's locally predicted edit runs, so the light volume has to be
+    // queued here too. Missing it meant a predicted break updated `chunk.light`
+    // and the mesh but not the tile, leaving the hole dark until the server's
+    // light delta arrived: a dark flash exactly one round-trip long.
     chunk.lightDirty = true;
     chunk.dirty = true;
     voxels.dirty.blocks.add(chunk);
     voxels.dirty.light.add(chunk);
+    markLightVolumeDirtyForCell(voxels, chunk, index);
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
     chunk.compressedLight = null;
@@ -305,12 +313,21 @@ function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
     // two independent queues, drained by different consumers at different
     // cadences, so they cannot share an early-out.
 
-    // remesh queue: the renderer drains `dirty.blocks` per frame and clears
-    // `chunk.dirty`, without touching `lightDirty`. always re-add, or a chunk
-    // whose ONLY change is light (a neighbour lit across a boundary) never
-    // remeshes again and keeps showing stale lighting.
-    chunk.dirty = true;
-    voxels.dirty.blocks.add(chunk);
+    // NO remesh queue. A light-only change (a neighbour lit across a boundary)
+    // used to have to re-mesh, because the mesher baked per-corner light into
+    // the quad stream. It does not any more: quads carry geometry, AO and flags,
+    // and light is sampled from the volume, so the mesh is unaffected by light.
+    // Re-meshing here was the coupling the light volume exists to remove, and it
+    // is the expensive half - a remesh is orders of magnitude more work than the
+    // tile rebake below, and relight fans out across neighbours constantly.
+
+    // light-volume queue: the renderer drains `dirty.lightVolume` to rebake GPU
+    // light tiles, at its own cadence, clearing only its own set. It must be
+    // added to BEFORE the `lightDirty` early-out below: that flag belongs to
+    // discovery, so gating on it would silently skip a rebake whenever the
+    // server had already drained and the renderer had not. Fans out to the
+    // apron: neighbours share this chunk's lattice boundary planes.
+    markLightVolumeUrgent(voxels, chunk);
 
     // network-dispatch queue: discovery drains this per tick and resets
     // `lightDirty`. these stores are idempotent while the flag is set.
@@ -871,6 +888,7 @@ export function relightChunks(voxels: Voxels, dirty: Set<Chunk>): void {
         c.version++;
         voxels.dirty.blocks.add(c);
         voxels.dirty.light.add(c);
+        markLightVolumeDirty(voxels, c);
         c.compressedSnapshot = null;
         c.snapshotPalette = null;
         c.compressedLight = null;

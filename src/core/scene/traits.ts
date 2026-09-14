@@ -1,7 +1,5 @@
-import { recordTrait } from '../capture/module-scope';
-import { declare, registry, structuralHash } from '../registry';
+import type { DepKey } from '../capture/dep-graph';
 import type { pack } from './pack';
-import type { ControlCodec, SyncCodec } from './packcat-bridge';
 import type { prop } from './prop';
 import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
@@ -233,29 +231,97 @@ export type TraitHandle<T extends TraitBase = TraitBase> = {
      */
     readonly slot: number;
     /** DepGraph dependency, see SceneHandle.dependency. */
-    dependency: { registry: 'traits'; id: string };
+    readonly dependency: DepKey;
     /** the authored data. re-pointed on every re-declaration. */
     def: TraitDef;
-
-    // ── derived from `def`; rebuilt by `mintHandle` on every declaration ──
-
-    /** compiled instance constructor, built from `def.body`. */
-    construct: () => TraitBase;
-    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. */
+    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. Not
+     *  derived from the def but from the registry's ordering, same as a block's
+     *  `_baseStateId`, so it lives on the handle and survives re-declaration. */
     netIndex: number | undefined;
-    /** `controlId` → its registration + slot index, over `def.controls`. */
-    controlsById: Map<string, { reg: ControlDef; index: number }>;
-    /** `syncId` → its registration + slot index, over `def.sync`. */
-    syncById: Map<string, { reg: SyncDef; index: number }>;
-    /** `scriptId` → its registration + slot index, over `def.scripts`. */
-    scriptsById: Map<string, { reg: ScriptDef; index: number }>;
-    /** memoised packcat codecs; null until first built, dropped on re-declaration. */
-    syncCodecs: SyncCodec[] | null;
-    controlCodecs: ControlCodec[] | null;
 
     /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
 };
+
+/*
+ * Everything a trait handle used to carry beyond the above — the compiled
+ * constructor, the packcat codec memos, the by-id indexes over
+ * `def.controls`/`def.sync`/`def.scripts`, and the wire `netIndex` — was state
+ * DERIVED from either the def or the registry's own ordering. Holding it on the
+ * handle meant `declare` had to rebuild it on every re-declaration, which is
+ * what made re-declaring a trait silently drop controls, syncs and scripts
+ * registered from OTHER modules: those had been accumulated onto the handle
+ * after the fact, and the rebuild started them empty again.
+ *
+ * It is all derived at the point of use now: `construct()` and the codecs
+ * memoise on def identity (see `derived`), the by-id indexes are views over the
+ * def's own arrays, and `netIndex`/`slotToTrait` are rebuilt by `reindexTraits`
+ * from `traitStore.byId`. A re-declaration mints a new def, so every memo
+ * refreshes itself with nothing to remember to invalidate.
+ */
+
+const constructors = new WeakMap<TraitDef, () => TraitBase>();
+
+/** compiled instance constructor for `handle`'s current def. */
+export function construct(handle: TraitHandle): () => TraitBase {
+    const def = handle.def;
+    let compiled = constructors.get(def);
+    if (compiled === undefined) {
+        compiled = compileConstructor(def);
+        constructors.set(def, compiled);
+    }
+    return compiled;
+}
+
+/*
+ * `controls` and `sync` are appended only by the `control()` / `sync()` calls
+ * that follow `trait()` in the same module body, and a re-declaration mints a
+ * fresh def — so once module evaluation is over the arrays are frozen in
+ * practice and a def-keyed memo is safe. These are read per trait instantiation,
+ * which is why they are memoised at all.
+ *
+ * `scripts` is NOT: `pruneRemovedScript` splices it IN PLACE on the same def
+ * when a `script()` call disappears from a file other than its trait's. A memo
+ * keyed on def identity would not see that. It is only read on cold paths
+ * (registration, HMR swap), so it is built on demand instead — cheaper than the
+ * invalidation step it would otherwise need, and impossible to get wrong.
+ */
+const controlIndexes = new WeakMap<TraitDef, Map<string, { reg: ControlDef; index: number }>>();
+const syncIndexes = new WeakMap<TraitDef, Map<string, { reg: SyncDef; index: number }>>();
+
+/** `controlId` → its registration + slot index, as a view over `def.controls`. */
+export function controlsById(handle: TraitHandle): Map<string, { reg: ControlDef; index: number }> {
+    const def = handle.def;
+    let index = controlIndexes.get(def);
+    if (index === undefined) {
+        index = indexBy(def.controls, (c) => c.controlId);
+        controlIndexes.set(def, index);
+    }
+    return index;
+}
+
+/** `syncId` → its registration + slot index, as a view over `def.sync`. */
+export function syncById(handle: TraitHandle): Map<string, { reg: SyncDef; index: number }> {
+    const def = handle.def;
+    let index = syncIndexes.get(def);
+    if (index === undefined) {
+        index = indexBy(def.sync, (s) => s.syncId);
+        syncIndexes.set(def, index);
+    }
+    return index;
+}
+
+/** `scriptId` → its registration + slot index, over `def.scripts`. Built fresh:
+ *  the array is spliced in place by `pruneRemovedScript`. */
+export function scriptsById(handle: TraitHandle): Map<string, { reg: ScriptDef; index: number }> {
+    return indexBy(handle.def.scripts, (s) => s.scriptId);
+}
+
+function indexBy<R>(regs: R[], keyOf: (reg: R) => string): Map<string, { reg: R; index: number }> {
+    const out = new Map<string, { reg: R; index: number }>();
+    for (let i = 0; i < regs.length; i++) out.set(keyOf(regs[i]!), { reg: regs[i]!, index: i });
+    return out;
+}
 
 /** extract the instance type from a trait handle. */
 export type TraitType<H extends TraitHandle> = H['__type'];
@@ -284,179 +350,10 @@ export type TraitDef = {
 
 /* ── global trait registry ── */
 
-let slotCounter = 0;
-
-/**
- * stable mapping from trait string id to runtime slot. Cached for the
- * process lifetime, a trait id always gets the same slot, even if its
- * registry entry is removed and re-added during HMR. Used as the integer
- * key into `node._traits` and friends.
- */
-export const traitSlots: Record<string, number> = {};
-
 /* ── trait() ── */
 
-/**
- * define a trait. registers it in the global capture area and returns
- * a handle used with getTrait, addTrait, hasTrait, query, etc.
- *
- * @example
- * ```ts
- * const TransformTrait = trait('transform', {
- *     position: () => vec3.create(),
- *     scale:    () => vec3.fromValues(1, 1, 1),
- *     teleport: 0,
- *     interpolate: false,
- * });
- *
- * control(TransformTrait, 'position', {
- *     schema: prop.vec3(),
- *     get: (t) => t.position,
- *     set: (t, v) => { vec3.copy(t.position, v); markDirty(t); },
- * });
- *
- * const poseSync = sync(TransformTrait, 'pose', {
- *     schema: pack.tuple([pack.position(), pack.quaternion()]),
- *     pack: (t) => [t.position, t.quaternion],
- *     unpack: ([p, q], t) => { vec3.copy(t.position, p); quat.copy(t.quaternion, q); markDirty(t); },
- * });
- * ```
- */
-export function trait<S extends TraitBody = Record<string, never>>(
-    id: string,
-    body?: S,
-    options?: TraitOptions,
-): TraitHandle<TraitInstance<S>> {
-    let slot = traitSlots[id];
-    if (slot === undefined) {
-        slot = slotCounter++;
-        traitSlots[id] = slot;
-    }
-
-    const nextBody = body ?? ({} as S);
-    const name = options?.name ?? id;
-    const persist = options?.persist ?? true;
-
-    const handle = declare(
-        registry.traits,
-        id,
-        (): TraitDef => ({
-            id,
-            name,
-            body: nextBody,
-            persist,
-            // the module's control() / sync() / script() calls run again immediately
-            // after this and re-register into these. Each refuses to re-register an id
-            // it already holds (warns, keeps the old body), so starting empty is what
-            // lets an author's edit to a control/sync/script body actually land.
-            controls: [],
-            sync: [],
-            scripts: [],
-        }),
-        (def): TraitHandle<TraitInstance<S>> => ({
-            id,
-            slot,
-            dependency: { registry: 'traits', id },
-            def,
-            // Everything below is derived from `def` and is rebuilt here on every
-            // declaration — `declare` merges this onto the surviving handle, so an
-            // edited body cannot leave a stale constructor or codec behind.
-            // `compileConstructor` runs at import time (~27us for the widest trait)
-            // rather than in whichever frame first spawns an instance.
-            construct: compileConstructor(def),
-            netIndex: undefined,
-            controlsById: new Map(),
-            syncById: new Map(),
-            scriptsById: new Map(),
-            syncCodecs: null,
-            controlCodecs: null,
-            __type: null!,
-        }),
-    );
-
-    // bodyHash = structural hash of the trait body (literals by value,
-    // factories by toString). any body delta, added/removed key, default
-    // tweak, factory swap, flips the hash and forces importer cascade.
-    // a default change can silently be a type change (e.g. number → string,
-    // vec3 factory → quat factory), so we treat any body delta as needing
-    // fresh script closures rather than try to classify "safe" tweaks.
-    recordTrait(id, structuralHash(hashableBody(handle.def.body)));
-
-    return handle as TraitHandle<TraitInstance<S>>;
-}
-
-/** the body IS the hashable shape now that it holds only literals, factories and arrays. */
-function hashableBody(body: TraitBody): Record<string, unknown> {
-    return body as Record<string, unknown>;
-}
 
 /* ── trait-level registrars ── */
-
-/**
- * register a control on a trait. callable multiple times per trait.
- * declared *after* the trait() literal so `t` is fully typed in get/set.
- * `id` is a stable string used as the persisted key in scene files and
- * the inspector lookup key.
- */
-export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void {
-    const target = handle.def;
-    if (handle.controlsById.has(controlId)) {
-        console.warn(`[bongle] trait '${target.id}' already has a control with id '${controlId}'; ignoring re-register`);
-        return;
-    }
-    // into the per-kind store so HMR detects individual control edits without
-    // flipping the parent trait hash. key matches the composed
-    // `${traitId}.${controlId}` shape used elsewhere. Nothing holds the minted
-    // handle today (`control()` returns void); it goes through `declare` so the
-    // kind has the same shape as every other, and so a future user-held ref would
-    // already be identity-stable.
-    const key = `${target.id}.${controlId}`;
-    const reg = declare(
-        registry.controls,
-        key,
-        () => ({ ...body, traitId: target.id, controlId }) as unknown as ControlDef,
-        (def) => ({ id: key, dependency: { registry: 'controls' as const, id: key }, def }),
-    ).def;
-    handle.controlsById.set(controlId, { reg, index: target.controls.length });
-    target.controls.push(reg);
-}
-
-/**
- * register a sync on a trait. callable multiple times per trait.
- * `id` is a stable string used for debug and per-attachment diff tracking.
- * returns a SyncHandle for producer-side dirty hints; wire envelope still
- * keys by `SyncHandle.index` (the slot in def.sync).
- */
-export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: string, body: SyncBody<T, S>): SyncHandle<T> {
-    const target = handle.def;
-    if (handle.syncById.has(syncId)) {
-        console.warn(`[bongle] trait '${target.id}' already has a sync with id '${syncId}'; ignoring re-register`);
-        return {
-            index: handle.syncById.get(syncId)!.index,
-            dirty(instance: T) {
-                setSyncDirty(instance, handle.syncById.get(syncId)!.index);
-            },
-        };
-    }
-    // see `control()` for why this goes through `declare` despite nothing holding
-    // the minted handle.
-    const key = `${target.id}.${syncId}`;
-    const reg = declare(
-        registry.sync,
-        key,
-        () => ({ ...body, traitId: target.id, syncId }) as unknown as SyncDef,
-        (def) => ({ id: key, dependency: { registry: 'sync' as const, id: key }, def }),
-    ).def;
-    const index = target.sync.length;
-    handle.syncById.set(syncId, { reg, index });
-    target.sync.push(reg);
-    return {
-        index,
-        dirty(instance: T) {
-            setSyncDirty(instance, index);
-        },
-    };
-}
 
 /* ── instance construction ── */
 
@@ -547,7 +444,7 @@ function arraySource(value: object): string | null {
  * Anything that can't be written as source — a factory, a nested object, a Map —
  * is captured in `v` and referenced from the generated body.
  */
-function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unknown> {
+export function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unknown> {
     const fields: string[] = ['_node: null', '_def: d', '_sync: undefined'];
     const captured: unknown[] = [];
 
@@ -595,14 +492,14 @@ function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unk
  * into the source.
  */
 export function buildTraitInstance(handle: TraitHandle, overrides?: Record<string, unknown>): TraitBase {
-    const instance = handle.construct() as TraitBase & Record<string, unknown>;
+    const instance = construct(handle)() as TraitBase & Record<string, unknown>;
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
             // overrides for control-backed fields go through reg.set so any
             // side effects (markDirty, etc.) fire as if the field was edited.
             // overrides for plain fields land via direct assignment.
-            const ci = handle.controlsById.get(key);
+            const ci = controlsById(handle).get(key);
             if (ci) {
                 ci.reg.set(instance as TraitBase, value);
             } else {

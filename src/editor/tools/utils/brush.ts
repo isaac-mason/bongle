@@ -14,10 +14,9 @@
 // matches the selection-mesh rebuilder.
 
 import type { Input } from '../../../client/input';
+import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../../../client/input';
 import * as Selection from '../../../core/scene/selection';
 import type { EditRoomStoreApi } from '../../edit-room-store';
-import type { PointerState } from '../../pointer-state';
-import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../../pointer-state';
 import { type BrushShape, buildShape } from '../../scene/shapes';
 
 /** per-room brush-stroke state. created once per edit room in EditorScript
@@ -60,15 +59,15 @@ const STAMP_SCRATCH: Selection.Selection = Selection.create();
 export function advanceBrushStroke(
     state: BrushStrokeState,
     store: EditRoomStoreApi,
-    pointer: PointerState,
     input: Input,
     opts: BrushShapeOpts,
     onCommit: (accumulated: Selection.Selection) => void,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
-    const held = pointerHeld(pointer, input);
-    const justUp = pointerJustUp(pointer, input);
-    const cancel = pointerJustRight(input);
+    const mk = input.mouseKeyboard;
+    const justDown = isMouseJustDown(mk, 'left');
+    const held = isMouseDown(mk, 'left');
+    const justUp = isMouseJustUp(mk, 'left');
+    const cancel = isMouseJustDown(mk, 'right');
     const hv = store.getState().hoverVoxel;
     const { shape, size, height } = opts;
 

@@ -85,6 +85,8 @@ export type ModelDef<NodeNames extends string = string, MeshNames extends string
     /** human-readable display name for editor UIs. always set,
      *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    readonly tags: readonly string[];
     /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
     /**

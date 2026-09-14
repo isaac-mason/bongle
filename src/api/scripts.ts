@@ -1,13 +1,7 @@
 import type { JsonValue } from 'bongle/interface';
 import { WorldTrait } from '../builtins/world';
-import {
-    EDITOR_JOIN_KEY,
-    type EditorPlayData,
-    type ScriptDef,
-    type ScriptFactory,
-    type ScriptOptions,
-    script,
-} from '../core/scene/scripts';
+import { EDITOR_JOIN_KEY, type EditorPlayData, type ScriptDef, type ScriptFactory, type ScriptOptions } from '../core/scene/scripts';
+import { script } from '../core/registry';
 import type { TraitHandle } from '../core/scene/traits';
 
 type WorldScriptBase = typeof WorldTrait extends TraitHandle<infer B> ? B : never;
@@ -70,34 +64,5 @@ export function editorPlayData(joinData: Record<string, JsonValue>): EditorPlayD
         quaternion: [Number(d.quaternion[0]), Number(d.quaternion[1]), Number(d.quaternion[2]), Number(d.quaternion[3])],
     };
 }
-export {
-    broadcast,
-    filter,
-    first,
-    isOwner,
-    listen,
-    onBlockBreak,
-    onBlockBuild,
-    onBlockStateChange,
-    onDispose,
-    onEnter,
-    onExit,
-    onFrame,
-    onInit,
-    onInput,
-    onJoin,
-    onLeave,
-    onPhysicsBodyPairValidate,
-    onPhysicsContact,
-    onPostAnimate,
-    onPostPhysicsStep,
-    onPrePhysicsStep,
-    onQueryEnter,
-    onQueryExit,
-    onSwap,
-    onTick,
-    onUpdate,
-    query,
-    script,
-    send,
-} from '../core/scene/scripts';
+export { broadcast, filter, first, isOwner, listen, onBlockBreak, onBlockBuild, onBlockStateChange, onDispose, onEnter, onExit, onFrame, onInit, onInput, onJoin, onLeave, onPhysicsBodyPairValidate, onPhysicsContact, onPostAnimate, onPostPhysicsStep, onPrePhysicsStep, onQueryEnter, onQueryExit, onSwap, onTick, onUpdate, query, send } from '../core/scene/scripts';
+export { script } from '../core/registry';

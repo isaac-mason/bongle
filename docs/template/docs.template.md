@@ -50,7 +50,7 @@ my-game/
   `scenes.ts`) so `model('id')` and friends resolve and type-check. Never edit these;
   every build and editor session overwrites them.
 - **`assets/`** holds the raw files you reference: a `.gltf` for `model()`, a `.png`
-  for `blockTexture()` or `sprite()`, an `.ogg` for `sound()`. Point a declaration's
+  for `texture()`, an `.ogg` for `sound()`. Point a declaration's
   `src` at one with `asset('./assets/...', import.meta.url)`.
 - **`content/`** holds what you author in the editor, scenes saved as `.scene.json`.
   The editor regenerates `src/generated/scenes.ts` so code references them by name.
@@ -808,9 +808,16 @@ across the toolset without scripting.
 
 Models, textures, sounds, and sprites come from asset files in your project. You
 declare each as a handle at module scope and point it at its source: `model(id,
-{ src })` for a glTF, `sound(id, { src })` for audio, and `blockTexture` and
-`sprite` for images. That handle is what the rest of your code and the editor
-reference.
+{ src })` for a glTF, `sound(id, { src })` for audio, and `texture` for images.
+That handle is what the rest of your code and the editor reference.
+
+Images have one extra layer, and it is worth getting straight early. A `texture`
+is the picture itself, named for what it IS. The two things that consume a
+texture are named for what they are FOR: a `tile` is a 16x16 entry in the voxel
+atlas that a block wears on its faces, and a `sprite` is an arbitrary-size entry
+in the sprite atlas. A tile is made of textures; a sprite is made of textures.
+Both accept a `src` shorthand that declares the texture for you, so the common
+one-image case stays a single call.
 
 Give `src` an `asset('./file', import.meta.url)`. The asset then co-locates with
 the module that declares it and resolves relative to that module wherever it's
@@ -826,9 +833,11 @@ content is available without hand-wiring it. Because a bundler can drop a
 declaration that nothing references in code, pass any handle that is only named in
 data, such as a scene's block palette or a prefab id, to `use` so it stays alive.
 
-A texture or sprite source need not be a file. Pass a `draw()` descriptor as the
-`src` and it paints the image at bake time with a 2D canvas context, which is
-handy for procedural or composed textures.
+A texture need not come from a file. Give `texture()` a `size` and an `fn`
+instead of a `src` and it paints the image at bake time with a 2D canvas context,
+which is handy for procedural textures. Such a texture can also take other
+textures as `inputs`, by handle, and compose them: because the input is a handle
+and not a path, editing the source re-bakes everything derived from it.
 
 <Snippet source="assets.snippet.ts" select="procedural" />
 
@@ -839,35 +848,35 @@ split into fixed-size chunks, and you can change it freely while the game runs.
 
 ### Your first cube
 
-The simplest block is a full cube wearing your own texture. It takes two
-declarations at module scope: a `blockTexture` for the image, and a
-`blockPreset.cube` that wraps it into a block.
+The simplest block is a full cube wearing your own tile. It takes two
+declarations at module scope: a `tile` for the image, and a `blockPreset.cube`
+that wraps it into a block.
 
-A block texture is a small square image, drawn at 16x16 pixels: the pipeline
-bakes every source down to a 16x16 tile in the block atlas, so that is the size
-to author at. PNG is the usual format. Drop the `.png` in your project's
-`assets/` folder next to the module that declares it, then point the texture's
-`src` at it with `asset('./assets/...', import.meta.url)`, so it resolves
-relative to that module wherever the code is installed (the same pattern as
-`model()` and `sound()`, see [Assets](#assets)).
+A tile is a small square image, drawn at 16x16 pixels: the voxel atlas is a fixed
+16x16 grid, so that is the size to author at and a wrong size is rejected at
+declaration. PNG is the usual format. Drop the `.png` in your project's `assets/`
+folder next to the module that declares it, then point the tile's `src` at it
+with `asset('./assets/...', import.meta.url)`, so it resolves relative to that
+module wherever the code is installed (the same pattern as `model()` and
+`sound()`, see [Assets](#assets)).
 
 <Snippet source="blocks.snippet.ts" select="first-cube" />
 
-A block is often made of several textures, one per distinct face. A grass block
-needs a grass top, a dirt bottom, and a grassy side, so it draws from three
-images: declare one `blockTexture` each, then hand `cube` a per-face map instead
-of a single texture. `top`/`bottom`/`sides` splits the top and bottom from the
-four sides; or name all six faces (`top`, `bottom`, `north`, `south`, `east`,
-`west`) for full control.
+A block often wears several tiles, one per distinct face. A grass block needs a
+grass top, a dirt bottom, and a grassy side, so it draws from three images:
+declare one `tile` each, then hand `cube` a per-face map instead of a single
+tile. `top`/`bottom`/`sides` splits the top and bottom from the four sides; or
+name all six faces (`top`, `bottom`, `north`, `south`, `east`, `west`) for full
+control. Each face takes a bare tile handle, or `{ tile, rotation }` to turn it.
 
 <Snippet source="blocks.snippet.ts" select="cube-faces" />
 
-The pipeline builds the atlas when you build or edit. A texture whose file is
+The pipeline builds the atlas when you build or edit. A tile whose file is
 missing renders as a bright magenta placeholder, so a wrong path shows up in the
-world instead of crashing. Two variations reuse the same wiring: for a texture
-painted in code rather than loaded from a file, pass a `draw()` descriptor as the
-`src` (see [Assets](#assets)); for an animated texture, pass `src` an array of
-frame images plus an `fps`.
+world instead of crashing. Two variations reuse the same wiring: for an image
+painted in code rather than loaded from a file, declare a computed `texture()`
+and pass it in the tile's `frames` (see [Assets](#assets)); for an animated tile,
+pass `src` an array of frame images plus an `fps`.
 
 ### Block presets
 
@@ -876,7 +885,7 @@ common block shapes for you, wiring up the model, collision, and any block state
 the shape needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`,
 `trapdoor`, `door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`,
 `column`, and `cube`. These cover most of what a world needs without authoring a
-model, and each takes the same `textures` you would give a cube. The kit blocks
+model, and each takes the same `tiles` you would give a cube. The kit blocks
 are the worked examples: `bongle/kit` is built almost entirely from these
 presets, so its source ([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best
 place to see them in use.
@@ -885,14 +894,14 @@ place to see them in use.
 
 Every preset is sugar over `block(id, options)`, the lower-level declaration.
 Reach for it directly when a preset's shape or defaults do not fit. The example
-below is exactly what `blockPreset.plant` expands to: a flower is not a cube at
+below is exactly what `blockPreset.cross` expands to: a flower is not a cube at
 all, but two crossed quads, and it needs several options set together to behave
 like vegetation.
 
 <Snippet source="blocks.snippet.ts" select="block-api" />
 
 The `model` function returns the block's geometry. A `type: 'cube'` model carries
-the per-face `textures` map from above; a `type: 'custom'` model returns a raw
+the per-face `tiles` map from above; a `type: 'custom'` model returns a raw
 list of quads for any shape a preset does not cover, and `blockModel` provides
 helpers that build the common ones (`cross` for the crossed vegetation quads
 here, `box` for an axis-aligned box). The remaining options tune behaviour rather
@@ -1378,8 +1387,8 @@ platforms and boats exactly this way.
 ### Sprites
 
 `SpriteTrait` draws 2D art as a billboard that always faces the camera. Point its
-`sprite` at a `sprite()` handle, whose `src` is a file, a procedural
-[`draw()` descriptor](#assets), or an array of either for animation frames. Size it
+`sprite` at a `sprite()` handle, whose `src` is a file (or whose `frames` are
+[textures](#assets), computed ones included) — an array for animation frames. Size it
 with `width` and `height` (in source pixels) and `worldScale`, and set `fps` to play
 those frames as an animation. Billboards suit items, pickups, foliage, and cheap
 characters.
@@ -1735,6 +1744,11 @@ These take the `mouseKeyboard` input. `code` is a `KeyboardEvent.code` such as
 | `isMouseJustUp(mouseKeyboard, button)` | button went up this frame |
 | `isMouseTap(mouseKeyboard, button)` | a quick press-and-release landed this frame |
 | `isMouseDragStart(mouseKeyboard, button)` | a drag began this frame |
+| `getCursor(mouseKeyboard)` | primary pointer position over the canvas: `x`/`y` in CSS px, `ndcX`/`ndcY` normalized (pinned to `0,0` under pointer lock) |
+
+The mouse predicates are driven by pointer events, so the first finger on a
+touchscreen reads as the left button and moves the cursor. A second finger never
+does; it belongs to the multi-touch gestures below.
 
 Touch input (joysticks, buttons, pinch) is read with its own predicates, covered
 under [Touch controls](#touch-controls).
@@ -1842,19 +1856,32 @@ the **debug dashboard**, a floating window of live metrics and readouts. Drag it
 bar to move it, and drag a tab to split or reorder it. Do not guess at what is slow:
 open the dashboard and find the hot row first.
 
-The perf tabs read three scopes, the client globally, the active room on the client, and
-that same room on the **server**, so you can tell a client-render cost apart from a
-server-simulation one. The tabs are:
+Everything on it is a read of one recording. The engine profiles each frame as a tree
+of timed **scopes**: the client's frame loop on your machine, the server's tick for the
+room you are in, mirrored to you a few times a second. Each frame keeps its whole span
+tree, so the charts plot real frames rather than a separate sampling of them, and every
+number on every tab comes out of that same recording. The tabs are:
 
 - **overview**: where you are, camera and foot position, chunk, facing, and the block
   under your feet (click a value to copy it), plus room info and world counts.
 - **perf**: the headline fps and client and server frame times, a stacked frame-time
   chart (one band per phase, summing to the frame, with the 60fps budget drawn as a
   dashed line), and a throughput glance.
-- **cpu**: the full frame breakdown, the top-level phases plus the render internals and
-  the server frame, each a stacked area you can hover to freeze per-band values.
-- **client net** and **server net**: inbound and outbound bandwidth in kb/s, with the
-  client side also broken down by message kind, for spotting a chatty `sync` or RPC.
+- **cpu**: the full frame breakdown, the client frame and the server tick and the work
+  inside your room on it, each a stacked area you can hover to read per-band values.
+- **gpu** and **physics**: what the renderer pushed and holds, and the server's solver
+  cost with live body and contact counts.
+- **net**: ping, inbound and outbound bandwidth in kb/s, broken down by message kind on
+  the client side, for spotting a chatty `sync` or RPC.
+- **frames**: one captured frame drawn as a flame graph, client or server. Wheel to zoom
+  around the cursor, drag to pan, hover a bar to read its time and share of the frame.
+  This is where a hitch stops being a spike on a chart and becomes the call that caused it.
+
+**pause capture** on the panel chrome freezes the recording on both sides. The charts,
+the readouts and the flame all read the frozen frames, so everything holds still together
+while the game keeps running: pause the moment after a hitch, then scrub back through the
+frames on the **frames** tab to find it. Recording only happens while the dashboard is
+open, on the client and on the server alike, so a closed panel costs nothing.
 
 In the editor you also get an **options** tab (debug view toggles and a ws-latency
 simulator) and a **logs** tab (client and server log tails).
@@ -1885,7 +1912,8 @@ panel.button('reset', () => resetEnemy(enemy));
 
 `add(target, key, opts)` binds a control to an object property and writes edits straight
 back, so it doubles as a live tweak surface for tuning gameplay values. `monitor`,
-`graph`, `lines` (multi-series), and `log` are read-only views over getters you supply.
+`graph`, `lines` (multi-series), `series` (multi-series over a history you own), `flame`
+(a span tree), and `log` are read-only views over getters you supply.
 Group rows with `panel.folder('name')`, or add a nested tab strip with `panel.tabs()`.
 Pass `copy: true` to a `monitor` to make its value click-to-copy.
 
@@ -1898,9 +1926,9 @@ directly at `ctx.client.debug.dashboard` and call `.panel(...)` on it. The panel
 control types (`Panel`, `Handle`, `AddOptions`, and friends) are re-exported from
 `bongle`.
 
-The dashboard is built on [dashcat](https://github.com/isaac-mason/dashcat). See its
-docs for the full control vocabulary (sliders, selects, colors, vectors, graphs,
-gauges, histograms, log views, and more) and the options each one takes.
+The dashboard ships with the engine, with a full control vocabulary (sliders, selects,
+colors, vectors, graphs, gauges, histograms, log views, and more); the exported option
+types above describe what each one takes.
 
 ## Building & deploying
 

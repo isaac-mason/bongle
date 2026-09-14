@@ -15,7 +15,7 @@
 //
 // ── particle() declaration ──
 //
-// Shape mirrors sprite() / blockTexture(): a typed registry entry whose
+// Shape mirrors sprite() / tile(): a typed registry entry whose
 // payload is fully authored content (sprite ref + playback knobs + update
 // fn). No codegen barrel, the runtime resolves particle types by id at
 // spawn time via `particlesRegistry.byId.get(typeId)`, parallel to how
@@ -30,8 +30,7 @@
 // `particle()` itself (and let `block()` reference `particleUpdate.dust`
 // for auto-derived block-dust without inverting core → client).
 
-import { recordParticle } from '../capture/module-scope';
-import { declare, registry } from '../registry';
+import type { AssetMeta } from '../asset-meta';
 import type { SpriteHandle } from '../sprites/sprites';
 import type { Voxels } from '../voxels/voxels';
 
@@ -106,11 +105,7 @@ export type ParticlePlayback = 'stretch' | 'loop' | 'once';
  *  without the pool carrying a back-ref. pure-motion fns ignore it. */
 export type ParticleUpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
 
-export type ParticleOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
+export type ParticleOptions = AssetMeta & {
     /** the sprite handle whose frames drive the particle's visuals. */
     sprite: SpriteHandle;
     /** how `age / total` (or `age * fps`) maps to the sprite's frame
@@ -144,6 +139,8 @@ export type ParticleDef = {
     /** human-readable display name for editor UIs. always set,
      *  defaults to `typeId` when the author didn't supply one. */
     name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    tags: readonly string[];
     /** DepGraph dependency, see SceneHandle.dependency. */
     /** sprite ref (frame timeline source). */
     sprite: SpriteHandle;
@@ -171,43 +168,3 @@ export type ParticleHandle = {
 };
 
 /* ── registration ── */
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * declare a particle type. called at module scope.
- *
- * returns a pure-data handle. the runtime resolves particle types by id
- * at spawn time via `particlesRegistry`; no codegen barrel.
- *
- * @example
- * ```ts
- * const Smoke = particle('smoke', {
- *     sprite: SmokeSprite,
- *     playback: 'stretch',
- *     update: particleUpdate.smoke,
- * });
- * ```
- */
-export function particle(id: string, options: ParticleOptions): ParticleHandle {
-    const name = options.name ?? id;
-    const fps = options.fps ?? 0;
-    const glow = options.glow ?? 0;
-    const tint = options.tint ?? ([1, 1, 1, 1] as [number, number, number, number]);
-    const handle = declare(
-        registry.particles,
-        id,
-        (): ParticleDef => ({
-            typeId: id,
-            name,
-            sprite: options.sprite,
-            playback: options.playback,
-            fps,
-            update: options.update,
-            glow,
-            tint,
-        }),
-        (def): ParticleHandle => ({ id, dependency: { registry: 'particles', id }, def }),
-    );
-    recordParticle(id);
-    return handle;
-}

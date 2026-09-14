@@ -254,6 +254,20 @@ export type Chunk = {
      * boundary AO/light instead of re-meshing as each neighbor arrives.
      */
     knownNeighbourCount: number;
+    /** frame the light volume first wanted to re-bake this chunk while its 26
+     *  neighbourhood was still incomplete, or -1. */
+    lightWaitSince: number;
+    /** the AOI wants this chunk rendered, so it may hold a light tile. ADMISSION
+     *  is the AOI's decision alone: everything else that marks the light volume
+     *  may only REFRESH a tile that already exists. Without that, the light pool
+     *  and the mesh arena are two residency systems with different working sets,
+     *  and they thrash - the pool evicts by distance while the AOI re-requests. */
+    lightWanted: boolean;
+    /** this chunk's OWN light changed, as opposed to being apron-dirtied because
+     *  a neighbour did. Urgent rebakes are never deferred: a deferred edit is a
+     *  visible delay on the block the player just broke, while a deferred
+     *  neighbour rebake only postpones a boundary plane. */
+    lightUrgent: boolean;
 };
 
 /** create a new empty chunk (all air). */
@@ -283,6 +297,9 @@ export function createChunk(cx: number, cy: number, cz: number): Chunk {
         compressedLight: null,
         neighbors: newNeighbors(),
         knownNeighbourCount: 0,
+        lightWaitSince: -1,
+        lightWanted: false,
+        lightUrgent: false,
     };
 }
 
@@ -348,6 +365,9 @@ export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk {
         compressedLight: null,
         neighbors: newNeighbors(),
         knownNeighbourCount: 0,
+        lightWaitSince: -1,
+        lightWanted: false,
+        lightUrgent: false,
     };
 }
 
@@ -959,7 +979,13 @@ export type Voxels = {
      *  the arena. Data-driven so the client stays room-agnostic — only the
      *  active room's arena is maintained; non-active rooms rebuild fresh on
      *  activation (which clears this set). */
-    dirty: { blocks: Set<Chunk>; light: Set<Chunk>; removed: Set<string> };
+    dirty: {
+        blocks: Set<Chunk>;
+        light: Set<Chunk>;
+        lightVolume: Set<Chunk>;
+        lightVolumeUrgent: Set<Chunk>;
+        removed: Set<string>;
+    };
     /** xz-column index, chunks at the same (cx, cz) sorted by cy descending.
      *  maintained by `ensureChunk` and rebuilt by `loadVoxels`. lets
      *  sky-light / heightmap / surface code walk only chunks that actually
@@ -990,7 +1016,7 @@ export type Voxels = {
 export function createVoxels(registry: Blocks): Voxels {
     return {
         chunks: new Map(),
-        dirty: { blocks: new Set(), light: new Set(), removed: new Set() },
+        dirty: { blocks: new Set(), light: new Set(), lightVolume: new Set(), lightVolumeUrgent: new Set(), removed: new Set() },
         columns: new Map(),
         regions: new Map(),
         registry,
@@ -1007,14 +1033,54 @@ export function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
     voxels.dirty.blocks.add(chunk);
 }
 
-/** mark `chunk` as needing a relight. adds to BOTH `dirty.blocks` (so the
- *  client renderer remeshes, meshChunk emits geometry+light in one pass)
- *  AND `dirty.light` (so the server's chunk_light streaming path can find
- *  light-only changes without filtering a growing blocks set). */
+/**
+ * Queue `chunk` for a light-volume rebake, at BULK priority.
+ *
+ * ONE chunk, not an apron. A tile is exactly the chunk's own cells, so nothing
+ * else holds a copy of them. The 26-neighbour fan-out this used to do existed
+ * because the tile carried a borrowed shell, and it cost a streaming chunk up to
+ * 27 rebakes before its neighbourhood settled.
+ *
+ * Bulk work is drained NEAREST-FIRST and may be deferred while a chunk's
+ * neighbourhood is still filling in. Streaming arrivals and whole-world relights
+ * belong here: they are not latency-critical, and marking them urgent hands the
+ * entire budget to insertion-order work that bypasses both.
+ */
+export function markLightVolumeDirty(voxels: Voxels, chunk: Chunk): void {
+    voxels.dirty.lightVolume.add(chunk);
+}
+
+/**
+ * Queue `chunk` at URGENT priority: the player just changed something here.
+ *
+ * Urgent work drains first and skips the neighbourhood deferral, because a
+ * deferred edit is a visible delay on the block that was just placed. Reserve it
+ * for edits - a bulk relight marking everything urgent starves the nearest-first
+ * ordering it is meant to jump.
+ */
+export function markLightVolumeUrgent(voxels: Voxels, chunk: Chunk): void {
+    chunk.lightUrgent = true;
+    voxels.dirty.lightVolumeUrgent.add(chunk);
+    voxels.dirty.lightVolume.add(chunk);
+}
+
+/** Queue the rebake implied by one cell of `chunk` changing. Just the chunk:
+ *  no other tile holds a copy of that cell. */
+export function markLightVolumeDirtyForCell(voxels: Voxels, chunk: Chunk, index: number): void {
+    void index;
+    markLightVolumeUrgent(voxels, chunk);
+}
+
+/** mark `chunk` as needing a relight: `dirty.light` for the server's chunk_light
+ *  streaming path, and the light volume for the renderer's tile.
+ *
+ *  Deliberately NOT `dirty.blocks`. That was needed when meshChunk emitted
+ *  geometry and light in one pass; quads carry no light now, so a light-only
+ *  change cannot alter the mesh and a remesh here is pure waste. */
 export function markChunkLightDirty(voxels: Voxels, chunk: Chunk): void {
     chunk.lightDirty = true;
-    voxels.dirty.blocks.add(chunk);
     voxels.dirty.light.add(chunk);
+    markLightVolumeDirty(voxels, chunk);
 }
 
 /** insert `chunk` into its xz-column array, keeping the array sorted by
@@ -1268,6 +1334,9 @@ function cloneChunk(src: Chunk): Chunk {
         compressedLight: null,
         neighbors: newNeighbors(),
         knownNeighbourCount: 0,
+        lightWaitSince: -1,
+        lightWanted: false,
+        lightUrgent: false,
     };
 }
 
@@ -1286,6 +1355,7 @@ export function cloneVoxels(src: Voxels): Voxels {
         if (cloned.lightDirty) {
             out.dirty.blocks.add(cloned);
             out.dirty.light.add(cloned);
+            out.dirty.lightVolume.add(cloned);
         }
         linkChunkNeighbors(out, cloned);
     }

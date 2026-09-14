@@ -73,11 +73,15 @@ export function create(): Renderer {
         initResources: () => {},
         loadResources: async () => {},
         disposeResources: () => {},
+        atlases: () => ({ voxel: null, sprite: null }),
 
         // The two that would do the work. `updateFrame` is where meshing, model
         // and sprite visuals live, so skipping it is the entire saving.
         updateFrame: () => {},
         render: () => {},
+        // Nothing is drawn and nothing is meshed, so there is nothing to wait for:
+        // a client on this backend reports ready as soon as it has a room.
+        voxelWorldDrawable: () => true,
 
         // Nothing was built, so nothing can have changed.
         refreshBlockResources: async () => false,

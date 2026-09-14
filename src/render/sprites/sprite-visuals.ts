@@ -32,8 +32,6 @@ import { box3 } from 'math/shapes';
 import { SpriteTrait } from '../../builtins/sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { query, type SceneTree } from '../../core/scene/scene-tree';
-import { sampleVoxelLight } from '../../core/voxels/light';
-import type { Voxels } from '../../core/voxels/voxels';
 import * as Visibility from '../visibility/visibility';
 import {
     CENTER_BIT,
@@ -138,7 +136,6 @@ export function update(
     visuals: SpriteVisuals,
     batch: SpriteBatch,
     resources: SpriteResources,
-    voxels: Voxels,
     _camera: Camera,
     visibility: Visibility.Visibility,
 ): void {
@@ -237,22 +234,16 @@ export function update(
         new Uint32Array(poseArr.buffer, poseArr.byteOffset, poseArr.length)[poseOff + 11] = flags;
         poseDirty = true;
 
-        if (!trait.unlit) {
-            sampleVoxelLight(voxels, worldMat[12]!, worldMat[13]!, worldMat[14]!, trait.light);
-        }
-
         // ── material write (per-frame; uvRect changes for flipbooks) ──
         const frameCount = state.entry.frames.length;
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const frame = state.entry.frames[frameIdx]!;
         const tint = trait.tint;
         const flash = trait.flash;
-        const light = trait.light;
         packTo(InstanceMaterial, matArr, state.slot * INSTANCE_MATERIAL_STRIDE, {
             uvRect: [frame.u, frame.v, frame.w, frame.h],
             tint: [tint[0], tint[1], tint[2], tint[3]],
             flash: [flash[0], flash[1], flash[2], flash[3]],
-            light: [light[0], light[1], light[2], light[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
@@ -274,8 +265,15 @@ export function update(
 
     batch.mesh.count = batch.head;
 
-    if (poseDirty) batch.instancePoseBuf.needsUpdate = true;
-    if (matDirty) batch.instanceMaterialBuf.needsUpdate = true;
+    // dense [0, head) pool — upload that prefix, not the whole capacity allocation.
+    if (poseDirty) {
+        batch.instancePoseBuf.addUpdateRange(0, batch.head * (INSTANCE_POSE_STRIDE / 4));
+        batch.instancePoseBuf.needsUpdate = true;
+    }
+    if (matDirty) {
+        batch.instanceMaterialBuf.addUpdateRange(0, batch.head * (INSTANCE_MATERIAL_STRIDE / 4));
+        batch.instanceMaterialBuf.needsUpdate = true;
+    }
 }
 
 /**

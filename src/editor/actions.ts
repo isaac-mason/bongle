@@ -39,6 +39,7 @@ import {
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
+import { controlsById } from '../core/scene/traits';
 import { rotateVoxelsByQuat } from '../core/voxels/voxel-rotate';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlock, type Voxels } from '../core/voxels/voxels';
 import type { VoxelOp } from './blueprint';
@@ -59,6 +60,7 @@ import type { EditRoomState, ElevationMode } from './edit-room-store';
 import { useEditor } from './editor-store';
 import { type Mask, testMask } from './scene/mask';
 import { type Pattern, samplePattern } from './scene/pattern';
+import { playBulkEdit } from './sounds';
 import { runSmooth } from './tools/smooth';
 import { commitVoxelOps } from './voxel-edit';
 
@@ -118,9 +120,11 @@ export function fill(state: EditRoomState, ctx: ScriptContext, pattern: Pattern,
         label: 'fill',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     state.clearVoxelSelection();
@@ -179,6 +183,7 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
         label,
         do() {
             if (forwardVoxelOps) sendVoxelOps(ctx, forwardVoxelOps);
+            if (forwardVoxelOps && reverseVoxelOps) playBulkEdit(ctx, forwardVoxelOps, reverseVoxelOps);
             if (nodeIds) {
                 for (const nid of nodeIds) {
                     const n = getNodeById(ctx.scene, nid);
@@ -190,6 +195,7 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
         },
         undo() {
             if (reverseVoxelOps) sendVoxelOps(ctx, reverseVoxelOps);
+            if (forwardVoxelOps && reverseVoxelOps) playBulkEdit(ctx, reverseVoxelOps, forwardVoxelOps);
             if (nodeCreateArgs) {
                 for (const createArgs of nodeCreateArgs) {
                     for (const args of createArgs) {
@@ -276,9 +282,11 @@ export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Patte
         label: 'overlay',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     state.clearVoxelSelection();
@@ -316,9 +324,11 @@ export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern
         label: 'walls',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     return forward.length;
@@ -426,9 +436,11 @@ export function elevateSelection(
         label: 'elevation',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     return forward.length;
@@ -450,9 +462,11 @@ export function smoothSelection(state: EditRoomState, ctx: ScriptContext, iterat
         label: 'smooth',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     return forward.length;
@@ -474,9 +488,11 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
         label: 'replace',
         do() {
             sendVoxelOps(ctx, forward);
+            playBulkEdit(ctx, forward, reverse);
         },
         undo() {
             sendVoxelOps(ctx, reverse);
+            playBulkEdit(ctx, reverse, forward);
         },
     });
     state.clearVoxelSelection();
@@ -840,7 +856,7 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
     const instance = node.traits[handle.slot];
     if (!instance) return;
     for (const key of Object.keys(props)) {
-        const ci = handle.controlsById.get(key);
+        const ci = controlsById(handle).get(key);
         if (!ci) continue;
         ci.reg.set(instance, props[key]);
     }

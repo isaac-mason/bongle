@@ -1,4 +1,5 @@
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 
 /**
  * Client-only override hook for the room's audio listener pose source.

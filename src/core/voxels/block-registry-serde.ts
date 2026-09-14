@@ -52,13 +52,22 @@ const H_MESH_QUAD_CORNER_NORM_SQ = 27;
 const H_MESH_QUAD_NORMAL = 28;
 const H_MESH_QUAD_UVS = 29;
 const H_MESH_QUAD_VERTS = 30;
+// per-position variation. cubeTexIndices/cubeFaceUVs are sized by SLOT count,
+// not state count, because variant slots are appended past the per-state region.
+const H_CUBE_SLOT_COUNT = 31;
+const H_VARIANT_COUNT = 32;
+const H_VARIANT_BASE = 33;
+const H_JITTER_XZ = 34;
+const H_JITTER_Y = 35;
+const H_MESH_QUAD_UNSHADED = 36;
 
-const HEADER_U32S = 31;
+const HEADER_U32S = 37;
 const HEADER_BYTES = HEADER_U32S * 4;
 
 // per-quad element counts for per-mesh fields (stride × element size = bytes per quad)
 const STRIDE_MESH_TEX_INDICES = 1;
 const STRIDE_MESH_QUAD_MATERIALS = 1;
+const STRIDE_MESH_QUAD_UNSHADED = 1;
 const STRIDE_MESH_QUAD_SHAPE = 1;
 const STRIDE_MESH_QUAD_FACE_DIR = 1;
 const STRIDE_MESH_QUAD_CULL_FACE_DIR = 1;
@@ -110,11 +119,25 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     const oModelType = c;
     c += totalStates * 1;
     c = align8(c);
+    // derived, not stored on Blocks: the cube tables are sized by it.
+    const cubeSlotCount = (reg.cubeFaceUVs.length / 48) | 0;
     const oCubeTexIndices = c;
-    c += totalStates * 6 * 2;
+    c += cubeSlotCount * 6 * 2;
     c = align8(c);
     const oCubeFaceUVs = c;
-    c += totalStates * 48 * 1;
+    c += cubeSlotCount * 48 * 1;
+    c = align8(c);
+    const oVariantCount = c;
+    c += totalStates * 1;
+    c = align8(c);
+    const oVariantBase = c;
+    c += totalStates * 4;
+    c = align8(c);
+    const oJitterXz = c;
+    c += totalStates * 1;
+    c = align8(c);
+    const oJitterY = c;
+    c += totalStates * 1;
     c = align8(c);
     const oMeshId = c;
     c += totalStates * 2;
@@ -137,6 +160,9 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     c = align8(c);
     const oMeshQuadMaterials = c;
     c += totalQuads * STRIDE_MESH_QUAD_MATERIALS * 1;
+    c = align8(c);
+    const oMeshQuadUnshaded = c;
+    c += totalQuads * STRIDE_MESH_QUAD_UNSHADED;
     c = align8(c);
     const oMeshQuadShape = c;
     c += totalQuads * STRIDE_MESH_QUAD_SHAPE * 1;
@@ -191,6 +217,11 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     u32[H_MODEL_TYPE] = oModelType;
     u32[H_CUBE_TEX_INDICES] = oCubeTexIndices;
     u32[H_CUBE_FACE_UVS] = oCubeFaceUVs;
+    u32[H_CUBE_SLOT_COUNT] = cubeSlotCount;
+    u32[H_VARIANT_COUNT] = oVariantCount;
+    u32[H_VARIANT_BASE] = oVariantBase;
+    u32[H_JITTER_XZ] = oJitterXz;
+    u32[H_JITTER_Y] = oJitterY;
     u32[H_MESH_ID] = oMeshId;
     u32[H_VERTEX_ANIMATION] = oVertexAnimation;
     u32[H_SURFACE_HEIGHT] = oSurfaceHeight;
@@ -198,6 +229,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     u32[H_EMISSIVE] = oEmissive;
     u32[H_MESH_TEX_INDICES] = oMeshTexIndices;
     u32[H_MESH_QUAD_MATERIALS] = oMeshQuadMaterials;
+    u32[H_MESH_QUAD_UNSHADED] = oMeshQuadUnshaded;
     u32[H_MESH_QUAD_SHAPE] = oMeshQuadShape;
     u32[H_MESH_QUAD_FACE_DIR] = oMeshQuadFaceDir;
     u32[H_MESH_QUAD_CULL_FACE_DIR] = oMeshQuadCullFaceDir;
@@ -221,6 +253,10 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     copyBytes(u8, reg.modelType, oModelType);
     copyBytes(u8, reg.cubeTexIndices, oCubeTexIndices);
     copyBytes(u8, reg.cubeFaceUVs, oCubeFaceUVs);
+    copyBytes(u8, reg.variantCount, oVariantCount);
+    copyBytes(u8, reg.variantBase, oVariantBase);
+    copyBytes(u8, reg.jitterXz, oJitterXz);
+    copyBytes(u8, reg.jitterY, oJitterY);
     copyBytes(u8, reg.meshId, oMeshId);
     copyBytes(u8, reg.vertexAnimation, oVertexAnimation);
     copyBytes(u8, reg.surfaceHeight, oSurfaceHeight);
@@ -230,6 +266,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     // ── phase 4: per-mesh bodies (concat slots 1..meshCount) ──────
     let qti = oMeshTexIndices;
     let qmm = oMeshQuadMaterials;
+    let qmus = oMeshQuadUnshaded;
     let qms = oMeshQuadShape;
     let qmf = oMeshQuadFaceDir;
     let qmc = oMeshQuadCullFaceDir;
@@ -249,6 +286,9 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
         const mm = reg.meshQuadMaterials[m]!;
         copyBytes(u8, mm, qmm);
         qmm += mm.byteLength;
+        const mus = reg.meshQuadUnshaded[m]!;
+        copyBytes(u8, mus, qmus);
+        qmus += mus.byteLength;
         const ms = reg.meshQuadShape[m]!;
         copyBytes(u8, ms, qms);
         qms += ms.byteLength;
@@ -313,8 +353,13 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
     const blockTypeId = new Uint16Array(buf, u32[H_BLOCK_TYPE_ID]!, totalStates);
     const material = new Uint8Array(buf, u32[H_MATERIAL]!, totalStates);
     const modelType = new Uint8Array(buf, u32[H_MODEL_TYPE]!, totalStates);
-    const cubeTexIndices = new Uint16Array(buf, u32[H_CUBE_TEX_INDICES]!, totalStates * 6);
-    const cubeFaceUVs = new Uint8Array(buf, u32[H_CUBE_FACE_UVS]!, totalStates * 48);
+    const cubeSlotCount = u32[H_CUBE_SLOT_COUNT]!;
+    const cubeTexIndices = new Uint16Array(buf, u32[H_CUBE_TEX_INDICES]!, cubeSlotCount * 6);
+    const cubeFaceUVs = new Uint8Array(buf, u32[H_CUBE_FACE_UVS]!, cubeSlotCount * 48);
+    const variantCount = new Uint8Array(buf, u32[H_VARIANT_COUNT]!, totalStates);
+    const variantBase = new Uint32Array(buf, u32[H_VARIANT_BASE]!, totalStates);
+    const jitterXz = new Uint8Array(buf, u32[H_JITTER_XZ]!, totalStates);
+    const jitterY = new Uint8Array(buf, u32[H_JITTER_Y]!, totalStates);
     const meshId = new Uint16Array(buf, u32[H_MESH_ID]!, totalStates);
     const vertexAnimation = new Uint8Array(buf, u32[H_VERTEX_ANIMATION]!, totalStates);
     const surfaceHeight = new Float32Array(buf, u32[H_SURFACE_HEIGHT]!, totalStates);
@@ -324,6 +369,7 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
     // per-mesh: rebuild slot arrays as views into each field's concat blob.
     const meshTexIndices: Uint16Array[] = new Array(meshCount + 1);
     const meshQuadMaterials: Uint8Array[] = new Array(meshCount + 1);
+    const meshQuadUnshaded: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadShape: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadFaceDir: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadCullFaceDir: Uint8Array[] = new Array(meshCount + 1);
@@ -340,6 +386,7 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
     // slot 0 sentinels (zero-length views; mesher only reads via 1-based meshId).
     meshTexIndices[0] = new Uint16Array(0);
     meshQuadMaterials[0] = new Uint8Array(0);
+    meshQuadUnshaded[0] = new Uint8Array(0);
     meshQuadShape[0] = new Uint8Array(0);
     meshQuadFaceDir[0] = new Uint8Array(0);
     meshQuadCullFaceDir[0] = new Uint8Array(0);
@@ -355,6 +402,7 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
 
     let qti = u32[H_MESH_TEX_INDICES]!;
     let qmm = u32[H_MESH_QUAD_MATERIALS]!;
+    let qmus = u32[H_MESH_QUAD_UNSHADED]!;
     let qms = u32[H_MESH_QUAD_SHAPE]!;
     let qmf = u32[H_MESH_QUAD_FACE_DIR]!;
     let qmc = u32[H_MESH_QUAD_CULL_FACE_DIR]!;
@@ -373,6 +421,8 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
         qti += n * STRIDE_MESH_TEX_INDICES * 2;
         meshQuadMaterials[m] = new Uint8Array(buf, qmm, n * STRIDE_MESH_QUAD_MATERIALS);
         qmm += n * STRIDE_MESH_QUAD_MATERIALS;
+        meshQuadUnshaded[m] = new Uint8Array(buf, qmus, n * STRIDE_MESH_QUAD_UNSHADED);
+        qmus += n * STRIDE_MESH_QUAD_UNSHADED;
         meshQuadShape[m] = new Uint8Array(buf, qms, n * STRIDE_MESH_QUAD_SHAPE);
         qms += n * STRIDE_MESH_QUAD_SHAPE;
         meshQuadFaceDir[m] = new Uint8Array(buf, qmf, n * STRIDE_MESH_QUAD_FACE_DIR);
@@ -408,6 +458,10 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
         modelType,
         cubeTexIndices,
         cubeFaceUVs,
+        variantCount,
+        variantBase,
+        jitterXz,
+        jitterY,
         meshId,
         vertexAnimation,
         surfaceHeight,
@@ -415,6 +469,7 @@ export function deserializeBlockRegistryForWorker(buf: ArrayBuffer): Deserialize
         emissive,
         meshTexIndices,
         meshQuadMaterials,
+        meshQuadUnshaded,
         meshQuadShape,
         meshQuadFaceDir,
         meshQuadCullFaceDir,

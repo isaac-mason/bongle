@@ -56,6 +56,7 @@ type CharacterConfig = {
     ownLandingVolume: number;
     landingCooldown: number;
     proximityFadeRange: number;
+    dither: number;
 };
 
 type CharacterState = {
@@ -131,13 +132,6 @@ type CharacterState = {
      *  freshly added meshes carry the trait default rather than the applied value. */
     appliedDither: number | null;
 
-    /** extra screen-door dither a game script can drive (e.g. fading out a
-     *  dead body). `max()`'d with the proximity + loading dither in the
-     *  presentation step, so the engine stays the single writer of mesh
-     *  dither and the script's intent can't be undone by the proximity fade.
-     *  Set it via `getTrait(node, CharacterTrait).state.externalDither = v`
-     *  instead of walking the rig and calling setMeshDither yourself. */
-    externalDither: number;
     /** the current model's nodes that `mountRig` added on top of the enforced
      *  skeleton (its mesh/visual nodes). `unmountRig` removes exactly these on
      *  a swap and leaves runtime attachments (gear) alone, ownership by node
@@ -166,7 +160,7 @@ type RigNodeName = (typeof RIG_6BONE_PERSISTENT_NODES)[number];
 type RigNodes = Record<RigNodeName, Node | null>;
 
 import type { Quat, Vec3 } from 'math';
-import { degreesToRadians, quat, vec3 } from 'math';
+import { degreesToRadians, quat } from 'math';
 import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from '../../avatar/rig';
 import { Animation } from '../api/animation';
 import { playAt, playMono } from '../api/audio';
@@ -184,9 +178,9 @@ import {
     isLocalNode,
     type Node,
 } from '../api/scene-tree';
-import { isOwner, onDispose, onFrame, onInit, query, script } from '../api/scripts';
+import { isOwner, onDispose, onFrame, onInit, query } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
-import { dirty, sync, type TraitType, trait } from '../api/traits';
+import { dirty, type TraitType } from '../api/traits';
 import {
     getVisualWorldQuaternion,
     getWorldPosition,
@@ -198,6 +192,7 @@ import {
 import { wrapPi } from '../core/math/angles';
 import type { ModelDef } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
+import { script, sync, trait } from '../core/registry';
 import { pack } from '../core/scene/pack';
 import type { TraitProps } from '../core/scene/scene-tree';
 import type { ScriptContext } from '../core/scene/scripts';
@@ -207,7 +202,7 @@ import { env } from '../env';
 import { AnimatorTrait } from './animator';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
-import { MeshTrait, setMeshDither } from './mesh';
+import { MeshTrait } from './mesh';
 import { ModelTrait } from './model';
 import { OrbitControllerTrait } from './orbit-controller';
 import { PlayerControllerTrait } from './player-controller';
@@ -245,7 +240,6 @@ const FOOTSTEP_DUST_COUNT = 3;
 // feet (y=0), so sampling there reads the floor block the character stands
 // on; push the sample up to ~half the standing height (1.8 / 2) so it lands
 // in the torso interior and the model is lit by the space it occupies.
-const LIGHT_SAMPLE_HEIGHT = 0.9;
 
 // ── loading-state dither pulse ─────────────────────────────────────
 // While the intended `modelId` hasn't hydrated yet (placeholder rig
@@ -489,7 +483,12 @@ export const CharacterTrait = trait(
          *  client-side sfx + visibility behavior. `proximityFadeRange`
          *  is the distance (m) at which the active camera starts fading
          *  this character via screen-door dither (0 disables; only ever
-         *  applies to non-POV characters). */
+         *  applies to non-POV characters). `dither` is the script-driven
+         *  screen-door fade (0 solid, 1 gone; e.g. fading out a dead body),
+         *  `max()`'d with the proximity + loading fades in the presentation
+         *  step so the engine stays the single writer of mesh dither and the
+         *  script's intent can't be undone by the proximity fade. Set it
+         *  instead of walking the rig and calling setMeshDither yourself. */
         config: (): CharacterConfig => ({
             animation: true,
             footstepVolume: 0.3,
@@ -498,6 +497,7 @@ export const CharacterTrait = trait(
             ownLandingVolume: 0.7,
             landingCooldown: 0.18,
             proximityFadeRange: 1.5,
+            dither: 0,
         }),
 
         /** runtime bookkeeping. `modelId` + `modelDef` are the reconciler's
@@ -532,7 +532,6 @@ export const CharacterTrait = trait(
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: null,
-            externalDither: 0,
             modelNodes: new Set(),
             nodes: emptyRigNodes(),
         }),
@@ -681,7 +680,7 @@ script(
                     // in), apply the load dither alone; proximity fade never
                     // applies to own body. a script-driven dither (e.g. own death
                     // fade) still composes in.
-                    finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
+                    finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.config.dither);
                 } else {
                     visible = true;
                     const range = t.config.proximityFadeRange;
@@ -696,7 +695,7 @@ script(
                         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                         proxDither = dist >= range ? 0 : 1 - dist / range;
                     }
-                    finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
+                    finalDither = Math.max(proxDither, t.state.loadingDither, t.config.dither);
                 }
                 // inherited visibility: one write on the rig root, which every mesh under it
                 // reads through the renderer's already-resolved `Up(ModelTrait)`. Leaves each
@@ -1151,11 +1150,10 @@ function mountRig(playerNode: Node, def: ModelDef): void {
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
 
-    // Sample voxel light from the torso center, not the feet. The animator
-    // installs the shared-light ModelTrait on this node; ensure it exists
-    // (server has no animator) and point its sample at half standing height.
-    const model = getTrait(playerNode, ModelTrait) ?? addTrait(playerNode, ModelTrait);
-    vec3.set(model.lightOffset, 0, LIGHT_SAMPLE_HEIGHT, 0);
+    // The animator installs the inherited-visibility ModelTrait on this node;
+    // ensure it exists (the server has no animator) so the first-person body
+    // toggle has something to write.
+    if (!getTrait(playerNode, ModelTrait)) addTrait(playerNode, ModelTrait);
 
     // the meshes just added carry the MeshTrait dither default, not whatever this character
     // currently resolves to. Drop the cache so the next presentation pass re-walks and
@@ -1640,12 +1638,11 @@ function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, p
 }
 
 /** Walk the playerNode subtree and apply `dither` to every MeshTrait.
- *  Skips the trait._version bump when the value is unchanged so the
- *  renderer doesn't re-upload InstanceParams every frame on a steady
- *  fade level. */
+ *  Assigning an unchanged value is free: the renderer diffs the trait's config
+ *  against what it last uploaded, so a steady fade level re-uploads nothing. */
 function setCharacterSubtreeDither(root: Node, dither: number): void {
     const mesh = getTrait(root, MeshTrait);
-    if (mesh && mesh.dither !== dither) setMeshDither(mesh, dither);
+    if (mesh) mesh.dither = dither;
     for (const child of root.children) {
         setCharacterSubtreeDither(child, dither);
     }

@@ -281,8 +281,6 @@ let htClosed = new Uint8Array(htCap);
 let htGen = new Int32Array(htCap); // 0 = never claimed; a slot is live iff === generation
 let generation = 0; // bumped per search
 let htCount = 0; // live slots this generation (drives the grow decision)
-/** set by htSlot: true when the returned slot was freshly claimed this search. */
-let htInserted = false;
 const HT_MAX_LOAD = 0.7;
 
 function htReset(): void {
@@ -297,14 +295,18 @@ function htReset(): void {
 }
 
 // Teschner et al. spatial hash. `^`/`*` coerce through int32, fine for a hash
-// (we only need spread + determinism) and it handles negative coords.
-function hashCoord(x: number, y: number, z: number): number {
+// (we only need spread + determinism) and it handles negative coords. Takes the mask so the
+// A* table and a `Flood`'s own map can share it rather than drift apart.
+function hashCell(x: number, y: number, z: number, mask: number): number {
     const h = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
-    return (h >>> 0) & htMask;
+    return (h >>> 0) & mask;
 }
 
-// return (x,y,z)'s slot, claiming a fresh one (g=Infinity, open) on first touch
-// this search. sets `htInserted` so callers can tell new from existing.
+function hashCoord(x: number, y: number, z: number): number {
+    return hashCell(x, y, z, htMask);
+}
+
+// return (x,y,z)'s slot, claiming a fresh one (g=Infinity, open) on first touch this search.
 function htSlot(x: number, y: number, z: number): number {
     if (htCount >= htCap * HT_MAX_LOAD) htGrow();
     let i = hashCoord(x, y, z);
@@ -317,13 +319,9 @@ function htSlot(x: number, y: number, z: number): number {
             htG[i] = Infinity;
             htClosed[i] = 0;
             htCount++;
-            htInserted = true;
             return i;
         }
-        if (htKeyX[i] === x && htKeyY[i] === y && htKeyZ[i] === z) {
-            htInserted = false;
-            return i;
-        }
+        if (htKeyX[i] === x && htKeyY[i] === y && htKeyZ[i] === z) return i;
         i = (i + 1) & htMask;
     }
 }
@@ -399,19 +397,79 @@ export type FindPathOptions = {
 };
 
 /**
- * find a path of cells from `start` to `goal` under the successor function
- * `actions`, or null. returns every cell, never smoothed (smooth explicitly with
- * `smoothPath` if you want steering waypoints). pass `actions` directly (e.g.
- * `groundActions`), wrap one, or build via `gridActions`. heuristic defaults to
- * euclidean (override via `options.heuristic`).
+ * A route, caller-owned and poolable: cells plus how many of them are live.
  *
- * uses lazy deletion: a cheaper route to an open cell pushes a fresh node and
- * stale duplicates are skipped on pop (closed check), correct without
- * decrease-key bookkeeping.
+ * `count` rather than `cells.length` for the reason `Flood` has one — the cells past it are
+ * retained storage from a longer path, and truncating to drop them is what would stop a warmed
+ * up `Path` from ever being allocation-free. Never read past `count`; never truncate.
+ *
+ * This is why every producer takes `out: Path` and not `out: Vec3[]`. An array cannot be
+ * genuinely reused: resetting it means `length = 0`, which throws the pooled cells away, so the
+ * callee ends up allocating a fresh `[x, y, z]` per cell anyway — an out-param that saves one
+ * allocation and churns N. A `Path` owns both halves, so cells are rewritten in place and only
+ * a path longer than any before it allocates at all.
  */
-export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Vec3[] | null {
+export type Path = { cells: Vec3[]; count: number };
+
+/** an empty `Path`. Grows to its high-water mark, then stops allocating. */
+export function createPath(): Path {
+    return { cells: [], count: 0 };
+}
+
+/** append a cell, rewriting the pooled entry at `count` rather than allocating one. */
+function pathPush(p: Path, x: number, y: number, z: number): void {
+    const cell = p.cells[p.count];
+    if (cell === undefined) p.cells[p.count] = [x, y, z];
+    else {
+        cell[0] = x;
+        cell[1] = y;
+        cell[2] = z;
+    }
+    p.count++;
+}
+
+/** reverse the live prefix in place. swaps references, so it allocates nothing. */
+function pathReverse(p: Path): void {
+    for (let i = 0, j = p.count - 1; i < j; i++, j--) {
+        const t = p.cells[i]!;
+        p.cells[i] = p.cells[j]!;
+        p.cells[j] = t;
+    }
+}
+
+/** copy `src`'s live cells into `out`, replacing whatever it held. */
+function pathCopy(out: Path, src: Path): void {
+    out.count = 0;
+    for (let i = 0; i < src.count; i++) {
+        const c = src.cells[i]!;
+        pathPush(out, c[0]!, c[1]!, c[2]!);
+    }
+}
+
+/**
+ * Find a path of cells from `start` to `goal` under the successor function `actions`, into
+ * `out`. Returns whether the goal was reached; `out.count` is 0 when it was not.
+ *
+ * Every cell, never smoothed — smooth explicitly with `smoothPath` if you want steering
+ * waypoints. Pass `actions` directly (e.g. `groundActions`), wrap one, or build via
+ * `gridActions`. Heuristic defaults to euclidean (override via `options.heuristic`).
+ *
+ * Uses lazy deletion: a cheaper route to an open cell pushes a fresh node and stale duplicates
+ * are skipped on pop (closed check), correct without decrease-key bookkeeping.
+ */
+export function findPath(
+    out: Path,
+    voxels: Voxels,
+    start: Vec3,
+    goal: Vec3,
+    actions: Actions,
+    options?: FindPathOptions,
+): boolean {
     const goalNode = search(voxels, start, goal, actions, options);
-    return goalNode ? reconstruct(goalNode) : null;
+    out.count = 0;
+    if (!goalNode) return false;
+    reconstruct(out, goalNode);
+    return true;
 }
 
 function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Node | null {
@@ -452,14 +510,14 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, optio
     return null;
 }
 
-function reconstruct(node: Node): Vec3[] {
-    const path: Vec3[] = [];
-    let current: Node | null = node;
-    while (current) {
-        path.unshift([current.x, current.y, current.z]);
-        current = current.parent;
+// walk the parent chain into `out`. goal-first as we go, then reversed — `unshift` per cell
+// would be O(n²), and reversing references is free.
+function reconstruct(out: Path, node: Node): void {
+    out.count = 0;
+    for (let current: Node | null = node; current; current = current.parent) {
+        pathPush(out, current.x, current.y, current.z);
     }
-    return path;
+    pathReverse(out);
 }
 
 // ── shortcut smoothing ──────────────────────────────────────────────
@@ -468,20 +526,28 @@ function reconstruct(node: Node): Vec3[] {
  *  directly (per `shortcut`) from the last kept cell to the one after it.
  *  never shortcuts across an upward hop, a waypoint whose predecessor is
  *  lower (a +Y step) is preserved so the agent still jumps it. */
-export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Vec3[] {
-    if (path.length < 3) return path;
-    const out: Vec3[] = [path[0]!];
+export function smoothPath(out: Path, voxels: Voxels, path: Path, shortcut: Shortcut): Path {
+    if (out === path) throw new Error('nav.smoothPath: `out` must not be the input path');
+    if (path.count < 3) {
+        pathCopy(out, path);
+        return out;
+    }
+    out.count = 0;
+    const first = path.cells[0]!;
+    pathPush(out, first[0]!, first[1]!, first[2]!);
     let prevIndex = 0;
-    for (let i = 2; i < path.length; i++) {
-        const prev = path[prevIndex]!;
-        const next = path[i]!;
-        const prevHop = prevIndex > 0 && prev[1] > path[prevIndex - 1]![1];
-        const nextHop = next[1] > path[i - 1]![1];
+    for (let i = 2; i < path.count; i++) {
+        const prev = path.cells[prevIndex]!;
+        const next = path.cells[i]!;
+        const prevHop = prevIndex > 0 && prev[1]! > path.cells[prevIndex - 1]![1]!;
+        const nextHop = next[1]! > path.cells[i - 1]![1]!;
         if (!prevHop && !nextHop && shortcut(voxels, prev, next)) continue;
-        out.push(path[i - 1]!);
+        const keep = path.cells[i - 1]!;
+        pathPush(out, keep[0]!, keep[1]!, keep[2]!);
         prevIndex = i - 1;
     }
-    out.push(path[path.length - 1]!);
+    const last = path.cells[path.count - 1]!;
+    pathPush(out, last[0]!, last[1]!, last[2]!);
     return out;
 }
 
@@ -524,56 +590,239 @@ export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut 
 // path-reachable, handy for picking a provably-reachable target (e.g. NPC wander)
 // without a path query that can fail.
 
-// ── flood-fill scratch (module; floodFill is non-re-entrant like search()) ──
-// the BFS frontier IS the result, so pooling its Vec3 cells makes a warmed-up flood
-// allocate nothing per call (mirrors the A* node pool): cells are rewritten in place
-// and the pool only ever grows. the old impl churned one `[x,y,z]` per discovered cell
-// plus a queue array + a closure every call — the dominant per-flood garbage.
-const fillPool: Vec3[] = [];
-const fillView: Vec3[] = []; // right-sized alias handed back (slots reference fillPool cells)
-let fillTail = 0; // cells discovered this flood == write cursor into fillPool
+/**
+ * A `Flood`'s own coord → cell-index map: the "have I seen this cell" set, which doubles as the
+ * lookup behind `floodIndexOf`.
+ *
+ * The flood used to borrow the A* table, and that is what made a completed flood unqueryable:
+ * one module-level table, reset per search, so it only ever described the MOST RECENT one. Ask
+ * a retained flood "did you reach here?" after anything else had run and it answered from
+ * somebody else's search.
+ *
+ * Owning one per flood is also SMALLER, not bigger. A flood needs "first touch?" and nothing
+ * else — it never reads a g-score or a closed flag — so this is four Int32Arrays where the A*
+ * table carries a Float64 g and a closed byte on top. And because the shapes differ, A* keeps
+ * its own table and its own probe loop untouched: nothing hot pays for this.
+ *
+ * Exported only because `Flood` names it. Treat it as internal.
+ */
+export type FloodMap = {
+    cap: number;
+    mask: number;
+    keyX: Int32Array;
+    keyY: Int32Array;
+    keyZ: Int32Array;
+    /** generation stamp per slot; a slot is live iff `gen[i] === generation`. */
+    gen: Int32Array;
+    /** index into `Flood.cells` for the cell in this slot. */
+    cell: Int32Array;
+    generation: number;
+    count: number;
+};
 
-function fillPush(x: number, y: number, z: number): void {
-    const cell = fillPool[fillTail];
-    if (cell === undefined) fillPool[fillTail] = [x, y, z];
+/**
+ * A completed flood: the cells reached, the BFS tree that reached them, and the map to look a
+ * cell up by coordinate.
+ *
+ * The tree is the point. A breadth-first expansion necessarily discovers HOW it got to every
+ * cell, and throwing that away meant a caller who picked a destination out of the result had to
+ * run `findPath` to rediscover a route the flood had already proved exists — two searches for
+ * one answer, and the A* could still fail on its own budget.
+ *
+ * CALLER-OWNED, so it is also safe to keep. `floodFill` refills one of these in place, which
+ * means two agents can hold their own without clobbering each other, and one agent can flood
+ * once and query it across frames.
+ *
+ * Only `[0, count)` of `cells`/`parent` is live. Entries beyond it are retained pool storage
+ * from a previous, larger fill — never read them, and never truncate them either, since keeping
+ * them is what makes a warmed-up `Flood` allocation-free.
+ */
+export type Flood = {
+    /** cells reached, start first, roughly nearest-first. */
+    cells: Vec3[];
+    /** for each cell, the index it was discovered FROM. `-1` at the start. */
+    parent: number[];
+    /** how many entries of `cells`/`parent` this fill wrote. */
+    count: number;
+    /** coord → cell index. internal; go through `floodIndexOf`. */
+    map: FloodMap;
+};
+
+const FLOOD_LOAD = 0.7;
+const FLOOD_CAP0 = 1 << 6;
+
+function createFloodMap(cap: number): FloodMap {
+    return {
+        cap,
+        mask: cap - 1,
+        keyX: new Int32Array(cap),
+        keyY: new Int32Array(cap),
+        keyZ: new Int32Array(cap),
+        gen: new Int32Array(cap),
+        cell: new Int32Array(cap),
+        generation: 0,
+        count: 0,
+    };
+}
+
+/** an empty `Flood`, ready to be filled. Grows to its high-water mark, then stops allocating. */
+export function createFlood(): Flood {
+    return { cells: [], parent: [], count: 0, map: createFloodMap(FLOOD_CAP0) };
+}
+
+// O(1) between fills: bump the stamp rather than clear the arrays.
+function floodMapReset(m: FloodMap): void {
+    m.count = 0;
+    m.generation++;
+    // the stamp is an Int32; on the (astronomically rare) wrap, clear so no stale slot aliases
+    if (m.generation === 0x7fffffff) {
+        m.gen.fill(0);
+        m.generation = 1;
+    }
+}
+
+// double capacity and re-insert this fill's live slots. one-off — the bigger arrays persist.
+function floodMapGrow(m: FloodMap): void {
+    const oldCap = m.cap;
+    const oldKeyX = m.keyX;
+    const oldKeyY = m.keyY;
+    const oldKeyZ = m.keyZ;
+    const oldGen = m.gen;
+    const oldCell = m.cell;
+
+    m.cap = oldCap << 1;
+    m.mask = m.cap - 1;
+    m.keyX = new Int32Array(m.cap);
+    m.keyY = new Int32Array(m.cap);
+    m.keyZ = new Int32Array(m.cap);
+    m.gen = new Int32Array(m.cap);
+    m.cell = new Int32Array(m.cap);
+
+    for (let i = 0; i < oldCap; i++) {
+        if (oldGen[i] !== m.generation) continue;
+        const x = oldKeyX[i]!;
+        const y = oldKeyY[i]!;
+        const z = oldKeyZ[i]!;
+        let j = hashCell(x, y, z, m.mask);
+        while (m.gen[j] === m.generation) j = (j + 1) & m.mask;
+        m.gen[j] = m.generation;
+        m.keyX[j] = x;
+        m.keyY[j] = y;
+        m.keyZ[j] = z;
+        m.cell[j] = oldCell[i]!;
+    }
+}
+
+// the slot for (x,y,z), claiming a fresh one (cell = -1, "seen but unassigned") on first touch.
+function floodMapSlot(m: FloodMap, x: number, y: number, z: number): number {
+    if (m.count >= m.cap * FLOOD_LOAD) floodMapGrow(m);
+    let i = hashCell(x, y, z, m.mask);
+    for (;;) {
+        if (m.gen[i] !== m.generation) {
+            m.gen[i] = m.generation;
+            m.keyX[i] = x;
+            m.keyY[i] = y;
+            m.keyZ[i] = z;
+            m.cell[i] = -1;
+            m.count++;
+            return i;
+        }
+        if (m.keyX[i] === x && m.keyY[i] === y && m.keyZ[i] === z) return i;
+        i = (i + 1) & m.mask;
+    }
+}
+
+function floodPush(f: Flood, x: number, y: number, z: number, from: number): void {
+    const cell = f.cells[f.count];
+    if (cell === undefined) f.cells[f.count] = [x, y, z];
     else {
         cell[0] = x;
         cell[1] = y;
         cell[2] = z;
     }
-    fillTail++;
+    f.parent[f.count] = from;
+    f.count++;
 }
 
-// the successor sink handed to `actions`: append each first-touch neighbour to the
-// pooled frontier. shared across calls, so there's no per-flood closure allocation.
+// in-flight fill state. the successor sink is shared rather than a per-call closure (the same
+// no-allocation reason the A* node pool exists), so the flood being written and the cell being
+// expanded live here. non-re-entrant, exactly like `search()`.
+let fillTarget: Flood | null = null;
+let fillFrom = 0;
+
 const fillStep: StepFn = (x, y, z) => {
-    htSlot(x, y, z);
-    if (htInserted) fillPush(x, y, z);
+    const f = fillTarget!;
+    const slot = floodMapSlot(f.map, x, y, z);
+    if (f.map.cell[slot] === -1) {
+        f.map.cell[slot] = f.count; // the map IS the visited set; -1 means seen-but-unqueued
+        floodPush(f, x, y, z, fillFrom);
+    }
 };
 
-/** breadth-first expansion of every cell reachable from `start` under the successor
- *  `actions`. `start` is included; order is roughly nearest-first. flood-fill is
- *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
- *  `findPath` takes); the result includes the frontier discovered up to that bound.
+/**
+ * Breadth-first expansion of every cell reachable from `start` under the successor `actions`,
+ * written into `out`. `start` is included, first; order is roughly nearest-first.
  *
- *  the returned array ALIASES a reused pool — it (and its cells) are valid only until
- *  the next `floodFill` call. read or copy what you need out before then; clone any
- *  cell you intend to retain (`[c[0], c[1], c[2]]`). */
-export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[] {
-    htReset(); // the visited table doubles as the "seen" set (htInserted = first touch)
-    fillTail = 0;
-    htSlot(start[0], start[1], start[2]); // mark the start visited...
-    fillPush(start[0], start[1], start[2]); // ...and make it result[0] (start first)
+ * Flood-fill is otherwise unbounded, so `maxIterations` caps cells EXPANDED (the same work
+ * budget `findPath` takes); the result includes the frontier discovered up to that bound.
+ *
+ * Touches no shared state — a fill neither disturbs nor is disturbed by A* or another `Flood`.
+ * Returns `out`, so a call reads as an assignment.
+ */
+export function floodFill(out: Flood, voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Flood {
+    out.count = 0;
+    floodMapReset(out.map);
+    fillTarget = out;
+    const slot = floodMapSlot(out.map, start[0], start[1], start[2]);
+    out.map.cell[slot] = 0;
+    floodPush(out, start[0], start[1], start[2], -1); // cells[0], the tree's root
     let head = 0;
-    while (head < fillTail && head < maxIterations) {
-        const cell = fillPool[head++]!;
+    while (head < out.count && head < maxIterations) {
+        fillFrom = head; // whatever `fillStep` discovers next came from here
+        const cell = out.cells[head++]!;
         actions(voxels, cell[0], cell[1], cell[2], fillStep);
     }
-    // hand back a right-sized view WITHOUT truncating fillPool itself, so its cells
-    // survive to be reused next call. copying references allocates no Vec3s.
-    fillView.length = fillTail;
-    for (let i = 0; i < fillTail; i++) fillView[i] = fillPool[i]!;
-    return fillView;
+    fillTarget = null;
+    return out;
+}
+
+/** the index of `(x,y,z)` in `flood.cells`, or `-1` if the fill never reached it. */
+export function floodIndexOf(flood: Flood, x: number, y: number, z: number): number {
+    const m = flood.map;
+    let i = hashCell(x, y, z, m.mask);
+    for (;;) {
+        if (m.gen[i] !== m.generation) return -1; // an unclaimed slot: never seen
+        if (m.keyX[i] === x && m.keyY[i] === y && m.keyZ[i] === z) return m.cell[i]!;
+        i = (i + 1) & m.mask;
+    }
+}
+
+/** did this fill reach `(x,y,z)`? the question `floodIndexOf` answers, when you only want yes/no. */
+export function floodReached(flood: Flood, x: number, y: number, z: number): boolean {
+    return floodIndexOf(flood, x, y, z) !== -1;
+}
+
+/**
+ * The route from the fill's start to `cells[index]`, start-first — the same cell list
+ * `findPath` returns, and smoothable the same way.
+ *
+ * FREE, in the sense that matters: the flood already found this route, so this only walks the
+ * parent chain back. No search, no budget, and no way for it to fail on a cell the flood
+ * reached — which is what makes "pick a destination out of a flood" a reachable-by-construction
+ * move rather than a hopeful one.
+ *
+ * `out`'s cells are its own, rewritten in place, so the result survives the next fill — unlike
+ * `flood.cells`, which the next fill overwrites.
+ */
+export function floodPath(out: Path, flood: Flood, index: number): Path {
+    out.count = 0;
+    if (index < 0 || index >= flood.count) return out;
+    for (let i = index; i !== -1; i = flood.parent[i]!) {
+        const c = flood.cells[i]!;
+        pathPush(out, c[0]!, c[1]!, c[2]!);
+    }
+    pathReverse(out); // walked goal→start; callers want start→goal
+    return out;
 }
 
 // ── swept-box voxel trace (skishore/wave) ───────────────────────────

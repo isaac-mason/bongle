@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addChild, addTrait, createNode, createSceneTree, getTrait } from '../../../../src/core/scene/scene-tree';
-import { Self, trait } from '../../../../src/core/scene/traits';
+import { Self } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
 
 describe('Self marker', () => {
     it('types a self-referential field as the trait instance, no cast', () => {

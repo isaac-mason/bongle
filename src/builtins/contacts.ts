@@ -1,5 +1,6 @@
 import type { Contact } from '../core/physics/contacts';
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 
 /**
  * per-step contact lifecycle for a node.

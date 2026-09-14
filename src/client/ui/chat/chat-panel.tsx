@@ -481,7 +481,7 @@ export function ChatPanel() {
                             color: '#fff',
                         }}
                     >
-                        <MessageSquare size={20} strokeWidth={2.2} />
+                        <MessageSquare size={24} />
                     </button>
                     {latestVisible && latestLine && (
                         <div

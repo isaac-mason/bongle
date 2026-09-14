@@ -58,12 +58,13 @@ export default defineConfig({
                 // so a dist/kit/ subdir would send every kit texture and sound one level off.
                 kit: entry('src/kit/index.ts'),
                 'kit-block-sound-presets': entry('src/kit/block-sound-presets.ts'),
-                'kit-block-textures': entry('src/kit/block-textures.ts'),
                 'kit-blocks': entry('src/kit/blocks.ts'),
                 'kit-models': entry('src/kit/models.ts'),
                 'kit-particle-presets': entry('src/kit/particle-presets.ts'),
                 'kit-sounds': entry('src/kit/sounds.ts'),
                 'kit-sprites': entry('src/kit/sprites.ts'),
+                'kit-textures': entry('src/kit/textures.ts'),
+                'kit-tiles': entry('src/kit/tiles.ts'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry
                 // the editor-OS apps this engine version provides (bongle/os/apps):

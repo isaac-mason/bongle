@@ -15,15 +15,24 @@
 import { registerAllShapes } from 'crashcat';
 import * as pack from 'packcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { prefab } from '../../../src/api/prefabs';
+
 import { createEmptyDef } from '../../../src/core/models/build-runtime-handle';
-import { model, _registerModelDef as registerModel } from '../../../src/core/models/models';
-import { particle } from '../../../src/core/particles/particles';
-import { declare, type HandleOf, type RegistryStore, registry, structuralHash, upsert } from '../../../src/core/registry';
-import { command } from '../../../src/core/rpc';
-import { sync, trait } from '../../../src/core/scene/traits';
-import { sprite } from '../../../src/core/sprites/sprites';
-import { block, blockTexture } from '../../../src/core/voxels/blocks';
+import {
+    block,
+    command,
+    model,
+    modelStore,
+    particle,
+    prefab,
+    _registerModelDef as registerModel,
+    registry,
+    sprite,
+    sync,
+    tile,
+    trait,
+    traitStore,
+} from '../../../src/core/registry';
+import { construct } from '../../../src/core/scene/traits';
 
 beforeAll(() => {
     registerAllShapes();
@@ -33,97 +42,76 @@ beforeEach(() => {
     registry._reset();
 });
 
-type Payload = { id: string; value: number };
-
-function makeStore(): RegistryStore<Payload> {
-    return {
-        name: 'test',
-        byId: new Map(),
-        handles: new Map(),
-        meta: new Map(),
-        moduleToIds: new Map(),
-        seen: new Map(),
-        pendingChanges: [],
-        revision: 0,
-        hash: (p) => structuralHash(p),
-        diff: (a, b) => structuralHash(a) !== structuralHash(b),
-    };
-}
-
-const mintHandle = (def: Payload): HandleOf<Payload> => ({ id: def.id, dependency: { registry: 'test', id: def.id }, def });
-
 /** drain and return the ids that fired a `changed` event on a store. */
-function takeChanged(store: RegistryStore<Payload>): string[] {
+function takeChanged(store: { pendingChanges: Array<{ kind: string; id: string }> }): string[] {
     const ids = store.pendingChanges.filter((c) => c.kind === 'changed').map((c) => c.id);
     store.pendingChanges.length = 0;
     return ids;
 }
 
-describe('declare', () => {
-    it('mints once, then swaps the def under the same handle', () => {
-        const store = makeStore();
-        const first = declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle);
-        expect(first.def.value).toBe(1);
-        store.pendingChanges.length = 0;
+// `declare` and `kind` are private to registry.ts — there is exactly one way for
+// content to enter a store — so the contract is pinned through the real
+// declaring APIs, which is what actually has to hold.
+describe('declaring an id twice', () => {
+    it('mints the handle once, then swaps the def under it', () => {
+        const first = trait('t', { hp: 1 });
+        registry.traits.pendingChanges.length = 0;
 
-        const second = declare(store, 'a', () => ({ id: 'a', value: 2 }), mintHandle);
+        const second = trait('t', { hp: 2 });
         expect(second).toBe(first); // identity survives the re-declare
-        expect(first.def.value).toBe(2); // ...and the importer's reference sees it
-        expect(takeChanged(store)).toEqual(['a']);
-        expect(store.byId.get('a')).toBe(first.def);
+        expect((first.def.body as { hp: number }).hp).toBe(2); // ...and holders see it
+        expect(takeChanged(registry.traits)).toEqual(['t']);
+        expect(registry.traits.byId.get('t')).toBe(first.def);
     });
 
     it('stays silent to dispatch when the content did not move', () => {
-        const store = makeStore();
-        const first = declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle);
-        store.pendingChanges.length = 0;
+        const first = trait('t', { hp: 1 });
+        registry.traits.pendingChanges.length = 0;
 
-        expect(declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle)).toBe(first);
-        expect(takeChanged(store)).toEqual([]);
+        expect(trait('t', { hp: 1 })).toBe(first);
+        expect(takeChanged(registry.traits)).toEqual([]);
     });
 
-    it('hands the previous def to mintDef so a kind can merge onto it', () => {
-        const store = makeStore();
-        declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle);
-        const merged = declare(store, 'a', (previous) => ({ ...previous!, id: 'a' }), mintHandle);
-        expect(merged.def.value).toBe(1);
+    it('never touches members the engine populates after declaration', () => {
+        const handle = trait('t', { hp: 1 });
+        handle.netIndex = 7; // as `reindexRegistry` would
+
+        trait('t', { hp: 2 });
+        // the container is minted once and only `def` is re-pointed, so nothing
+        // else on the handle is written — this survives by construction rather
+        // than by each kind remembering to carry it across.
+        expect(handle.netIndex).toBe(7);
     });
 
-    it('adopts a placeholder that a codegen barrel seeded before user code ran', () => {
-        const store = makeStore();
-        upsert(store, 'a', { id: 'a', value: 7 });
-        expect(store.handles.has('a')).toBe(false);
+    it('adopts an entry a codegen barrel seeded before user code ran', () => {
+        registerModel('m', { ...createEmptyDef('m'), src: 'seeded.glb' });
+        // unlike the old placeholder path the container exists immediately, so a
+        // consumer populating off the seeded payload has a handle to write into.
+        const seeded = modelStore.handles.get('m');
+        expect(seeded).toBeDefined();
 
-        const handle = declare(store, 'a', (previous) => ({ ...previous!, id: 'a' }), mintHandle);
-        expect(handle.def.value).toBe(7);
-        expect(store.handles.get('a')).toBe(handle);
+        const handle = model('m', { src: 'user.glb' });
+        expect(handle).toBe(seeded);
+        expect(registry.models.meta.get('m')?.module).not.toBe('__placeholder__');
     });
 
     it('never prunes handles, so an id re-declared later keeps its identity', () => {
-        const store = makeStore();
-        const first = declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle);
-        store.byId.delete('a');
-        store.meta.delete('a');
+        const first = trait('t', { hp: 1 });
+        traitStore.byId.delete('t');
+        traitStore.meta.delete('t');
 
-        expect(declare(store, 'a', () => ({ id: 'a', value: 3 }), mintHandle)).toBe(first);
-        expect(first.def.value).toBe(3);
+        expect(trait('t', { hp: 3 })).toBe(first);
+        expect((first.def.body as { hp: number }).hp).toBe(3);
     });
 
     it('carries `id` on the handle, since identity cannot go stale the way data can', () => {
-        const store = makeStore();
-        const handle = declare(store, 'a', () => ({ id: 'a', value: 1 }), mintHandle);
-        declare(store, 'a', () => ({ id: 'a', value: 2 }), mintHandle);
-        // `id` is the one field safe to hold outside the def: a re-declaration of an
-        // id is by definition the same id, so it can never drift from the def the way
-        // `name` or any other authored field would.
-        expect(handle.id).toBe('a');
+        const handle = trait('t', { hp: 1 });
+        trait('t', { hp: 2 });
+        // `id` is the one field safe to hold outside the def: a re-declaration of
+        // an id is by definition the same id, so it can never drift from the def
+        // the way `name` or any other authored field would.
+        expect(handle.id).toBe('t');
         expect(handle.id).toBe(handle.def.id);
-    });
-
-    it('leaves upsert as the fresh-object path it always was', () => {
-        const store = makeStore();
-        const first = upsert(store, 'a', { id: 'a', value: 1 });
-        expect(upsert(store, 'a', { id: 'a', value: 2 })).not.toBe(first);
     });
 });
 
@@ -134,15 +122,15 @@ describe('declare', () => {
 // that got updated.
 
 describe('re-declaration preserves handle identity', () => {
-    it('blockTexture', () => {
-        const first = blockTexture('t', { src: 'a.png' });
-        const second = blockTexture('t', { src: 'b.png' });
+    it('tile', () => {
+        const first = tile('t', { src: 'a.png' });
+        const second = tile('t', { src: 'b.png' });
         expect(second).toBe(first);
         expect(first.def.frames).toHaveLength(1);
     });
 
     it('block', () => {
-        blockTexture('t', { src: 'a.png' });
+        tile('t', { src: 'a.png' });
         const first = block('stone', { name: 'Stone' });
         const second = block('stone', { name: 'Rock' });
         expect(second).toBe(first);
@@ -153,7 +141,10 @@ describe('re-declaration preserves handle identity', () => {
         const first = sprite('s', { src: 'a.png' });
         const second = sprite('s', { src: 'b.png' });
         expect(second).toBe(first);
-        expect(first.def.src).toBe('b.png');
+        // a sprite holds frame REFERENCES; the source moved on the texture the `src`
+        // sugar declared for it, which keeps the sprite's own identity untouched.
+        expect(first.def.frames).toEqual([{ registry: 'textures', id: 's' }]);
+        expect(registry.textures.byId.get('s')).toMatchObject({ from: 'file', src: 'b.png' });
     });
 
     it('particle', () => {
@@ -236,10 +227,10 @@ describe('trait re-declaration resets def-local derived state', () => {
 
     it('recompiles construct against the new body', () => {
         const handle = trait('t', { hp: 1 });
-        expect((handle.construct() as Record<string, unknown>).hp).toBe(1);
+        expect((construct(handle)() as Record<string, unknown>).hp).toBe(1);
 
         trait('t', { hp: 5 });
-        const instance = handle.construct() as Record<string, unknown>;
+        const instance = construct(handle)() as Record<string, unknown>;
         expect(instance.hp).toBe(5);
         expect(instance._def).toBe(handle.def);
     });
@@ -264,5 +255,22 @@ describe('ModelHandle forwarding accessors', () => {
         // the accessor followed the swap rather than holding a stale copy — the
         // whole reason these are getters and not fields.
         expect((handle.nodes as unknown as Record<string, { marker: boolean }>).arrow.marker).toBe(true);
+    });
+});
+
+describe('asset tags', () => {
+    it('every kind carries normalised tags on its def, empty when unset', () => {
+        registry._reset();
+        expect(block('plain', {}).def.tags).toEqual([]);
+        expect(block('log', { name: 'Oak Log', tags: ['Wood', 'tree', 'wood '] }).def.tags).toEqual(['wood', 'tree']);
+        expect(sprite('spark', { src: 'spark.png', tags: ['FX'] }).def.tags).toEqual(['fx']);
+        expect(prefab('hut', { type: 'nodes', tags: ['building', 'wood'] }).def.tags).toEqual(['building', 'wood']);
+        expect(model('bow', { src: 'assets/bow.glb', tags: ['weapon'] }).def.tags).toEqual(['weapon']);
+    });
+
+    it('re-declaring with new tags updates the def', () => {
+        registry._reset();
+        block('log', { tags: ['wood'] });
+        expect(block('log', { tags: ['wood', 'oak'] }).def.tags).toEqual(['wood', 'oak']);
     });
 });

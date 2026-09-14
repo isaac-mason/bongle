@@ -3,7 +3,7 @@
 // booted in the `pipeline` Vite env (a RunnableDevEnvironment in node). It
 // evaluates the user code (so it owns the registry the AssetPipeline reads) and
 // re-bakes on the SAME __bongle flush that HMR fires — so a CODE edit (a block(),
-// blockTexture(), sprite/model/sound decl) re-bakes just like an asset-file edit
+// texture()/tile(), sprite/model/sound decl) re-bakes just like an asset-file edit
 // (start.ts calls rebake() for those). One trigger for both.
 //
 // Runs the DATA bake only (atlas / sprites / models / audio) — NOT the webgpu icon
@@ -67,7 +67,11 @@ export async function start(opts: StartPipelineOptions): Promise<PipelineBootRes
         baking = true;
         try {
             const r = await AssetPipeline.run(pipeline, { forceAll: force });
-            opts.onBaked({ atlasChanged: r.atlasChanged, spriteAtlasChanged: r.spriteAtlasChanged, audioAtlasChanged: r.audioAtlasChanged });
+            opts.onBaked({
+                atlasChanged: r.atlasChanged,
+                spriteAtlasChanged: r.spriteAtlasChanged,
+                audioAtlasChanged: r.audioAtlasChanged,
+            });
         } catch (err) {
             console.error(`[dev:pipeline] bake failed: ${(err as Error).message}`);
         } finally {

@@ -8,10 +8,8 @@ export type {
     ModelHandle,
 } from '../core/models/handle';
 export type { ModelHandleMap, ModelOptions } from '../core/models/models';
-export { model } from '../core/models/models';
-
 export { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
-
+export { block, model, tile } from '../core/registry';
 export type { AABB, BlockShape, BlockShapeAabbs, BlockShapeCube } from '../core/voxels/block-collider';
 export * as blockShape from '../core/voxels/block-collider';
 // bulk write flag: setBlock(..., SetBlockFlags.BULK) / setChunkBlock(..., BULK) defer
@@ -22,9 +20,9 @@ export * as blockModel from '../core/voxels/block-model';
 // directional placement utils, for user-defined directional blocks' `place`.
 export * as blockPlace from '../core/voxels/block-place';
 export * as blockPreset from '../core/voxels/block-presets';
-// door operations (also reachable via blockPreset.*), top-level since they're
-// operations on a placed door, not preset factories.
-export { getDoorOpen, setDoorOpen } from '../core/voxels/block-presets';
+// door and lantern operations (also reachable via blockPreset.*), top-level
+// since they're operations on a placed block, not preset factories.
+export { getDoorOpen, getLanternLit, setDoorOpen, setLanternLit } from '../core/voxels/block-presets';
 export type { Blocks as BlockRegistryData } from '../core/voxels/block-registry';
 export {
     AIR,
@@ -49,14 +47,16 @@ export type {
     BlockOptions,
     BlockQuad,
     BlockSoundConfig,
-    BlockTextureDef,
-    BlockTextureOptions,
+    CubeFaceRotation,
+    CubeFaceSpec,
     CubeModel,
-    CubeTextures,
+    CubeTiles,
     CustomModel,
-    TextureRef,
+    TileDef,
+    TileHandle,
+    TileOptions,
 } from '../core/voxels/blocks';
-export { block, blockTexture, CullType, MaterialType, resolveTextureRef, VertexAnimation } from '../core/voxels/blocks';
+export { CullType, faceRotation, faceTile, MaterialType, tileFrame, VertexAnimation } from '../core/voxels/blocks';
 export { propagateAllLight, relightChunks } from '../core/voxels/light';
 export type { VoxelSweepHit } from '../core/voxels/voxel-aabb-sweep';
 export { createVoxelSweepHit, sweepAabbVsVoxels } from '../core/voxels/voxel-aabb-sweep';

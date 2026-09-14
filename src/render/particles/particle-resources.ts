@@ -43,6 +43,7 @@ import type { TextureNode } from 'gpucat/dist/nodes/nodes';
 import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
+import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 
 // ── shared gpu structs ──────────────────────────────────────────────
 //
@@ -58,7 +59,6 @@ export const InstancePose = struct('ParticleInstancePose', {
 export const InstanceMaterial = struct('ParticleInstanceMaterial', {
     uvRect: d.vec4f,
     tint: d.vec4f,
-    light: d.vec4f,
     glow: d.f32,
 });
 
@@ -207,8 +207,13 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const S = INSTANCE_MATERIAL_STRIDE;
     const uvRect = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: S, offset: 0 }).toVar('pvUvRect');
     const tint = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: S, offset: 16 }).toVar('pvTint');
-    const instLight = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: S, offset: 32 }).toVar('pvInstLight');
-    const glow = attribute('instanceMaterial', d.f32, { instanced: true, stride: S, offset: 48 }).toVar('pvGlow');
+    const glow = attribute('instanceMaterial', d.f32, { instanced: true, stride: S, offset: 32 }).toVar('pvGlow');
+
+    // light is sampled from the GPU light volume at the particle's CENTRE, one
+    // value for the whole billboard. That is where the CPU used to sample it
+    // (`posX/Y/Z` in particle-visuals), so the look is unchanged; what goes away
+    // is a per-particle CPU voxel walk and a vec4 per instance every frame.
+    const instLight = sampleWorldLight(bindLightVolume(env), posWorld).toVar('pvInstLight');
 
     const sampledU = add(uvRect.x, mul(aUv.x, uvRect.z)).toVar('pvSampledU');
     const sampledV = add(uvRect.y, mul(aUv.y, uvRect.w)).toVar('pvSampledV');

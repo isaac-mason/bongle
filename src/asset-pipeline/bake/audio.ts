@@ -111,6 +111,10 @@ export type AudioManifest = {
 /** Per-id codegen entry, input to the barrel emitter. */
 export type CodegenEntry = {
     id: string;
+    /** the declared display name and search tags, carried through so a barrel
+     *  re-registration keeps what the author wrote rather than the id. */
+    name: string;
+    tags: readonly string[];
     src: string;
     long: boolean;
     duration: number;
@@ -156,7 +160,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
     // partition sources, sorted by id for deterministic order (the atlas
     // concatenation order — and thus its offsets — follows this).
     const all = [...soundsRegistry.byId.entries()]
-        .map(([id, h]) => ({ id, src: h.src, long: h.long }))
+        .map(([id, h]) => ({ id, name: h.name, tags: h.tags, src: h.src, long: h.long }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
     if (all.length === 0) {
@@ -252,6 +256,8 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
 
     const codegenEntries: CodegenEntry[] = all.map((s) => ({
         id: s.id,
+        name: s.name,
+        tags: s.tags,
         src: s.src,
         long: s.long,
         duration: durationById.get(s.id) ?? 0,
@@ -396,13 +402,10 @@ async function buildStandalones(
 }
 
 async function pruneStandalones(fs: Filesystem, liveIds: Set<string>): Promise<void> {
-    for (const entry of await fs.list(STANDALONE_DIR)) {
-        if (entry.kind !== 'file' || !entry.path.endsWith('.mp3')) continue;
-        const id = entry.path
-            .split('/')
-            .pop()!
-            .replace(/\.mp3$/, '');
-        if (!liveIds.has(id)) await fs.remove(entry.path);
+    for (const [name, kind] of await fs.readDir(STANDALONE_DIR)) {
+        if (kind !== 'file' || !name.endsWith('.mp3')) continue;
+        const id = name.replace(/\.mp3$/, '');
+        if (!liveIds.has(id)) await fs.remove(`${STANDALONE_DIR}/${name}`);
     }
 }
 
@@ -449,7 +452,8 @@ export function renderBarrel(entries: CodegenEntry[]): string {
         lines.push(`// source: ${e.src}`);
         lines.push(`const ${constId}: SoundDef = {`);
         lines.push(`    soundId: ${JSON.stringify(e.id)},`);
-        lines.push(`    name: ${JSON.stringify(e.id)},`);
+        lines.push(`    name: ${JSON.stringify(e.name)},`);
+        lines.push(`    tags: ${JSON.stringify(e.tags)},`);
         lines.push(`    src: ${JSON.stringify(e.src)},`);
         lines.push(`    long: ${e.long},`);
         lines.push(`    duration: ${fmtNum(e.duration)},`);

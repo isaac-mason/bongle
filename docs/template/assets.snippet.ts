@@ -1,7 +1,7 @@
 // Typechecked snippets for Assets.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { asset, block, blockTexture, draw, model, sound, sprite, use } from 'bongle';
+import { asset, block, model, sound, sprite, texture, tile, use } from 'bongle';
 
 /* SNIPPET_START: declare */
 // declare each asset once at module scope; the handle is what you reference
@@ -9,13 +9,13 @@ import { asset, block, blockTexture, draw, model, sound, sprite, use } from 'bon
 // module that declares it and resolves wherever it's installed (a plain project-root path also works)
 const MascotModel = model('mascot', { src: asset('./assets/mascot.gltf', import.meta.url) });
 const ChimeSound = sound('chime', { src: asset('./assets/chime.ogg', import.meta.url) });
-const MarbleBlockTexture = blockTexture('marble', { src: asset('./assets/marble.png', import.meta.url) });
+const MarbleTile = tile('marble', { src: asset('./assets/marble.png', import.meta.url) });
 const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
 
-// a block texture feeds a block model
+// a tile feeds a block model
 const MarbleBlock = block('guide:marble', {
     name: 'Marble',
-    model: () => ({ type: 'cube', textures: { all: { texture: MarbleBlockTexture } } }),
+    model: () => ({ type: 'cube', tiles: { all: MarbleTile } }),
 });
 
 // keep handles that nothing else references in code alive through bundling
@@ -23,19 +23,18 @@ use(MascotModel, ChimeSound, SmokeSprite, MarbleBlock);
 /* SNIPPET_END: declare */
 
 /* SNIPPET_START: procedural */
-// a texture's src can be a draw() descriptor that paints the image at bake time,
-// instead of loading a file
-const CheckerBlockTexture = blockTexture('checker', {
-    src: draw(
-        (c) => {
-            c.fillStyle = '#222';
-            c.fillRect(0, 0, 16, 16);
-            c.fillStyle = '#eee';
-            c.fillRect(0, 0, 8, 8);
-            c.fillRect(8, 8, 8, 8);
-        },
-        { size: [16, 16] },
-    ),
+// a texture can be COMPUTED — painted at bake time by a function, instead of
+// loaded from a file. `tile()` and `sprite()` consume either kind the same way.
+const CheckerTexture = texture('checker', {
+    size: [16, 16],
+    fn: (c) => {
+        c.fillStyle = '#222';
+        c.fillRect(0, 0, 16, 16);
+        c.fillStyle = '#eee';
+        c.fillRect(0, 0, 8, 8);
+        c.fillRect(8, 8, 8, 8);
+    },
 });
-use(CheckerBlockTexture);
+const CheckerTile = tile('checker', { frames: [CheckerTexture] });
+use(CheckerTile);
 /* SNIPPET_END: procedural */

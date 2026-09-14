@@ -27,11 +27,10 @@ import { connectRealmPort, type RealmPort } from '../../build/dev/shakeup-port';
 import { browserEvaluator, makeImportMeta } from '../../build/dev/shakeup-runner-host';
 import { openNodeFs } from '../../cli/node-fs';
 import { registerFlushHandler } from '../../src/core/capture/flush';
-import { registry, reindexRegistry } from '../../src/core/registry';
+import { block, registry, reindexRegistry, script, tile, trait } from '../../src/core/registry';
 import { addTrait, createNode, serializeNode } from '../../src/core/scene/scene-tree';
-import { onDispose, onSwap, onTick, script } from '../../src/core/scene/scripts';
-import { trait } from '../../src/core/scene/traits';
-import { block } from '../../src/core/voxels/blocks';
+import { onDispose, onSwap, onTick } from '../../src/core/scene/scripts';
+import { scriptsById } from '../../src/core/scene/traits';
 import { env } from '../../src/env';
 import { __bongle } from '../../src/internal-runtime';
 import { createFallbackAvatarsDriver } from '../../src/node/sample-avatars-driver';
@@ -43,7 +42,7 @@ import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory'
 const DT = 1 / 60;
 
 /** The engine surface a game module imports from 'bongle', bound to THIS registry instance. */
-const bongleApi = { trait, script, onTick, onSwap, onDispose, block, env };
+const bongleApi = { trait, script, onTick, onSwap, onDispose, block, tile, env };
 
 function portPair(): [RealmPort, RealmPort] {
     const a: RealmPort = { postMessage: (d) => queueMicrotask(() => b.onmessage?.({ data: d })), onmessage: null };
@@ -122,7 +121,7 @@ async function boot(files: Record<string, string>, log: string[], entry = '/game
     // the same wiring the editor's server realm boot does (see engine-server-editor.ts).
     const unregisterFlush = registerFlushHandler(() => applyRegistryChanges(server));
     // boot-time registrations are already reflected in the room; isolate the edits under test.
-    for (const store of [registry.traits, registry.scripts, registry.blocks, registry.blockTextures]) {
+    for (const store of [registry.traits, registry.scripts, registry.blocks, registry.tiles, registry.textures]) {
         store.pendingChanges.length = 0;
     }
 
@@ -215,8 +214,9 @@ script(T, 'tick', (ctx) => {
         // if the DepGraph carries an edge from the script to the block it closes over — the edge the
         // capture dep-wrap emits. /game.ts is transformed BEFORE /blocks.ts here, which is exactly
         // the order that used to leave that edge unwired.
-        const blocks = (texture: string) => `import { block } from 'bongle';
-export const Stone = block('hmr-int/stone', { model: () => ({ type: 'cube', textures: { all: { texture: '${texture}' } } }) });`;
+        const blocks = (texture: string) => `import { block, tile } from 'bongle';
+const tex = tile('${texture}', { src: 'textures/${texture}.png' });
+export const Stone = block('hmr-int/stone', { model: () => ({ type: 'cube', tiles: { all: tex } }) });`;
         const game = `import { trait, script, onTick } from 'bongle';
 import { Stone } from './blocks';
 export const T = trait('hmr-int/d');
@@ -241,8 +241,9 @@ script(T, 'tick', (ctx) => {
     it('leaves a script that does NOT close over the producer alone', async () => {
         // The negative control for the test above: if a block edit re-ran every script, that test
         // would pass without any DepGraph edge existing. The narrow path has to actually be narrow.
-        const blocks = (texture: string) => `import { block } from 'bongle';
-export const Stone = block('hmr-int/stone2', { model: () => ({ type: 'cube', textures: { all: { texture: '${texture}' } } }) });`;
+        const blocks = (texture: string) => `import { block, tile } from 'bongle';
+const tex = tile('${texture}', { src: 'textures/${texture}.png' });
+export const Stone = block('hmr-int/stone2', { model: () => ({ type: 'cube', tiles: { all: tex } }) });`;
         const game = `import { trait, script, onTick } from 'bongle';
 import './blocks';
 export const T = trait('hmr-int/e');
@@ -324,7 +325,7 @@ ${ids
         expect(log).toEqual(['a']);
 
         const handle = registry.traits.handles.get('hmr-int/g');
-        expect(handle?.scriptsById.has('b')).toBe(false);
+        expect(handle ? scriptsById(handle).has('b') : false).toBe(false);
         expect(handle?.def.scripts.map((s) => s.scriptId)).toEqual(['a']);
         expect(registry.scripts.byId.has('hmr-int/g.b')).toBe(false);
     });

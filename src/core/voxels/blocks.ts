@@ -1,30 +1,33 @@
 import type { Vec2, Vec3 } from 'math';
 import { mulberry32 } from 'math/random';
-import { recordBlock, recordBlockTexture } from '../capture/module-scope';
+import type { AssetMeta } from '../asset-meta';
+import type { DepKey } from '../capture/dep-graph';
 import { particleUpdate } from '../particles/particle-update';
-import { type ParticleHandle, particle } from '../particles/particles';
-import { declare, registry } from '../registry';
+import type { ParticleHandle } from '../particles/particles';
+import { particle, sprite, texture, textureStore } from '../registry';
 import type { SoundHandle } from '../sounds/sounds';
-import { draw, type ImageSource, type NormalizedImageSource } from '../sprites/draw';
-import { sprite } from '../sprites/sprites';
+import type { ImageSource } from '../sprites/sprites';
+import type { TextureHandle } from '../textures/textures';
 import type { BlockShape } from './block-collider';
-import { formatKey } from './block-registry';
 import type { BlockStateDef, PropsDef, PropsValues } from './block-state';
 import * as blockState from './block-state';
 import type { Voxels } from './voxels';
 
-export type BlockTextureOptions = {
+export type TileOptions = {
     /**
      * source image(s). single entry for static, array for animated. each
-     * entry may be a string path (project-root-relative), a module-relative
-     * `asset('./texture.png', import.meta.url)` ref, or a `draw()` bake-time
-     * descriptor for procedural / composed textures.
+     * entry may be a string path (project-root-relative) or a module-relative
+     * `asset('./texture.png', import.meta.url)` ref.
      *
      * the `asset()` form lets 3rd-party packs ship textures alongside their
      * modules — it resolves relative to the calling module wherever it's
      * installed, and the pipeline reads the resolved path.
      */
-    src: ImageSource | ImageSource[];
+    src?: ImageSource | ImageSource[];
+
+    /** the textures this tile's frames come from. The direct form; `src`
+     *  is sugar that declares textures for you. */
+    frames?: TextureHandle[];
 
     /** animation speed in frames per second. default 1. ignored if single frame. */
     fps?: number;
@@ -33,19 +36,16 @@ export type BlockTextureOptions = {
     interpolate?: boolean;
 };
 
-/** The declared data for one block texture. Pure: hashed wholesale, swapped
+/** The declared data for one tile. Pure: hashed wholesale, swapped
  *  wholesale on re-declaration (see `declare`). */
-export type BlockTextureDef = {
-    /** texture string id (e.g. 'lava') */
+export type TileDef = {
+    /** tile string id (e.g. 'lava') */
     id: string;
 
-    /** DepGraph dependency, see SceneHandle.dependency. */
-
-    /** source declarations, post-URL-normalization. each entry is either
-     *  a path string or a `DrawSource` descriptor; the asset-pipeline
-     *  `draw-textures` pass (step 10) bakes any DrawSource entries to
-     *  in-memory canvases before the block atlas builder runs. */
-    frames: NormalizedImageSource[];
+    /** the textures this tile's frames sample, in order. one entry for a
+     *  static tile, N for a flipbook. every frame is a multiple of 16 per side
+     *  (see `BLOCK_TILE_SIZE`), and every frame of one tile is the same size. */
+    frames: DepKey[];
 
     /** animation speed in frames per second. */
     fps: number;
@@ -54,56 +54,46 @@ export type BlockTextureDef = {
     interpolate: boolean;
 };
 
-/** Stable wrapper around a `BlockTextureDef`; identity plus the live def. */
-export type BlockTextureHandle = {
+/**
+ * Stable wrapper around a `TileDef`; identity plus the live def.
+ *
+ * A tile is referenced by its HANDLE, never by id string. The handle carries
+ * its own def, so resolving a reference needs no registry lookup and cannot
+ * depend on declaration order — which is what lets a block derive its dust at
+ * declaration time rather than deferring to the registry build. A string id
+ * would reintroduce both: the lookup could miss simply because the tile was
+ * declared later in the file.
+ */
+export type TileHandle = {
     /** the declared id (identity, never changes). */
     readonly id: string;
     /** DepGraph dependency + the brand `isHandle` tests. */
-    dependency: { registry: 'blockTextures'; id: string };
+    dependency: { registry: 'tiles'; id: string };
     /** the declared data. re-pointed on every re-declaration. */
-    def: BlockTextureDef;
+    def: TileDef;
 };
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * declare a block texture. called at module scope.
- *
- * pass a single src for static textures, or an array for animated
- * textures (one entry per frame). each entry may be a string path,
- * a URL, or a `draw()` descriptor; flipbook frames mix freely.
- *
- * returns a handle that can be passed to block model definitions.
- */
-export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureHandle {
-    const src = options.src;
-    const frames: NormalizedImageSource[] = Array.isArray(src) ? src : [src];
-    const fps = options.fps ?? 1;
-    const interpolate = options.interpolate ?? false;
-    const handle = declare(
-        registry.blockTextures,
-        id,
-        (): BlockTextureDef => ({ id, frames, fps, interpolate }),
-        (def): BlockTextureHandle => ({ id, dependency: { registry: 'blockTextures', id }, def }),
-    );
-    recordBlockTexture(id);
-    return handle;
-}
-
-export type TextureRef = BlockTextureHandle | string;
-
-/** resolve a TextureRef to its string id. */
-export function resolveTextureRef(ref: TextureRef): string {
-    return typeof ref === 'string' ? ref : ref.id;
-}
 
 /** UV rotation for a cube face, 0/90/180/270 ccw. default 0. */
 export type CubeFaceRotation = 0 | 90 | 180 | 270;
 
-/** per-face slot for a cube model. rotation defaults to 0 if omitted. */
-export type CubeFaceSpec = { texture: TextureRef; rotation?: CubeFaceRotation };
+/**
+ * per-face slot for a cube model. A bare handle is the common case; the object
+ * form exists only to carry a rotation.
+ */
+export type CubeFaceSpec = TileHandle | { tile: TileHandle; rotation?: CubeFaceRotation };
 
-/** per-face texture assignment for a cube model. */
-export type CubeTextures =
+/** the tile a face spec names, in either form. */
+export function faceTile(spec: CubeFaceSpec): TileHandle {
+    return 'tile' in spec ? spec.tile : spec;
+}
+
+/** the rotation a face spec carries, 0 when it is a bare handle. */
+export function faceRotation(spec: CubeFaceSpec): CubeFaceRotation {
+    return 'tile' in spec ? (spec.rotation ?? 0) : 0;
+}
+
+/** per-face tile assignment for a cube model. */
+export type CubeTiles =
     | { all: CubeFaceSpec }
     | { top: CubeFaceSpec; bottom: CubeFaceSpec; sides: CubeFaceSpec }
     | {
@@ -118,7 +108,7 @@ export type CubeTextures =
 /** cube model, standard solid block. */
 export type CubeModel = {
     type: 'cube';
-    textures: CubeTextures;
+    tiles: CubeTiles;
 };
 
 /** custom model, quad list for arbitrary block shapes. */
@@ -146,8 +136,8 @@ export type BlockQuad = {
     /** face normal as [nx, ny, nz]. */
     normal: Vec3;
 
-    /** texture ref for this quad (BlockTextureDef handle or string id). */
-    texture: TextureRef;
+    /** the tile this quad samples. */
+    tile: TileHandle;
 
     /** uv coordinates for each vertex. defaults to full-texture [[0,1],[1,1],[1,0],[0,0]]. */
     uvs?: [Vec2, Vec2, Vec2, Vec2];
@@ -162,6 +152,14 @@ export type BlockQuad = {
      * occluded by a neighbor.
      */
     cullFace?: 'north' | 'south' | 'east' | 'west' | 'up' | 'down';
+
+    /**
+     * `false` draws the quad without the per-face directional shade (top 1.0,
+     * sides 0.6 / 0.8, bottom 0.5); AO still applies. Minecraft's element
+     * `shade: false`. Foliage planes use it so a clump reads as one soft mass
+     * rather than as lit cards. Default true.
+     */
+    shade?: boolean;
 
     /**
      * render pass for this quad. defaults to the block's material.
@@ -181,34 +179,34 @@ export type BlockQuad = {
 export type BlockModel = CubeModel | CustomModel;
 
 /**
- * Collect the BlockTexture ids referenced by a model into `out`. Used by
+ * Collect the tile ids referenced by a model into `out`. Used by
  * the block-registry freeze pass to seed the atlas and by the blocks
- * registry's `extractDeps` to wire DepGraph edges from textures to the
+ * registry's `extractDeps` to wire DepGraph edges from tiles to the
  * blocks that close over them in their model factories.
  */
-export function collectModelTextureIds(model: BlockModel, out: Set<string>): void {
+export function collectModelTileIds(model: BlockModel, out: Set<string>): void {
     switch (model.type) {
         case 'cube': {
-            const tex = model.textures;
-            if ('all' in tex) {
-                out.add(resolveTextureRef(tex.all.texture));
-            } else if ('sides' in tex) {
-                out.add(resolveTextureRef(tex.top.texture));
-                out.add(resolveTextureRef(tex.bottom.texture));
-                out.add(resolveTextureRef(tex.sides.texture));
+            const t = model.tiles;
+            if ('all' in t) {
+                out.add(faceTile(t.all).id);
+            } else if ('sides' in t) {
+                out.add(faceTile(t.top).id);
+                out.add(faceTile(t.bottom).id);
+                out.add(faceTile(t.sides).id);
             } else {
-                out.add(resolveTextureRef(tex.top.texture));
-                out.add(resolveTextureRef(tex.bottom.texture));
-                out.add(resolveTextureRef(tex.north.texture));
-                out.add(resolveTextureRef(tex.south.texture));
-                out.add(resolveTextureRef(tex.east.texture));
-                out.add(resolveTextureRef(tex.west.texture));
+                out.add(faceTile(t.top).id);
+                out.add(faceTile(t.bottom).id);
+                out.add(faceTile(t.north).id);
+                out.add(faceTile(t.south).id);
+                out.add(faceTile(t.east).id);
+                out.add(faceTile(t.west).id);
             }
             break;
         }
         case 'custom':
             for (const q of model.quads) {
-                out.add(resolveTextureRef(q.texture));
+                out.add(q.tile.id);
             }
             break;
     }
@@ -417,11 +415,7 @@ export type BlockParticleConfig = {
 
 // ── block definition (user input) ───────────────────────────────────
 
-export type BlockOptions<P extends PropsDef = PropsDef> = {
-    /** human-readable display name for editor UIs (inventory, hotbar,
-     *  inspectors). falls back to the string id when omitted. */
-    name?: string;
-
+export type BlockOptions<P extends PropsDef = PropsDef> = AssetMeta & {
     /** block state schema. omit for stateless blocks. */
     states?: BlockStateDef<P>;
 
@@ -442,7 +436,23 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      *
      * omit for invisible blocks (air).
      */
-    model?: (props: PropsValues<P>) => BlockModel;
+    /**
+     * the block's geometry for a given state.
+     *
+     * returning an ARRAY declares per-position variants: the mesher picks one
+     * by hashing the block's world position, so the same block does not look
+     * identical everywhere. the array IS the variant set, so the count is
+     * derived and cannot drift out of step with what the entries actually are.
+     *
+     * every entry must share a `type` (a list mixing 'cube' and 'custom' has no
+     * single mesher path) and the list must be non-empty. a one-entry array
+     * behaves exactly like returning that entry directly.
+     *
+     * ```ts
+     * model: () => [0, 1, 2, 3].map((r) => ({ type: 'custom', quads: rotateY(base, r) }))
+     * ```
+     */
+    model?: (props: PropsValues<P>) => BlockModel | BlockModel[];
 
     /**
      * cull type, controls face culling between adjacent blocks.
@@ -467,6 +477,18 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      * @default VertexAnimation.NONE
      */
     vertexAnimation?: VertexAnimation | ((props: PropsValues<P>) => VertexAnimation);
+
+    /**
+     * offset this block's geometry by a small amount derived from its world
+     * position, so a field of them does not sit on a visible grid. rendering
+     * only; collision and occupancy stay on the cell.
+     *
+     * `xz` is the max horizontal offset in blocks, `y` the max downward one
+     * (plants sink, never float). the hash deliberately ignores world Y, so a
+     * vertical stack of the same block shares one offset and a two-block plant
+     * cannot tear apart.
+     */
+    jitter?: { xz?: number; y?: number };
 
     /**
      * rgb light emission, each channel 0-15. blocks with this set act
@@ -701,6 +723,8 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    tags: readonly string[];
     /** block state schema (empty schema if stateless) */
     states: BlockStateDef<P>;
     /** local state index for the block's default state. omitted (or 0)
@@ -708,13 +732,41 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
      *  state. drives `defaultId()`/`defaultKey()` on the handle. */
     defaultLocalIdx?: number;
     /** model function (undefined for invisible blocks like air) */
-    model?: (props: PropsValues<P>) => BlockModel;
+    /**
+     * the block's geometry for a given state.
+     *
+     * returning an ARRAY declares per-position variants: the mesher picks one
+     * by hashing the block's world position, so the same block does not look
+     * identical everywhere. the array IS the variant set, so the count is
+     * derived and cannot drift out of step with what the entries actually are.
+     *
+     * every entry must share a `type` (a list mixing 'cube' and 'custom' has no
+     * single mesher path) and the list must be non-empty. a one-entry array
+     * behaves exactly like returning that entry directly.
+     *
+     * ```ts
+     * model: () => [0, 1, 2, 3].map((r) => ({ type: 'custom', quads: rotateY(base, r) }))
+     * ```
+     */
+    model?: (props: PropsValues<P>) => BlockModel | BlockModel[];
     /** cull type setting */
     cull: CullType | ((props: PropsValues<P>) => CullType);
     /** material type setting */
     material: MaterialType | ((props: PropsValues<P>) => MaterialType);
     /** vertex animation setting */
     vertexAnimation?: VertexAnimation | ((props: PropsValues<P>) => VertexAnimation);
+
+    /**
+     * offset this block's geometry by a small amount derived from its world
+     * position, so a field of them does not sit on a visible grid. rendering
+     * only; collision and occupancy stay on the cell.
+     *
+     * `xz` is the max horizontal offset in blocks, `y` the max downward one
+     * (plants sink, never float). the hash deliberately ignores world Y, so a
+     * vertical stack of the same block shares one offset and a two-block plant
+     * cannot tear apart.
+     */
+    jitter?: { xz?: number; y?: number };
     /** light emission setting */
     lightEmission?: [number, number, number] | ((props: PropsValues<P>) => [number, number, number]);
     /** light opacity setting */
@@ -774,10 +826,10 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
 // stateId()/defaultId() inside script callbacks, which run after freeze.
 
 /** Stable wrapper around a `BlockDef`; identity, the live def, and the state-id
- *  helpers gameplay code calls. The three `_`-prefixed slots are stamped by
- *  `buildBlockRegistry` at freeze time and are NOT declared data, which is why
- *  they live here rather than on the def (hashing them would make every rebuild
- *  look like a content change). */
+ *  helpers gameplay code calls. The `_`-prefixed slots are DERIVED, not declared
+ *  data, which is why they live here rather than on the def: `blockHash` walks
+ *  the def, and dust derived FROM a block feeding back into that block's own hash
+ *  would make every rebuild look like a content change. */
 export type BlockHandle<P extends PropsDef = PropsDef> = {
     /** the declared id (identity, never changes). */
     readonly id: string;
@@ -797,6 +849,16 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
      * see BlockHooks enum in block-hooks.ts.
      */
     _hooks: number;
+    /**
+     * per-block dust particles, derived from the default state's model by
+     * `block()` itself and shared across every state as the fallback for any
+     * particle slot the author left unset. `null` when the block opted out with
+     * `particles: false`, declared no model, or the model names no tile.
+     *
+     * Derived at DECLARATION time, in the declaring module's own scope, so the
+     * ordinary per-module sweep reclaims it when the block is deleted.
+     */
+    _defaultDust: readonly ParticleHandle[] | null;
 
     /** get the global state id for specific property values. */
     stateId(props: PropsValues<P>): number;
@@ -822,105 +884,7 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
 };
 
 // empty states singleton for stateless blocks
-const EMPTY_STATES = blockState.create({});
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * declare a block type. called at module scope, the definition is
- * captured and frozen into a registry when the module is loaded.
- *
- * returns a handle used for getting global state ids in gameplay code.
- */
-export function block<const P extends PropsDef = {}>(id: string, options: BlockOptions<P> = {}): BlockHandle<P> {
-    const states = (options.states ?? EMPTY_STATES) as BlockStateDef<P>;
-    const cull = options.cull ?? CullType.SOLID;
-    const material = options.material ?? MaterialType.OPAQUE;
-    const defaultLocalIdx = options.defaultState ? states.encode(options.defaultState) : 0;
-
-    const name = options.name ?? id;
-    const def: BlockDef<P> = {
-        id,
-        name,
-        states,
-        defaultLocalIdx,
-        model: options.model,
-        cull,
-        material,
-        vertexAnimation: options.vertexAnimation,
-        lightEmission: options.lightEmission,
-        lightOpacity: options.lightOpacity,
-        emissive: options.emissive,
-        collision: options.collision,
-        selection: options.selection,
-        shape: options.shape,
-        climbable: options.climbable,
-        liquid: options.liquid,
-        pathfindable: options.pathfindable,
-        friction: options.friction,
-        restitution: options.restitution,
-        sneakGuard: options.sneakGuard,
-        flags: options.flags,
-        surfaceHeight: options.surfaceHeight,
-        fluidGroup: options.fluidGroup,
-        screenTint: options.screenTint,
-        sounds: options.sounds,
-        particles: options.particles,
-        onNeighbourUpdate: options.onNeighbourUpdate,
-        onNeighbourChanged: options.onNeighbourChanged,
-        place: options.place,
-        rotate: options.rotate,
-        flip: options.flip,
-    };
-
-    // Methods read the schema off `this.def`, never a closure capture: the handle
-    // outlives every re-declaration (see `declare`), so a capture of THIS call's
-    // `states` / `defaultLocalIdx` would be stale for every importer the moment the
-    // author edits the state schema.
-    const stored = declare(
-        registry.blocks,
-        id,
-        (): BlockDef => def as BlockDef,
-        (d, previous): BlockHandle => ({
-            id,
-            dependency: { registry: 'blocks', id },
-            def: d,
-            // stamped by `buildBlockRegistry` at freeze, NOT derived from the def, so
-            // they must survive a re-declaration: the next reindex re-patches them,
-            // and anything reading a state id in between would otherwise see 0.
-            _index: previous?._index ?? 0,
-            _baseStateId: previous?._baseStateId ?? 0,
-            _hooks: previous?._hooks ?? 0,
-
-            stateId(props): number {
-                return this._baseStateId + this.def.states.encode(props);
-            },
-
-            stateIdLocal(localIdx: number): number {
-                return this._baseStateId + localIdx;
-            },
-
-            defaultId(): number {
-                return this._baseStateId + (this.def.defaultLocalIdx ?? 0);
-            },
-
-            stateKey(props): string {
-                return formatKey(this.id, this.def.states, this.def.states.encode(props));
-            },
-
-            defaultKey(): string {
-                return formatKey(this.id, this.def.states, this.def.defaultLocalIdx ?? 0);
-            },
-        }),
-    );
-
-    // presence-only snapshot record. block content changes propagate via
-    // the flush path, `applyRegistryChanges` rebuilds BlockRegistry,
-    // refreshes the atlas, repoints per-room `voxels.registry`, and
-    // `resolveAllChunks` triggers a remesh on the next tick.
-    recordBlock(id);
-
-    return stored as BlockHandle<P>;
-}
+export const EMPTY_STATES = blockState.create({});
 
 // ── auto-derived block-dust ─────────────────────────────────────────
 //
@@ -966,29 +930,33 @@ function hashStringFnv1a(s: string): number {
     return h >>> 0;
 }
 
-/** resolve a TextureRef (string id or BlockTextureDef handle) to the
- *  first-frame `NormalizedImageSource`. returns `null` if a string ref
- *  doesn't resolve, the deriver silently skips in that case (block
- *  authoring order would have to be wrong for this to fire). */
-function resolveTextureFrame(ref: TextureRef): NormalizedImageSource | null {
-    const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref) : ref.def;
-    return def?.frames[0] ?? null;
+/**
+ * The texture backing one of a tile's frames, resolved through the texture store.
+ * `null` when the tile has no such frame.
+ *
+ * A tile stores frame REFERENCES, so reaching the texture is a lookup rather than a
+ * field read. This is the supported way to draw from an existing tile — pass the
+ * result as a `texture()` input.
+ */
+export function tileFrame(tile: TileHandle, index = 0): TextureHandle | null {
+    const frame = tile.def.frames[index];
+    return frame ? (textureStore.handles.get(frame.id) ?? null) : null;
 }
 
-/** pick the texture ref to slice dust sprites out of. cubes have an
+/** pick the tile to slice dust sprites out of. cubes have an
  *  unambiguous top face; custom models pick the first upward-facing
  *  quad and fall back to quads[0] if none face up. */
-function pickDustSourceTexture(model: BlockModel): TextureRef | null {
+function pickDustSourceTile(model: BlockModel): TileHandle | null {
     if (model.type === 'cube') {
-        const tex = model.textures;
-        return 'all' in tex ? tex.all.texture : tex.top.texture;
+        const t = model.tiles;
+        return faceTile('all' in t ? t.all : t.top);
     }
     const quads = model.quads;
     if (quads.length === 0) return null;
     for (const q of quads) {
-        if (q.normal[1] > 0.5) return q.texture;
+        if (q.normal[1] > 0.5) return q.tile;
     }
-    return quads[0]!.texture;
+    return quads[0]!.tile;
 }
 
 /** declare `<id>:particle{0..N-1}` sprite + particle entries from the
@@ -996,26 +964,28 @@ function pickDustSourceTexture(model: BlockModel): TextureRef | null {
  *  default props and hands the snapshot in; invisible blocks (no model)
  *  never reach here (caller guards).
  *
- *  source-texture pick:
- *    - cube: `all` / `top`, depending on which the texture map exposes.
+ *  source-tile pick:
+ *    - cube: `all` / `top`, depending on which the tile map exposes.
  *    - custom: the first quad with an upward-facing normal (ny > 0.5);
  *      falls back to the first quad if no upward face exists (rare,
  *      e.g. hanging vines). stairs/slabs land on their top slab face,
  *      which is what we'd hand-pick anyway.
  *
- *  the seed passed into `draw()`'s `params` is `hash(id) + idx` rather
- *  than per-variant PRNG draws so each variant's structural hash is
+ *  the seed passed into the computed texture's `params` is `hash(id) + idx`
+ *  rather than per-variant PRNG draws so each variant's structural hash is
  *  stable independent of the others, adding a 4th variant later won't
  *  bust the cache for variants 0..2.
  *
  *  returns the derived `ParticleHandle`s (one per variant) so the caller
  *  can stash them on the block def for direct lookup; `null` when the
- *  source texture can't be resolved or a custom model has no quads. */
+ *  source tile can't be resolved or a custom model has no quads. */
 export function deriveBlockDust(id: string, model: BlockModel): readonly ParticleHandle[] | null {
-    const topRef = pickDustSourceTexture(model);
-    if (!topRef) return null;
-    const frame = resolveTextureFrame(topRef);
-    if (!frame) return null;
+    const topTile = pickDustSourceTile(model);
+    if (!topTile) return null;
+    // frame 0 is the deliberate pick: a tile's `frames` is an animation sequence
+    // (water, lava) and dust wants one static image out of it.
+    const source = tileFrame(topTile);
+    if (!source) return null;
 
     const baseSeed = hashStringFnv1a(id);
     const handles: ParticleHandle[] = [];
@@ -1024,34 +994,33 @@ export function deriveBlockDust(id: string, model: BlockModel): readonly Particl
         const variantId = `${id}:particle${i}`;
         const seed = (baseSeed + i) >>> 0;
 
-        const variantSprite = sprite(variantId, {
-            src: draw(
-                (ctx, inputs, params) => {
-                    const rng = mulberry32.create(params.seed as number);
-                    const r = () => mulberry32.sample(rng);
-                    const max = (params.src as number) - (params.size as number);
-                    const sx = Math.floor(r() * max);
-                    const sy = Math.floor(r() * max);
-                    ctx.drawImage(
-                        inputs.tex,
-                        sx,
-                        sy,
-                        params.size as number,
-                        params.size as number,
-                        0,
-                        0,
-                        params.size as number,
-                        params.size as number,
-                    );
-                },
-                {
-                    size: [DUST_SIZE, DUST_SIZE],
-                    inputs: { tex: frame },
-                    params: { seed, src: DUST_SOURCE_SIZE, size: DUST_SIZE },
-                },
-            ),
-            mipmap: false,
+        // a computed texture drawn from the block's top face, then a sprite that
+        // references it. The source is passed as a HANDLE, so the derived texture holds a
+        // real dep edge back to it rather than a copy of its resolved path.
+        const variantTexture = texture(variantId, {
+            size: [DUST_SIZE, DUST_SIZE],
+            inputs: { tex: source },
+            params: { seed, src: DUST_SOURCE_SIZE, size: DUST_SIZE },
+            fn: (ctx, inputs, params) => {
+                const rng = mulberry32.create(params.seed as number);
+                const r = () => mulberry32.sample(rng);
+                const max = (params.src as number) - (params.size as number);
+                const sx = Math.floor(r() * max);
+                const sy = Math.floor(r() * max);
+                ctx.drawImage(
+                    inputs.tex,
+                    sx,
+                    sy,
+                    params.size as number,
+                    params.size as number,
+                    0,
+                    0,
+                    params.size as number,
+                    params.size as number,
+                );
+            },
         });
+        const variantSprite = sprite(variantId, { frames: [variantTexture], mipmap: false });
         handles.push(
             particle(variantId, {
                 sprite: variantSprite,

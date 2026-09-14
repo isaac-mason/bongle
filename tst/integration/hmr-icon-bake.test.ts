@@ -21,8 +21,7 @@ import { browserEvaluator, makeImportMeta } from '../../build/dev/shakeup-runner
 import type { Filesystem, FsPath } from '../../os/interface';
 import { type IconBakePlan, iconBakeIsNoop, planIconBake } from '../../src/asset-pipeline/icons';
 import { registerFlushHandler } from '../../src/core/capture/flush';
-import { registry, reindexRegistry } from '../../src/core/registry';
-import { block, blockTexture } from '../../src/core/voxels/blocks';
+import { block, registry, reindexRegistry, tile } from '../../src/core/registry';
 import { env } from '../../src/env';
 import { __bongle } from '../../src/internal-runtime';
 
@@ -30,7 +29,7 @@ const BLOCK_ICON_PNG = 'resources/client/voxels-icons.png';
 const BLOCK_ICON_JSON = 'resources/client/voxels-icons.json';
 
 /** The engine surface the game module imports from 'bongle', bound to THIS registry. */
-const bongleApi = { block, blockTexture, env };
+const bongleApi = { block, tile, env };
 
 /** just enough project disk for the gate: it reads the icon sidecar's hash and
  *  probes for the png. */
@@ -63,13 +62,10 @@ function portPair(): [RealmPort, RealmPort] {
 /** a block module declaring `ids`, all wearing one texture — so a block joining
  *  the set adds no atlas layer and only the DERIVED registry says it changed. */
 const blocksModule = (ids: string[]) =>
-    `import { block, blockTexture } from 'bongle';
-const stone = blockTexture('hmr-icons/stone', { src: 'stone.png' });
+    `import { block, tile } from 'bongle';
+const stone = tile('hmr-icons/stone', { src: 'stone.png' });
 ${ids
-    .map(
-        (id, i) =>
-            `export const B${i} = block('${id}', { model: () => ({ type: 'cube', textures: { all: { texture: stone } } }) });`,
-    )
+    .map((id, i) => `export const B${i} = block('${id}', { model: () => ({ type: 'cube', tiles: { all: stone } }) });`)
     .join('\n')}`;
 
 /** what a completed icon bake leaves on disk for the next pass's gate. */

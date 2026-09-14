@@ -14,11 +14,11 @@ import {
     TransformTrait,
     VoxelMeshTrait,
 } from 'bongle';
-import { blockTextures } from 'bongle/kit';
+import { tiles } from 'bongle/kit';
 
 const PlankBlock = block('guide:plank', {
     name: 'Plank',
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.stone } }),
 });
 
 /* SNIPPET_START: voxel-model */

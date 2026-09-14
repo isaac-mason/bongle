@@ -30,7 +30,7 @@ import {
 } from 'gpucat';
 import type { Mat4, Quat, Vec3 } from 'math';
 import { degreesToRadians, mat4, quat, vec3 } from 'math';
-import { drone as flyIcon, footprints as walkIcon } from '../../icons/strings';
+import { drone as flyIcon, arrowUp as jumpIcon, footprints as walkIcon } from '../../icons/strings';
 import {
     addCrosshair,
     type Crosshair,
@@ -56,13 +56,14 @@ import type { Physics } from '../api/physics';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-tree';
-import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
+import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
-import { control, type TraitType, trait } from '../api/traits';
+import type { TraitType } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { UILayer } from '../client/ui/util/ui-layers';
 import type * as vcc from '../core/physics/vcc/vcc';
+import { control, script, trait } from '../core/registry';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { env } from '../env';
@@ -160,6 +161,11 @@ type PlayerControllerConfig = {
     fovLerpSpeed: number;
     fov: number;
     fovSprint: number;
+    /** game-set multiplier on the target FOV (folded in before the ease),
+     *  < 1 zooms in, > 1 widens. lets game code drive transient FOV effects
+     *  (aim-down-sights, a bow-draw zoom, a speed-line widen) without fighting
+     *  the controller's own sprint-FOV easing. reset to 1 to clear. */
+    fovScale: number;
     debugContacts: boolean;
     debugVelocity: boolean;
     debugPanel: boolean;
@@ -167,11 +173,6 @@ type PlayerControllerConfig = {
 
 type PlayerControllerState = {
     currentFov: number;
-    /** game-set multiplier on the target FOV (folded in before the ease),
-     *  < 1 zooms in, > 1 widens. lets game code drive transient FOV effects
-     *  (aim-down-sights, a bow-draw zoom, a speed-line widen) without fighting
-     *  the controller's own sprint-FOV easing. reset to 1 to clear. */
-    fovScale: number;
     currentCameraDistance: number;
     elapsed: number;
     lastJumpDownTime: number;
@@ -194,6 +195,7 @@ export const PlayerControllerTrait = trait(
             fovLerpSpeed: 10,
             fov: degreesToRadians(75),
             fovSprint: degreesToRadians(85),
+            fovScale: 1,
             debugContacts: false,
             debugVelocity: false,
             debugPanel: false,
@@ -201,7 +203,6 @@ export const PlayerControllerTrait = trait(
 
         state: (): PlayerControllerState => ({
             currentFov: degreesToRadians(75),
-            fovScale: 1,
             currentCameraDistance: 0,
             elapsed: 0,
             lastJumpDownTime: -1,
@@ -868,7 +869,7 @@ script(
                     bottom: 24,
                     width: 96,
                     height: 96,
-                    icon: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', // lucide arrow-up
+                    icon: jumpIcon,
                 }),
             );
             reconcileHud('verticalJoystick', wantHud && pc.controls.touch.noclipVerticalJoystick && noclip, () =>
@@ -1010,7 +1011,7 @@ script(
 
             // eye-height (incl. the crouch drop) is eased on CharacterControllerTrait
             // now, `state.eyeHeight`, which the camera reads above.
-            const targetFov = (cc.input.sprint ? pc.config.fovSprint : pc.config.fov) * pc.state.fovScale;
+            const targetFov = (cc.input.sprint ? pc.config.fovSprint : pc.config.fov) * pc.config.fovScale;
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });
 

@@ -88,32 +88,35 @@ export function inventoryItemsEqual(a: InventoryItem | null, b: InventoryItem | 
  *
  * Returns id-only fallbacks when the room or def isn't available.
  */
-export function inventoryItemDisplay(item: InventoryItem, room: ClientRoom | null): { name: string; id: string; title: string } {
+export function inventoryItemDisplay(
+    item: InventoryItem,
+    room: ClientRoom | null,
+): { name: string; id: string; title: string; tags: readonly string[] } {
     switch (item.kind) {
         case 'block': {
             const id = item.blockKey;
-            if (!room) return { name: id, id, title: id };
+            if (!room) return { name: id, id, title: id, tags: [] };
             const parsed = parseKey(id);
             const def = parsed ? registry.blockRegistry.defs.find((d) => d.id === parsed.blockId) : undefined;
             const name = def?.name ?? id;
-            return { name, id, title: name === id ? id : `${name} (${id})` };
+            return { name, id, title: name === id ? id : `${name} (${id})`, tags: def?.tags ?? [] };
         }
         case 'prefab': {
             const id = item.prefabId;
-            if (!room) return { name: id, id, title: id };
+            if (!room) return { name: id, id, title: id, tags: [] };
             const def = registry.prefabs.byId.get(id);
             const name = def?.name ?? id;
-            return { name, id, title: name === id ? id : `${name} (${id})` };
+            return { name, id, title: name === id ? id : `${name} (${id})`, tags: def?.tags ?? [] };
         }
         case 'blueprint': {
             const id = item.sceneId;
             // strip the `blueprints/` prefix for display, the folder is
             // implied by the inventory tab.
             const short = id.startsWith(BLUEPRINT_PREFIX) ? id.slice(BLUEPRINT_PREFIX.length) : id;
-            return { name: short, id: short, title: short };
+            return { name: short, id: short, title: short, tags: [] };
         }
         default:
-            return { name: 'unknown', id: 'unknown', title: 'unknown inventory item kind' };
+            return { name: 'unknown', id: 'unknown', title: 'unknown inventory item kind', tags: [] };
     }
 }
 

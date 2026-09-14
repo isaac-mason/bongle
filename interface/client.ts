@@ -42,6 +42,20 @@ export type ClientDriver = {
         started(backend: 'webgpu' | 'webgl' | 'none'): void;
         deviceLost(backend: 'webgpu' | 'webgl' | 'none'): void;
     };
+    /** The game is up: the player is in a room and the frame that drew its world
+     *  has been submitted. A host holding a loading screen drops it here, and a
+     *  host inside a portal reports the end of loading here.
+     *
+     *  Nothing else tells a host this. `load()` resolving means assets are in the
+     *  tab, and the socket opening means a room exists — a client can be past both
+     *  with a black canvas, waiting on the join to apply or on chunk meshes to come
+     *  back from the worker. So the engine says it, because only the engine knows.
+     *
+     *  Fired once per room, not once per session: an in-game `matchmake` tears the
+     *  world down and builds another, and a host that re-raised its loading card
+     *  needs telling again. Optional, like `graphics` — a host with nothing to drop
+     *  omits it. */
+    ready?(): void;
     send(channel: Channel, bytes: Uint8Array): void;
 };
 

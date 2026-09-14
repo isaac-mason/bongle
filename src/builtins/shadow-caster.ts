@@ -13,7 +13,8 @@
 //
 // Render path lives in `render/shadows/shadow-visuals.ts`.
 
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 import type { ShadowVisualState } from '../render/shadows/shadow-visuals';
 
 export const ShadowCasterTrait = trait('shadow-caster', {

@@ -1,15 +1,17 @@
 // bongle's own icon set — React components over plain inner-SVG strings, no
-// lucide-react dependency. The markup lives in ./strings (shared with non-React
-// consumers); see create-icon.tsx for why, and how to add one.
+// icon-package dependency. Pixel-art glyphs on a 24x24 grid; the markup lives in
+// ./strings (shared with non-React consumers); see create-icon.tsx for why, and
+// how to add one.
 import { createIcon } from './create-icon';
 import {
     activity,
     alertCircle,
     arrowRightLeft,
+    arrowUp,
+    article,
     bookmarkPlus,
-    bookOpen,
+    box,
     boxSelect,
-    brush,
     check,
     chevronDown,
     chevronRight,
@@ -17,6 +19,7 @@ import {
     code,
     copy,
     crosshair,
+    debug,
     download,
     drone,
     eraser,
@@ -45,10 +48,8 @@ import {
     minimize2,
     minus,
     monitorPlay,
-    mountain,
     mousePointer2,
     move,
-    moveDown,
     music,
     orbit,
     paintBucket,
@@ -79,21 +80,24 @@ import {
     upload,
     volume2,
     wandSparkles,
+    waves,
+    wavesUp,
     wrench,
     x,
     zoomIn,
     zoomOut,
 } from './strings';
 
-export type { IconComponent, IconProps } from './create-icon';
+export type { IconComponent, IconProps, IconSize } from './create-icon';
 
 export const Activity = /*@__PURE__*/ createIcon(activity);
 export const AlertCircle = /*@__PURE__*/ createIcon(alertCircle);
 export const ArrowRightLeft = /*@__PURE__*/ createIcon(arrowRightLeft);
+export const ArrowUp = /*@__PURE__*/ createIcon(arrowUp);
+export const Article = /*@__PURE__*/ createIcon(article);
 export const BookmarkPlus = /*@__PURE__*/ createIcon(bookmarkPlus);
-export const BookOpen = /*@__PURE__*/ createIcon(bookOpen);
+export const Box = /*@__PURE__*/ createIcon(box);
 export const BoxSelect = /*@__PURE__*/ createIcon(boxSelect);
-export const Brush = /*@__PURE__*/ createIcon(brush);
 export const Check = /*@__PURE__*/ createIcon(check);
 export const ChevronDown = /*@__PURE__*/ createIcon(chevronDown);
 export const ChevronRight = /*@__PURE__*/ createIcon(chevronRight);
@@ -101,6 +105,7 @@ export const ClipboardCopy = /*@__PURE__*/ createIcon(clipboardCopy);
 export const Code = /*@__PURE__*/ createIcon(code);
 export const Copy = /*@__PURE__*/ createIcon(copy);
 export const Crosshair = /*@__PURE__*/ createIcon(crosshair);
+export const Debug = /*@__PURE__*/ createIcon(debug);
 export const Download = /*@__PURE__*/ createIcon(download);
 export const Drone = /*@__PURE__*/ createIcon(drone);
 export const Eraser = /*@__PURE__*/ createIcon(eraser);
@@ -129,14 +134,12 @@ export const MessageSquare = /*@__PURE__*/ createIcon(messageSquare);
 export const Minimize2 = /*@__PURE__*/ createIcon(minimize2);
 export const Minus = /*@__PURE__*/ createIcon(minus);
 export const MonitorPlay = /*@__PURE__*/ createIcon(monitorPlay);
-export const Mountain = /*@__PURE__*/ createIcon(mountain);
 export const MousePointer2 = /*@__PURE__*/ createIcon(mousePointer2);
 export const Move = /*@__PURE__*/ createIcon(move);
-export const MoveDown = /*@__PURE__*/ createIcon(moveDown);
 export const Music = /*@__PURE__*/ createIcon(music);
 export const Orbit = /*@__PURE__*/ createIcon(orbit);
-export const PaintBucket = /*@__PURE__*/ createIcon(paintBucket);
 export const Paintbrush = /*@__PURE__*/ createIcon(paintbrush);
+export const PaintBucket = /*@__PURE__*/ createIcon(paintBucket);
 export const Pause = /*@__PURE__*/ createIcon(pause);
 export const Pencil = /*@__PURE__*/ createIcon(pencil);
 export const PersonStanding = /*@__PURE__*/ createIcon(personStanding);
@@ -163,6 +166,8 @@ export const Undo2 = /*@__PURE__*/ createIcon(undo2);
 export const Upload = /*@__PURE__*/ createIcon(upload);
 export const Volume2 = /*@__PURE__*/ createIcon(volume2);
 export const WandSparkles = /*@__PURE__*/ createIcon(wandSparkles);
+export const Waves = /*@__PURE__*/ createIcon(waves);
+export const WavesUp = /*@__PURE__*/ createIcon(wavesUp);
 export const Wrench = /*@__PURE__*/ createIcon(wrench);
 export const X = /*@__PURE__*/ createIcon(x);
 export const ZoomIn = /*@__PURE__*/ createIcon(zoomIn);

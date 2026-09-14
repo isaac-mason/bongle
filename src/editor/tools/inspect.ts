@@ -9,7 +9,16 @@
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import { vec3 } from 'math';
 import { TransformTrait } from '../../builtins/transform';
-import { getCanvasTouches, isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
+import {
+    getCanvasTouches,
+    getCursor,
+    isKeyDown,
+    isKeyJustDown,
+    isMouseDown,
+    isMouseJustDown,
+    isMouseJustUp,
+    isMouseTap,
+} from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait, isAncestorOf } from '../../core/scene/scene-tree';
@@ -22,8 +31,6 @@ import { useEditor } from '../editor-store';
 import { isInputFocused } from '../input';
 import { lensOf } from '../lens';
 import type { NodeBodies } from '../node-bodies';
-import type { PointerState } from '../pointer-state';
-import { pointerFlush, pointerHeld, pointerJustDown, pointerJustUp } from '../pointer-state';
 import * as Selector from '../selector';
 import type { State as PivotPoint } from '../visuals/pivot-point';
 import * as PivotPointMod from '../visuals/pivot-point';
@@ -77,13 +84,13 @@ export function openViewportContextMenu(
     room: ClientRoom,
     ctx: ScriptContext,
     nodeBodies: NodeBodies,
-    pointer: PointerState,
     camera: PerspectiveCamera,
 ): void {
     // desktop opens on a right-click tap. touch has no second button, so a
     // long-press (a finger held in place past the hold threshold) stands in for
-    // it. the primary pointer already tracks the pressing finger, so the raycast
-    // and menu anchor below use its position unchanged.
+    // it. the cursor already tracks the pressing finger, so the raycast and menu
+    // anchor below use its position unchanged.
+    const cursor = getCursor(client.input.mouseKeyboard);
     let longPress = false;
     for (const finger of getCanvasTouches(client.input.touch).values()) {
         if (finger.longPressed) {
@@ -94,8 +101,8 @@ export function openViewportContextMenu(
     if (!longPress && !isMouseTap(client.input.mouseKeyboard, 'right')) return;
     if (document.pointerLockElement) return;
 
-    unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
-    unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
+    unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
+    unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
     vec3.subtract(_rayDir, _farWorld, _nearWorld);
     vec3.normalize(_rayDir, _rayDir);
 
@@ -146,7 +153,7 @@ export function openViewportContextMenu(
     }
 
     if (shouldOpen) {
-        s.openViewportContextMenu(pointer.screenX, pointer.screenY);
+        s.openViewportContextMenu(cursor.x, cursor.y);
     }
 }
 
@@ -160,9 +167,9 @@ export function updateInspect(
     transformToolState: TransformToolState,
     pivotPoint: PivotPoint,
     meshState: SelectionMeshState,
-    pointer: PointerState,
     camera: PerspectiveCamera,
 ): void {
+    const cursor = getCursor(client.input.mouseKeyboard);
     // place-mode-with-selection cursor follow is a non-destructive preview:
     // confirm (click) commits with a history entry; any other exit (mode-key,
     // escape, tool change, selection cleared) reverts to the snapshot positions.
@@ -253,7 +260,7 @@ export function updateInspect(
     const transformModeNow = store.getState().transformMode;
     const inPlaceMode = activeTool === 'transform' && transformModeNow === 'place';
     const inGrabMode = activeTool === 'transform' && transformModeNow === 'grab';
-    const clicked = pointerJustDown(pointer, client.input);
+    const clicked = isMouseJustDown(client.input.mouseKeyboard, 'left');
     // right-click trigger is mode-aware, mirroring the build tool: when the
     // pointer is already locked (RMB unambiguous) fire on down for a snappy
     // commit; when the cursor is visible (fly / orbit) fire only on a tap,
@@ -269,14 +276,14 @@ export function updateInspect(
     // editor/client.ts before this function runs.
     if (inGrabMode) {
         if (TransformTool.isInGrab(transformToolState)) {
-            if (pointerJustUp(pointer, client.input) || !pointerHeld(pointer, client.input)) {
+            if (isMouseJustUp(client.input.mouseKeyboard, 'left') || !isMouseDown(client.input.mouseKeyboard, 'left')) {
                 TransformTool.exitGrab(transformToolState, room.scene, room.physics, ctx);
             } else {
                 TransformTool.updateGrab(transformToolState, client.input.mouseKeyboard);
             }
         } else if (clicked && !gizmoDragging) {
-            unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
-            unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
+            unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
+            unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
             vec3.subtract(_rayDir, _farWorld, _nearWorld);
             vec3.normalize(_rayDir, _rayDir);
             const hits = Selector.castRay(
@@ -335,8 +342,8 @@ export function updateInspect(
     } else if (clicked && !gizmoDragging && !inPlaceMode && !inGrabMode) {
         const { selectTarget } = store.getState();
 
-        unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
-        unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
+        unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
+        unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
         vec3.subtract(_rayDir, _farWorld, _nearWorld);
         vec3.normalize(_rayDir, _rayDir);
 
@@ -411,10 +418,8 @@ export function updateInspect(
     // context menu is an inspect-tool concept; transform owns right-click
     // for its own semantics (place commit, grab exit).
     if (activeTool === 'inspect') {
-        openViewportContextMenu(store, client, room, ctx, nodeBodies, pointer, camera);
+        openViewportContextMenu(store, client, room, ctx, nodeBodies, camera);
     }
-
-    pointerFlush(pointer);
 
     // keyboard shortcuts for tool switching (only when not typing in an input)
     if (!isInputFocused()) {

@@ -27,7 +27,7 @@ export type {
     ParticlePool,
     ParticleUpdateFn,
 } from '../core/particles/particles';
-export { particle } from '../core/particles/particles';
+export { particle } from '../core/registry';
 export type { SpawnOpts } from '../render/particles/particles';
 
 /**

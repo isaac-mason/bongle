@@ -141,7 +141,13 @@ describe('WebGPU voxel arena residency', () => {
         const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
         const env = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
         // tight budget: ~600 quads and 24 sections per pass, so pressure eviction fires
-        const budget = { quadArenaBytes: 600 * QUAD_STRIDE_U32S * 4, maxSections: 24, maxAllocs: 512 };
+        const budget = {
+            quadArenaBytes: 600 * QUAD_STRIDE_U32S * 4,
+            maxSections: 24,
+            maxAllocs: 512,
+            maxLightTiles: 24,
+            lightGridChunkRadius: 8,
+        };
         const res = VoxelResources.init(registry, env, budget, Time.init());
         res.arenas.camera = [0, 0, 0];
 

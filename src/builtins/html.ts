@@ -12,7 +12,8 @@
 //
 // See `client/dom-ui.ts` for the visuals layer.
 
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 import { env } from '../env';
 
 export type HtmlMode = 'screen' | 'world' | 'billboard' | 'y-billboard';

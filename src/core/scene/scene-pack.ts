@@ -11,7 +11,7 @@
 
 import type { BinaryField, BinaryTrait, PackedNode, RoomMode, SceneSyncUpdate } from '../protocol';
 import { packPackedSceneTree, unpackPackedSceneTree } from '../protocol';
-import { type InboundProtocol, registry, resolveTraitWireRef } from '../registry';
+import { registry, resolveTraitWireRef, type InboundProtocol } from '../registry';
 import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
 import {
     addChild,

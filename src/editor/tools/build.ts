@@ -15,7 +15,9 @@
 // (no drag crossed because the cursor was frozen), but pointer-lock
 // is still active on that frame so the tap branch self-suppresses.
 //
-// each break/place is a single undoable action.
+// each break/place is a single undoable action, and carries the touched
+// material's own sfx (sounds.ts). the slot flips on undo, since undoing a
+// place is a break.
 
 import type { PerspectiveCamera } from 'gpucat';
 import type { Quat, Vec3 } from 'math';
@@ -23,15 +25,14 @@ import type { Input } from '../../client/input';
 import { isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import type { Blocks } from '../../core/voxels/block-registry';
-import { parseKey } from '../../core/voxels/block-registry';
+import { parseKey, resolveKey } from '../../core/voxels/block-registry';
 import type { PlaceIO } from '../../core/voxels/blocks';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { pitchFromQuat, yawFromQuat } from '../camera';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown } from '../pointer-state';
+import { playBlockEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import type { TransformToolState } from './transform';
 import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
@@ -43,7 +44,6 @@ type Op = { wx: number; wy: number; wz: number; key: string };
 export function updateBuild(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    pointer: PointerState,
     input: Input,
     voxels: Voxels,
     transformToolState: TransformToolState,
@@ -82,7 +82,7 @@ export function updateBuild(
     }
 
     // left click: break the hovered block (set to air)
-    if (pointerJustDown(pointer, input) && s.hoverVoxel) {
+    if (isMouseJustDown(input.mouseKeyboard, 'left') && s.hoverVoxel) {
         const [wx, wy, wz] = s.hoverVoxel;
         const oldKey = getBlock(voxels, wx, wy, wz);
 
@@ -90,14 +90,19 @@ export function updateBuild(
         if (oldKey !== BLOCK_AIR) {
             const fwd: Op = { wx, wy, wz, key: BLOCK_AIR };
             const rev: Op = { wx, wy, wz, key: oldKey };
+            // sfx identity of this edit: the material that was here. resolved
+            // once at dispatch, the cell reads as air from here on.
+            const state = resolveKey(ctx.blocks, oldKey);
 
             store.getState().action({
                 label: 'break',
                 do() {
                     commitVoxelOps(ctx, [fwd]);
+                    playBlockEdit(ctx, state, 'break', wx, wy, wz);
                 },
                 undo() {
                     commitVoxelOps(ctx, [rev]);
+                    playBlockEdit(ctx, state, 'place', wx, wy, wz);
                 },
             });
         }
@@ -130,13 +135,20 @@ export function updateBuild(
                     ctx.blocks,
                 );
                 if (placement) {
+                    // the palette key, not a written op: a multi-cell `place`
+                    // hook (door, bed) writes several states, but they're one
+                    // material and one sound, at the cell the user aimed at.
+                    const state = resolveKey(ctx.blocks, activeBlockKey);
+
                     store.getState().action({
                         label: 'place',
                         do() {
                             commitVoxelOps(ctx, placement.fwd);
+                            playBlockEdit(ctx, state, 'place', tx, ty, tz);
                         },
                         undo() {
                             commitVoxelOps(ctx, placement.rev);
+                            playBlockEdit(ctx, state, 'break', tx, ty, tz);
                         },
                     });
                 }

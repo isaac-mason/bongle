@@ -20,7 +20,7 @@ import {
     query,
     removeChild,
 } from '../../../../src/core/scene/scene-tree';
-import { trait } from '../../../../src/core/scene/traits';
+import { trait } from '../../../../src/core/registry';
 
 const Mesh = trait('resfill/mesh', { id: 0 });
 const Group = trait('resfill/group', { id: 0 });

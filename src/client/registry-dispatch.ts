@@ -14,7 +14,7 @@
  * client-side `resolveAllChunks` marks every chunk dirty, which the mesher
  * picks up on the next frame, no explicit `remeshWorld` call needed.
  *
- * because blockTextures feed into BlockRegistry (textures + texAnimData)
+ * because tiles feed into BlockRegistry (atlas layers + texAnimData)
  * and into VoxelResources (atlas + animation buffer), the two stores
  * drain together, a wholesale BlockRegistry rebuild covers both.
  * VoxelResources.refresh internally short-circuits when the atlas hash
@@ -51,7 +51,7 @@ import type { EngineClient } from './client';
 
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const allStores = [
-        registry.blockTextures,
+        registry.tiles,
         registry.blocks,
         registry.models,
         registry.prefabs,
@@ -98,10 +98,10 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // when the atlas does change, per-room visuals (which hold material refs)
     // must be disposed + re-init'd; mesh visuals also bind the atlas + anim
     // buffer directly.
-    if (registry.blocks.pendingChanges.length > 0 || registry.blockTextures.pendingChanges.length > 0) {
+    if (registry.blocks.pendingChanges.length > 0 || registry.tiles.pendingChanges.length > 0) {
         await refreshBlockResources(state);
         registry.blocks.pendingChanges.length = 0;
-        registry.blockTextures.pendingChanges.length = 0;
+        registry.tiles.pendingChanges.length = 0;
     }
 
     if (registry.models.pendingChanges.length > 0) {
@@ -210,7 +210,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // and short-circuits on hash equality. image-file edits without a
     // registry change ride the `bongle:sprite-atlas-updated` HMR path
     // into `refreshSpriteResources` directly (parallel to the voxel
-    // atlas's `bongle:block-texture-atlas-updated` flow).
+    // atlas's `bongle:tile-atlas-updated` flow).
     if (registry.sprites.pendingChanges.length > 0) {
         await refreshSpriteResources(state);
         registry.sprites.pendingChanges.length = 0;
@@ -235,8 +235,8 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
  * per-room voxel materials (they bind the GPU TextureArray + per-room
  * env buffers) and re-init the room's voxel + voxel-mesh visuals.
  *
- * Called from the registry dispatch when blocks/blockTextures pendingChanges
- * fire, AND directly from the `bongle:block-texture-atlas-updated` HMR listener when the
+ * Called from the registry dispatch when blocks/tiles pendingChanges
+ * fire, AND directly from the `bongle:tile-atlas-updated` HMR listener when the
  * asset pipeline regenerates the atlas because of an image-file edit. The
  * pipeline-driven case has no registry change to ride on; this entrypoint
  * is the only way the image edit propagates to the live client.

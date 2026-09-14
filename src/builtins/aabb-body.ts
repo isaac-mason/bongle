@@ -1,7 +1,8 @@
 import { type Vec3, vec3 } from 'math';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
-import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
+import { dirty, rate, type TraitType } from '../api/traits';
+import { control, sync, trait } from '../core/registry';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import * as AabbPhysics from '../core/physics/aabb';
 import { COLLISION_GROUP_NODES } from '../core/physics/rigid/rigid-world-settings';

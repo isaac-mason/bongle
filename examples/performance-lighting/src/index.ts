@@ -1,11 +1,11 @@
 import {
-    block,
     BLOCK_AIR,
+    block,
+    config,
     control,
     env,
     getBlock,
     getTrait,
-    config,
     onInit,
     onJoin,
     onTick,
@@ -16,22 +16,22 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks, blockTextures } from 'bongle/kit';
+import { blocks, tiles } from 'bongle/kit';
 
 // Stone comes from the kit pack. The rgb emitters are example-local because
 // they only exist to drive the lighting stress demo.
 const RedEmitter = block('emitter_r', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.stone } }),
     lightEmission: [15, 0, 0],
 });
 
 const GreenEmitter = block('emitter_g', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.stone } }),
     lightEmission: [0, 15, 0],
 });
 
 const BlueEmitter = block('emitter_b', {
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+    model: () => ({ type: 'cube', tiles: { all: tiles.stone } }),
     lightEmission: [0, 0, 15],
 });
 

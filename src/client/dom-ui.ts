@@ -288,6 +288,24 @@ function installCanvas(domUi: DomUi, trait: CanvasTrait): CanvasState {
     // even if the user hasn't called getContext yet.
     canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
     const tex = new CanvasTexture(canvas);
+    // NEAREST magnified, LINEAR minified, NO mip chain, anisotropy on.
+    //
+    // `CanvasTexture` takes no options and `Texture` defaults to linear, so this was
+    // the one surface in the engine being filtered - hence nearest for magnification,
+    // matching voxel-textures / mesh-atlas / sprite-resources.
+    //
+    // Minification is the interesting half, because these are world-space quads
+    // whose on-screen size is whatever distance makes it. A trilinear mip chain is
+    // the textbook answer but overshoots here: labels typically sit around 2-3x
+    // minified, where sampling a blended mip throws away detail the screen could
+    // still show. Bilinear off the full-resolution texture is sharper at that range,
+    // and anisotropy covers the glancing angles a billboard hits when you look down
+    // on it. Past ~4x this will start to sparkle, and the fix then is not a filter:
+    // it is that the canvas has more pixels than the quad occupies, so either raise
+    // `worldScale` or lower `width`/`height` to match.
+    tex.magFilter = 'nearest';
+    tex.minFilter = 'linear';
+    tex.anisotropy = 16;
     const mesh = new Mesh(createPlaneGeometry(1, 1), createTexturedQuadMaterial(tex, domUi.sceneDepthNode));
     mesh.name = 'dom-ui-canvas';
     mesh.frustumCulled = false;

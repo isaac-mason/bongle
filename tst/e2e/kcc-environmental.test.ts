@@ -20,6 +20,7 @@ import {
     script,
     setBlock,
     TransformTrait,
+    tile,
     trait,
 } from 'bongle';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,22 +35,26 @@ describe('kcc environmental mechanics', () => {
     });
 
     function defineTestBlocks() {
+        const stoneTex = tile('stone', { src: 'textures/stone.png' });
         block('stone', {
-            model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }),
+            model: () => ({ type: 'cube', tiles: { all: stoneTex } }),
         });
+        const iceTex = tile('ice', { src: 'textures/ice.png' });
         block('ice', {
-            model: () => ({ type: 'cube', textures: { all: { texture: 'ice' } } }),
+            model: () => ({ type: 'cube', tiles: { all: iceTex } }),
             friction: 0.1,
             sneakGuard: false,
         });
+        const vinesTex = tile('vines', { src: 'textures/vines.png' });
         block('vines', {
-            model: () => ({ type: 'cube', textures: { all: { texture: 'vines' } } }),
+            model: () => ({ type: 'cube', tiles: { all: vinesTex } }),
             cull: CullType.NONE,
             collision: false,
             climbable: true,
         });
+        const waterTex = tile('water', { src: 'textures/water.png' });
         block('water', {
-            model: () => ({ type: 'cube', textures: { all: { texture: 'water' } } }),
+            model: () => ({ type: 'cube', tiles: { all: waterTex } }),
             cull: CullType.NONE,
             collision: false,
             liquid: { viscosity: 0.5 },
@@ -291,7 +296,7 @@ describe('kcc environmental mechanics', () => {
         // branch takes over so swim cadence + entry splash still work.
         harness = await createTestHarness((root) => {
             defineTestBlocks();
-            blockPreset.slab('stone-slab', { textures: 'stone' });
+            blockPreset.slab('stone-slab', { tiles: tile('stone-slab-tex', { src: 'textures/stone.png' }) });
             spawnAt(root, [2, 3, 2]);
         });
 
@@ -346,7 +351,7 @@ describe('kcc environmental mechanics', () => {
         // water below.
         harness = await createTestHarness((root) => {
             defineTestBlocks();
-            blockPreset.slab('stone-slab', { textures: 'stone' });
+            blockPreset.slab('stone-slab', { tiles: tile('stone-slab-tex', { src: 'textures/stone.png' }) });
             spawnAt(root, [2, 4, 2]);
         });
 

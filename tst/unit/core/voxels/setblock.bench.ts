@@ -13,11 +13,11 @@
 // the op count to get a per-call estimate.
 
 import { bench, describe } from 'vitest';
-import { registry } from '../../../../src/core/registry';
+import { block, registry, tile } from '../../../../src/core/registry';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
-import { BLOCK_FLAG_FENCE, buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
+import { BLOCK_FLAG_FENCE, buildBlockRegistry, createBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import * as bs from '../../../../src/core/voxels/block-state';
-import { type BlockDef, type BlockTextureDef, block, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
+import { type BlockDef, CullType, MaterialType, type TileDef, type TileHandle } from '../../../../src/core/voxels/blocks';
 import {
     CHUNK_SIZE,
     CHUNK_VOLUME,
@@ -39,26 +39,30 @@ const SINGLE_STATE = {
     decode: () => ({}),
 };
 
-function texDef(id: string): BlockTextureDef {
-    return { id, frames: [`textures/${id}.png`], fps: 1, interpolate: false };
+function tileHandle(id: string): TileHandle {
+    return {
+        id,
+        dependency: { registry: 'tiles', id },
+        def: { id, frames: [{ registry: 'textures', id }], fps: 1, interpolate: false },
+    };
 }
 
 function buildBenchRegistry(extraKeys: string[] = []) {
     const defs = new Map<string, BlockDef>();
     const handles = new Map<string, any>();
-    const textures = new Map<string, BlockTextureDef>();
+    const tiles = new Map<string, TileDef>();
 
     const baseIds = ['stone', 'dirt', 'grass', 'sand', 'wood', 'leaves'];
     const allIds = [...baseIds, ...extraKeys];
 
     for (const id of allIds) {
-        const tex = texDef(id);
-        textures.set(id, tex);
+        const tex = tileHandle(id);
+        tiles.set(id, tex.def);
 
         const def: BlockDef = {
             id,
             states: SINGLE_STATE as any,
-            model: () => ({ type: 'cube' as const, textures: { all: { texture: tex } } }),
+            model: () => ({ type: 'cube' as const, tiles: { all: tex } }),
             cull: CullType.SOLID,
             material: MaterialType.OPAQUE,
         };
@@ -77,7 +81,9 @@ function buildBenchRegistry(extraKeys: string[] = []) {
         });
     }
 
-    return buildBlockRegistry(defs, handles, textures);
+    const out = createBlockRegistry();
+    buildBlockRegistry(out, defs, handles, tiles);
+    return out;
 }
 
 const baseRegistry = buildBenchRegistry();
@@ -233,8 +239,9 @@ describe('setBlock — server mode (change tracking on)', () => {
 // `bench:` id prefix keeps these out of the way of any other declarations
 // that might be picked up by the shared module-scope registry.
 
+const bench_stoneTile = tile('bench:stone', { src: 'textures/bench:stone.png' });
 const StoneBlock = block('bench:stone_solid', {
-    model: () => ({ type: 'cube', textures: { all: { texture: 'bench:stone' } } }),
+    model: () => ({ type: 'cube', tiles: { all: bench_stoneTile } }),
 });
 
 const FenceState = bs.create({
@@ -244,9 +251,10 @@ const FenceState = bs.create({
     west: bs.bool(),
 });
 
+const fenceTile = tile('bench:fence', { src: 'textures/bench_fence.png' });
 const FenceBlock = block('bench:fence', {
     states: FenceState,
-    model: () => ({ type: 'cube', textures: { all: { texture: 'bench:fence' } } }),
+    model: () => ({ type: 'cube', tiles: { all: fenceTile } }),
     cull: CullType.PARTIAL,
     flags: BLOCK_FLAG_FENCE,
     onNeighbourUpdate(ctx) {

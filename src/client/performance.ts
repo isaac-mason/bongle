@@ -28,6 +28,14 @@ export type Tier = (typeof TIER_ORDER)[number];
 // every numeric knob the active tier controls. keep additions here so a
 // future settings menu can iterate one struct instead of grepping the
 // codebase for `profile.active`.
+//
+// SIZED FROM MEASUREMENT, not from the worst case a radius could theoretically
+// reach. A terrain map at radius 12 sat at 227 resident light tiles and 6.3% of a
+// 96 MB arena (412 allocs), i.e. an order of magnitude under every budget here.
+// The budgets below still carry roughly 2x headroom over a working set scaled to
+// the smaller radius, because a dense build packs far more quads per chunk than
+// open terrain does. The VOXEL LIGHT VOLUME and VOXEL QUAD ARENA debug panels
+// report the live figures; re-measure there rather than re-deriving.
 
 export type Settings = {
     /** upper bound on the device pixel ratio the scene renders at. a
@@ -45,6 +53,9 @@ export type Settings = {
     voxelArenaDesiredMB: number;
     /** max chunk×pass slots per voxel SectionTable. */
     voxelMaxSections: number;
+    /** light-volume tiles, one per resident CHUNK. Sized independently of
+     *  `voxelMaxSections`, which counts chunk x pass slots per table. */
+    voxelMaxLightTiles: number;
     /** max simultaneous SegmentArena allocations (node-pool size for the
      *  OffsetAllocator). target: live + free-node headroom across all 3
      *  passes, voxelMaxSections × 3 × 2 rounded to a power of two. */
@@ -73,20 +84,25 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
     low: {
         maxPixelRatio: 1,
         voxelViewChunkRadius: 6,
-        voxelArenaDesiredMB: 64,
-        voxelMaxSections: 1024,
-        voxelArenaMaxAllocs: 8192, // 1024 × 3 × 2 ≈ 6144 → 8192
+        voxelArenaDesiredMB: 48,
+        voxelMaxSections: 768,
+        // 8704 B/tile: ~169 columns of a few surface chunks each at radius 6.
+        voxelMaxLightTiles: 1024,
+        voxelArenaMaxAllocs: 4096, // 768 × 3 × 2 ≈ 4608 → 4096 (allocs run well under slots)
         // single mesh worker: low-end (≤4 cores, Chromebook) keeps memory down
         // and avoids postMessage overhead; the urgent tier still covers edits.
         voxelWorkerCount: 1,
         voxelWorkerQueueDepth: 3,
     },
     standard: {
-        maxPixelRatio: 1.5,
-        voxelViewChunkRadius: 12,
-        voxelArenaDesiredMB: 96,
-        voxelMaxSections: 2048,
-        voxelArenaMaxAllocs: 16384, // 2048 × 3 × 2 ≈ 12288 → 16384
+        maxPixelRatio: 2,
+        voxelViewChunkRadius: 8,
+        voxelArenaDesiredMB: 64,
+        voxelMaxSections: 1280,
+        // 8704 B/tile = ~15 MB. Radius 8 is ~289 columns of a few surface chunks
+        // each (radius 12 was 625, so a bit under half the working set).
+        voxelMaxLightTiles: 1792,
+        voxelArenaMaxAllocs: 8192, // 1280 × 3 × 2 ≈ 7680 → 8192
         // 2 mesh workers: past ~2 the postMessage + per-worker chunk-cache
         // (~4 MB each) overhead outweighs the parallelism, and the urgent tier
         // covers edit latency, so we no longer scale with core count.
@@ -106,7 +122,17 @@ export function voxelArenaBudgetForTier(profile: Profile): VoxelArenaBudget {
     const s = settingsForTier(profile);
     const cap = Math.floor(profile.limits.maxArenaBytes * 0.25);
     const total = Math.min(s.voxelArenaDesiredMB * 1024 * 1024, cap);
-    return { quadArenaBytes: total, maxSections: s.voxelMaxSections, maxAllocs: s.voxelArenaMaxAllocs };
+    return {
+        quadArenaBytes: total,
+        maxSections: s.voxelMaxSections,
+        maxAllocs: s.voxelArenaMaxAllocs,
+        // one tile per resident CHUNK, where `maxSections` counts chunk x PASS
+        // slots across three tables. Sizing light off the section count made the
+        // pool a third of the residency it is tied to, so it sat at capacity
+        // evicting chunks the AOI immediately asked for again.
+        maxLightTiles: s.voxelMaxLightTiles,
+        lightGridChunkRadius: s.voxelViewChunkRadius + STREAM_APRON,
+    };
 }
 
 /** chunks of loaded-but-not-drawn apron kept beyond the visual radius. gives

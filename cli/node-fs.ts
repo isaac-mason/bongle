@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BuildFs } from '../build';
-import type { Filesystem, FilesystemSnapshot, FsStat } from '../os/interface';
+import type { Filesystem, FsEntry, FsKind } from '../os/interface';
 
 export function openNodeFs(root: string): Filesystem & BuildFs {
     // Ids are project-relative, EXCEPT the ones `realpath` hands back: a pnpm package's
@@ -32,28 +32,32 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
             return [];
         }
     };
-    const listStats = (dir: string, recursive: boolean): FsStat[] => {
-        const out: FsStat[] = [];
+    // kind of a dirent, following symlinks so a workspace-linked package dir
+    // (node_modules/bongle → lib) is a 'dir', not lstat's 'file'. null when the
+    // link is broken or the entry vanished.
+    const kindOf = (rel: string, e: { isDirectory(): boolean; isSymbolicLink(): boolean }): FsKind | null => {
+        if (!e.isSymbolicLink()) return e.isDirectory() ? 'dir' : 'file';
+        try {
+            return statSync(abs(rel)).isDirectory() ? 'dir' : 'file';
+        } catch {
+            return null;
+        }
+    };
+    const listTree = (dir: string): FsEntry[] => {
+        const out: FsEntry[] = [];
         const walk = (d: string) => {
             for (const e of readDirEntries(d)) {
                 const rel = d ? `${d}/${e.name}` : e.name;
-                let st: ReturnType<typeof statSync>;
-                try {
-                    // statSync follows symlinks so a workspace-linked package dir
-                    // (node_modules/bongle → lib) is a 'dir', not lstat's 'file'.
-                    st = statSync(abs(rel));
-                } catch {
-                    continue; // broken symlink / vanished entry
-                }
-                const kind = st.isDirectory() ? 'dir' : 'file';
-                out.push({ path: rel, kind, size: st.size, mtime: st.mtimeMs });
+                const kind = kindOf(rel, e);
+                if (kind === null) continue;
+                out.push({ path: rel, kind });
                 // recurse only into REAL dirs — never follow a symlink (a workspace
                 // link can point back into a parent and cycle).
-                if (kind === 'dir' && !e.isSymbolicLink() && recursive) walk(rel);
+                if (kind === 'dir' && !e.isSymbolicLink()) walk(rel);
             }
         };
         walk(dir);
-        return out;
+        return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     };
 
     // file:// URLs to builtin engine assets (e.g. the avatar glb) reach the bake
@@ -85,29 +89,18 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
                 return null;
             }
         },
-        async list(dir = '', opts) {
-            return listStats(dir, !!opts?.recursive);
+        async list(dir = '') {
+            return listTree(dir);
         },
         // resolve.ts probes directories constantly — a missing dir is a normal
         // "no such candidate", not an error (mirrors OPFS readDir).
         async readDir(dir = '') {
-            const m = new Map<string, 'file' | 'dir'>();
-            try {
-                for (const e of readdirSync(abs(dir), { withFileTypes: true })) {
-                    // follow symlinks so a workspace-linked package dir
-                    // (node_modules/bongle → lib) reads as 'dir', not lstat's 'file'
-                    // — otherwise the resolver never finds the package.
-                    let kind: 'file' | 'dir' = e.isDirectory() ? 'dir' : 'file';
-                    if (e.isSymbolicLink()) {
-                        try {
-                            kind = statSync(abs(dir ? `${dir}/${e.name}` : e.name)).isDirectory() ? 'dir' : 'file';
-                        } catch {
-                            kind = 'file';
-                        }
-                    }
-                    m.set(e.name, kind);
-                }
-            } catch {}
+            const m = new Map<string, FsKind>();
+            for (const e of readDirEntries(dir)) {
+                const kind = kindOf(dir ? `${dir}/${e.name}` : e.name, e);
+                // a broken link is still a name the resolver must not treat as a dir.
+                m.set(e.name, kind ?? 'file');
+            }
             return m;
         },
         async exists(p) {
@@ -151,18 +144,6 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         // one-shot build: no file watching.
         watch() {
             return { close() {} };
-        },
-        async snapshot(dir = '') {
-            const paths = listStats(dir, true)
-                .filter((s) => s.kind === 'file')
-                .map((s) => s.path)
-                .sort();
-            return {
-                read: (p) => readFileSync(abs(p)),
-                readText: (p) => readFileSync(abs(p), 'utf8'),
-                exists: (p) => existsSync(abs(p)),
-                list: () => paths,
-            } satisfies FilesystemSnapshot;
         },
     };
 }

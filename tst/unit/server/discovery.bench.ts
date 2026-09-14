@@ -3,7 +3,8 @@ import { TRANSFORM_SEND_HZ } from '../../../src/core/clock';
 import { pack } from '../../../src/core/scene/pack';
 import { addChild, addTrait, createNode, createSceneTree } from '../../../src/core/scene/scene-tree';
 import { dirty, rate } from '../../../src/core/scene/sync/sync-rate';
-import { sync, trait } from '../../../src/core/scene/traits';
+import { trait } from '../../../src/core/registry';
+import { sync } from '../../../src/core/registry';
 import { runDiffDetection } from '../../../src/server/discovery';
 
 // ── runDiffDetection bench ───────────────────────────────────────────

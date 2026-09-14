@@ -72,7 +72,7 @@ export async function renderIcons(fs: Filesystem, Icons: Icons, atlasHash: strin
     try {
         const result = await Icons.runIconBake(deps, fs, plan, async (px, w, h) => skiaEncodePng(px, w, h));
         console.log(result.blockAtlas ? '  · icons: wrote voxels-icons.png' : '  · icons: no renderable blocks');
-        if (result.prefabs > 0) console.log(`  · icons: wrote ${result.prefabs} prefab icon(s)`);
+        if (result.prefabs.length > 0) console.log(`  · icons: wrote ${result.prefabs.length} prefab icon(s)`);
         return true;
     } finally {
         dispose();

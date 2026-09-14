@@ -15,7 +15,7 @@
 // bake; the flush drives re-bakes on code edits. Browser-only (OffscreenCanvas + the
 // headless GPU icon render) — kept out of the host-neutral `pipeline.ts` core.
 
-import type { Filesystem } from '../../os/interface';
+import type { BakedArtifacts, Filesystem } from '../../os/interface';
 import { registerFlushHandler } from '../core/capture/flush';
 import { type Config, serverMaxPlayers } from '../core/config';
 import { registry, reindexRegistry } from '../core/registry';
@@ -26,8 +26,9 @@ import { createBakeLoader, createClientResourceLoader } from './loader';
 import * as AssetPipeline from './pipeline';
 
 export type BakeReport = {
-    /** atlas bytes moved this pass — the caller tells the live client to refresh. */
-    atlasChanged: boolean;
+    /** what this session has left in `resources/`, so consumers re-read exactly
+     *  what moved instead of watching the fs for it. */
+    artifacts: BakedArtifacts;
     /** latest declared launch config (the build manifest reads this). null when
      *  the config revision hasn't produced a value this session yet. */
     config: Config | null;
@@ -46,7 +47,9 @@ function deriveMaxPlayers(config: Config | null): number | null {
 export type Driver = {
     /** the editor project filesystem: sidecars read from it, baked outputs written into it. */
     fs: Filesystem;
-    /** called after every bake pass (flush-driven or run()-driven) with the result. */
+    /** called with the session's artifacts every time they move. Fires MORE THAN
+     *  ONCE per pass: the icon render lands after the data bake (deliberately not
+     *  awaited), so it reports again when it settles. */
     onBaked: (report: BakeReport) => void;
     /** optional progress log surfaced to the editor. */
     log?: (msg: string) => void;
@@ -76,6 +79,11 @@ export type State = {
     unregisterFlush: () => void;
     /** forced render backend for icon baking (see `Opts.renderer`). */
     renderer: 'webgpu' | 'webgl' | undefined;
+    /** everything a report carries, kept here because the data bake and the icon
+     *  render finish at different times and each reports the CURRENT whole picture
+     *  rather than its own slice. */
+    artifacts: BakedArtifacts;
+    config: Config | null;
     // guards: a bake / icon render in flight COALESCES an overlapping trigger onto a
     // trailing re-run instead of dropping it. Dropping was the bug: the boot icon
     // render holds the GPU for seconds (device handshake + pipeline compiles), and the
@@ -110,6 +118,8 @@ export function init(driver: Driver, opts: Opts): State {
         cache: opts.cache,
         unregisterFlush: () => {},
         renderer: opts.renderer,
+        artifacts: { blocks: null, sprites: null, audio: null, blockIcons: null, prefabIcons: [] },
+        config: null,
         baking: false,
         queuedBake: null,
         renderCtx: null,
@@ -150,6 +160,13 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
                 const t0 = performance.now();
                 const r = await AssetPipeline.run(state.pipeline, { forceAll });
                 atlasHash = r.atlasHash;
+                state.config = r.config;
+                state.artifacts = {
+                    ...state.artifacts,
+                    blocks: r.atlasHash,
+                    sprites: r.spriteAtlasHash,
+                    audio: r.audioAtlasHash,
+                };
                 // per-stage wall-clock alongside the total: the stages run in parallel behind
                 // `draw`, so the longest one is the bake's critical path.
                 const stages = Object.entries(r.timings)
@@ -160,7 +177,7 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
                     `bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}` +
                         (stages ? ` (${stages})` : ''),
                 );
-                state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
+                report(state);
             } catch (err) {
                 state.driver.err?.(`bake error: ${(err as Error).message}`);
             }
@@ -223,6 +240,10 @@ async function renderIconsPass(state: State, atlasHash: string | null): Promise<
             // disk already current, so a missing icon after THIS line is a consumer
             // problem, not a bake that never ran.
             log?.('icons: up to date');
+            // still announce: "up to date" means the atlas ALREADY on disk is the
+            // one this pass would have drawn, which is exactly what a consumer that
+            // has yet to read it (a client that just connected) needs told.
+            announceIcons(state, plan.blockIconsHash, []);
             return;
         }
 
@@ -236,7 +257,12 @@ async function renderIconsPass(state: State, atlasHash: string | null): Promise<
         try {
             log?.(`icons: rendering ${plan.blockAtlasStale ? 'block atlas + ' : ''}${plan.stalePrefabs.length} prefab icon(s)…`);
             const result = await Icons.runIconBake(deps, fs, plan, encodeRgbaPng);
-            log?.(`icons: wrote ${result.blockAtlas ? 'block atlas, ' : ''}${result.prefabs} prefab icon(s)`);
+            log?.(`icons: wrote ${result.blockAtlas ? 'block atlas, ' : ''}${result.prefabs.length} prefab icon(s)`);
+            // announced only HERE, once both the png and its sidecar are written:
+            // the two land as separate writes, and a consumer told about the pair
+            // after the fact can never read a half of one pass with a half of the
+            // last.
+            announceIcons(state, plan.blockIconsHash, result.prefabs);
         } finally {
             dispose();
         }
@@ -246,6 +272,21 @@ async function renderIconsPass(state: State, atlasHash: string | null): Promise<
         // must be legible: without block icons the palette just renders empty.
         reportErr?.(`icons error: ${(err as Error).message}`);
     }
+}
+
+/** Announce the session's current artifacts. `prefabIcons` is edge-shaped (ids
+ *  that moved THIS report), so it is cleared once sent — a later report must not
+ *  re-announce an invalidation the consumer already applied. */
+function report(state: State): void {
+    const artifacts = state.artifacts;
+    state.artifacts = { ...artifacts, prefabIcons: [] };
+    state.driver.onBaked({ artifacts, config: state.config, maxPlayers: deriveMaxPlayers(state.config) });
+}
+
+/** Fold an icon pass's outputs into the session's artifacts and report them. */
+function announceIcons(state: State, blockIcons: string | null, prefabIcons: string[]): void {
+    state.artifacts = { ...state.artifacts, blockIcons, prefabIcons: [...state.artifacts.prefabIcons, ...prefabIcons] };
+    report(state);
 }
 
 /** RGBA8 pixels → PNG bytes via OffscreenCanvas (worker-safe; no DOM canvas). */

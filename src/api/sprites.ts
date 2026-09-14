@@ -18,17 +18,9 @@
 import type { ScriptContext } from '../core/scene/scripts';
 import type { SpriteHandle } from '../core/sprites/sprites';
 
-export type {
-    DrawFn,
-    DrawInputs,
-    DrawParams,
-    DrawSource,
-    ImageSource,
-    NormalizedImageSource,
-    SpriteHandle,
-    SpriteOptions,
-} from '../core/sprites/sprites';
-export { draw, sprite } from '../core/sprites/sprites';
+export { sprite } from '../core/registry';
+export type { ImageSource, SpriteHandle, SpriteOptions } from '../core/sprites/sprites';
+export type { DrawFn, DrawInputs, DrawParams } from '../core/textures/draw-fn';
 
 /**
  * Default world units per source pixel. Matches `SpriteTrait`'s

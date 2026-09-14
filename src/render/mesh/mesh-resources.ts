@@ -33,6 +33,7 @@
 
 import type { IndexedMeshDraw } from 'gpucat';
 import {
+    abs,
     add,
     attribute,
     BufferLifecycle,
@@ -52,7 +53,10 @@ import {
     max,
     mix,
     mul,
+    type Node,
     normalize,
+    screenSize,
+    select,
     sin,
     smoothstep,
     storage,
@@ -73,17 +77,16 @@ import { ditherDiscard } from '../dsl/dither';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
+import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 import * as MeshAtlas from './mesh-atlas';
 
 // ── gpu structs ─────────────────────────────────────────────────────
 
-const InstanceParams = struct('ModelInstanceParams', {
+export const InstanceParams = struct('ModelInstanceParams', {
     // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
     // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
-    // light: voxel-light contribution [sky, r, g, b]
-    light: d.vec4f,
     // glow: emissive glow intensity 0-1, added to final color
     glow: d.f32,
     // unlit: 0 = lit, 1 = bypass all lighting (carried as f32 so the shader
@@ -100,14 +103,22 @@ const InstanceParams = struct('ModelInstanceParams', {
     // the atlas, re-uploaded on entry-ref mismatch in mesh-visuals.
     uvOffset: d.vec2f,
     uvScale: d.vec2f,
+    // outlineColor: rgba drawn by the expanded shell pass.
+    outlineColor: d.vec4f,
+    // outlineWidth: shell expansion, 0 = no outline. Units depend on outlineSpace.
+    outlineWidth: d.f32,
+    // outlineSpace: 1 = width is SCREEN pixels, held constant with distance;
+    // 0 = width is WORLD units, so the outline shrinks with distance like real
+    // geometry. Lands in the padding that followed `outlineWidth`, so it is free.
+    outlineSpace: d.f32,
 });
 
 // Per-slot stable instance record. Merges what were two separate
 // storage buffers (transforms + params) into one binding, same
 // cardinality, same writer, same grow lifecycle.
 //
-// Layout: mat4x4f (64B, align 16) then InstanceParams (80B, align 16)
-// → total 144B per slot, struct align 16, no internal padding.
+// Layout: mat4x4f (64B, align 16) then InstanceParams (96B, align 16)
+// → total 160B per slot, struct align 16.
 export const ModelInstance = struct('ModelInstance', {
     worldMatrix: d.mat4x4f,
     params: InstanceParams,
@@ -131,12 +142,13 @@ export const INSTANCE_PARAMS_STRIDE = layoutStrideOf(InstanceParams);
 export const MODEL_INSTANCE_STRIDE = layoutStrideOf(ModelInstance);
 /** byte offset of the `params` member inside `ModelInstance` (after the mat4x4f). */
 export const MODEL_INSTANCE_PARAMS_OFFSET = 64;
-/** f32-index offset of the `params` member inside `ModelInstance`. Used by
- *  the inlined params writer in mesh-visuals, keep in sync with
- *  `MODEL_INSTANCE_PARAMS_OFFSET` (64 bytes = 16 f32). */
-export const MODEL_INSTANCE_PARAMS_OFFSET_F32 = 16;
-/** f32 count per `ModelInstance` slot (144B / 4 = 36). */
-export const MODEL_INSTANCE_STRIDE_F32 = MODEL_INSTANCE_STRIDE / 4; // 36
+/** f32-index offset of the `params` member inside `ModelInstance`, i.e.
+ *  `MODEL_INSTANCE_PARAMS_OFFSET` in f32 units (64 bytes = 16 f32). */
+export const MODEL_INSTANCE_PARAMS_OFFSET_F32 = MODEL_INSTANCE_PARAMS_OFFSET / 4;
+/** f32 count of one `InstanceParams`. Derived, so it tracks struct changes. */
+export const INSTANCE_PARAMS_STRIDE_F32 = INSTANCE_PARAMS_STRIDE / 4;
+/** f32 count per `ModelInstance` slot. Derived, so it tracks struct changes. */
+export const MODEL_INSTANCE_STRIDE_F32 = MODEL_INSTANCE_STRIDE / 4;
 export const MODEL_VERTEX_STRIDE = layoutStrideOf(ModelVertex);
 const MODEL_VERTEX_STRIDE_F32 = MODEL_VERTEX_STRIDE / 4; // 8
 
@@ -150,6 +162,10 @@ const INITIAL_INSTANCE_CAPACITY = 4096;
 // via `mesh.draws`). UVs ride in the `.w` lanes of the interleaved attributes.
 
 export type GeometrySlot = {
+    /** whether `pool.smoothNormals` has been filled for this slot. The bake is
+     *  LAZY: only a mesh something actually outlines ever pays for it, and it is
+     *  read back out of the interleaved pool so no source arrays are retained. */
+    smoothReady: boolean;
     /** vertex index into the pooled vertex buffer. */
     vertexOffset: number;
     /** vertex count. */
@@ -230,6 +246,20 @@ export type ModelGeometryPool = {
     slots: Map<string, GeometrySlot>;
     /** interleaved {posU, normalV} per vertex. */
     vertices: GpuBuffer<typeof ModelVertex>;
+    /** oct-encoded SMOOTHED normal per vertex, parallel to `vertices` and indexed
+     *  by the same vertex offset. Only the outline shell reads it, so the base
+     *  pass's vertex fetch is untouched and `ModelVertex` stays 32 B.
+     *
+     *  Smoothed, not the shading normal: a box carries three different normals at
+     *  each corner, and expanding a shell along those pulls the faces apart and
+     *  tears it open. Averaging the normals of every vertex that shares a position
+     *  gives a direction field that is both continuous across edges and actually
+     *  perpendicular to the surface, which is the only thing that works on an
+     *  arbitrary mesh. This is what Guilty Gear and Genshin bake into their assets;
+     *  we can derive it at upload instead, because we own that path.
+     *
+     *  4 bytes a vertex, allocated with the pool and filled lazily per mesh. */
+    smoothNormals: GpuBuffer<d.u32>;
     indices: GpuBuffer<d.u32>;
     vertexAllocator: RangeAllocator;
     indexAllocator: RangeAllocator;
@@ -253,10 +283,20 @@ function createGeometryPool(
         usage: 'index',
         lifecycle: BufferLifecycle.MANUAL,
     });
+    // one u32 a vertex, so it costs ~0.4 MB at 100k vertices. Allocated up front
+    // rather than on first use: the outline shell binds it every frame regardless,
+    // and a later allocation would have to preserve every slot's vertex offset
+    // anyway, which is all the eager cost buys back.
+    const smoothNormals = new GpuBuffer(d.u32, {
+        data: new Uint32Array(initialVertexCapacity),
+        usage: 'vertex',
+        lifecycle: BufferLifecycle.MANUAL,
+    });
 
     return {
         slots: new Map(),
         vertices,
+        smoothNormals,
         indices,
         vertexAllocator: createRangeAllocator(initialVertexCapacity),
         indexAllocator: createRangeAllocator(initialIndexCapacity),
@@ -286,6 +326,7 @@ function uploadGeometry(pool: ModelGeometryPool, meshKey: string, geom: ModelGeo
     if (iRange.offset + iRange.count > getIndexCapacity(pool)) growIndex(pool, pool.indexAllocator.capacity);
 
     const slot: GeometrySlot = {
+        smoothReady: false,
         vertexOffset: vRange.offset,
         vertexCount,
         indexOffset: iRange.offset,
@@ -361,6 +402,90 @@ function growVertex(pool: ModelGeometryPool, newCapacity: number): void {
     next.set(old);
     pool.vertices.array = next;
     pool.vertices.needsUpdate = true;
+
+    // parallel array, same vertex indexing: it has to grow in lockstep or a slot
+    // allocated after the grow indexes past the end of it.
+    const oldSmooth = pool.smoothNormals.array as Uint32Array;
+    const nextSmooth = new Uint32Array(newCapacity);
+    nextSmooth.set(oldSmooth);
+    pool.smoothNormals.array = nextSmooth;
+    pool.smoothNormals.needsUpdate = true;
+}
+
+/** octahedral-encode a unit vector into 8:8 fixed point, packed in a u32. Two
+ *  bytes is ample for a direction that only steers an outline. */
+function octEncodeNormal(x: number, y: number, z: number): number {
+    const invL1 = 1 / (Math.abs(x) + Math.abs(y) + Math.abs(z) || 1);
+    let ox = x * invL1;
+    let oy = y * invL1;
+    if (z < 0) {
+        const tx = (1 - Math.abs(oy)) * (ox >= 0 ? 1 : -1);
+        const ty = (1 - Math.abs(ox)) * (oy >= 0 ? 1 : -1);
+        ox = tx;
+        oy = ty;
+    }
+    const qx = Math.round((ox * 0.5 + 0.5) * 255) & 0xff;
+    const qy = Math.round((oy * 0.5 + 0.5) * 255) & 0xff;
+    return (qx | (qy << 8)) >>> 0;
+}
+
+/**
+ * Fill `pool.smoothNormals` for one slot, averaging the normals of every vertex
+ * that shares a position. Idempotent and lazy: called the first time something
+ * actually outlines this mesh, so a game that never uses outlines never pays.
+ *
+ * Reads positions and normals back out of the interleaved pool rather than
+ * keeping the source arrays alive - they are already sitting there at this
+ * slot's vertex offset.
+ */
+export function ensureSmoothNormals(pool: ModelGeometryPool, slot: GeometrySlot): void {
+    if (slot.smoothReady) return;
+    slot.smoothReady = true;
+
+    const vertArr = pool.vertices.array as Float32Array;
+    const out = pool.smoothNormals.array as Uint32Array;
+    const base = slot.vertexOffset * MODEL_VERTEX_STRIDE_F32;
+    const count = slot.vertexCount;
+
+    // quantised so vertices meant to be coincident actually collide. Split
+    // vertices come from the same source position, so exact bits usually match,
+    // but a rounded key costs nothing and survives a lossy export.
+    const sums = new Map<string, [number, number, number]>();
+    const keys: string[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+        const o = base + i * MODEL_VERTEX_STRIDE_F32;
+        const key = `${Math.round(vertArr[o]! * 4096)},${Math.round(vertArr[o + 1]! * 4096)},${Math.round(vertArr[o + 2]! * 4096)}`;
+        keys[i] = key;
+        const acc = sums.get(key);
+        if (acc === undefined) sums.set(key, [vertArr[o + 4]!, vertArr[o + 5]!, vertArr[o + 6]!]);
+        else {
+            acc[0] += vertArr[o + 4]!;
+            acc[1] += vertArr[o + 5]!;
+            acc[2] += vertArr[o + 6]!;
+        }
+    }
+
+    for (let i = 0; i < count; i++) {
+        const o = base + i * MODEL_VERTEX_STRIDE_F32;
+        const acc = sums.get(keys[i]!)!;
+        let [nx, ny, nz] = acc;
+        const len = Math.hypot(nx, ny, nz);
+        // normals cancelling to nothing means a degenerate fan; fall back to this
+        // vertex's own normal rather than emitting a zero direction.
+        if (len < 1e-6) {
+            nx = vertArr[o + 4]!;
+            ny = vertArr[o + 5]!;
+            nz = vertArr[o + 6]!;
+        } else {
+            nx /= len;
+            ny /= len;
+            nz /= len;
+        }
+        out[slot.vertexOffset + i] = octEncodeNormal(nx, ny, nz);
+    }
+
+    pool.smoothNormals.addUpdateRange(slot.vertexOffset, count);
+    pool.smoothNormals.needsUpdate = true;
 }
 
 function growIndex(pool: ModelGeometryPool, newCapacity: number): void {
@@ -385,6 +510,9 @@ export type MeshInfoEntry = {
     indexCount: number;
     aabbMin: [number, number, number];
     aabbMax: [number, number, number];
+    /** the pool geometry slot, so the write loop can trigger the lazy smoothed
+     *  normal bake the first time something outlines this mesh. */
+    geometry: GeometrySlot;
 };
 
 export type MeshInfoCatalog = {
@@ -458,6 +586,8 @@ export type MeshBatch = {
     geometry: Geometry;
     /** stable per-slot {worldMatrix, params}, 144B/slot; read-only storage,
      *  auto-lowered to a buffer-texture fetch on WebGL2 (gpucat). */
+    /** the outline shell, sharing this batch's geometry, buffers and draw list. */
+    outlineMesh: Mesh;
     instanceDataBuf: GpuBufferType;
     /** per-frame u32[] sized to `instanceCapacity`; slotMap[instanceIndex] → slot. */
     slotMapBuf: GpuBufferType;
@@ -471,18 +601,27 @@ export type MeshBatch = {
     instanceCapacity: number;
     /** slot free-list into the instance buffer. */
     instanceAllocator: Allocator;
+
+    /** last frame's instance-upload shape, read by the render backend into the frame profiler.
+     *  `dirtyInstances` is what changed; `dirtySpan` is what the one min..max range actually
+     *  uploads. A span much larger than the dirty count means scattered slots are dragging
+     *  untouched neighbours along for the ride. */
+    aliveInstances: number;
+    dirtyInstances: number;
+    dirtySpan: number;
 };
 
 /** Build the client-global instance batch: its Geometry binds the pool vertex/
  *  index buffers + fresh instanceData/slotMap storage, and the Mesh wraps it with
  *  the engine-global material. Not added to any scene until a room `enter`s. */
-function createMeshBatch(pool: ModelGeometryPool, material: Material): MeshBatch {
+function createMeshBatch(pool: ModelGeometryPool, material: Material, outlineMaterial: Material): MeshBatch {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
     const geometry = new Geometry();
     // pool buffers, engine-global, interleaved {posU, normalV} (uv in the .w
     // lanes) + index buffer. HW vertex fetch + HW indexing.
     geometry.setBuffer('vertex', pool.vertices);
+    geometry.setBuffer('smoothNormal', pool.smoothNormals);
     geometry.setIndex(pool.indices);
 
     const instanceDataBuf = new GpuBuffer(d.array(ModelInstance), {
@@ -503,11 +642,27 @@ function createMeshBatch(pool: ModelGeometryPool, material: Material): MeshBatch
     mesh.frustumCulled = false; // per-mesh CPU cull via Visibility
     mesh.draws = draws;
 
+    // the outline shell shares the geometry, the instance buffers AND the draw
+    // list by reference, so it is the same instances drawn a second time with a
+    // different material. Instances with outlineWidth 0 collapse outside the
+    // frustum in the vertex stage, so this costs a draw call and no fragments
+    // when nothing is outlined. renderOrder puts it after the mesh, which is
+    // what the stencil test depends on.
+    const outlineMesh = new Mesh(geometry, outlineMaterial);
+    outlineMesh.name = 'mesh-visuals-outline';
+    outlineMesh.frustumCulled = false;
+    outlineMesh.draws = draws;
+    outlineMesh.renderOrder = 1;
+
     return {
         mesh,
+        outlineMesh,
         geometry,
         instanceDataBuf,
         slotMapBuf,
+        aliveInstances: 0,
+        dirtyInstances: 0,
+        dirtySpan: 0,
         draws,
         _bucketScratch: new Map(),
         _freeBuckets: [],
@@ -622,7 +777,8 @@ export function init(env: EnvironmentResources): MeshResources {
     const geometry = createGeometryPool();
 
     const material = createModelMaterial(atlas, env);
-    const batch = createMeshBatch(geometry, material);
+    const outlineMaterial = createMeshOutlineMaterial(atlas);
+    const batch = createMeshBatch(geometry, material, outlineMaterial);
 
     return {
         atlas,
@@ -706,6 +862,7 @@ function upload(resources: MeshResources, loader: ResourceLoader, modelId: strin
             uvScale: hasImage ? [1, 1] : [0, 0],
             firstIndex: geomSlot.indexOffset,
             indexCount: geomSlot.indexCount,
+            geometry: geomSlot,
             aabbMin: [m.aabb[0], m.aabb[1], m.aabb[2]],
             aabbMax: [m.aabb[3], m.aabb[4], m.aabb[5]],
         });
@@ -905,7 +1062,17 @@ function createModelMaterial(atlas: MeshAtlas.MeshAtlas, env: EnvironmentResourc
     const vNormal = varying(worldNormal, 'mvNormalV');
     const vTint = varying(instParams.field('tint'), 'mvTint');
     const vFlash = varying(instParams.field('flash'), 'mvFlash');
-    const vInstLight = varying(instParams.field('light'), 'mvInstLight');
+    // one sample per instance at its light anchor, replacing the per-frame CPU
+    // sample + per-instance upload. Grouping (the old `Up(ModelTrait)` shared
+    // value) is unnecessary here: the corner lattice blends the 8 cells at each
+    // corner with `blendChannelMinNonZero`, so a bone clipping into a wall still
+    // reads the open cells beside it instead of going black, which is the pop-dark
+    // that grouping existed to prevent.
+    // PER VERTEX, at the vertex's own world position, so a mesh half in shadow
+    // renders half lit. This used to sample a per-instance anchor, which meant
+    // every vertex of an instance recomputed one identical value - the flat look
+    // `ModelTrait` grouping used to enforce, and pure redundant work besides.
+    const vInstLight = varying(sampleWorldLight(bindLightVolume(env), worldPos.xyz), 'mvInstLight');
     const vGlow = varying(instParams.field('glow'), 'mvGlow');
     const vUnlit = varying(instParams.field('unlit'), 'mvUnlit').setInterpolation('flat');
     const vLitMin = varying(instParams.field('litMin'), 'mvLitMin').setInterpolation('flat');
@@ -954,9 +1121,148 @@ function createModelMaterial(atlas: MeshAtlas.MeshAtlas, env: EnvironmentResourc
     return new Material({
         name: 'model',
         vertex: clipPos,
-        fragment,
+        fragment: fragment,
         cullMode: 'back',
         depthTest: true,
         depthWrite: true,
+    });
+}
+
+/** shader-side inverse of `octEncodeNormal`. */
+function octDecodeNormal(packed: Node<d.u32>): Node<d.vec3f> {
+    const qx = packed.bitwiseAnd(u32(0xff)).toF32().div(f32(255)).mul(f32(2)).sub(f32(1));
+    const qy = packed.shiftRight(u32(8)).bitwiseAnd(u32(0xff)).toF32().div(f32(255)).mul(f32(2)).sub(f32(1));
+    const z = f32(1).sub(abs(qx)).sub(abs(qy)).toVar('octZ');
+    // the lower hemisphere is folded across the octahedron's diagonals, so undo
+    // that fold before normalising.
+    const t = max(z.mul(f32(-1)), f32(0)).toVar('octT');
+    const x = qx.sub(t.mul(select(f32(-1), f32(1), qx.greaterThanEqual(f32(0)))));
+    const y = qy.sub(t.mul(select(f32(-1), f32(1), qy.greaterThanEqual(f32(0)))));
+    return normalize(vec3f(x, y, z));
+}
+
+/**
+ * The outline shell: the same instances drawn again, expanded along the normal,
+ * flat-coloured, and stencil-masked to the rim.
+ *
+ * Masked by DEPTH, drawing the shell's BACK faces (`cull: 'front'`). Those sit
+ * behind the mesh's own front faces, so the depth test rejects them wherever the
+ * mesh is and only the rim survives.
+ *
+ * Godot masks with a stencil instead (STENCIL_MODE_OUTLINE), which survives
+ * concave geometry better - but a stencil reference is set per DRAW CALL, and we
+ * draw every instance in one call, so every mesh necessarily shares one value.
+ * That meant any mesh suppressed any outline it overlapped: a character standing
+ * behind another erased the nearer one's rim. Depth masks per object for free,
+ * because the far character's depth simply loses.
+ *
+ * Width is in SCREEN pixels. The expansion happens in clip space along the
+ * projected normal, scaled by `w`, so perspective divide leaves a constant pixel
+ * thickness at any distance. A world-space expansion instead goes sub-pixel far
+ * away and the outline quietly disappears, which is the opposite of the point.
+ */
+function createMeshOutlineMaterial(atlas: MeshAtlas.MeshAtlas): Material {
+    const posU = attribute('vertex', d.vec4f, { stride: 32, offset: 0 });
+    const normalV = attribute('vertex', d.vec4f, { stride: 32, offset: 16 });
+    const aPosition = posU.xyz.toVar('moPos');
+    const aUv = vec2f(posU.w, normalV.w).toVar('moUv');
+    // the SMOOTHED normal, not the shading one. See `smoothNormals` on the pool:
+    // face normals split at every hard edge and tear the shell open.
+    const aSmoothNormal = octDecodeNormal(attribute('smoothNormal', d.u32)).toVar('moSmoothNormal');
+
+    const slotMap = storage('slotMap', d.array(d.u32), 'read');
+    const realSlot = slotMap.element(instanceIndex).toVar('moSlot');
+    const instanceData = storage('instanceData', d.array(ModelInstance), 'read');
+    const instRec = instanceData.element(realSlot);
+    const worldMatrix = instRec.field('worldMatrix').toVar('moWorldMatrix');
+    const instParams = instRec.field('params').toVar('moInstParams');
+    const width = instParams.field('outlineWidth').toVar('moWidth');
+    const space = instParams.field('outlineSpace').toVar('moSpace');
+
+    const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('moWorldPos');
+
+    const col0 = worldMatrix.element(u32(0)).xyz;
+    const col1 = worldMatrix.element(u32(1)).xyz;
+    const col2 = worldMatrix.element(u32(2)).xyz;
+    // ROTATION ONLY: normalise the basis columns, dropping the part's scale.
+    // Character parts are unit boxes scaled non-uniformly into limbs, and the
+    // choice of transform here is the whole ball game.
+    //
+    //   raw matrix           - a position delta gets stretched by the scale, so on
+    //                          an arm scaled long in Y every direction tilts toward
+    //                          Y. Taller than it is wide.
+    //   inverse-transpose    - right for a FACE normal, wrong for the corner
+    //                          diagonal: it yields (1/sx, 1/sy, 1/sz) when the true
+    //                          answer is the average of the three world face
+    //                          normals, which axis-aligned scale leaves untouched.
+    //   normalised columns   - correct for both, because it is exactly that average.
+    const rot = mat3(normalize(col0), normalize(col1), normalize(col2)).toVar('moRot');
+    const worldGrow = normalize(mul(rot, aSmoothNormal)).toVar('moWorldGrow');
+
+    // EXPAND IN 3D, in world space, exactly like Godot's `VERTEX += NORMAL * grow`.
+    // Projecting the direction into clip space and renormalising it in 2D looks
+    // equivalent and is not: a vertex growing mostly toward or away from the camera
+    // has a near-zero xy component, and renormalising that blows the vertex out to
+    // full width in an arbitrary screen direction. That is uneven expansion, and it
+    // is the reason to stay in 3D.
+    //
+    // Screen-constant thickness then comes from scaling the world DISTANCE by view
+    // depth, never from touching the direction. `proj[1][1]` is `1 / tan(fovY/2)`,
+    // so one pixel at one unit of depth spans `2 / (proj[1][1] * screenHeight)`
+    // world units; times the view depth is what a pixel is worth at this vertex.
+    const viewPos = mul(cameraViewMatrix, worldPos).toVar('moViewPos');
+    const viewDepth = max(viewPos.z.mul(f32(-1)), f32(0.001)).toVar('moViewDepth');
+    const screen = max(screenSize, vec2f(f32(1), f32(1))).toVar('moScreen');
+    const projYY = max(cameraProjectionMatrix.element(u32(1)).y, f32(0.001)).toVar('moProjYY');
+    const worldPerPixel = f32(2).div(projYY.mul(screen.y)).mul(viewDepth).toVar('moWorldPerPixel');
+    // world space is the same expansion with the depth term dropped, so the two
+    // modes are one multiply apart rather than two code paths.
+    const perUnit = mix(f32(1), worldPerPixel, space).toVar('moPerUnit');
+
+    const grownWorld = worldPos.xyz.add(worldGrow.mul(width).mul(perUnit)).toVar('moGrownWorld');
+    const viewProj = mul(cameraProjectionMatrix, cameraViewMatrix).toVar('moViewProj');
+    const grown = mul(viewProj, vec4f(grownWorld, f32(1.0))).toVar('moGrown');
+    // width 0 means no outline. Push the whole triangle outside the frustum
+    // rather than relying on a zero-size shell: every vertex of a triangle shares
+    // one instance, so all three collapse identically and the clipper drops it
+    // before any fragment work happens.
+    const OFF = vec4f(f32(2), f32(2), f32(2), f32(1));
+    const vertex = select(OFF, grown, width.greaterThan(f32(0))).toVar('moVertex');
+
+    const uvOffset = instParams.field('uvOffset');
+    const uvScale = instParams.field('uvScale');
+    const vUv = varying(add(mul(aUv, uvScale), uvOffset), 'moAtlasUv').setInterpolation('perspective', 'centroid');
+    const vColor = varying(instParams.field('outlineColor'), 'moColor');
+
+    // honour the mesh's own cutout so a leaf or a hair card outlines its actual
+    // silhouette rather than its quad.
+    const texAlpha = texture(atlas.texture).sample(vUv).a.toVar('moTexAlpha');
+    const fragment = ditherDiscard(vColor, texAlpha, f32(0)).toVar('moFragment');
+
+    return new Material({
+        name: 'model-outline',
+        vertex,
+        fragment: fragment,
+        // FRONT-culled: we want the shell's back faces, which the mesh's own front
+        // faces then occlude. See above.
+        cullMode: 'front',
+        depthTest: true,
+        // WRITES DEPTH, unlike Godot's, which only skips it because it is alpha
+        // transparent. This shell is opaque, so the rim is real covering geometry:
+        // writing depth makes overlapping outlines resolve by distance instead of by
+        // draw order, and lets anything drawn later sort against the rim. Safe where
+        // it matters, because over the mesh itself the stencil rejects first and a
+        // stencil failure writes no depth - only the rim ever writes.
+        depthWrite: true,
+        // OPAQUE, despite drawing after the mesh. `transparent: true` sorts the
+        // shell into the same bucket as the voxel translucent pass, which writes no
+        // depth - so water and outlines end up ordered by renderOrder rather than by
+        // depth, and the shell (renderOrder 1) paints straight over water it is
+        // actually behind. It also gives every instance ONE sort position, since the
+        // shell is a single Mesh with many draws, so instances cannot order against
+        // each other either. The cost is that `outline.color`'s alpha no longer
+        // blends; renderOrder still puts this after the mesh, which is all the
+        // stencil needs.
+        transparent: false,
     });
 }

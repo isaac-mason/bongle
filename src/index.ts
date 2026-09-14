@@ -9,9 +9,6 @@
 // graph acyclic: builtins depend on api helpers, this file depends on both,
 // but neither depends on this file.
 
-// dashcat surface types, for games annotating panels/controls built via
-// `debug.panel(ctx, …)` or `ctx.client.debug.dashboard`.
-export type { AddOptions, Dashboard, Handle, LogEntry, Panel, PanelOptions } from 'dashcat';
 export * from './api/animation';
 export * from './api/asset';
 export * from './api/audio';
@@ -36,6 +33,7 @@ export { platform } from './api/platform';
 export * from './api/pointer-lock';
 export * from './api/prefabs';
 export * from './api/prop';
+export * from './api/render';
 export * as rooms from './api/rooms';
 export * from './api/rpc';
 export * from './api/scene-tree';
@@ -45,6 +43,7 @@ export * from './api/sounds';
 export * from './api/sprites';
 export { projectStorage, userStorage } from './api/storage';
 export * from './api/subject';
+export * from './api/textures';
 export * from './api/touch-controls';
 export * from './api/traits';
 export * from './api/transforms';
@@ -75,6 +74,9 @@ export * from './builtins/sprite';
 export { TransformTrait } from './builtins/transform';
 export * from './builtins/voxel-mesh';
 export * from './builtins/world';
+// debug widget surface types (client/debug), for games annotating panels/controls built via
+// `debug.panel(ctx, …)` or `ctx.client.debug.dashboard`.
+export type { AddOptions, Dashboard, Handle, LogEntry, Panel, PanelOptions } from './client/debug';
 export { UILayer } from './client/ui/util/ui-layers';
 export type { Avatar } from './core/avatar/avatar';
 export { env } from './env';

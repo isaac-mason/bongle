@@ -1,6 +1,6 @@
 // sprite() declaration primitive, pure-data handle, module-scope api.
 //
-// shape mirrors `blockTexture()` (`core/voxels/blocks.ts`), not `model()`:
+// shape mirrors `tile()` (`core/voxels/blocks.ts`), not `model()`:
 //   - no `_registerSpriteHandle` mutation path
 //   - no codegen barrel (the bake's `GENERATED_BARRELS`
 //     stays `['models', 'scenes', 'sounds']`, sprites are not added)
@@ -8,46 +8,40 @@
 //     sidecar (`sprites-atlas.json`) emitted by the asset-pipeline pass
 //     and fetched by `render/sprites/sprite-resources.ts` at room init
 //
-// `src` accepts an `ImageSource` (path/url, or a `DrawSource` bake-time
-// fn descriptor) or an array of them (flipbook frames). URLs are
-// normalized to `.href` strings at registration so downstream consumers
-// (atlas hash, pipeline) only see one shape; nested `DrawSource`s pass
-// through untouched. No per-frame `fps` or `interpolate` here, playback
-// rate is the consumer's decision (`SpriteTrait`, `particle()` etc.).
-//
-// `DrawSource` / `ImageSource` / the `draw()` constructor live in
-// `./draw.ts` and are re-exported below; both `sprite()` and
-// `blockTexture()` consume them.
+// A sprite holds `frames: DepKey[]` pointing at TEXTURES. `src` is sugar that
+// declares one texture per frame; `frames` takes texture handles directly.
+// URLs are normalized to `.href` strings at registration so downstream
+// consumers (atlas hash, pipeline) only see one shape. No per-frame `fps` or
+// `interpolate` here, playback rate is the consumer's decision (`SpriteTrait`,
+// `particle()` etc.).
 
-import { recordSprite } from '../capture/module-scope';
-import { declare, registry } from '../registry';
-import type { ImageSource, NormalizedImageSource } from './draw';
+import type { AssetMeta } from '../asset-meta';
+import type { DepKey } from '../capture/dep-graph';
+import type { TextureHandle } from '../textures/textures';
 
-/* ── source types re-exported for back-compat with existing import sites ── */
-
-export type { DrawFn, DrawInputs, DrawParams, DrawSource, ImageSource, NormalizedImageSource } from './draw';
-export { draw } from './draw';
+/** one image source: a project-relative path or an `asset()` href. Composition is no
+ *  longer expressible here — a composed image is a computed `texture()`, which has an id,
+ *  a hash and real dep edges. */
+export type ImageSource = string;
 
 /* ── public types ── */
 
-export type SpriteOptions = {
-    /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic, IDs remain the lookup
-     *  key everywhere else. */
-    name?: string;
-
+export type SpriteOptions = AssetMeta & {
     /**
      * source image(s). single entry for static sprites, array for
-     * flipbooks (one entry per frame, frames mixed freely between
-     * paths/URLs and draw descriptors).
+     * flipbooks (one entry per frame). Sugar: each entry declares a texture.
      *
      * URLs are normalized to `.href` at registration, same convention
-     * as `blockTexture()`. The URL form lets 3rd-party packs ship sprite
+     * as `tile()`. The URL form lets 3rd-party packs ship sprite
      * pixels bundled alongside their modules (vite rewrites
      * `new URL(...)` in the client bundle; the asset pipeline resolves
      * `file://` URLs via `fileURLToPath` at bake time).
      */
-    src: ImageSource | ImageSource[];
+    src?: ImageSource | ImageSource[];
+
+    /** the textures this sprite's frames come from. The direct form; `src` is sugar
+     *  that declares textures for you. */
+    frames?: TextureHandle[];
 
     /** gutter pixels in the atlas to avoid bleed at mip levels. default 1. */
     padding?: number;
@@ -65,9 +59,12 @@ export type SpriteDef = {
      *  defaults to `spriteId` when the author didn't supply one, so
      *  readers can show `def.name` unconditionally. */
     name: string;
-    /** source declarations, post-URL-normalization. uv rects + sizes
-     *  live in the atlas JSON sidecar, fetched at runtime. */
-    src: NormalizedImageSource | NormalizedImageSource[];
+    /** search words for editor UIs, normalised (see `AssetMeta`). */
+    tags: readonly string[];
+    /** the textures this sprite's frames come from, in order. References, not
+     *  sources: the pixels belong to the texture kind. uv rects + sizes live in
+     *  the atlas JSON sidecar, fetched at runtime. */
+    frames: DepKey[];
     /** atlas padding (gutter pixels). */
     padding: number;
     /** mip generation flag. */
@@ -85,37 +82,3 @@ export type SpriteHandle = {
 };
 
 /* ── registration ── */
-
-/*#__NO_SIDE_EFFECTS__*/
-/**
- * declare a sprite. called at module scope.
- *
- * single entry → static sprite; array → flipbook frames.
- *
- * returns a pure-data handle that the asset pipeline reads to pack the
- * sprite atlas and the runtime consults (by id) for uvRect + sizePx.
- *
- * @example
- * ```ts
- * const Sword = sprite('sword', { src: 'items/sword.png' });
- * const FlamingSword = sprite('flaming-sword', {
- *     src: ['items/flaming_0.png', 'items/flaming_1.png'],
- * });
- * ```
- */
-export function sprite(id: string, options: SpriteOptions): SpriteHandle {
-    const src: NormalizedImageSource | NormalizedImageSource[] = options.src;
-
-    const name = options.name ?? id;
-    const padding = options.padding ?? 1;
-    const mipmap = options.mipmap ?? true;
-
-    const handle = declare(
-        registry.sprites,
-        id,
-        (): SpriteDef => ({ spriteId: id, name, src, padding, mipmap }),
-        (def): SpriteHandle => ({ id, dependency: { registry: 'sprites', id }, def }),
-    );
-    recordSprite(id);
-    return handle;
-}

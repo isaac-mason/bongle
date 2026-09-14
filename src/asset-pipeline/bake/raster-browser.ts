@@ -25,6 +25,15 @@ export function createBrowserRaster(): Raster {
             if (!ctx) throw new Error('[bongle] OffscreenCanvas 2d context unavailable');
             return ctx.getImageData(0, 0, c.width, c.height).data;
         },
+        putPixels(rgba, w, h) {
+            // putImageData writes straight alpha; drawImage would premultiply and
+            // quantise every partly transparent texel on the way through.
+            const { canvas, ctx } = makeCanvas(w, h);
+            const image = ctx.createImageData(w, h);
+            image.data.set(rgba);
+            ctx.putImageData(image, 0, 0);
+            return canvas as unknown as RasterCanvas;
+        },
         async encodePng(c) {
             const blob = await (c as unknown as OffscreenCanvas).convertToBlob({ type: 'image/png' });
             return new Uint8Array(await blob.arrayBuffer());

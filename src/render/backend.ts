@@ -16,10 +16,13 @@ import type { Camera, DeviceLostInfo, PerspectiveCamera } from 'gpucat';
 import type * as Performance from '../client/performance';
 import type { ClientRoom } from '../client/rooms';
 import type { Viewport } from '../client/viewport';
+import type * as Debug from '../core/debug';
 import type { Resources } from '../core/resources';
 import type { Blocks } from '../core/voxels/block-registry';
+import type { SpriteResources } from './sprites/sprite-resources';
 import type { TimeResources } from './time';
 import type { VoxelArenaBudget } from './voxels/voxel-arena';
+import type { VoxelTextures } from './voxels/voxel-textures';
 
 /** `none` draws nothing and is never auto-selected — see `render/none`. It
  *  exists for headless load generation, where a faithful client on the network
@@ -37,6 +40,9 @@ export type FrameContext = {
     resources: Resources;
     /** seconds, `performance.now() / 1000`, sampled once for the frame. */
     now: number;
+    /** the client's frame profiler. the renderer's phases are spans inside the
+     *  frame the client loop opened, so they land under it in the flame graph. */
+    profiler: Debug.Profiler;
     /** the active room's POV camera, resolved by the client into `Renderer.camera`
      *  (via `render/common/camera`); null when the active room has no POV. Drives
      *  the mesher/dom-ui/sprite/shadow visuals. */
@@ -71,6 +77,13 @@ export type RenderDeviceCaps = {
  * and returns this; every method operates on that closed-over state, so the client
  * holds a single `Renderer` and never sees backend internals.
  */
+export type RendererAtlases = {
+    /** the packed block atlas + per-texture entries. */
+    voxel: VoxelTextures | null;
+    /** the sprite atlas + its sidecar. */
+    sprite: SpriteResources | null;
+};
+
 export type Renderer = {
     /** which graphics backend this drives. */
     readonly kind: RendererBackendKind;
@@ -108,6 +121,10 @@ export type Renderer = {
     initResources(opts: InitResourcesOpts): void;
     loadResources(opts: LoadResourcesOpts): Promise<void>;
     disposeResources(): void;
+    /** the two texture atlases as the client holds them (the debug panel's
+     *  atlas tab draws them); null for either before `initResources`, and on a
+     *  backend that has none. */
+    atlases(): RendererAtlases;
 
     // ── active-room visuals ──────────────────────────────────────────────────
     // Only ONE room renders at a time. The client owns which room is active; the
@@ -125,6 +142,17 @@ export type Renderer = {
     /** render the active room, drawing with `camera` (resolved by the client before
      *  this call). No-op when there is no active room. */
     render(voxelViewChunkRadius: number): void;
+
+    // ── readiness ─────────────────────────────────────────────────────────────
+    /** Whether the mounted room's world is worth looking at: some chunk mesh is
+     *  resident (drawable) and nothing is still queued or in flight for the mesher.
+     *  True for a room with no voxel content at all, and on a backend with no
+     *  mesher (`none`, the asset pipeline) — neither has anything to wait for.
+     *
+     *  The client asks this to decide when to tell its host the game is up (see
+     *  `ClientDriver.ready`). A voxel world is black for the first frames after a
+     *  join no matter how fast the socket was: the chunks are in the worker. */
+    voxelWorldDrawable(): boolean;
 
     // ── HMR / registry-dispatch driven resource + visual rebuilds ────────────
     /** returns whether the block/voxel resources actually swapped. rebuilds the

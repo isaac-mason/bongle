@@ -14,10 +14,19 @@ import { describe, expect, it } from 'vitest';
 import { type CodegenEntry, renderBarrel as renderSoundBarrel } from '../../../src/asset-pipeline/bake/audio';
 import { type BuildEntry, renderBarrel as renderModelBarrel } from '../../../src/asset-pipeline/bake/models';
 
-const SOUND: CodegenEntry = { id: 'arrow-reload', src: 'assets/arrow-reload.ogg', long: false, duration: 0.236 };
+const SOUND: CodegenEntry = {
+    id: 'arrow-reload',
+    name: 'Arrow Reload',
+    tags: ['bow', 'ui'],
+    src: 'assets/arrow-reload.ogg',
+    long: false,
+    duration: 0.236,
+};
 
 const MODEL: BuildEntry = {
     id: 'bow',
+    name: 'Bow',
+    tags: ['weapon'],
     srcRel: 'assets/bow.glb',
     srcHash: 'abc',
     hash8: 'abcdef01',
@@ -94,5 +103,16 @@ describe('HandleMap declaration merging', () => {
         const sounds = renderSoundBarrel([SOUND]);
         expect(sounds).toContain('interface SoundHandleMap');
         expect(sounds).toMatch(/"arrow-reload":\s*SoundHandle\b/);
+    });
+});
+
+describe('barrel defs carry the declared asset meta', () => {
+    it('emits the authored name and tags, not the id', () => {
+        const models = renderModelBarrel([MODEL]);
+        expect(models).toContain('name: "Bow"');
+        expect(models).toContain('tags: ["weapon"]');
+        const sounds = renderSoundBarrel([SOUND]);
+        expect(sounds).toContain('name: "Arrow Reload"');
+        expect(sounds).toContain('tags: ["bow","ui"]');
     });
 });

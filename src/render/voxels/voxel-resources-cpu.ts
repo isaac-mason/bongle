@@ -1,7 +1,7 @@
 // voxel-resources-cpu.ts — WebGL-only voxel frame producer (CPU cull → mesh.draws).
 //
 // The WebGL counterpart of voxel-resources-gpu.ts. It builds the same substrate
-// (atlas + texAnimBuffer + quad arena + mesher + per-pass geometries + materials)
+// (atlas + texture entries + quad arena + mesher + per-pass geometries + materials)
 // but has no compute chain: instead of the ~15-dispatch GPU cull/emit/radix-sort
 // producer, `cullEmit` walks the resident sections on the CPU each frame — frustum +
 // per-facing back-face cone-cull — and pushes one `mesh.draws` entry per surviving
@@ -42,12 +42,14 @@ import {
     type SectionEntryFields,
     type VoxelArenaBudget,
 } from './voxel-arena';
+import { lightVolumeConfigOf, routeLightVolumeBuffers } from './voxel-light-sample';
+import { createLightVolume, evictChunkLightByKey, type LightVolume } from './voxel-light-volume';
 import { createCpuQuadMaterial, type VoxelPass } from './voxel-material';
 import {
-    type BlockTextureAtlasMetadata,
     createVoxelTextures,
     loadAtlasMeta,
     loadVoxelTextures,
+    type TileAtlasMetadata,
     type VoxelTextures,
 } from './voxel-textures';
 import type { VoxelVisuals } from './voxel-visuals';
@@ -74,6 +76,13 @@ type CpuSectionTable = {
     readonly cpuDataCount: Uint32Array; // 1 per slot (translucent slice quadCount)
     readonly cpuFaceOffsets: Uint32Array; // 7 per slot (localBase per facing)
     readonly cpuFaceCounts: Uint32Array; // 7 per slot
+    /** per-slot arena range `(dataStart, dataCount)` that `quadSlot` was last
+     *  stamped with for this slot; `cullEmit` re-stamps only when the live range
+     *  differs. Sentinel `0xffffffff` on a free slot: freeing resets it, so a
+     *  later occupant re-stamps even when it lands on the identical range (other
+     *  sections may have stamped over that range in between). */
+    readonly stampedBase: Uint32Array;
+    readonly stampedCount: Uint32Array;
     /** free slot indices (LIFO); a slot is live iff it's not on the stack. */
     readonly freeStack: number[];
 };
@@ -99,6 +108,8 @@ function createCpuSectionTable(slotCount: number): CpuSectionTable {
         cpuDataCount: new Uint32Array(slotCount),
         cpuFaceOffsets: new Uint32Array(slotCount * 7),
         cpuFaceCounts: new Uint32Array(slotCount * 7),
+        stampedBase: new Uint32Array(slotCount).fill(0xffffffff),
+        stampedCount: new Uint32Array(slotCount).fill(0xffffffff),
         freeStack,
     };
 }
@@ -120,6 +131,8 @@ function sectionFreeSlot(t: CpuSectionTable, slot: number): void {
         t.cpuFaceOffsets[facingBase + i] = 0;
         t.cpuFaceCounts[facingBase + i] = 0;
     }
+    t.stampedBase[slot] = 0xffffffff;
+    t.stampedCount[slot] = 0xffffffff;
     t.freeStack.push(slot);
 }
 
@@ -379,7 +392,7 @@ function packerAllocSlotWithEviction(packer: CpuVoxelArena, upsertKey: string, p
 // read-only storage streams by name — and NO `geometry.indirect` (WebGL2 rejects
 // it at prepare-time; the per-frame `mesh.draws` carries the draw args instead).
 
-function createGeometries(arenas: CpuVoxelArena, quadSlot: GpuBuffer): Record<VoxelPass, Geometry> {
+function createGeometries(arenas: CpuVoxelArena, quadSlot: GpuBuffer, lightVolume: LightVolume): Record<VoxelPass, Geometry> {
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
@@ -390,6 +403,8 @@ function createGeometries(arenas: CpuVoxelArena, quadSlot: GpuBuffer): Record<Vo
         g.setBuffer('quadSlot', quadSlot);
         // ChunkInfo: per-slot {origin, arenaBase}. VS reads chunkInfo[slot].origin.
         g.setBuffer('chunkInfo', arenas.tables[pass].buffer);
+        // per-chunk light tiles + residency grid, sampled per corner in the VS.
+        routeLightVolumeBuffers(g, lightVolume);
         // NO g.indirect: mesh.draws (set by cullEmit) is the draw source on WebGL2.
         out[pass] = g;
     }
@@ -416,21 +431,20 @@ export type VoxelResources = {
     arenas: CpuVoxelArena;
     /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
     meshDispatcher: Mesher | null;
+    /** GPU-resident per-chunk light tiles + residency grid. Light is the ROOT
+     *  residency fact: a chunk may be lit without a mesh, never meshed without
+     *  light. So it is NOT released when the mesh is evicted (`packerEvictChunk`,
+     *  `toForget`) - only when the CHUNK itself is gone from `voxels.chunks`.
+     *  The `toForget` case matters: those are all-air chunks, exactly where
+     *  entities stand and still need lighting. */
+    lightVolume: LightVolume;
 
     /** per-quad → section-slot table (arena-quad-indexed, one u32 per quad slot);
      *  `buffer` is bound as 'quadSlot' on every pass geometry so the CPU material
      *  resolves `chunkInfo[quadSlot[instanceIndex]].origin`. A projection of the
-     *  SectionTable owned entirely here: `cullEmit` (re)stamps a section's range
-     *  when it changes (see `_stampedBase`/`_stampedCount`). The packer/arena never
-     *  reference it — no backend conditional leaks into shared code. */
+     *  SectionTable: `cullEmit` (re)stamps a visible section's range when it differs
+     *  from the table's per-slot `stampedBase`/`stampedCount`, which free resets. */
     quadSlot: { data: Uint32Array; buffer: GpuBuffer };
-    /** per-pass, per-section-slot record of the arena range `quadSlot` was last
-     *  stamped with. `cullEmit` re-stamps only when a section's `(dataStart,
-     *  dataCount)` differs — the exact + self-invalidating re-stamp condition (the
-     *  slot *index* is stable across chunk reuse; origin comes from `chunkInfo`
-     *  fresh). Sentinel-filled so the first sighting always stamps. */
-    stampedBase: Record<VoxelPass, Uint32Array>;
-    stampedCount: Record<VoxelPass, Uint32Array>;
     /** per-pass reusable `mesh.draws` arrays. `cullEmit` clears + repopulates them
      *  each frame (one entry per surviving (section, facing) range) and assigns
      *  them onto the active room's per-pass voxel meshes. Allocation-free. */
@@ -441,13 +455,12 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     console.log(`[cpu-voxel-frame] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
     const textures = createVoxelTextures(registry);
-    const { atlas, texAnimBuffer } = textures;
 
     const elapsedTime = time.elapsedTime;
     const quadMaterials: Record<VoxelPass, Material> = {
-        opaque: createCpuQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque', elapsedTime, env }),
-        transparent: createCpuQuadMaterial({ atlas, texAnimBuffer, pass: 'transparent', elapsedTime, env }),
-        translucent: createCpuQuadMaterial({ atlas, texAnimBuffer, pass: 'translucent', elapsedTime, env }),
+        opaque: createCpuQuadMaterial({ textures, pass: 'opaque', elapsedTime, env }),
+        transparent: createCpuQuadMaterial({ textures, pass: 'transparent', elapsedTime, env }),
+        translucent: createCpuQuadMaterial({ textures, pass: 'translucent', elapsedTime, env }),
     };
 
     const arenas = createCpuVoxelArena(budget);
@@ -463,16 +476,10 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     });
     const quadSlot = { data: quadSlotData, buffer: quadSlotBuffer };
 
-    // per-pass, per-section-slot last-stamped arena range; sentinel so first stamp fires.
-    const mkStamp = (): Record<VoxelPass, Uint32Array> => ({
-        opaque: new Uint32Array(arenas.tables.opaque.slotCount).fill(0xffffffff),
-        transparent: new Uint32Array(arenas.tables.transparent.slotCount).fill(0xffffffff),
-        translucent: new Uint32Array(arenas.tables.translucent.slotCount).fill(0xffffffff),
-    });
-    const stampedBase = mkStamp();
-    const stampedCount = mkStamp();
-
-    const geometries = createGeometries(arenas, quadSlotBuffer);
+    // built before the geometries: they bind its buffers by name.
+    const lightVolume = createLightVolume(budget.lightGridChunkRadius, budget.maxLightTiles);
+    env.lightVolumeConfig.value = lightVolumeConfigOf(lightVolume);
+    const geometries = createGeometries(arenas, quadSlotBuffer, lightVolume);
 
     const draws: Record<VoxelPass, NonIndexedMeshDraw[]> = {
         opaque: [],
@@ -486,10 +493,9 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         geometries,
         arenas,
         quadSlot,
-        stampedBase,
-        stampedCount,
         draws,
         meshDispatcher: null,
+        lightVolume,
     };
 }
 
@@ -504,7 +510,7 @@ export async function load(
     workerCount: number,
     workerQueueDepth: number,
     resources: Resources,
-    meta?: BlockTextureAtlasMetadata | null,
+    meta?: TileAtlasMetadata | null,
 ): Promise<void> {
     await loadVoxelTextures(res.textures, registry, resources.loader, meta);
 
@@ -565,7 +571,7 @@ function f32Equal(a: Float32Array, b: Float32Array): boolean {
 
 export function dispose(state: VoxelResources): void {
     state.textures.atlas.dispose();
-    state.textures.texAnimBuffer.dispose();
+    state.textures.entriesBuffer.dispose();
     state.quadMaterials.opaque.dispose();
     state.quadMaterials.transparent.dispose();
     state.quadMaterials.translucent.dispose();
@@ -617,17 +623,17 @@ function facingVisible(rx: number, ry: number, rz: number, f: number): boolean {
     return isPlus ? axisVal < HALF : axisVal > NEG_HALF;
 }
 
-/** Keep `quadSlot` current for one section: if its arena range `(base,count)` changed
- *  since last stamp, fill `quadSlot[base..+count] = slot` + mark the GPU updateRange.
- *  The projection that replaces the old packer-side fill — owned by the frame, keyed
- *  off facts the arena already exposes, so no backend conditional touches the packer.
- *  Called just before a section contributes draws, so only visible sections upload. */
+/** Keep `quadSlot` current for one section: if its arena range `(base,count)` differs
+ *  from what this slot last stamped (or the slot was freed since), fill
+ *  `quadSlot[base..+count] = slot` + mark the GPU updateRange. Called just before a
+ *  section contributes draws, so only visible sections upload. */
 function stampQuadSlot(res: VoxelResources, pass: VoxelPass, slot: number, base: number, count: number): void {
-    if (res.stampedBase[pass][slot] === base && res.stampedCount[pass][slot] === count) return;
+    const table = res.arenas.tables[pass];
+    if (table.stampedBase[slot] === base && table.stampedCount[slot] === count) return;
     res.quadSlot.data.fill(slot, base, base + count);
     res.quadSlot.buffer.addUpdateRange(base, count);
-    res.stampedBase[pass][slot] = base;
-    res.stampedCount[pass][slot] = count;
+    table.stampedBase[slot] = base;
+    table.stampedCount[slot] = count;
 }
 
 /**
@@ -765,10 +771,21 @@ export function upsertChunk(res: VoxelResources, key: string, chunk: Chunk, mesh
     packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
 }
 
-/** remove a chunk from this backend's arena (e.g. the chunk unloaded from `voxels`). */
+/**
+ * Remove a chunk from this backend's arena, and release its light tile with it.
+ *
+ * ONE residency decision. The light pool used to outlive the mesh, on the theory
+ * that light can exist without a mesh (an all-air chunk is where entities stand).
+ * In practice that made the pool a SECOND residency system with a different
+ * working set from the AOI's: it filled with chunks nothing renders, hit
+ * capacity, and then evicted by distance while the AOI immediately re-requested
+ * what it had just dropped. Tying the two together bounds the pool by the mesh
+ * budget, which is what that budget was sized for.
+ */
 export function removeChunk(res: VoxelResources, key: string): void {
     const packer = res.arenas;
     if (packerHas(packer, key)) packerEvictChunk(packer, key);
+    evictChunkLightByKey(res.lightVolume, key);
 }
 
 /** Synchronously mesh a chunk (unless all-air or fully occluded) and place it in
@@ -822,7 +839,10 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
 
     // evict meshes for chunks the server dropped (voxel_region_del queued their keys).
     if (voxels.dirty.removed.size > 0) {
-        for (const key of voxels.dirty.removed) removeChunk(res, key);
+        for (const key of voxels.dirty.removed) {
+            removeChunk(res, key);
+            evictChunkLightByKey(res.lightVolume, key);
+        }
         voxels.dirty.removed.clear();
     }
 
@@ -832,7 +852,10 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
     // evict any arena-held chunk the server has dropped from voxels.chunks
     // (server discovery owns chunk membership; we just mirror it).
     for (const key of packer.residentKeys) {
-        if (!voxels.chunks.has(key)) packerEvictChunk(packer, key);
+        if (!voxels.chunks.has(key)) {
+            packerEvictChunk(packer, key);
+            evictChunkLightByKey(res.lightVolume, key);
+        }
     }
 
     // self-heal: re-dirty any chunk lost to memory pressure so it re-meshes instead

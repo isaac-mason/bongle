@@ -11,6 +11,7 @@
 // 1-voxel paint behaviour, no separate mode needed.
 
 import type { Input } from '../../client/input';
+import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -19,9 +20,8 @@ import type { VoxelOp } from '../blueprint';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
-import type { PointerState } from '../pointer-state';
-import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../pointer-state';
 import { buildShape } from '../scene/shapes';
+import { playBulkEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import { applyStamp } from './brush-apply';
 
@@ -48,6 +48,9 @@ export type PainterState = {
     lastCenter: [number, number, number] | null;
     /** idle-preview cache key (content-eq dirty check, matches brush.ts). */
     previewKey: string;
+    /** last stroke sfx timestamp, ms. lives on the stroke rather than
+     *  module scope for the same reason the rest of this state does. */
+    lastSoundAt: number;
 };
 
 export function createPainterState(): PainterState {
@@ -58,8 +61,14 @@ export function createPainterState(): PainterState {
         visited: new Set(),
         lastCenter: null,
         previewKey: '',
+        lastSoundAt: 0,
     };
 }
+
+/** minimum gap between stroke sfx, ms. the painter applies a stamp every
+ *  time the cursor crosses into a new voxel, which on a fast drag is far
+ *  more often than a clip should retrigger, this makes it a stream. */
+const STROKE_SOUND_MS = 80;
 
 const STAMP_SCRATCH: Selection.Selection = Selection.create();
 
@@ -69,14 +78,14 @@ export function updatePainter(
     state: PainterState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    pointer: PointerState,
     input: Input,
     voxels: Voxels,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
-    const held = pointerHeld(pointer, input);
-    const justUp = pointerJustUp(pointer, input);
-    const cancel = pointerJustRight(input);
+    const mk = input.mouseKeyboard;
+    const justDown = isMouseJustDown(mk, 'left');
+    const held = isMouseDown(mk, 'left');
+    const justUp = isMouseJustUp(mk, 'left');
+    const cancel = isMouseJustDown(mk, 'right');
     const s = store.getState();
     const opts = s.paintOptions;
     const hv = s.hoverVoxel;
@@ -91,6 +100,7 @@ export function updatePainter(
         state.reverse = [];
         state.visited.clear();
         state.lastCenter = null;
+        state.lastSoundAt = 0;
         return;
     }
 
@@ -101,6 +111,7 @@ export function updatePainter(
         state.reverse = [];
         state.visited.clear();
         state.lastCenter = null;
+        state.lastSoundAt = 0;
     }
 
     // ── apply while held ──
@@ -137,6 +148,13 @@ export function updatePainter(
             if (frameForward.length > 0) {
                 // send live so the user sees the paint stream.
                 sendOps(ctx, frameForward);
+                // and hear it: one clip per cadence tick, characterising the
+                // cells painted this frame rather than the stroke so far.
+                const now = performance.now();
+                if (now - state.lastSoundAt >= STROKE_SOUND_MS) {
+                    state.lastSoundAt = now;
+                    playBulkEdit(ctx, frameForward, frameReverse);
+                }
                 for (const op of frameForward) state.forward.push(op);
                 for (const op of frameReverse) state.reverse.push(op);
             }
@@ -150,13 +168,20 @@ export function updatePainter(
         if (state.forward.length > 0) {
             const forward = state.forward;
             const reverse = state.reverse;
+            // the stroke made its own noise on the way through, so the
+            // dispatch that closes it stays quiet; a later redo has no
+            // cadence behind it and speaks for the whole stroke.
+            let live = true;
             store.getState().action({
                 label: 'paint',
                 do() {
                     sendOps(ctx, forward);
+                    if (live) live = false;
+                    else playBulkEdit(ctx, forward, reverse);
                 },
                 undo() {
                     sendOps(ctx, reverse);
+                    playBulkEdit(ctx, reverse, forward);
                 },
             });
         }
@@ -165,6 +190,7 @@ export function updatePainter(
         state.reverse = [];
         state.visited.clear();
         state.lastCenter = null;
+        state.lastSoundAt = 0;
     }
 
     // ── footprint preview ──

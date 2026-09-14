@@ -738,21 +738,21 @@ export function flush(
     state: Discovery,
     rooms: Rooms,
     resources: Resources,
-    metrics: Debug.Metrics,
+    profiler: Debug.Profiler,
 ): Array<[Client, ServerMessage]> {
     const out: Array<[Client, ServerMessage]> = [];
 
     // --- phase 1: diff detection (per-room, serialize once) ---
-    Debug.begin(metrics, 'discovery/diff');
+    Debug.begin(profiler, 'discovery/diff');
     for (const room of rooms.rooms.values()) {
         runDiffDetection(room.scene);
     }
-    Debug.end(metrics, 'discovery/diff');
+    Debug.end(profiler, 'discovery/diff');
 
     // --- phase 2: voxel chunk streaming + transform-root region-index reconcile ---
     // runs BEFORE the scene phase: the region index must be current when scene sync
     // gates node presence via `rootRegionChanges`.
-    Debug.begin(metrics, 'discovery/voxels');
+    Debug.begin(profiler, 'discovery/voxels');
     for (const room of rooms.rooms.values()) {
         // reconcile the transform-root region index off this tick's replication.dirty so
         // rootsInRegion is current for the scene phase. runs for every room (even
@@ -774,10 +774,10 @@ export function flush(
         }
         room.voxels.dirty.light.clear();
     }
-    Debug.end(metrics, 'discovery/voxels');
+    Debug.end(profiler, 'discovery/voxels');
 
     // --- phase 3: per-client scene sync ---
-    Debug.begin(metrics, 'discovery/scene');
+    Debug.begin(profiler, 'discovery/scene');
 
     // build room list lazily (only if at least one client needs it)
     let roomListJson: string | null = null;
@@ -875,7 +875,7 @@ export function flush(
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
     for (const room of rooms.rooms.values()) clearDirtyNodes(room.scene);
 
-    Debug.end(metrics, 'discovery/scene');
+    Debug.end(profiler, 'discovery/scene');
 
     return out;
 }

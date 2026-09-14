@@ -25,6 +25,7 @@ import {
 } from '../../client/ui/components';
 import { useClient } from '../../client/ui/stores/client-store';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
+import { assetMatches } from '../../core/asset-meta';
 import { depId, registry } from '../../core/registry';
 import {
     BLOCK_FLAG_CLIMBABLE,
@@ -35,6 +36,7 @@ import {
 } from '../../core/voxels/block-registry';
 import { MaterialType } from '../../core/voxels/blocks';
 import { useEditRoom } from '../edit-room-store';
+import { HOTBAR_NUMBER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
 import { switchRoom } from '../session';
@@ -87,7 +89,7 @@ export function LibraryOverlay() {
                         className="p-1 hover:bg-surface-muted text-fg-muted cursor-pointer"
                         title="close (esc)"
                     >
-                        <Icons.X size={14} />
+                        <Icons.X size={12} />
                     </button>
                 </div>
 
@@ -125,16 +127,37 @@ function InventoryTab() {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<Filter>('all');
 
+    // 1-9 over a hovered tile binds it to that hotbar slot. handled at the DOM
+    // layer rather than the per-frame shortcut loop so it also works while the
+    // search box has focus (the engine drops every key while a text input is
+    // focused). stopPropagation keeps the engine's window listener from also
+    // reading the digit as a plain slot select; preventDefault keeps it out of
+    // the search text. with no tile hovered the event passes through untouched.
+    const hovered = useEditRoom((s) => s.hoveredInventoryItem);
+    useEffect(() => {
+        if (!hovered) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+            const slot = HOTBAR_NUMBER_KEYS.indexOf(e.code as (typeof HOTBAR_NUMBER_KEYS)[number]);
+            if (slot === -1) return;
+            e.preventDefault();
+            e.stopPropagation();
+            useEditor.getState().setHotbarSlot(slot, hovered);
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [hovered]);
+
     const catalog = useMemo(() => (room ? buildCatalog(room, sceneList) : []), [room, sceneList]);
     const filtered = useMemo(() => {
-        const q = search.trim().toLowerCase();
+        const q = search.trim();
         return catalog.filter((item) => {
             if (filter === 'bongle' && item.kind !== 'block') return false;
             if (filter === 'prefabs' && item.kind !== 'prefab') return false;
             if (filter === 'blueprints' && item.kind !== 'blueprint') return false;
             if (!q) return true;
-            const { name, id } = inventoryItemDisplay(item, room);
-            return name.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+            const { name, id, tags } = inventoryItemDisplay(item, room);
+            return assetMatches({ id, name, tags }, q);
         });
     }, [catalog, filter, search, room]);
 
@@ -315,6 +338,7 @@ function PrefabInfoRows({ prefabId }: { prefabId: string }) {
             {realm && <AttrRow label="realm" value={String(realm)} />}
             {argKeys.length > 0 && <AttrRow label="args" value={argKeys.join(', ')} />}
             {def.deps.length > 0 && <AttrRow label="deps" value={String(def.deps.length)} />}
+            {def.tags.length > 0 && <AttrRow label="tags" value={def.tags.join(', ')} />}
         </>
     );
 }
@@ -330,7 +354,8 @@ function BlockInfoRows({ blockKey }: { blockKey: string }) {
     const flags = blocks.flags[sid] ?? 0;
     const material = blocks.material[sid] ?? MaterialType.OPAQUE;
     const emits = (blocks.lightEmission[sid] ?? 0) !== 0;
-    const totalStates = (parsed ? blocks.defs.find((d) => d.id === parsed.blockId) : undefined)?.states.totalStates ?? 1;
+    const def = parsed ? blocks.defs.find((d) => d.id === parsed.blockId) : undefined;
+    const totalStates = def?.states.totalStates ?? 1;
 
     const materialLabel =
         material === MaterialType.TRANSLUCENT ? 'translucent' : material === MaterialType.TRANSPARENT ? 'cutout' : 'opaque';
@@ -347,6 +372,7 @@ function BlockInfoRows({ blockKey }: { blockKey: string }) {
             {(flags & BLOCK_FLAG_LIQUID) !== 0 && <AttrRow label="liquid" value="yes" />}
             {(flags & BLOCK_FLAG_CLIMBABLE) !== 0 && <AttrRow label="climb" value="yes" />}
             {totalStates > 1 && <AttrRow label="states" value={String(totalStates)} />}
+            {def && def.tags.length > 0 && <AttrRow label="tags" value={def.tags.join(', ')} />}
         </>
     );
 }
@@ -606,7 +632,7 @@ function SceneRow({
                             }`}
                             title="referenced by prefab()"
                         >
-                            <Icons.Tags size={8} />
+                            <Icons.Tags size={12} />
                         </span>
                     )}
                     <button
@@ -623,7 +649,7 @@ function SceneRow({
                         }`}
                         title="rename"
                     >
-                        <Icons.Pencil size={10} />
+                        <Icons.Pencil size={12} />
                     </button>
                     <button
                         type="button"
@@ -638,7 +664,7 @@ function SceneRow({
                         }`}
                         title="delete"
                     >
-                        <Icons.Trash2 size={10} />
+                        <Icons.Trash2 size={12} />
                     </button>
                 </div>
             )}

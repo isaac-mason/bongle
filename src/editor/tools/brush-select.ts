@@ -17,8 +17,8 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi } from '../edit-room-store';
-import type { PointerState } from '../pointer-state';
 import { testMask } from '../scene/mask';
+import { playSelected } from '../sounds';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
 // per-room state contract. the shared stroke harness is nested under `brush`
@@ -34,12 +34,11 @@ export function createBrushSelectState(): BrushSelectState {
 export function updateBrushSelect(
     state: BrushSelectState,
     store: EditRoomStoreApi,
-    _ctx: ScriptContext,
-    pointer: PointerState,
+    ctx: ScriptContext,
     input: Input,
     voxels: Voxels,
 ): void {
-    advanceBrushStroke(state.brush, store, pointer, input, store.getState().brushSelectOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, input, store.getState().brushSelectOptions, (accumulated) => {
         const s = store.getState();
         const mk = input.mouseKeyboard;
         const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
@@ -60,6 +59,7 @@ export function updateBrushSelect(
         // `#existing` mask) leaves the selection intact rather than wiping it.
         if (selectedAny || behavior === 'add') {
             store.setState({ selection: next });
+            playSelected(ctx, behavior === 'add');
         }
     });
 }

@@ -9,6 +9,7 @@
 
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { tile } from '../../../../src/core/registry';
 import { stairs } from '../../../../src/core/voxels/block-presets';
 import type { Blocks } from '../../../../src/core/voxels/block-registry';
 import {
@@ -16,7 +17,7 @@ import {
     deserializeBlockRegistryForWorker,
     serializeBlockRegistryForWorker,
 } from '../../../../src/core/voxels/block-registry-serde';
-import { blockTexture, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
+import { CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import {
     buildMeshInput,
     type ChunkMeshResult,
@@ -39,8 +40,8 @@ beforeEach(() => {
 // path (stairs). The serde must round-trip per-state and per-mesh
 // tables, so we want at least one of each kind.
 function buildMixedRegistry(): Blocks {
-    blockTexture('stone', { src: 'textures/stone.png' });
-    stairs('stair', { textures: 'stone' });
+    const stoneTex = tile('stone', { src: 'textures/stone.png' });
+    stairs('stair', { tiles: stoneTex });
     return buildTestRegistry([
         { id: 'block', texId: 'block' },
         { id: 'glass', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, texId: 'glass' },
@@ -102,6 +103,7 @@ describe('block-registry-serde', () => {
             for (let m = 1; m <= meshCount; m++) {
                 expect(bytesEqual(out.meshTexIndices![m]!, reg.meshTexIndices[m]!)).toBe(true);
                 expect(bytesEqual(out.meshQuadMaterials![m]!, reg.meshQuadMaterials[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadUnshaded![m]!, reg.meshQuadUnshaded[m]!)).toBe(true);
                 expect(bytesEqual(out.meshQuadShape![m]!, reg.meshQuadShape[m]!)).toBe(true);
                 expect(bytesEqual(out.meshQuadFaceDir![m]!, reg.meshQuadFaceDir[m]!)).toBe(true);
                 expect(bytesEqual(out.meshQuadCullFaceDir![m]!, reg.meshQuadCullFaceDir[m]!)).toBe(true);
@@ -124,6 +126,7 @@ describe('block-registry-serde', () => {
 
             expect(out.meshTexIndices![0]!.length).toBe(0);
             expect(out.meshQuadMaterials![0]!.length).toBe(0);
+            expect(out.meshQuadUnshaded![0]!.length).toBe(0);
             expect(out.meshQuadShape![0]!.length).toBe(0);
             expect(out.meshQuadFaceDir![0]!.length).toBe(0);
             expect(out.meshQuadCullFaceDir![0]!.length).toBe(0);

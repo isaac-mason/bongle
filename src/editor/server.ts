@@ -28,7 +28,8 @@ import {
     setPrefab,
     setRealm,
 } from '../core/scene/scene-tree';
-import { listen, onJoin, onLeave, onTick, script } from '../core/scene/scripts';
+import { listen, onJoin, onLeave, onTick } from '../core/scene/scripts';
+import { script } from '../core/registry';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';

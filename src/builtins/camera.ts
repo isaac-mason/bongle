@@ -1,4 +1,5 @@
-import { type TraitType, trait } from '../core/scene/traits';
+import { type TraitType } from '../core/scene/traits';
+import { trait } from '../core/registry';
 
 /**
  * camera trait, plain projection data (fov/near/far) for a scene-tree node.

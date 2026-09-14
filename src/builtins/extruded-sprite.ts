@@ -22,7 +22,8 @@
 // `fps` (parallel to `SpriteTrait`).
 
 import type { Vec4 } from 'math';
-import { type TraitType, trait } from '../core/scene/traits';
+import { trait } from '../core/registry';
+import type { TraitType } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
 import type { ExtrudedSpriteVisualState } from '../render/sprites/extruded-sprite-visuals';
 
@@ -54,13 +55,6 @@ export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
      *  applied as `mix(surface, rgb, a)` over the tint but under lighting.
      *  [0,0,0,0] = none (default). client-only. */
     flash: [0, 0, 0, 0] as Vec4,
-
-    /**
-     * voxel-light contribution [sky, r, g, b], each 0-1. client-only.
-     * auto-sampled each frame from the room's voxel light grid at the
-     * node's world position. mirrors `MeshTrait.light`.
-     */
-    light: [0, 0, 0, 0] as Vec4,
 
     /** emissive glow intensity 0-1. added to final color. client-only. */
     glow: 0,

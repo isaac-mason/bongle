@@ -34,6 +34,7 @@ import { applyRegistryChanges } from '../../src/server/registry-dispatch';
 import * as Rooms from '../../src/server/rooms';
 import * as EngineServerModule from '../../src/server/server';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
+import { scriptsById } from '../../src/core/scene/traits';
 
 const DT = 1 / 60;
 const ENTRY = 'src/index.ts';
@@ -177,7 +178,7 @@ describe('hmr system removal in the editor flow (integration)', () => {
         // the registry dropped the key, the engine-owned WorldTrait def was pruned, and the edit
         // room's live instance is disposed.
         expect(registry.scripts.byId.has(SPIN_KEY)).toBe(false);
-        expect(WorldTrait.scriptsById.has('spin')).toBe(false);
+        expect(scriptsById(WorldTrait).has('spin')).toBe(false);
         expect(WorldTrait.def.scripts.map((s) => s.key)).not.toContain(SPIN_KEY);
         expect(rootInstances(booted.editRoom)).not.toContain(SPIN_KEY);
 

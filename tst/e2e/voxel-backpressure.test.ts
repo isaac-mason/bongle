@@ -6,7 +6,7 @@
 // voxel_ack → handleVoxelAck. (server-side caps/gates are unit-tested in
 // discovery.test.ts; this covers the client ack seam those can't reach.)
 
-import { block, setBlock } from 'bongle';
+import { block, setBlock, tile } from 'bongle';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
@@ -20,7 +20,8 @@ describe('voxel backpressure (e2e)', () => {
 
     it('client acks delivered chunks, freeing the server in-flight window', async () => {
         harness = await createTestHarness(() => {
-            block('stone', { model: () => ({ type: 'cube', textures: { all: { texture: 'stone' } } }) });
+            const stoneTex = tile('stone', { src: 'textures/stone.png' });
+            block('stone', { model: () => ({ type: 'cube', tiles: { all: stoneTex } }) });
         });
         const client = await harness.connect();
         harness.tickN(3); // join + initial scene sync

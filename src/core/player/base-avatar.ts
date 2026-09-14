@@ -18,7 +18,7 @@
 // eval, `CharacterTrait` can read these without an `ensureModel` race.
 
 import { asset } from '../../api/asset';
-import { model } from '../models/models';
+import { model } from '../registry';
 
 /** Stable id for the builtin avatar. Imported by the service to short-
  *  circuit the resolve endpoint (it returns `{ modelId: BUILTIN_BASE_AVATAR_ID }`

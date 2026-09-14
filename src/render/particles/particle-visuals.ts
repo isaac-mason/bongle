@@ -14,10 +14,7 @@
 // imports leak in.
 
 import { packTo, type Scene } from 'gpucat';
-import type { Vec4 } from 'math';
 import type { ParticleHandle, ParticlePool } from '../../core/particles/particles';
-import { sampleVoxelLight } from '../../core/voxels/light';
-import type { Voxels } from '../../core/voxels/voxels';
 import type { SpriteResources } from '../sprites/sprite-resources';
 import {
     INSTANCE_MATERIAL_STRIDE,
@@ -60,9 +57,8 @@ export function init(batch: ParticleBatch, scene: Scene, spriteResources: Sprite
  * No camera arg, the billboard basis is reconstructed in-shader from
  * cameraViewMatrix.
  */
-const _light: Vec4 = [0, 0, 0, 0];
 
-export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: ParticlePool, voxels: Voxels, nowSec: number): void {
+export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: ParticlePool, nowSec: number): void {
     const count = pool.count;
 
     // mesh.count is the instance count drawIndexed sees; gating it on
@@ -109,28 +105,19 @@ export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: Par
         poseArr[off + 3] = w;
         poseArr[off + 7] = h;
 
-        const glowValue = glow[i]!;
-        // glow raises the light floor to `glowValue` (see shader). at >=1
-        // the floor saturates, so the sampled voxel light is irrelevant,
-        // skip the sample.
-        if (glowValue >= 1) {
-            _light[0] = 0;
-            _light[1] = 0;
-            _light[2] = 0;
-            _light[3] = 0;
-        } else {
-            sampleVoxelLight(voxels, posX[i]!, posY[i]!, posZ[i]!, _light);
-        }
-
         packTo(InstanceMaterial, matArr, i * INSTANCE_MATERIAL_STRIDE, {
             uvRect: [resolved.u, resolved.v, resolved.w, resolved.h],
             tint: [tintR[i]!, tintG[i]!, tintB[i]!, tintA[i]!],
-            light: [_light[0]!, _light[1]!, _light[2]!, _light[3]!],
-            glow: glowValue,
+            glow: glow[i]!,
         });
     }
 
+    // the pool is dense [0, count), so only that prefix is ever read by the draw. upload it
+    // rather than the whole INSTANCE_CAPACITY allocation — a blanket `needsUpdate` here
+    // re-sends 8192 slots' worth of pose + material every frame a single particle is alive.
+    batch.instancePoseBuf.addUpdateRange(0, count * poseFloatStride);
     batch.instancePoseBuf.needsUpdate = true;
+    batch.instanceMaterialBuf.addUpdateRange(0, (count * INSTANCE_MATERIAL_STRIDE) / 4);
     batch.instanceMaterialBuf.needsUpdate = true;
 }
 

@@ -153,7 +153,11 @@ export function update(visuals: ShadowVisuals, batch: ShadowBatch, voxels: Voxel
     }
 
     batch.mesh.count = batch.head;
-    if (dirty) batch.instanceBuf.needsUpdate = true;
+    // dense [0, head) pool — upload that prefix, not the whole capacity allocation.
+    if (dirty) {
+        batch.instanceBuf.addUpdateRange(0, batch.head * stride4);
+        batch.instanceBuf.needsUpdate = true;
+    }
 }
 
 /**

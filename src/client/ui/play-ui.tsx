@@ -6,7 +6,7 @@ import { Viewport } from './viewport';
 
 import './editor.css';
 
-// the debug dashboard is vanilla dashcat mounted straight to the DOM (see
+// the debug dashboard is plain DOM mounted straight to the document (see
 // client/ui/dashboard.ts), toggled by backtick via the `debugOpen` store bit.
 // nothing to render in the React tree here.
 

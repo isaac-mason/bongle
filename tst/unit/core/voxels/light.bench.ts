@@ -19,8 +19,8 @@
 
 import { bench, describe } from 'vitest';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
-import { buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
-import { type BlockDef, type BlockTextureDef, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
+import { buildBlockRegistry, createBlockRegistry } from '../../../../src/core/voxels/block-registry';
+import { type BlockDef, CullType, MaterialType, type TileDef, type TileHandle } from '../../../../src/core/voxels/blocks';
 import { flushPendingLight, propagateAllLight, updateLightBatch } from '../../../../src/core/voxels/light';
 import {
     CHUNK_SIZE,
@@ -40,8 +40,12 @@ const SINGLE_STATE = {
     decode: () => ({}),
 };
 
-function texDef(id: string): BlockTextureDef {
-    return { id, frames: [`textures/${id}.png`], fps: 1, interpolate: false };
+function tileHandle(id: string): TileHandle {
+    return {
+        id,
+        dependency: { registry: 'tiles', id },
+        def: { id, frames: [{ registry: 'textures', id }], fps: 1, interpolate: false },
+    };
 }
 
 type Spec = {
@@ -55,14 +59,14 @@ type Spec = {
 function buildLightRegistry(specs: Spec[]) {
     const defs = new Map<string, BlockDef>();
     const handles = new Map<string, any>();
-    const textures = new Map<string, BlockTextureDef>();
+    const tiles = new Map<string, TileDef>();
     for (const s of specs) {
-        const tex = texDef(s.id);
-        textures.set(s.id, tex);
+        const tex = tileHandle(s.id);
+        tiles.set(s.id, tex.def);
         const def: BlockDef = {
             id: s.id,
             states: SINGLE_STATE as any,
-            model: () => ({ type: 'cube' as const, textures: { all: { texture: tex } } }),
+            model: () => ({ type: 'cube' as const, tiles: { all: tex } }),
             cull: s.cull ?? CullType.SOLID,
             material: s.material ?? MaterialType.OPAQUE,
             lightEmission: s.lightEmission,
@@ -82,7 +86,9 @@ function buildLightRegistry(specs: Spec[]) {
             defaultKey: () => s.id,
         });
     }
-    return buildBlockRegistry(defs, handles, textures);
+    const out = createBlockRegistry();
+    buildBlockRegistry(out, defs, handles, tiles);
+    return out;
 }
 
 // stone (solid opaque), glowstone (full RGB emitter, transparent so it

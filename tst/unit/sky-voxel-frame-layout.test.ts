@@ -1,10 +1,12 @@
 import * as gpu from 'gpucat';
 import { describe, expect, test } from 'vitest';
 import { ENVIRONMENT_DEFAULT } from '../../src/api/environment';
+import { createBlockRegistry } from '../../src/core/voxels/block-registry';
 import { createEnvironmentResources } from '../../src/render/environment/environment';
 import { createCpuQuadMaterial, createGpuQuadMaterial } from '../../src/render/voxels/voxel-material';
+import { createVoxelTextures } from '../../src/render/voxels/voxel-textures';
 
-const { compile, d } = gpu as unknown as {
+const { compile } = gpu as unknown as {
     compile: (slots: { vertex: unknown; fragment: unknown; depth?: unknown }) => {
         code: string;
         uniformGroups: Array<{
@@ -40,12 +42,6 @@ function frameDump(r: ReturnType<typeof compileMat>) {
         );
 }
 
-function makeStubAtlas() {
-    return new gpu.ArrayTexture(new Uint8Array(4), 1, 1, 1) as unknown as gpu.ArrayTexture;
-}
-function makeStubBuffer() {
-    return gpu.createStorageBuffer(d.array(d.vec4f), new Float32Array(4)) as unknown as gpu.GpuBuffer;
-}
 
 describe('sky vs voxel frameGroup layout of shared EnvConfig', () => {
     test('EnvConfig lands at the same offset in sky and both voxel resolvers', () => {
@@ -53,8 +49,7 @@ describe('sky vs voxel frameGroup layout of shared EnvConfig', () => {
         const sky = compileMat(res.skyMaterial);
         const voxGpu = compileMat(
             createGpuQuadMaterial({
-                atlas: makeStubAtlas(),
-                texAnimBuffer: makeStubBuffer(),
+                textures: createVoxelTextures(createBlockRegistry()),
                 pass: 'opaque',
                 elapsedTime: gpu.f32(0),
                 env: res,
@@ -62,8 +57,7 @@ describe('sky vs voxel frameGroup layout of shared EnvConfig', () => {
         );
         const voxCpu = compileMat(
             createCpuQuadMaterial({
-                atlas: makeStubAtlas(),
-                texAnimBuffer: makeStubBuffer(),
+                textures: createVoxelTextures(createBlockRegistry()),
                 pass: 'opaque',
                 elapsedTime: gpu.f32(0),
                 env: res,

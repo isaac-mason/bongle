@@ -9,10 +9,10 @@ import type {
     BlockParticleConfig,
     BlockQuad,
     BlockSoundConfig,
-    BlockTextureDef,
+    TileDef,
     VertexAnimation,
 } from './blocks';
-import { collectModelTextureIds, deriveBlockDust, MaterialType, resolveTextureRef } from './blocks';
+import { collectModelTileIds, faceRotation, faceTile, MaterialType } from './blocks';
 import { defaultLightOpacity, packEmission } from './light';
 
 /** shape kind enum; matches block-collider's BlockShape['type'] order. */
@@ -109,6 +109,9 @@ export const BLOCK_FLAG_DOOR = 1 << 8;
  *  `block({ pathfindable })`, e.g. open doors pathable, hazards not. read by
  *  the voxel pathfinding utils (core/nav). mirrors Minecraft `isPathfindable`. */
 export const BLOCK_FLAG_PATHFINDABLE = 1 << 9;
+/** block can hold a hanging block below it even though it is not a full cube
+ *  (a chain, a fence post). vanilla's `canSupportCenter` special cases. */
+export const BLOCK_FLAG_SUPPORTS_HANGING = 1 << 10;
 
 /**
  * format a string key from a block id, its state schema, and a local state index.
@@ -382,6 +385,24 @@ export type Blocks = {
      */
     cubeFaceUVs: Uint8Array;
 
+    // ── per-position variation ──────────────────────────────────────
+
+    /**
+     * global state id → how many per-position model variants this state has.
+     * 0 or 1 means none; the mesher then reads the state's own base.
+     */
+    variantCount: Uint8Array;
+    /**
+     * global state id → the first of `variantCount` CONSECUTIVE bases. a cube
+     * base is a slot into cubeTexIndices/cubeFaceUVs, a mesh base is a meshId,
+     * so the mesher's arithmetic (`base + (hash & mask)`) is the same either way.
+     */
+    variantBase: Uint32Array;
+    /** global state id → max horizontal render offset, in 1/255 of a block. */
+    jitterXz: Uint8Array;
+    /** global state id → max downward render offset, in 1/255 of a block. */
+    jitterY: Uint8Array;
+
     // ── mesh-only data (dense, indexed by meshId) ───────────────────
 
     /**
@@ -398,6 +419,10 @@ export type Blocks = {
      * always allocated, quads without explicit material get the block's default.
      */
     meshQuadMaterials: Uint8Array[];
+
+    /** per-quad `shade: false` flag (1 = skip directional face shade). parallel
+     *  to meshQuads; always allocated. */
+    meshQuadUnshaded: Uint8Array[];
 
     /**
      * per-quad shape tag (SHAPE_FLAT..SHAPE_IRREGULAR) routing the mesher
@@ -696,10 +721,15 @@ export function createBlockRegistry(): Blocks {
         modelType: new Uint8Array(0),
         cubeTexIndices: new Uint16Array(0),
         cubeFaceUVs: new Uint8Array(0),
+        variantCount: new Uint8Array(0),
+        variantBase: new Uint32Array(0),
+        jitterXz: new Uint8Array(0),
+        jitterY: new Uint8Array(0),
         meshId: new Uint16Array(0),
         meshQuads: [],
         meshTexIndices: [],
         meshQuadMaterials: [],
+        meshQuadUnshaded: [],
         meshQuadShape: [],
         meshQuadFaceDir: [],
         meshQuadCullFaceDir: [],
@@ -744,15 +774,19 @@ export function createBlockRegistry(): Blocks {
 }
 
 /**
- * Rebuild `out` from the current block + texture declarations, IN PLACE. See
+ * Rebuild `out` from the current block + tile declarations, IN PLACE. See
  * `createBlockRegistry` for why identity is preserved rather than a fresh object
  * returned. Callers with no registry yet start from `createBlockRegistry()`.
+ *
+ * Declares nothing. Every derived entry a block implies (its dust textures,
+ * sprites and particles) is declared by `block()` in the declaring module's own
+ * scope; this pass only reads what is already there, through `handle._defaultDust`.
  */
 export function buildBlockRegistry(
     out: Blocks,
     blockDefs: Map<string, BlockDef>,
     blockHandles: Map<string, BlockHandle>,
-    blockTextures: Map<string, BlockTextureDef>,
+    tiles: Map<string, TileDef>,
 ): void {
     const orderedDefs: BlockDef[] = [];
     const orderedHandles: BlockHandle[] = [];
@@ -859,10 +893,25 @@ export function buildBlockRegistry(
     // at pass 2 and no BlockModel object is stored in the registry.
 
     const _tempModels: (BlockModel | undefined)[] = new Array(totalStates);
+    const _tempVariants: (BlockModel[] | undefined)[] = new Array(totalStates);
     const _tempColliderShapes: (Shape | undefined)[] = new Array(totalStates);
     const _tempBlockShapes: (BlockShape | undefined)[] = new Array(totalStates);
     const modelTypeTable = new Uint8Array(totalStates); // MODEL_NONE=0
     const meshIdTable = new Uint16Array(totalStates); // 0 = not a mesh
+    // per-position variants. `variantCount` is 0 for the overwhelming majority
+    // of states; where it is > 1 the mesher picks `variantBase + (hash & mask)`
+    // instead of the state's own base. For a cube that base is a SLOT into the
+    // extended cubeTexIndices/cubeFaceUVs arrays (slots < totalStates are the
+    // states themselves, slots above are variant copies); for a mesh it is a
+    // meshId. Same arithmetic either way, which is why one pair of tables
+    // serves both paths.
+    const variantCountTable = new Uint8Array(totalStates);
+    const variantBaseTable = new Uint32Array(totalStates);
+    // jitter, quantised to 1/255 of a block. 0 = none.
+    const jitterXzTable = new Uint8Array(totalStates);
+    const jitterYTable = new Uint8Array(totalStates);
+    // extra cube slots needed beyond one per state, filled in pass 1.
+    let extraCubeSlots = 0;
     const colliderIdTable = new Uint16Array(totalStates); // 0 = cube fast path
     const cullTable = new Uint8Array(totalStates);
     const blockTypeIdTable = new Uint16Array(totalStates);
@@ -917,12 +966,11 @@ export function buildBlockRegistry(
         if (!handle) continue; // reserved index with no live declaration
         const def = handle.def;
 
-        // default dust handles, derived once per block from the default
-        // state's model (state 0). shared across every state of the
-        // block as the fallback for missing particle slots, keeps the
-        // sprite + particle registry from multiplying by state count.
-        // null when `particles: false`, no model, or the model isn't a cube.
-        const defaultDust = resolveDefaultDust(def);
+        // default dust handles, derived once per block by `block()` from the
+        // default state's model (state 0). shared across every state as the
+        // fallback for missing particle slots, which keeps the sprite + particle
+        // registry from multiplying by state count.
+        const defaultDust = handle._defaultDust;
 
         for (let local = 0; local < def.states.totalStates; local++) {
             const globalId = handle._baseStateId + local;
@@ -930,19 +978,47 @@ export function buildBlockRegistry(
 
             // cache model, classify model type
             if (def.model) {
-                const model = def.model(props);
-                _tempModels[globalId] = model;
-                collectModelTextureIds(model, textureSet);
+                const produced = def.model(props);
+                const models = Array.isArray(produced) ? produced : [produced];
+                if (models.length === 0) {
+                    throw new Error(`block ${def.id}: model returned an empty variant list`);
+                }
+                const head = models[0]!;
+                for (const variant of models) {
+                    if (variant.type !== head.type) {
+                        throw new Error(
+                            `block ${def.id}: variant list mixes '${head.type}' and '${variant.type}' models; ` +
+                                `every entry must share a type, since the mesher picks one path for the block`,
+                        );
+                    }
+                    collectModelTileIds(variant, textureSet);
+                }
+                _tempModels[globalId] = head;
+                _tempVariants[globalId] = models.length > 1 ? models : undefined;
+                if (models.length > 1) variantCountTable[globalId] = models.length;
 
-                if (model.type === 'cube') {
-                    // liquids opt into MODEL_LIQUID via def.surfaceHeight; texture
-                    // baking still goes through the cube path (6 face textures).
+                if (head.type === 'cube') {
+                    // liquids opt into MODEL_LIQUID via def.surfaceHeight; tile
+                    // baking still goes through the cube path (6 face tiles).
                     modelTypeTable[globalId] = def.surfaceHeight !== undefined ? MODEL_LIQUID : MODEL_CUBE;
+                    if (models.length > 1) {
+                        // ALL N go in the appended region so `base + v` is
+                        // contiguous. Reusing the state's own slot for variant 0
+                        // would put variant 1 on the NEXT state's slot.
+                        variantBaseTable[globalId] = totalStates + extraCubeSlots;
+                        extraCubeSlots += models.length;
+                    }
                 } else {
                     modelTypeTable[globalId] = MODEL_MESH;
-                    meshCount++;
-                    meshIdTable[globalId] = meshCount; // 1-based
+                    meshIdTable[globalId] = meshCount + 1; // 1-based
+                    variantBaseTable[globalId] = meshCount + 1;
+                    meshCount += models.length;
                 }
+            }
+
+            if (def.jitter) {
+                jitterXzTable[globalId] = Math.round(Math.min(Math.max(def.jitter.xz ?? 0, 0), 1) * 255);
+                jitterYTable[globalId] = Math.round(Math.min(Math.max(def.jitter.y ?? 0, 0), 1) * 255);
             }
 
             // resolve cull type (CullType enum values are already numeric)
@@ -1082,14 +1158,16 @@ export function buildBlockRegistry(
         }
     }
 
-    // ── build texture layers (expanding animated textures) ────────
+    // ── build atlas layers (expanding animated tiles) ─────────────
     //
-    // each unique texture id from models gets atlas layers. static
-    // textures get 1 layer. animated textures (multi-frame) get N
-    // consecutive layers. textureIndex maps id → base layer index.
+    // each unique tile id from models gets atlas layers. static tiles
+    // get 1 layer. animated tiles (multi-frame) get N consecutive
+    // layers. textureIndex maps tile id → base layer index.
     //
-    // textures[] is the flat list of layer entries for the atlas builder.
-    // for animated frames: "id:0", "id:1", etc. (texture indices, not block state keys). for static: just "id".
+    // `textures[]` is the flat list of LAYER entries for the atlas builder,
+    // one per animation frame — so it is not a list of tiles and is
+    // deliberately not named for them. for animated frames: "id:0", "id:1",
+    // etc. (layer entries, not block state keys). for static: just "id".
 
     const textureIds = [...textureSet];
     const textures: string[] = [];
@@ -1100,7 +1178,7 @@ export function buildBlockRegistry(
     const animEntries: number[] = [];
 
     for (const texId of textureIds) {
-        const decl = blockTextures.get(texId);
+        const decl = tiles.get(texId);
         const baseLayer = textures.length;
         textureIndex.set(texId, baseLayer);
 
@@ -1142,8 +1220,11 @@ export function buildBlockRegistry(
     // custom (mesh) models are compacted into dense arrays indexed by
     // meshId (1-based, 0 = sentinel). this avoids holes for air/missing/cubes.
 
-    const cubeTexIndices = new Uint16Array(totalStates * 6);
-    const cubeFaceUVs = new Uint8Array(totalStates * 48);
+    // variant slots live past the per-state region: slot < totalStates is a
+    // state's own, slots above are its variant copies.
+    const cubeSlotCount = totalStates + extraCubeSlots;
+    const cubeTexIndices = new Uint16Array(cubeSlotCount * 6);
+    const cubeFaceUVs = new Uint8Array(cubeSlotCount * 48);
 
     // canonical face UVs, must mirror chunk-mesher's FACE_UVS order.
     // mesher face index: 0=east, 1=west, 2=up, 3=down, 4=south, 5=north.
@@ -1187,6 +1268,7 @@ export function buildBlockRegistry(
     const meshQuads: BlockQuad[][] = new Array(meshCount + 1);
     const meshTexIndices: Uint16Array[] = new Array(meshCount + 1);
     const meshQuadMaterials: Uint8Array[] = new Array(meshCount + 1);
+    const meshQuadUnshaded: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadShape: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadFaceDir: Uint8Array[] = new Array(meshCount + 1);
     const meshQuadCullFaceDir: Uint8Array[] = new Array(meshCount + 1);
@@ -1228,56 +1310,66 @@ export function buildBlockRegistry(
         const model = _tempModels[sid]!;
 
         if ((mt === MODEL_CUBE || mt === MODEL_LIQUID) && model.type === 'cube') {
-            // dissolve cube textures into cubeTexIndices, and bake rotated
+            // dissolve cube tiles into cubeTexIndices, and bake rotated
             // per-face UVs into cubeFaceUVs.
-            const base = sid * 6;
-            const uvBase = sid * 48;
-            const tex = model.textures;
-            if ('all' in tex) {
-                const idx = textureIndex.get(resolveTextureRef(tex.all.texture)) ?? 0;
-                const rot = tex.all.rotation ?? 0;
-                cubeTexIndices[base] = idx; // top
-                cubeTexIndices[base + 1] = idx; // bottom
-                cubeTexIndices[base + 2] = idx; // north
-                cubeTexIndices[base + 3] = idx; // south
-                cubeTexIndices[base + 4] = idx; // east
-                cubeTexIndices[base + 5] = idx; // west
-                for (let f = 0; f < 6; f++) writeFaceUVs(uvBase, f, rot);
-            } else if ('sides' in tex) {
-                const t = textureIndex.get(resolveTextureRef(tex.top.texture)) ?? 0;
-                const b = textureIndex.get(resolveTextureRef(tex.bottom.texture)) ?? 0;
-                const s = textureIndex.get(resolveTextureRef(tex.sides.texture)) ?? 0;
-                cubeTexIndices[base] = t;
-                cubeTexIndices[base + 1] = b;
-                cubeTexIndices[base + 2] = s;
-                cubeTexIndices[base + 3] = s;
-                cubeTexIndices[base + 4] = s;
-                cubeTexIndices[base + 5] = s;
-                writeFaceUVs(uvBase, FACE_INDEX.top, tex.top.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.bottom, tex.bottom.rotation ?? 0);
-                const sideRot = tex.sides.rotation ?? 0;
-                writeFaceUVs(uvBase, FACE_INDEX.north, sideRot);
-                writeFaceUVs(uvBase, FACE_INDEX.south, sideRot);
-                writeFaceUVs(uvBase, FACE_INDEX.east, sideRot);
-                writeFaceUVs(uvBase, FACE_INDEX.west, sideRot);
-            } else {
-                cubeTexIndices[base] = textureIndex.get(resolveTextureRef(tex.top.texture)) ?? 0;
-                cubeTexIndices[base + 1] = textureIndex.get(resolveTextureRef(tex.bottom.texture)) ?? 0;
-                cubeTexIndices[base + 2] = textureIndex.get(resolveTextureRef(tex.north.texture)) ?? 0;
-                cubeTexIndices[base + 3] = textureIndex.get(resolveTextureRef(tex.south.texture)) ?? 0;
-                cubeTexIndices[base + 4] = textureIndex.get(resolveTextureRef(tex.east.texture)) ?? 0;
-                cubeTexIndices[base + 5] = textureIndex.get(resolveTextureRef(tex.west.texture)) ?? 0;
-                writeFaceUVs(uvBase, FACE_INDEX.top, tex.top.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.bottom, tex.bottom.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.north, tex.north.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.south, tex.south.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.east, tex.east.rotation ?? 0);
-                writeFaceUVs(uvBase, FACE_INDEX.west, tex.west.rotation ?? 0);
-            }
+            //
+            // once per variant, into consecutive slots. a state with no variants
+            // runs once against its own slot, which is the `sid` the mesher
+            // reads by default.
+            const cubeVariants = _tempVariants[sid];
+            const cubeVariantCount = cubeVariants?.length ?? 1;
+            const cubeSlot0 = cubeVariants ? variantBaseTable[sid]! : sid;
+            for (let v = 0; v < cubeVariantCount; v++) {
+                const slot = cubeSlot0 + v;
+                const base = slot * 6;
+                const uvBase = slot * 48;
+                const t = ((cubeVariants ? cubeVariants[v]! : model) as Extract<BlockModel, { type: 'cube' }>).tiles;
+                if ('all' in t) {
+                    const idx = textureIndex.get(faceTile(t.all).id) ?? 0;
+                    const rot = faceRotation(t.all);
+                    cubeTexIndices[base] = idx; // top
+                    cubeTexIndices[base + 1] = idx; // bottom
+                    cubeTexIndices[base + 2] = idx; // north
+                    cubeTexIndices[base + 3] = idx; // south
+                    cubeTexIndices[base + 4] = idx; // east
+                    cubeTexIndices[base + 5] = idx; // west
+                    for (let f = 0; f < 6; f++) writeFaceUVs(uvBase, f, rot);
+                } else if ('sides' in t) {
+                    const top = textureIndex.get(faceTile(t.top).id) ?? 0;
+                    const bottom = textureIndex.get(faceTile(t.bottom).id) ?? 0;
+                    const side = textureIndex.get(faceTile(t.sides).id) ?? 0;
+                    cubeTexIndices[base] = top;
+                    cubeTexIndices[base + 1] = bottom;
+                    cubeTexIndices[base + 2] = side;
+                    cubeTexIndices[base + 3] = side;
+                    cubeTexIndices[base + 4] = side;
+                    cubeTexIndices[base + 5] = side;
+                    writeFaceUVs(uvBase, FACE_INDEX.top, faceRotation(t.top));
+                    writeFaceUVs(uvBase, FACE_INDEX.bottom, faceRotation(t.bottom));
+                    const sideRot = faceRotation(t.sides);
+                    writeFaceUVs(uvBase, FACE_INDEX.north, sideRot);
+                    writeFaceUVs(uvBase, FACE_INDEX.south, sideRot);
+                    writeFaceUVs(uvBase, FACE_INDEX.east, sideRot);
+                    writeFaceUVs(uvBase, FACE_INDEX.west, sideRot);
+                } else {
+                    cubeTexIndices[base] = textureIndex.get(faceTile(t.top).id) ?? 0;
+                    cubeTexIndices[base + 1] = textureIndex.get(faceTile(t.bottom).id) ?? 0;
+                    cubeTexIndices[base + 2] = textureIndex.get(faceTile(t.north).id) ?? 0;
+                    cubeTexIndices[base + 3] = textureIndex.get(faceTile(t.south).id) ?? 0;
+                    cubeTexIndices[base + 4] = textureIndex.get(faceTile(t.east).id) ?? 0;
+                    cubeTexIndices[base + 5] = textureIndex.get(faceTile(t.west).id) ?? 0;
+                    writeFaceUVs(uvBase, FACE_INDEX.top, faceRotation(t.top));
+                    writeFaceUVs(uvBase, FACE_INDEX.bottom, faceRotation(t.bottom));
+                    writeFaceUVs(uvBase, FACE_INDEX.north, faceRotation(t.north));
+                    writeFaceUVs(uvBase, FACE_INDEX.south, faceRotation(t.south));
+                    writeFaceUVs(uvBase, FACE_INDEX.east, faceRotation(t.east));
+                    writeFaceUVs(uvBase, FACE_INDEX.west, faceRotation(t.west));
+                }
 
-            // a TRANSPARENT cube cuts out on every face → flag all 6 textures.
-            if (materialTable[sid] === MaterialType.TRANSPARENT) {
-                for (let f = 0; f < 6; f++) markCutoutLayer(cubeTexIndices[base + f]!);
+                // a TRANSPARENT cube cuts out on every face → flag all 6 layers.
+                if (materialTable[sid] === MaterialType.TRANSPARENT) {
+                    for (let f = 0; f < 6; f++) markCutoutLayer(cubeTexIndices[base + f]!);
+                }
             }
         } else {
             // mesh / liquid-from-custom: seed default uvs so the array is
@@ -1287,156 +1379,167 @@ export function buildBlockRegistry(
         }
 
         if (mt === MODEL_MESH && model.type === 'custom') {
-            const mid = meshIdTable[sid]!;
-            const quads = model.quads;
+            // once per variant, into consecutive meshIds starting at the state's
+            // own. no variants means a single pass over `meshIdTable[sid]`.
+            const meshVariants = _tempVariants[sid];
+            const meshVariantCount = meshVariants?.length ?? 1;
+            const mid0 = meshIdTable[sid]!;
+            for (let v = 0; v < meshVariantCount; v++) {
+                const mid = mid0 + v;
+                const quads = ((meshVariants ? meshVariants[v]! : model) as Extract<BlockModel, { type: 'custom' }>).quads;
 
-            // quad-only authoring, validated implicitly by the type
-            // (BlockQuad.verts is a 4-tuple). reject empty quad lists.
-            if (quads.length === 0) {
-                throw new Error(`block ${sid}: custom model has zero quads`);
-            }
-
-            meshQuads[mid] = quads;
-
-            // per-quad texture indices
-            const indices = new Uint16Array(quads.length);
-            for (let i = 0; i < quads.length; i++) {
-                indices[i] = textureIndex.get(resolveTextureRef(quads[i]!.texture)) ?? 0;
-            }
-            meshTexIndices[mid] = indices;
-
-            // per-quad material, always allocate for mesh models.
-            // quads without an explicit material get the block's default.
-            const defaultMat = materialTable[sid]!;
-            const quadMats = new Uint8Array(quads.length);
-            for (let i = 0; i < quads.length; i++) {
-                quadMats[i] = quads[i]!.material ?? defaultMat;
-            }
-            meshQuadMaterials[mid] = quadMats;
-
-            // flag textures of any cutout quad so their mips preserve coverage.
-            for (let i = 0; i < quads.length; i++) {
-                if (quadMats[i] === MaterialType.TRANSPARENT) markCutoutLayer(indices[i]!);
-            }
-
-            // per-quad smooth-light shape classification (see classifyMeshQuadShape).
-            const qShape = new Uint8Array(quads.length);
-            const qFaceDir = new Uint8Array(quads.length);
-            const qCullFaceDir = new Uint8Array(quads.length).fill(FACE_DIR_NONE);
-            const qDepth = new Float32Array(quads.length);
-            const qVertDepth = new Float32Array(quads.length * 4);
-            const qVertNormal = new Float32Array(quads.length * 12);
-            const qCornerUV = new Float32Array(quads.length * 8);
-            const qCornerPos = new Float32Array(quads.length * 12);
-            const qCornerNormSq = new Float32Array(quads.length * 12);
-            const qNormal = new Float32Array(quads.length * 3);
-            const qUVs = new Float32Array(quads.length * 8);
-            const qVerts = new Float32Array(quads.length * 12);
-            for (let i = 0; i < quads.length; i++) {
-                const q = quads[i]!;
-                const c = classifyMeshQuadShape(q, _shapeDepthScratch, _shapeNormalScratch);
-                qShape[i] = c.shape;
-                qFaceDir[i] = c.faceDir;
-                if (q.cullFace !== undefined) qCullFaceDir[i] = CULL_FACE_TO_DIR[q.cullFace]!;
-                qDepth[i] = c.depth;
-
-                // flatten BlockQuad.normal / uvs / verts into dense per-mesh
-                // tables so the mesher hot loop reads typed-array entries
-                // instead of indexing into the BlockQuad object array.
-                const nBase = i * 3;
-                qNormal[nBase] = q.normal[0]!;
-                qNormal[nBase + 1] = q.normal[1]!;
-                qNormal[nBase + 2] = q.normal[2]!;
-
-                const vBase = i * 12;
-                for (let v = 0; v < 4; v++) {
-                    const vert = q.verts[v]!;
-                    qVerts[vBase + v * 3] = vert[0]!;
-                    qVerts[vBase + v * 3 + 1] = vert[1]!;
-                    qVerts[vBase + v * 3 + 2] = vert[2]!;
-                }
-                const uvBase = i * 8;
-                const uvs = q.uvs;
-                if (uvs !== undefined) {
-                    qUVs[uvBase] = uvs[0]![0]!;
-                    qUVs[uvBase + 1] = uvs[0]![1]!;
-                    qUVs[uvBase + 2] = uvs[1]![0]!;
-                    qUVs[uvBase + 3] = uvs[1]![1]!;
-                    qUVs[uvBase + 4] = uvs[2]![0]!;
-                    qUVs[uvBase + 5] = uvs[2]![1]!;
-                    qUVs[uvBase + 6] = uvs[3]![0]!;
-                    qUVs[uvBase + 7] = uvs[3]![1]!;
-                } else {
-                    // default: [0,1] [1,1] [1,0] [0,0]
-                    qUVs[uvBase] = 0;
-                    qUVs[uvBase + 1] = 1;
-                    qUVs[uvBase + 2] = 1;
-                    qUVs[uvBase + 3] = 1;
-                    qUVs[uvBase + 4] = 1;
-                    qUVs[uvBase + 5] = 0;
-                    qUVs[uvBase + 6] = 0;
-                    qUVs[uvBase + 7] = 0;
-                }
-                if (c.shape === SHAPE_NON_PARALLEL) {
-                    const o = i * 4;
-                    qVertDepth[o] = _shapeDepthScratch[0]!;
-                    qVertDepth[o + 1] = _shapeDepthScratch[1]!;
-                    qVertDepth[o + 2] = _shapeDepthScratch[2]!;
-                    qVertDepth[o + 3] = _shapeDepthScratch[3]!;
-                } else if (c.shape === SHAPE_IRREGULAR) {
-                    const o = i * 12;
-                    for (let k = 0; k < 12; k++) qVertNormal[o + k] = _shapeNormalScratch[k]!;
+                // quad-only authoring, validated implicitly by the type
+                // (BlockQuad.verts is a 4-tuple). reject empty quad lists.
+                if (quads.length === 0) {
+                    throw new Error(`block ${sid}: custom model has zero quads`);
                 }
 
-                // per-corner (u, w) on the chosen face plane (ALIGNED_*, PARALLEL,
-                // NON_PARALLEL). IRREGULAR has no single face plane → leave zeros
-                // and populate the per-axis variant instead. FLAT also unused.
-                if (c.shape !== SHAPE_FLAT && c.shape !== SHAPE_IRREGULAR) {
-                    const axU = FACE_AXIS_UW[c.faceDir * 2]!;
-                    const axW = FACE_AXIS_UW[c.faceDir * 2 + 1]!;
-                    const o = i * 8;
-                    qCornerUV[o] = q.verts[0]![axU]!;
-                    qCornerUV[o + 1] = q.verts[0]![axW]!;
-                    qCornerUV[o + 2] = q.verts[1]![axU]!;
-                    qCornerUV[o + 3] = q.verts[1]![axW]!;
-                    qCornerUV[o + 4] = q.verts[2]![axU]!;
-                    qCornerUV[o + 5] = q.verts[2]![axW]!;
-                    qCornerUV[o + 6] = q.verts[3]![axU]!;
-                    qCornerUV[o + 7] = q.verts[3]![axW]!;
+                meshQuads[mid] = quads;
+
+                // per-quad atlas layer indices
+                const indices = new Uint16Array(quads.length);
+                for (let i = 0; i < quads.length; i++) {
+                    indices[i] = textureIndex.get(quads[i]!.tile.id) ?? 0;
+                }
+                meshTexIndices[mid] = indices;
+
+                // per-quad material, always allocate for mesh models.
+                // quads without an explicit material get the block's default.
+                const defaultMat = materialTable[sid]!;
+                const quadMats = new Uint8Array(quads.length);
+                for (let i = 0; i < quads.length; i++) {
+                    quadMats[i] = quads[i]!.material ?? defaultMat;
+                }
+                meshQuadMaterials[mid] = quadMats;
+
+                const quadUnshaded = new Uint8Array(quads.length);
+                for (let i = 0; i < quads.length; i++) quadUnshaded[i] = quads[i]!.shade === false ? 1 : 0;
+                meshQuadUnshaded[mid] = quadUnshaded;
+
+                // flag textures of any cutout quad so their mips preserve coverage.
+                for (let i = 0; i < quads.length; i++) {
+                    if (quadMats[i] === MaterialType.TRANSPARENT) markCutoutLayer(indices[i]!);
                 }
 
-                // IRREGULAR: raw 3D vert position + per-corner squared-normal
-                // weights. (u, w) for each of the 3 axis-aligned face planes
-                // are derived at sample time from the same 3D position.
-                if (c.shape === SHAPE_IRREGULAR) {
-                    const pBase = i * 12;
-                    const nsBase = i * 12;
+                // per-quad smooth-light shape classification (see classifyMeshQuadShape).
+                const qShape = new Uint8Array(quads.length);
+                const qFaceDir = new Uint8Array(quads.length);
+                const qCullFaceDir = new Uint8Array(quads.length).fill(FACE_DIR_NONE);
+                const qDepth = new Float32Array(quads.length);
+                const qVertDepth = new Float32Array(quads.length * 4);
+                const qVertNormal = new Float32Array(quads.length * 12);
+                const qCornerUV = new Float32Array(quads.length * 8);
+                const qCornerPos = new Float32Array(quads.length * 12);
+                const qCornerNormSq = new Float32Array(quads.length * 12);
+                const qNormal = new Float32Array(quads.length * 3);
+                const qUVs = new Float32Array(quads.length * 8);
+                const qVerts = new Float32Array(quads.length * 12);
+                for (let i = 0; i < quads.length; i++) {
+                    const q = quads[i]!;
+                    const c = classifyMeshQuadShape(q, _shapeDepthScratch, _shapeNormalScratch);
+                    qShape[i] = c.shape;
+                    qFaceDir[i] = c.faceDir;
+                    if (q.cullFace !== undefined) qCullFaceDir[i] = CULL_FACE_TO_DIR[q.cullFace]!;
+                    qDepth[i] = c.depth;
+
+                    // flatten BlockQuad.normal / uvs / verts into dense per-mesh
+                    // tables so the mesher hot loop reads typed-array entries
+                    // instead of indexing into the BlockQuad object array.
+                    const nBase = i * 3;
+                    qNormal[nBase] = q.normal[0]!;
+                    qNormal[nBase + 1] = q.normal[1]!;
+                    qNormal[nBase + 2] = q.normal[2]!;
+
+                    const vBase = i * 12;
                     for (let v = 0; v < 4; v++) {
-                        qCornerPos[pBase + v * 3] = q.verts[v]![0]!;
-                        qCornerPos[pBase + v * 3 + 1] = q.verts[v]![1]!;
-                        qCornerPos[pBase + v * 3 + 2] = q.verts[v]![2]!;
+                        const vert = q.verts[v]!;
+                        qVerts[vBase + v * 3] = vert[0]!;
+                        qVerts[vBase + v * 3 + 1] = vert[1]!;
+                        qVerts[vBase + v * 3 + 2] = vert[2]!;
+                    }
+                    const uvBase = i * 8;
+                    const uvs = q.uvs;
+                    if (uvs !== undefined) {
+                        qUVs[uvBase] = uvs[0]![0]!;
+                        qUVs[uvBase + 1] = uvs[0]![1]!;
+                        qUVs[uvBase + 2] = uvs[1]![0]!;
+                        qUVs[uvBase + 3] = uvs[1]![1]!;
+                        qUVs[uvBase + 4] = uvs[2]![0]!;
+                        qUVs[uvBase + 5] = uvs[2]![1]!;
+                        qUVs[uvBase + 6] = uvs[3]![0]!;
+                        qUVs[uvBase + 7] = uvs[3]![1]!;
+                    } else {
+                        // default: [0,1] [1,1] [1,0] [0,0]
+                        qUVs[uvBase] = 0;
+                        qUVs[uvBase + 1] = 1;
+                        qUVs[uvBase + 2] = 1;
+                        qUVs[uvBase + 3] = 1;
+                        qUVs[uvBase + 4] = 1;
+                        qUVs[uvBase + 5] = 0;
+                        qUVs[uvBase + 6] = 0;
+                        qUVs[uvBase + 7] = 0;
+                    }
+                    if (c.shape === SHAPE_NON_PARALLEL) {
+                        const o = i * 4;
+                        qVertDepth[o] = _shapeDepthScratch[0]!;
+                        qVertDepth[o + 1] = _shapeDepthScratch[1]!;
+                        qVertDepth[o + 2] = _shapeDepthScratch[2]!;
+                        qVertDepth[o + 3] = _shapeDepthScratch[3]!;
+                    } else if (c.shape === SHAPE_IRREGULAR) {
+                        const o = i * 12;
+                        for (let k = 0; k < 12; k++) qVertNormal[o + k] = _shapeNormalScratch[k]!;
+                    }
 
-                        const nx = _shapeNormalScratch[v * 3]!;
-                        const ny = _shapeNormalScratch[v * 3 + 1]!;
-                        const nz = _shapeNormalScratch[v * 3 + 2]!;
-                        qCornerNormSq[nsBase + v * 3] = nx * nx;
-                        qCornerNormSq[nsBase + v * 3 + 1] = ny * ny;
-                        qCornerNormSq[nsBase + v * 3 + 2] = nz * nz;
+                    // per-corner (u, w) on the chosen face plane (ALIGNED_*, PARALLEL,
+                    // NON_PARALLEL). IRREGULAR has no single face plane → leave zeros
+                    // and populate the per-axis variant instead. FLAT also unused.
+                    if (c.shape !== SHAPE_FLAT && c.shape !== SHAPE_IRREGULAR) {
+                        const axU = FACE_AXIS_UW[c.faceDir * 2]!;
+                        const axW = FACE_AXIS_UW[c.faceDir * 2 + 1]!;
+                        const o = i * 8;
+                        qCornerUV[o] = q.verts[0]![axU]!;
+                        qCornerUV[o + 1] = q.verts[0]![axW]!;
+                        qCornerUV[o + 2] = q.verts[1]![axU]!;
+                        qCornerUV[o + 3] = q.verts[1]![axW]!;
+                        qCornerUV[o + 4] = q.verts[2]![axU]!;
+                        qCornerUV[o + 5] = q.verts[2]![axW]!;
+                        qCornerUV[o + 6] = q.verts[3]![axU]!;
+                        qCornerUV[o + 7] = q.verts[3]![axW]!;
+                    }
+
+                    // IRREGULAR: raw 3D vert position + per-corner squared-normal
+                    // weights. (u, w) for each of the 3 axis-aligned face planes
+                    // are derived at sample time from the same 3D position.
+                    if (c.shape === SHAPE_IRREGULAR) {
+                        const pBase = i * 12;
+                        const nsBase = i * 12;
+                        for (let v = 0; v < 4; v++) {
+                            qCornerPos[pBase + v * 3] = q.verts[v]![0]!;
+                            qCornerPos[pBase + v * 3 + 1] = q.verts[v]![1]!;
+                            qCornerPos[pBase + v * 3 + 2] = q.verts[v]![2]!;
+
+                            const nx = _shapeNormalScratch[v * 3]!;
+                            const ny = _shapeNormalScratch[v * 3 + 1]!;
+                            const nz = _shapeNormalScratch[v * 3 + 2]!;
+                            qCornerNormSq[nsBase + v * 3] = nx * nx;
+                            qCornerNormSq[nsBase + v * 3 + 1] = ny * ny;
+                            qCornerNormSq[nsBase + v * 3 + 2] = nz * nz;
+                        }
                     }
                 }
+                meshQuadShape[mid] = qShape;
+                meshQuadFaceDir[mid] = qFaceDir;
+                meshQuadCullFaceDir[mid] = qCullFaceDir;
+                meshQuadDepth[mid] = qDepth;
+                meshQuadVertDepth[mid] = qVertDepth;
+                meshQuadVertNormal[mid] = qVertNormal;
+                meshQuadCornerUV[mid] = qCornerUV;
+                meshQuadCornerPos[mid] = qCornerPos;
+                meshQuadCornerNormSq[mid] = qCornerNormSq;
+                meshQuadNormal[mid] = qNormal;
+                meshQuadUVs[mid] = qUVs;
+                meshQuadVerts[mid] = qVerts;
             }
-            meshQuadShape[mid] = qShape;
-            meshQuadFaceDir[mid] = qFaceDir;
-            meshQuadCullFaceDir[mid] = qCullFaceDir;
-            meshQuadDepth[mid] = qDepth;
-            meshQuadVertDepth[mid] = qVertDepth;
-            meshQuadVertNormal[mid] = qVertNormal;
-            meshQuadCornerUV[mid] = qCornerUV;
-            meshQuadCornerPos[mid] = qCornerPos;
-            meshQuadCornerNormSq[mid] = qCornerNormSq;
-            meshQuadNormal[mid] = qNormal;
-            meshQuadUVs[mid] = qUVs;
-            meshQuadVerts[mid] = qVerts;
         }
     }
 
@@ -1480,10 +1583,15 @@ export function buildBlockRegistry(
         modelType: modelTypeTable,
         cubeTexIndices,
         cubeFaceUVs,
+        variantCount: variantCountTable,
+        variantBase: variantBaseTable,
+        jitterXz: jitterXzTable,
+        jitterY: jitterYTable,
         meshId: meshIdTable,
         meshQuads,
         meshTexIndices,
         meshQuadMaterials,
+        meshQuadUnshaded,
         meshQuadShape,
         meshQuadFaceDir,
         meshQuadCullFaceDir,
@@ -1595,7 +1703,11 @@ export function resolveKey(registry: Blocks, key: string): number {
  * handle, so the result is never null.
  */
 export function stateToBlock(registry: Blocks, state: number): BlockHandle {
-    return registry.handles[registry.stateToBlockIndex[state] ?? 0]!;
+    // `?? 0` only covers a MISSING index. A stale one - a state id from before a
+    // registry rebuild, which the editor does on every hot reload - is a number
+    // that simply no longer addresses a handle, so it has to fall back too or
+    // this returns undefined while claiming to return a BlockHandle.
+    return registry.handles[registry.stateToBlockIndex[state] ?? 0] ?? registry.handles[0]!;
 }
 
 /**
@@ -1608,18 +1720,6 @@ export function keyToBlock(registry: Blocks, key: string): BlockHandle {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
-
-/** derive the per-block default dust handle set once, from the default
- *  state's model. used as the fallback for any particle slot the author
- *  left unset. returns `null` when the block has no model or opts out
- *  via `particles: false`. cube models slice from the top face; custom
- *  models pick the first upward-facing quad (see `deriveBlockDust`). */
-function resolveDefaultDust<P extends PropsDef>(def: BlockDef<P>): readonly ParticleHandle[] | null {
-    if (def.particles === false) return null;
-    if (!def.model) return null;
-    const model = def.model(def.states.decode(0));
-    return deriveBlockDust(def.id, model);
-}
 
 /** evaluate the sounds option for a single state. static config passes
  *  through (shared ref across all states, common case); function form
