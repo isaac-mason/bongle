@@ -1,39 +1,41 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import type { PropPath } from './path';
-import type { ObjectSchema, Schema, ShapeSpecData } from './prop';
+import type { ObjectKind, ObjectSchema, Schema } from './prop';
 
-export type ShapeSite = {
-    path: PropPath;
-    spec: ShapeSpecData;
-    local: Record<string, unknown>;
-    space: 'local' | 'world';
-    /** the object's frame relative to the walk root (the node), without the shape's centre. */
-    matrix: Mat4;
-    /** `matrix` with the shape's centre applied. */
-    shapeMatrix: Mat4;
-};
-
-/** one annotated object met by `walkObjects`, with the frames composed for it. */
+/** one kinded object (a shape or a pose) met by `walkObjects`, with the frames composed for it. */
 export type ObjectSite = {
-    schema: ObjectSchema;
+    schema: ObjectSchema & { kind: ObjectKind };
     local: Record<string, unknown>;
     path: PropPath;
-    /** the frame the object's own `frame` is expressed in. */
+    /** the frame the object's fields are expressed in: node world times every enclosing pose. */
     parent: Mat4;
-    /** `parent` times the object's own frame; what its fields and a `frame` handle live in. */
+    /** the object's own frame: `parent` times its pose, or times its `center` for a sphere or box. */
     matrix: Mat4;
-    /** `matrix` times the shape's `center`; what the shape itself is drawn and handled in. */
-    shapeMatrix: Mat4;
 };
 
 const IDENTITY: Mat4 = mat4.create();
-const POOL: { frame: Mat4; shape: Mat4 }[] = [];
+const POOL: { frame: Mat4; own: Mat4 }[] = [];
 const _p: Vec3 = [0, 0, 0];
 const _q: Quat = [0, 0, 0, 1];
 
+/** the pose field that frames `schema`'s other fields, seen through optional wrappers; null when it has none. */
+export function poseFieldOf(schema: ObjectSchema): string | null {
+    for (const [key, field] of Object.entries(schema.fields)) {
+        if (unwrap(field).kind === 'pose') return key;
+    }
+    return null;
+}
+
+function unwrap(schema: Schema): { kind: ObjectKind | undefined; space: 'local' | 'world' } {
+    let inner = schema;
+    while (inner.type === 'nullable' || inner.type === 'optional' || inner.type === 'nullish') inner = inner.of;
+    return inner.type === 'object' ? { kind: inner.kind, space: inner.space ?? 'local' } : { kind: undefined, space: 'local' };
+}
+
 /**
- * visits every object in `value` (through fields, list items, the union variant the value selects and optional wrappers),
- * composing `frame` annotations along the way; `space: 'world'` restarts the chain at identity. `visit` returns true to stop.
+ * visits every shape and pose in `value` (through fields, list items, the union variant the value selects and optional
+ * wrappers). an object holding a pose field is framed by it; `space: 'world'` restarts the chain at identity.
+ * `visit` returns true to stop.
  */
 export function walkObjects(
     schema: Schema,
@@ -47,28 +49,41 @@ export function walkObjects(
         case 'object': {
             if (value === null || typeof value !== 'object') return false;
             const local = value as Record<string, unknown>;
-            while (POOL.length <= depth) POOL.push({ frame: mat4.create(), shape: mat4.create() });
+            while (POOL.length <= depth) POOL.push({ frame: mat4.create(), own: mat4.create() });
             const pool = POOL[depth]!;
             const parent = schema.space === 'world' ? IDENTITY : matrixIn;
+            if (schema.kind === 'pose') {
+                const position = local.position as Vec3 | undefined;
+                const quaternion = local.quaternion as Quat | undefined;
+                mat4.fromRotationTranslation(pool.own, quaternion ?? quat.identity(_q), position ?? vec3.set(_p, 0, 0, 0));
+                mat4.multiply(pool.own, parent, pool.own);
+                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own }) === true;
+            }
+            if (schema.kind === 'sphere' || schema.kind === 'box3') {
+                const center = local.center as Vec3 | undefined;
+                mat4.fromTranslation(pool.own, center ?? vec3.set(_p, 0, 0, 0));
+                mat4.multiply(pool.own, parent, pool.own);
+                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own }) === true;
+            }
+            if (schema.kind === 'segment') {
+                return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: parent }) === true;
+            }
             let matrix = parent;
-            if (schema.frame) {
-                const position = schema.frame.position ? (local[schema.frame.position] as Vec3 | undefined) : undefined;
-                const quaternion = schema.frame.quaternion ? (local[schema.frame.quaternion] as Quat | undefined) : undefined;
-                mat4.fromRotationTranslation(pool.frame, quaternion ?? quat.identity(_q), position ?? vec3.set(_p, 0, 0, 0));
-                matrix = mat4.multiply(pool.frame, parent, pool.frame);
+            const poseField = poseFieldOf(schema);
+            if (poseField !== null) {
+                const poseSpace = unwrap(schema.fields[poseField]!).space;
+                const pose = local[poseField] as { position?: Vec3; quaternion?: Quat } | null | undefined;
+                mat4.fromRotationTranslation(
+                    pool.frame,
+                    pose?.quaternion ?? quat.identity(_q),
+                    pose?.position ?? vec3.set(_p, 0, 0, 0),
+                );
+                matrix = mat4.multiply(pool.frame, poseSpace === 'world' ? IDENTITY : parent, pool.frame);
             }
-            let shapeMatrix = matrix;
-            const center =
-                schema.shape && schema.shape.kind !== 'segment' && schema.shape.center
-                    ? (local[schema.shape.center] as Vec3 | undefined)
-                    : undefined;
-            if (center) {
-                mat4.fromTranslation(pool.shape, center);
-                shapeMatrix = mat4.multiply(pool.shape, matrix, pool.shape);
-            }
-            if (visit({ schema, local, path, parent, matrix, shapeMatrix })) return true;
             for (const [key, field] of Object.entries(schema.fields)) {
-                if (walkObjects(field, local[key], matrix, visit, [...path, key], depth + 1)) return true;
+                // the pose is visited in the frame it is expressed in, its siblings in the frame it makes
+                const fieldMatrix = key === poseField ? parent : matrix;
+                if (walkObjects(field, local[key], fieldMatrix, visit, [...path, key], depth + 1)) return true;
             }
             return false;
         }
@@ -97,32 +112,38 @@ export function walkObjects(
     }
 }
 
-/** the first shape-annotated object reachable through `value`. */
+export type ShapeKind = Exclude<ObjectKind, 'pose'>;
+
+export type ShapeSite = ObjectSite & { schema: ObjectSchema & { kind: ShapeKind } };
+
+export function isShape(site: ObjectSite): site is ShapeSite {
+    return site.schema.kind !== 'pose';
+}
+
+/** the first shape reachable through `value`, its matrices relative to the walk root (the node). */
 export function findShape(schema: Schema, value: unknown): ShapeSite | null {
     let found: ShapeSite | null = null;
     walkObjects(schema, value, IDENTITY, (site) => {
-        if (!site.schema.shape) return false;
-        found = {
-            path: site.path,
-            spec: site.schema.shape,
-            local: site.local,
-            space: site.schema.space ?? 'local',
-            matrix: mat4.clone(site.matrix),
-            shapeMatrix: mat4.clone(site.shapeMatrix),
-        };
+        if (!isShape(site)) return false;
+        found = { ...site, parent: mat4.clone(site.parent), matrix: mat4.clone(site.matrix) };
         return true;
     });
     return found;
 }
 
-/** every shape or frame spec in `schema` that names a field the object lacks or of the wrong kind. */
+/** every object in `schema` whose frame is ambiguous because it holds more than one pose field. */
 export function checkSpecs(schema: Schema, path = ''): string[] {
     const problems: string[] = [];
     switch (schema.type) {
-        case 'object':
-            checkObject(schema, path, problems);
+        case 'object': {
+            const poses = Object.entries(schema.fields)
+                .filter(([, field]) => unwrap(field).kind === 'pose')
+                .map(([key]) => key);
+            if (poses.length > 1)
+                problems.push(`${path}: holds ${poses.length} pose fields (${poses.join(', ')}), only one can frame it`);
             for (const [key, field] of Object.entries(schema.fields)) problems.push(...checkSpecs(field, `${path}.${key}`));
             return problems;
+        }
         case 'union':
             for (const variant of schema.variants) problems.push(...checkSpecs(variant, path));
             return problems;
@@ -138,32 +159,5 @@ export function checkSpecs(schema: Schema, path = ''): string[] {
             return problems;
         default:
             return problems;
-    }
-}
-
-function checkObject(schema: ObjectSchema, path: string, problems: string[]): void {
-    const expect = (field: string | undefined, want: string, test: (s: Schema) => boolean): void => {
-        if (field === undefined) return;
-        const target = schema.fields[field];
-        if (target === undefined) problems.push(`${path}: spec names '${field}', which is not a field`);
-        else if (!test(target)) problems.push(`${path}: spec field '${field}' is not ${want}`);
-    };
-    const shape = schema.shape;
-    if (shape) {
-        if (shape.kind === 'sphere') {
-            expect(shape.radius, 'a radius', (s) => s.type === 'number' && s.subtype === 'radius');
-            expect(shape.center, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
-        } else if (shape.kind === 'box3') {
-            expect(shape.halfExtents, 'a vector3', (s) => s.type === 'vector3');
-            expect(shape.center, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
-        } else {
-            expect(shape.from, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
-            expect(shape.to, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
-        }
-    }
-    const frame = schema.frame;
-    if (frame) {
-        expect(frame.position, 'a point', (s) => s.type === 'vector3' && s.subtype === 'point');
-        expect(frame.quaternion, 'a quaternion', (s) => s.type === 'quaternion');
     }
 }

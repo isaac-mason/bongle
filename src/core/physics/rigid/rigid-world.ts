@@ -195,21 +195,21 @@ function effectiveMotionType(rb: RigidBodyTrait, identity: PlayerId | null, simu
 
 function resolveLiteralShape(shapeDef: ShapeDef): Shape | null {
     switch (shapeDef.type) {
-        case 'box':
-            return box.create({ halfExtents: shapeDef.halfExtents });
+        case 'box3':
+            return centred(box.create({ halfExtents: shapeDef.halfExtents }), shapeDef.center);
         case 'sphere':
-            return sphere.create({ radius: shapeDef.radius });
+            return centred(sphere.create({ radius: shapeDef.radius }), shapeDef.center);
         case 'transformed': {
             const inner = resolveLiteralShape(shapeDef.shape);
             return inner
-                ? transformed.create({ shape: inner, position: shapeDef.position, quaternion: shapeDef.quaternion })
+                ? transformed.create({ shape: inner, position: shapeDef.pose.position, quaternion: shapeDef.pose.quaternion })
                 : null;
         }
         case 'compound': {
             const children: { shape: Shape; position: Vec3; quaternion: Quat }[] = [];
             for (const part of shapeDef.shapes) {
                 const s = resolveLiteralShape(part.shape);
-                if (s) children.push({ shape: s, position: part.position, quaternion: part.quaternion });
+                if (s) children.push({ shape: s, position: part.pose.position, quaternion: part.pose.quaternion });
             }
             return children.length > 0 ? compound.create({ children }) : null;
         }
@@ -220,6 +220,14 @@ function resolveLiteralShape(shapeDef: ShapeDef): Shape | null {
             console.warn('[physics] unknown shape type');
             return null;
     }
+}
+
+const CENTRE_TOL = 1e-6;
+
+// crashcat primitives sit at their frame origin; a shape value's `center` is a translation around it.
+function centred(shape: Shape, center: Vec3): Shape {
+    if (Math.abs(center[0]) <= CENTRE_TOL && Math.abs(center[1]) <= CENTRE_TOL && Math.abs(center[2]) <= CENTRE_TOL) return shape;
+    return transformed.create({ shape, position: [center[0], center[1], center[2]], quaternion: [0, 0, 0, 1] });
 }
 
 type MeshContribution = {

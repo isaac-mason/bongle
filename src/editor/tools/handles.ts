@@ -6,8 +6,7 @@ import type { Cursor, MouseKeyboardInput } from '../../client/input';
 import { getCursor, isModDown, isMouseDown, isMouseJustDown, isMouseLocked } from '../../client/input';
 import { registry } from '../../core/registry';
 import { type PropPath, setAtPath } from '../../core/scene/prop/path';
-import type { ShapeSpecData } from '../../core/scene/prop/prop';
-import { walkObjects } from '../../core/scene/prop/specs';
+import { type ShapeKind, walkObjects } from '../../core/scene/prop/specs';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -55,7 +54,7 @@ type Handle = {
     nodeId: number;
     traitId: string;
     controlId: string;
-    /** to the annotated object inside the control value. */
+    /** to the shape or pose inside the control value. */
     path: PropPath;
     field: string;
     axis: 0 | 1 | 2;
@@ -63,8 +62,6 @@ type Handle = {
     /** node world times every enclosing frame. */
     matrix: Mat4;
     world: Vec3;
-    framePosition: string | undefined;
-    frameQuaternion: string | undefined;
 };
 
 export type HandlesState = {
@@ -146,7 +143,6 @@ export function update(
 
 function handleLabel(handle: Handle): string {
     if (handle.kind === 'box-face') return `${handle.field} ${AXIS_NAMES[handle.axis]}${handle.sign > 0 ? '+' : '-'}`;
-    if (handle.kind === 'frame') return 'frame';
     return handle.field;
 }
 
@@ -156,14 +152,7 @@ function arm(state: HandlesState, handle: Handle, sceneTree: SceneTree, store: E
         const { activeTool, transformMode } = store.getState();
         const keepMode = activeTool === 'transform' && (transformMode === 'translate' || transformMode === 'rotate');
         store.setState({
-            activeFrame: {
-                nodeId: handle.nodeId,
-                traitId: handle.traitId,
-                controlId: handle.controlId,
-                path: handle.path,
-                position: handle.framePosition,
-                quaternion: handle.frameQuaternion,
-            },
+            activeFrame: { nodeId: handle.nodeId, traitId: handle.traitId, controlId: handle.controlId, path: handle.path },
             activeTool: 'transform',
             transformMode: keepMode ? transformMode : 'translate',
         });
@@ -399,7 +388,7 @@ function draw(
     }
 }
 
-// collection: one handle per box face, sphere radius, segment end and frame origin on the active node.
+// collection: one handle per box face, sphere radius, segment end, shape centre and pose origin on the active node.
 
 let _collecting: HandlesState | null = null;
 
@@ -430,17 +419,11 @@ function collect(state: HandlesState, node: Node | undefined, eye: Vec3): void {
             _controlId = reg.controlId;
             walkObjects(reg.schema, reg.get(instance), world, (site) => {
                 const { schema, local, path } = site;
-                if (schema.frame) {
-                    const origin = take('frame', path, '', 0, 1, site.matrix, 0, 0, 0);
-                    origin.framePosition = schema.frame.position;
-                    origin.frameQuaternion = schema.frame.quaternion;
-                }
-                if (schema.shape) {
-                    if (schema.shape.kind !== 'segment' && schema.shape.center) {
-                        const origin = take('frame', path, '', 0, 1, site.shapeMatrix, 0, 0, 0);
-                        origin.framePosition = schema.shape.center;
-                    }
-                    shapeHandles(schema.shape, local, site.shapeMatrix, path);
+                if (schema.kind === 'pose') take('frame', path, 'pose', 0, 1, site.matrix, 0, 0, 0);
+                else if (schema.kind === 'segment') segmentHandles(local, site.matrix, path);
+                else {
+                    take('frame', path, 'center', 0, 1, site.matrix, 0, 0, 0);
+                    shapeHandles(schema.kind, local, site.matrix, path);
                 }
                 return false;
             });
@@ -472,8 +455,6 @@ function take(
         sign: 1,
         matrix: mat4.create(),
         world: [0, 0, 0],
-        framePosition: undefined,
-        frameQuaternion: undefined,
     };
     handle.kind = kind;
     handle.nodeId = _nodeId;
@@ -485,37 +466,37 @@ function take(
     handle.sign = sign;
     mat4.copy(handle.matrix, matrix);
     vec3.transformMat4(handle.world, vec3.set(handle.world, lx, ly, lz), matrix);
-    handle.framePosition = undefined;
-    handle.frameQuaternion = undefined;
     state.handles.push(handle);
     return handle;
 }
 
-function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
-    if (spec.kind === 'box3') {
-        const half = local[spec.halfExtents] as Vec3 | undefined;
+function shapeHandles(kind: Exclude<ShapeKind, 'segment'>, local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
+    if (kind === 'box3') {
+        const half = local.halfExtents as Vec3 | undefined;
         if (!half) return;
-        take('box-face', path, spec.halfExtents, 0, 1, matrix, half[0], 0, 0);
-        take('box-face', path, spec.halfExtents, 0, -1, matrix, -half[0], 0, 0);
-        take('box-face', path, spec.halfExtents, 1, 1, matrix, 0, half[1], 0);
-        take('box-face', path, spec.halfExtents, 1, -1, matrix, 0, -half[1], 0);
-        take('box-face', path, spec.halfExtents, 2, 1, matrix, 0, 0, half[2]);
-        take('box-face', path, spec.halfExtents, 2, -1, matrix, 0, 0, -half[2]);
-    } else if (spec.kind === 'sphere') {
-        const radius = local[spec.radius] as number | undefined;
-        if (radius === undefined) return;
-        // the drag measures from the centre (the matrix origin); the dot sits on the silhouette ring, where the edge is on screen.
-        const handle = take('radius', path, spec.radius, 0, 1, matrix, 0, 0, 0);
-        vec3.set(_centerWorld, matrix[12]!, matrix[13]!, matrix[14]!);
-        const ringRadius = silhouette(_centerWorld, radius, _collectEye, _ringCenter, _ringU, _ringV);
-        if (ringRadius > 0) vec3.scaleAndAdd(handle.world, _ringCenter, _ringU, ringRadius);
-        else vec3.scaleAndAdd(handle.world, _centerWorld, [1, 0, 0], radius);
-    } else if (spec.kind === 'segment') {
-        const from = local[spec.from] as Vec3 | undefined;
-        const to = local[spec.to] as Vec3 | undefined;
-        if (from) take('segment-end', path, spec.from, 0, 1, matrix, from[0], from[1], from[2]);
-        if (to) take('segment-end', path, spec.to, 0, 1, matrix, to[0], to[1], to[2]);
+        take('box-face', path, 'halfExtents', 0, 1, matrix, half[0], 0, 0);
+        take('box-face', path, 'halfExtents', 0, -1, matrix, -half[0], 0, 0);
+        take('box-face', path, 'halfExtents', 1, 1, matrix, 0, half[1], 0);
+        take('box-face', path, 'halfExtents', 1, -1, matrix, 0, -half[1], 0);
+        take('box-face', path, 'halfExtents', 2, 1, matrix, 0, 0, half[2]);
+        take('box-face', path, 'halfExtents', 2, -1, matrix, 0, 0, -half[2]);
+        return;
     }
+    const radius = local.radius as number | undefined;
+    if (radius === undefined) return;
+    // the drag measures from the centre (the matrix origin); the dot sits on the silhouette ring, where the edge is on screen.
+    const handle = take('radius', path, 'radius', 0, 1, matrix, 0, 0, 0);
+    vec3.set(_centerWorld, matrix[12]!, matrix[13]!, matrix[14]!);
+    const ringRadius = silhouette(_centerWorld, radius, _collectEye, _ringCenter, _ringU, _ringV);
+    if (ringRadius > 0) vec3.scaleAndAdd(handle.world, _ringCenter, _ringU, ringRadius);
+    else vec3.scaleAndAdd(handle.world, _centerWorld, [1, 0, 0], radius);
+}
+
+function segmentHandles(local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
+    const from = local.from as Vec3 | undefined;
+    const to = local.to as Vec3 | undefined;
+    if (from) take('segment-end', path, 'from', 0, 1, matrix, from[0], from[1], from[2]);
+    if (to) take('segment-end', path, 'to', 0, 1, matrix, to[0], to[1], to[2]);
 }
 
 const _centerWorld: Vec3 = [0, 0, 0];

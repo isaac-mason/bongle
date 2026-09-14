@@ -1,8 +1,7 @@
 import { type Mat4, mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { registry } from '../../core/registry';
-import type { ShapeSpecData } from '../../core/scene/prop/prop';
-import { walkObjects } from '../../core/scene/prop/specs';
+import { isShape, type ShapeKind, walkObjects } from '../../core/scene/prop/specs';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait } from '../../core/scene/scene-tree';
 import * as Lines from '../../render/overlay/lines';
@@ -14,7 +13,7 @@ const GREAT_CIRCLE_ALPHA = 0.35;
 
 let _eye: Vec3 = [0, 0, 0];
 
-/** every shape-annotated object in the node's controls, each under its enclosing frames. */
+/** every shape in the node's controls, each under its enclosing poses. */
 export function drawNode(lines: Lines.LineBatch, node: Node, color: Rgba, eye: Vec3): void {
     const transform = getTrait(node, TransformTrait);
     if (!transform) return;
@@ -26,7 +25,7 @@ export function drawNode(lines: Lines.LineBatch, node: Node, color: Rgba, eye: V
         if (!instance || !handle) continue;
         for (const reg of handle.def.controls) {
             walkObjects(reg.schema, reg.get(instance), world, (site) => {
-                if (site.schema.shape) drawShape(lines, site.schema.shape, site.local, site.shapeMatrix, color);
+                if (isShape(site)) drawShape(lines, site.schema.kind, site.local, site.matrix, color);
                 return false;
             });
         }
@@ -63,16 +62,16 @@ function segment(
     Lines.line(lines, _a[0], _a[1], _a[2], _b[0], _b[1], _b[2], color[0], color[1], color[2], color[3]);
 }
 
-function drawShape(lines: Lines.LineBatch, spec: ShapeSpecData, local: Record<string, unknown>, matrix: Mat4, color: Rgba): void {
-    if (spec.kind === 'box3') {
-        const half = local[spec.halfExtents] as Vec3 | undefined;
+function drawShape(lines: Lines.LineBatch, kind: ShapeKind, local: Record<string, unknown>, matrix: Mat4, color: Rgba): void {
+    if (kind === 'box3') {
+        const half = local.halfExtents as Vec3 | undefined;
         if (half) box(lines, matrix, half[0], half[1], half[2], color);
-    } else if (spec.kind === 'sphere') {
-        const radius = local[spec.radius] as number | undefined;
+    } else if (kind === 'sphere') {
+        const radius = local.radius as number | undefined;
         if (radius !== undefined) sphere(lines, matrix, 0, 0, 0, radius, color);
-    } else if (spec.kind === 'segment') {
-        const from = local[spec.from] as Vec3 | undefined;
-        const to = local[spec.to] as Vec3 | undefined;
+    } else {
+        const from = local.from as Vec3 | undefined;
+        const to = local.to as Vec3 | undefined;
         if (from && to) segment(lines, matrix, from[0], from[1], from[2], to[0], to[1], to[2], color);
     }
 }

@@ -17,47 +17,21 @@ export const AutoShapeDef = prop.object({
     shape: prop.enumeration(['box', 'sphere', 'capsule', 'hull', 'mesh']),
 });
 
-export const BoxShapeDef = prop.object(
-    {
-        type: prop.literal('box'),
-        halfExtents: prop.vec3(),
-    },
-    { shape: { kind: 'box3', halfExtents: 'halfExtents' } },
-);
+/** a box or sphere in the body's frame; a nonzero `center` offsets it. */
+export const ColliderShape = prop.union('type', [prop.box3(), prop.sphere()]);
 
-export const SphereShapeDef = prop.object(
-    {
-        type: prop.literal('sphere'),
-        radius: prop.radius(),
-    },
-    { shape: { kind: 'sphere', radius: 'radius' } },
-);
-
-export const TransformedShapeDef = prop.object(
-    {
-        type: prop.literal('transformed'),
-        shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
-        position: prop.point(),
-        quaternion: prop.quaternion(),
-    },
-    { frame: { position: 'position', quaternion: 'quaternion' } },
-);
+export const TransformedShapeDef = prop.object({
+    type: prop.literal('transformed'),
+    pose: prop.pose(),
+    shape: ColliderShape,
+});
 
 export const CompoundShapeDef = prop.object({
     type: prop.literal('compound'),
-    shapes: prop.list(
-        prop.object(
-            {
-                shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
-                position: prop.point(),
-                quaternion: prop.quaternion(),
-            },
-            { frame: { position: 'position', quaternion: 'quaternion' } },
-        ),
-    ),
+    shapes: prop.list(prop.object({ pose: prop.pose(), shape: ColliderShape })),
 });
 
-export const ShapeDef = prop.union('type', [AutoShapeDef, BoxShapeDef, SphereShapeDef, TransformedShapeDef, CompoundShapeDef]);
+export const ShapeDef = prop.union('type', [AutoShapeDef, prop.box3(), prop.sphere(), TransformedShapeDef, CompoundShapeDef]);
 
 export type ShapeDef = prop.SchemaType<typeof ShapeDef>;
 

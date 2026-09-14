@@ -40,7 +40,7 @@ system('drop-ball', (ctx) => {
         setPosition(transform, [0, 15, 0]);
 
         const bodyTrait = addTrait(ball, RigidBodyTrait);
-        bodyTrait.def = { shape: { type: 'sphere', radius: 0.5 }, restitution: 0.4, friction: 0.5 };
+        bodyTrait.def = { shape: { type: 'sphere', center: [0, 0, 0], radius: 0.5 }, restitution: 0.4, friction: 0.5 };
 
         addChild(ctx.node, ball);
     });
@@ -86,7 +86,7 @@ function spawnCoin(parent: Node, position: Vec3) {
     addTrait(coin, CoinTrait);
     addTrait(coin, ContactsTrait);
     addTrait(coin, RigidBodyTrait).def = {
-        shape: { type: 'sphere', radius: 0.5 },
+        shape: { type: 'sphere', center: [0, 0, 0], radius: 0.5 },
         motionType: MotionType.STATIC,
         sensor: true,
     };
@@ -141,7 +141,7 @@ system('group-demo', (ctx) => {
         const enemy = createNode({ name: 'enemy' });
         setPosition(addTrait(enemy, TransformTrait), [0, 5, 0]);
         addTrait(enemy, RigidBodyTrait).def = {
-            shape: { type: 'sphere', radius: 0.4 },
+            shape: { type: 'sphere', center: [0, 0, 0], radius: 0.4 },
             collisionGroups: Groups.enemies,
             collisionMask: exceptGroups(Groups.enemies),
         };
@@ -152,7 +152,7 @@ system('group-demo', (ctx) => {
         const pickup = createNode({ name: 'pickup' });
         setPosition(addTrait(pickup, TransformTrait), [2, 1, 0]);
         addTrait(pickup, RigidBodyTrait).def = {
-            shape: { type: 'sphere', radius: 0.5 },
+            shape: { type: 'sphere', center: [0, 0, 0], radius: 0.5 },
             motionType: MotionType.STATIC,
             sensor: true,
             collisionGroups: Groups.pickups,

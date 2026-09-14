@@ -107,7 +107,8 @@ script(
                         const rb = addTrait(mesh, RigidBodyTrait);
                         rb.def = {
                             shape: {
-                                type: 'box',
+                                type: 'box3',
+                                center: [0, 0, 0],
                                 halfExtents: [SPARK_HALF_EXTENT, SPARK_HALF_EXTENT, SPARK_HALF_EXTENT],
                             },
                             motionType: MotionType.STATIC,

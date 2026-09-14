@@ -24,7 +24,7 @@ function project(camera: PerspectiveCamera, world: Vec3): { ndcX: number; ndcY: 
 }
 
 describe('shape handles', () => {
-    it('clicking the frame dot of a transformed shape arms that frame and opens the transform tool', () => {
+    it('clicking the pose dot of a transformed shape arms that pose and opens the transform tool', () => {
         reindexRegistry(registry);
         const sceneTree = createSceneTree();
         const node = createNode({ name: 'body' });
@@ -32,7 +32,11 @@ describe('shape handles', () => {
         addTrait(node, TransformTrait);
         const body = addTrait(node, RigidBodyTrait);
         body.def = {
-            shape: { type: 'transformed', shape: { type: 'sphere', radius: 1 }, position: [2, 0, 0], quaternion: [0, 0, 0, 1] },
+            shape: {
+                type: 'transformed',
+                pose: { position: [2, 0, 0], quaternion: [0, 0, 0, 1] },
+                shape: { type: 'sphere', center: [0, 0, 0], radius: 1 },
+            },
         };
         computeWorldTransforms(sceneTree);
 
@@ -79,26 +83,17 @@ describe('shape handles', () => {
         // frame 2: press
         mk._gestures.left.pressed = true;
         Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
-        expect(state.activeFrame).toMatchObject({
-            nodeId: node.id,
-            traitId: 'rigidbody',
-            controlId: 'def',
-            position: 'position',
-        });
+        expect(state.activeFrame).toEqual({ nodeId: node.id, traitId: 'rigidbody', controlId: 'def', path: ['shape', 'pose'] });
         expect(state.activeTool).toBe('transform');
     });
 });
 
 describe('shape handles on a list of centred spheres', () => {
-    it('a sphere with a center gets a frame dot that arms `center` for the gizmo', () => {
-        const Sphere = prop.object(
-            { center: prop.point(), radius: prop.radius() },
-            { shape: { kind: 'sphere', radius: 'radius', center: 'center' } },
-        );
-        const ZonesTrait = trait('test-zones', { zones: [] as { center: [number, number, number]; radius: number }[] });
+    it('a sphere gets a centre dot that arms it for the gizmo', () => {
+        const ZonesTrait = trait('test-zones', { zones: [] as prop.SchemaType<ReturnType<typeof prop.sphere>>[] });
         control(ZonesTrait, 'zones', {
             label: 'Zones',
-            schema: prop.list(Sphere),
+            schema: prop.list(prop.sphere()),
             get: (t) => t.zones,
             set: (t, v) => {
                 t.zones = v;
@@ -112,8 +107,8 @@ describe('shape handles on a list of centred spheres', () => {
         addTrait(node, TransformTrait);
         const zones = addTrait(node, ZonesTrait);
         zones.zones = [
-            { center: [3, 0, 0], radius: 1 },
-            { center: [-3, 0, 0], radius: 0.5 },
+            { type: 'sphere', center: [3, 0, 0], radius: 1 },
+            { type: 'sphere', center: [-3, 0, 0], radius: 0.5 },
         ];
         computeWorldTransforms(sceneTree);
 
@@ -152,7 +147,7 @@ describe('shape handles on a list of centred spheres', () => {
 
         mk._gestures.left.pressed = true;
         Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
-        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1], position: 'center' });
+        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1] });
         expect(state.activeTool).toBe('transform');
     });
 });
@@ -221,8 +216,7 @@ let harnessCount = 0;
 
 describe('shape handles: drags and spaces', () => {
     it('dragging a box face along its axis resizes that extent, snapped, with one history entry on release', () => {
-        const Box = prop.object({ halfExtents: prop.vec3() }, { shape: { kind: 'box3', halfExtents: 'halfExtents' } });
-        const h = harness(Box, { halfExtents: [1, 1, 1] });
+        const h = harness(prop.box3(), { type: 'box3', center: [0, 0, 0], halfExtents: [1, 1, 1] });
         h.aim([1, 0, 0]);
         h.tick();
         expect(h.handles.handles[h.handles.hovered]).toMatchObject({ kind: 'box-face', axis: 0, sign: 1 });
@@ -243,19 +237,14 @@ describe('shape handles: drags and spaces', () => {
     });
 
     it('a world-space shape ignores the node transform', () => {
-        const Sphere = prop.object(
-            { center: prop.point(), radius: prop.radius() },
-            { space: 'world', shape: { kind: 'sphere', radius: 'radius', center: 'center' } },
-        );
-        const h = harness(Sphere, { center: [1, 0, 0], radius: 1 }, [5, 0, 0]);
+        const h = harness(prop.sphere({ space: 'world' }), { type: 'sphere', center: [1, 0, 0], radius: 1 }, [5, 0, 0]);
         h.tick();
         const frame = h.handles.handles.find((x) => x.kind === 'frame')!;
         expect(Array.from(frame.world)).toEqual([1, 0, 0]);
     });
 
     it('a local shape sits under the node transform, and a segment gets its two end handles', () => {
-        const Seg = prop.object({ from: prop.point(), to: prop.point() }, { shape: { kind: 'segment', from: 'from', to: 'to' } });
-        const h = harness(Seg, { from: [0, 0, 0], to: [2, 0, 0] }, [1, 0, 0]);
+        const h = harness(prop.segment(), { type: 'segment', from: [0, 0, 0], to: [2, 0, 0] }, [1, 0, 0]);
         h.tick();
         const ends = h.handles.handles.filter((x) => x.kind === 'segment-end').map((x) => Array.from(x.world));
         expect(ends).toEqual([

@@ -51,41 +51,14 @@ export type TupleSchema = {
     of: Schema[];
 };
 
-/** the keys of `F` whose schema extends `S`. */
-export type Field<F, S> = { [K in keyof F]: F[K] extends S ? K : never }[keyof F];
-
-export type SphereSpec<F> = {
-    kind: 'sphere';
-    radius: Field<F, { subtype: 'radius' }>;
-    center?: Field<F, { subtype: 'point' }>;
-};
-export type Box3Spec<F> = { kind: 'box3'; halfExtents: Field<F, Vector3Schema>; center?: Field<F, { subtype: 'point' }> };
-export type SegmentSpec<F> = {
-    kind: 'segment';
-    from: Field<F, { subtype: 'point' }>;
-    to: Field<F, { subtype: 'point' }>;
-};
-/** which fields of an object make it a shape; drawn and given handles by the editor. */
-export type ShapeSpec<F> = SphereSpec<F> | Box3Spec<F> | SegmentSpec<F>;
-/** which fields of an object position its children. */
-export type FrameSpec<F> = {
-    position?: Field<F, { subtype: 'point' }>;
-    quaternion?: Field<F, QuaternionSchema>;
-};
-
-/** the stored form: field names as plain strings, checked by `checkSpecs`. */
-export type ShapeSpecData =
-    | { kind: 'sphere'; radius: string; center?: string }
-    | { kind: 'box3'; halfExtents: string; center?: string }
-    | { kind: 'segment'; from: string; to: string };
-export type FrameSpecData = { position?: string; quaternion?: string };
+/** an object with a fixed layout the editor knows: shapes get outlines and handles, a pose frames its sibling fields. */
+export type ObjectKind = 'sphere' | 'box3' | 'segment' | 'pose';
 
 export type ObjectSchema = {
     type: 'object';
     fields: Record<string, Schema>;
-    shape?: ShapeSpecData;
-    frame?: FrameSpecData;
-    /** 'world' restarts the frame chain at identity for this object: its frame and shape are absolute, not under the node. */
+    kind?: ObjectKind;
+    /** 'world' expresses this object's frame absolutely instead of under the node and its enclosing poses. */
     space?: 'local' | 'world';
 };
 
@@ -296,12 +269,78 @@ export const tuple = <T extends Schema[]>(of: [...T]): { type: 'tuple'; of: [...
     of,
 });
 
-export const object = <F extends Record<string, Schema>>(
-    fields: F,
-    opts?: { shape?: ShapeSpec<F>; frame?: FrameSpec<F>; space?: 'local' | 'world' },
-): { type: 'object'; fields: F; shape?: ShapeSpec<F>; frame?: FrameSpec<F>; space?: 'local' | 'world' } => ({
+export const object = <F extends Record<string, Schema>>(fields: F): { type: 'object'; fields: F } => ({
     type: 'object',
     fields,
+});
+
+export type ShapeOptions = { space?: 'local' | 'world' };
+
+/** value `{ type: 'sphere', center, radius }`; `center` is in the enclosing frame. */
+export const sphere = (
+    opts?: ShapeOptions,
+): {
+    type: 'object';
+    kind: 'sphere';
+    fields: { type: { type: 'literal'; value: 'sphere' }; center: { type: 'vector3'; subtype: 'point' }; radius: NumberSchema };
+    space?: 'local' | 'world';
+} => ({
+    type: 'object',
+    kind: 'sphere',
+    fields: { type: literal('sphere'), center: point(), radius: radius() },
+    ...opts,
+});
+
+/** value `{ type: 'box3', center, halfExtents }`; the box is axis-aligned in the enclosing frame, a pose rotates it. */
+export const box3 = (
+    opts?: ShapeOptions,
+): {
+    type: 'object';
+    kind: 'box3';
+    fields: {
+        type: { type: 'literal'; value: 'box3' };
+        center: { type: 'vector3'; subtype: 'point' };
+        halfExtents: Vector3Schema;
+    };
+    space?: 'local' | 'world';
+} => ({
+    type: 'object',
+    kind: 'box3',
+    fields: { type: literal('box3'), center: point(), halfExtents: vec3() },
+    ...opts,
+});
+
+/** value `{ type: 'segment', from, to }`; both ends in the enclosing frame. */
+export const segment = (
+    opts?: ShapeOptions,
+): {
+    type: 'object';
+    kind: 'segment';
+    fields: {
+        type: { type: 'literal'; value: 'segment' };
+        from: { type: 'vector3'; subtype: 'point' };
+        to: { type: 'vector3'; subtype: 'point' };
+    };
+    space?: 'local' | 'world';
+} => ({
+    type: 'object',
+    kind: 'segment',
+    fields: { type: literal('segment'), from: point(), to: point() },
+    ...opts,
+});
+
+/** value `{ position, quaternion }`; an object holding a pose field is framed by it, so its other fields live inside that pose. */
+export const pose = (
+    opts?: ShapeOptions,
+): {
+    type: 'object';
+    kind: 'pose';
+    fields: { position: { type: 'vector3'; subtype: 'point' }; quaternion: QuaternionSchema };
+    space?: 'local' | 'world';
+} => ({
+    type: 'object',
+    kind: 'pose',
+    fields: { position: point(), quaternion: quaternion() },
     ...opts,
 });
 

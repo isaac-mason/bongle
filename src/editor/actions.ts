@@ -1,11 +1,5 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
-import {
-    getVisualWorldMatrix,
-    getVisualWorldPosition,
-    getWorldPosition,
-    TransformTrait,
-    worldToLocalPosition,
-} from '../builtins/transform';
+import { getVisualWorldMatrix, getWorldPosition, TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
 import { setAtPath } from '../core/scene/prop/path';
 import { findShape, type ShapeSite } from '../core/scene/prop/specs';
@@ -855,7 +849,7 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
 export type PendingShapeFit = { nodeId: number; bounds: Selection.Bounds; framesLeft: number };
 const PENDING_FIT_FRAMES = 600;
 
-/** the first shape-annotated control on any of the node's traits. */
+/** the first shape on any of the node's controls. */
 export function findNodeShape(node: Node): { traitId: string; controlId: string; value: unknown; site: ShapeSite } | null {
     for (let slot = 0; slot < node.traits.length; slot++) {
         const instance = node.traits[slot];
@@ -911,10 +905,7 @@ function halfExtentsInFrame(bounds: Selection.Bounds, centre: Vec3, shapeFrame: 
     return half;
 }
 
-/**
- * moves the node's first shape onto the bounds and sizes it to them: a shape with a centre takes the centre itself,
- * otherwise the node moves; the extents are read in the shape's own frame. false when the node has no fittable shape.
- */
+/** moves the node's first shape onto the bounds through its `center` and sizes it to them, the extents read in the shape's own frame. false when the node has no sphere or box. */
 export function fitShapeToBoundsAction(
     state: EditRoomState,
     ctx: ScriptContext,
@@ -925,58 +916,35 @@ export function fitShapeToBoundsAction(
     if (!node) return false;
     const shape = findNodeShape(node);
     if (!shape) return false;
-    const { spec, local, space } = shape.site;
-    if (spec.kind === 'segment') return false;
+    const { local, schema } = shape.site;
+    if (schema.kind === 'segment') return false;
     const transform = getTrait(node, TransformTrait);
-    if (space === 'local' && !transform) return false;
-    if (space === 'world' && !spec.center) return false;
+    if (schema.space !== 'world' && !transform) return false;
 
-    const nodeWorld = space === 'world' || !transform ? IDENTITY : getVisualWorldMatrix(transform);
-    mat4.multiply(_fitFrame, nodeWorld, shape.site.matrix);
-    mat4.multiply(_fitShapeFrame, nodeWorld, shape.site.shapeMatrix);
+    const nodeWorld = schema.space === 'world' || !transform ? IDENTITY : getVisualWorldMatrix(transform);
+    mat4.multiply(_fitFrame, nodeWorld, shape.site.parent);
+    mat4.multiply(_fitShapeFrame, nodeWorld, shape.site.matrix);
     const centre = boundsCenter(bounds);
     const half = halfExtentsInFrame(bounds, centre, _fitShapeFrame);
+    mat4.invert(_fitInverse, _fitFrame);
+    const fitted: Record<string, unknown> = {
+        ...local,
+        center: vec3.transformMat4([0, 0, 0], centre, _fitInverse),
+        ...(schema.kind === 'box3' ? { halfExtents: half } : { radius: Math.max(half[0], half[1], half[2]) }),
+    };
 
-    const fitted: Record<string, unknown> =
-        spec.kind === 'box3'
-            ? { ...local, [spec.halfExtents]: half }
-            : { ...local, [spec.radius]: Math.max(half[0], half[1], half[2]) };
-    let nextTransformProps: Record<string, unknown> | null = null;
-    if (spec.center) {
-        mat4.invert(_fitInverse, _fitFrame);
-        fitted[spec.center] = vec3.transformMat4([0, 0, 0], centre, _fitInverse);
-    } else {
-        // the shape sits at its frame origin: shift the node by that origin's offset from the bounds centre
-        const origin: Vec3 = [_fitShapeFrame[12]!, _fitShapeFrame[13]!, _fitShapeFrame[14]!];
-        const nodeWorldPosition = getVisualWorldPosition(transform!);
-        const target: Vec3 = [
-            nodeWorldPosition[0] + centre[0] - origin[0],
-            nodeWorldPosition[1] + centre[1] - origin[1],
-            nodeWorldPosition[2] + centre[2] - origin[2],
-        ];
-        nextTransformProps = { position: worldToLocalPosition(transform!, target, [0, 0, 0]) };
-    }
-
-    const nextShapeProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
-    const prevShapeProps = captureTraitProps(node, shape.traitId);
-    const prevTransformProps = nextTransformProps ? captureTraitProps(node, 'transform') : null;
-
-    const write = (shapeProps: Record<string, unknown> | null, transformProps: Record<string, unknown> | null) => {
+    const nextProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
+    const prevProps = captureTraitProps(node, shape.traitId);
+    const write = (props: Record<string, unknown> | null) => {
         const n = getNodeById(ctx.scene, nodeId);
-        if (!n) return;
-        if (shapeProps) {
-            setTraitProps(ctx.scene, n, shape.traitId, shapeProps);
-            send(ctx, SetTraitCommand, { id: nodeId, traitId: shape.traitId, props: JSON.stringify(shapeProps) });
-        }
-        if (transformProps) {
-            setTraitProps(ctx.scene, n, 'transform', transformProps);
-            send(ctx, SetTraitCommand, { id: nodeId, traitId: 'transform', props: JSON.stringify(transformProps) });
-        }
+        if (!n || !props) return;
+        setTraitProps(ctx.scene, n, shape.traitId, props);
+        send(ctx, SetTraitCommand, { id: nodeId, traitId: shape.traitId, props: JSON.stringify(props) });
     };
     state.action({
         label: 'fit to selection',
-        do: () => write(nextShapeProps, nextTransformProps),
-        undo: () => write(prevShapeProps, prevTransformProps),
+        do: () => write(nextProps),
+        undo: () => write(prevProps),
     });
     return true;
 }
@@ -1036,15 +1004,16 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
     if (!node || !transform) return null;
     const shape = findNodeShape(node);
     if (!shape) return null;
-    const { spec, local } = shape.site;
-    const origin: Vec3 = shape.site.space === 'world' ? [0, 0, 0] : getWorldPosition(transform);
+    const { schema, local } = shape.site;
+    if (schema.kind === 'segment') return null;
+    const origin: Vec3 = schema.space === 'world' ? [0, 0, 0] : getWorldPosition(transform);
+    const center = local.center as Vec3;
+    const cx = origin[0] + center[0];
+    const cy = origin[1] + center[1];
+    const cz = origin[2] + center[2];
     const selection = Selection.create();
-    if (spec.kind === 'box3') {
-        const half = local[spec.halfExtents] as Vec3;
-        const center = spec.center ? ((local[spec.center] as Vec3 | undefined) ?? [0, 0, 0]) : [0, 0, 0];
-        const cx = origin[0] + center[0];
-        const cy = origin[1] + center[1];
-        const cz = origin[2] + center[2];
+    if (schema.kind === 'box3') {
+        const half = local.halfExtents as Vec3;
         Selection.setAABB(
             selection,
             Math.ceil(cx - half[0] - 0.5),
@@ -1056,26 +1025,19 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
         );
         return selection;
     }
-    if (spec.kind === 'sphere') {
-        const radius = local[spec.radius] as number;
-        const center = spec.center ? (local[spec.center] as Vec3) : [0, 0, 0];
-        const cx = origin[0] + center[0];
-        const cy = origin[1] + center[1];
-        const cz = origin[2] + center[2];
-        const r2 = radius * radius;
-        for (let wx = Math.ceil(cx - radius - 0.5); wx <= Math.floor(cx + radius - 0.5); wx++) {
-            for (let wy = Math.ceil(cy - radius - 0.5); wy <= Math.floor(cy + radius - 0.5); wy++) {
-                for (let wz = Math.ceil(cz - radius - 0.5); wz <= Math.floor(cz + radius - 0.5); wz++) {
-                    const ex = wx + 0.5 - cx;
-                    const ey = wy + 0.5 - cy;
-                    const ez = wz + 0.5 - cz;
-                    if (ex * ex + ey * ey + ez * ez <= r2) Selection.set(selection, wx, wy, wz);
-                }
+    const radius = local.radius as number;
+    const r2 = radius * radius;
+    for (let wx = Math.ceil(cx - radius - 0.5); wx <= Math.floor(cx + radius - 0.5); wx++) {
+        for (let wy = Math.ceil(cy - radius - 0.5); wy <= Math.floor(cy + radius - 0.5); wy++) {
+            for (let wz = Math.ceil(cz - radius - 0.5); wz <= Math.floor(cz + radius - 0.5); wz++) {
+                const ex = wx + 0.5 - cx;
+                const ey = wy + 0.5 - cy;
+                const ez = wz + 0.5 - cz;
+                if (ex * ex + ey * ey + ez * ez <= r2) Selection.set(selection, wx, wy, wz);
             }
         }
-        return selection;
     }
-    return null;
+    return selection;
 }
 
 export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, config: PrefabConfig): void {

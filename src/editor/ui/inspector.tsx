@@ -202,31 +202,35 @@ function EnumEditor({
 
 const ControlContext = createContext<{ nodeId: number; traitId: string; controlId: string } | null>(null);
 
+// a pose hands translate and rotate to the gizmo; a sphere or box hands it their centre.
 function FrameToggle({ schema, path }: { schema: ObjectSchema; path: PropPath }) {
     const control = useContext(ControlContext);
     const activeFrame = useEditRoom((s) => s.activeFrame);
     const setActiveFrame = useEditRoom((s) => s.setActiveFrame);
-    const frame = schema.frame;
-    if (!control || !frame) return null;
+    const kind = schema.kind;
+    if (!control || kind === undefined || kind === 'segment') return null;
     const armed =
         activeFrame !== null &&
         activeFrame.nodeId === control.nodeId &&
         activeFrame.traitId === control.traitId &&
         activeFrame.controlId === control.controlId &&
         samePath(activeFrame.path, path);
+    const label = kind === 'pose' ? 'pose' : 'center';
     return (
         <button
             type="button"
-            title={armed ? 'gizmo follows the node' : 'gizmo follows this frame'}
+            title={armed ? 'gizmo follows the node' : `gizmo follows this ${label}`}
             onClick={() => {
                 if (armed) {
                     setActiveFrame(null);
                     return;
                 }
-                const next: ActiveFrame = { ...control, path, position: frame.position, quaternion: frame.quaternion };
+                const next: ActiveFrame = { ...control, path };
                 const store = activeEditRoomStore();
                 const { activeTool, transformMode } = store.getState();
-                const keepMode = activeTool === 'transform' && (transformMode === 'translate' || transformMode === 'rotate');
+                const keepMode =
+                    activeTool === 'transform' &&
+                    (transformMode === 'translate' || (kind === 'pose' && transformMode === 'rotate'));
                 store.setState({
                     activeFrame: next,
                     activeTool: 'transform',
@@ -237,7 +241,7 @@ function FrameToggle({ schema, path }: { schema: ObjectSchema; path: PropPath })
                 armed ? 'bg-accent text-on-accent' : 'bg-surface-muted text-fg-muted hover:text-fg'
             }`}
         >
-            <Icons.Move size={12} /> frame
+            <Icons.Move size={12} /> {label}
         </button>
     );
 }
