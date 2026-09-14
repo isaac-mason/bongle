@@ -1,4 +1,4 @@
-import { asset, sprite, texture } from 'bongle';
+import { asset, type SpriteHandle, sprite, texture } from 'bongle';
 import {
     beetrootItem as beetrootItemTexture,
     blueberryItem as blueberryItemTexture,
@@ -19,13 +19,29 @@ const GLYPH_COLUMNS = 16;
 const GLYPH_WIDTH = 5;
 const GLYPH_HEIGHT = 7;
 
-/** one static sprite per printable ASCII character, `kit:glyph:<code>`. */
-export const glyphs = Array.from({ length: GLYPH_COUNT }, (_, i) => {
+const GLYPH_FALLBACK = '?'.charCodeAt(0) - GLYPH_FIRST_CODE;
+
+/** one static sprite per printable ASCII character, `kit:glyph:<code>`, in code order from space. */
+export const glyphSprites: SpriteHandle[] = Array.from({ length: GLYPH_COUNT }, (_, i) => {
     const id = `kit:glyph:${GLYPH_FIRST_CODE + i}`;
     const x = (i % GLYPH_COLUMNS) * GLYPH_CELL;
     const y = Math.floor(i / GLYPH_COLUMNS) * GLYPH_CELL;
     return sprite(id, { frames: [texture(id, { of: fontSheet, region: [x, y, GLYPH_WIDTH, GLYPH_HEIGHT] })], mipmap: false });
 });
+
+/** the font's pixel metrics: every glyph is `width` by `height`, and a run steps `advance` per character. */
+export const glyphMetrics = { width: GLYPH_WIDTH, height: GLYPH_HEIGHT, advance: GLYPH_WIDTH + 1 } as const;
+
+/** the sprite for one character; anything outside printable ASCII draws as `?`. */
+export function glyph(char: string): SpriteHandle {
+    const index = char.charCodeAt(0) - GLYPH_FIRST_CODE;
+    return glyphSprites[index >= 0 && index < GLYPH_COUNT ? index : GLYPH_FALLBACK]!;
+}
+
+/** one sprite per character of `text`, in order. */
+export function glyphs(text: string): SpriteHandle[] {
+    return Array.from(text, (char) => glyph(char));
+}
 
 /** one white 8x8 icon per builtin trait family, `kit:icon:<name>`; `trait(id, body, { icon })` names them. */
 export const icons = {
