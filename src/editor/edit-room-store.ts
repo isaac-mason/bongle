@@ -766,6 +766,10 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
     }));
     api = store;
     store.subscribe((state, previous) => {
+        // an armed sub-frame lives only while the transform tool holds the selection that armed it
+        if (state.activeFrame !== null && (state.activeTool !== 'transform' || state.selection !== previous.selection)) {
+            store.setState({ activeFrame: null });
+        }
         if (state.selection === previous.selection) return;
         if (env.editor) checkSelectionInvariants(state.selection, placement);
         const inspectedVoxel = inspectedVoxelOf(state.selection);

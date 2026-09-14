@@ -224,12 +224,14 @@ function FrameToggle({ schema, path }: { schema: ObjectSchema; path: PropPath })
                     return;
                 }
                 const next: ActiveFrame = { ...control, path, position: frame.position, quaternion: frame.quaternion };
-                setActiveFrame(next);
                 const store = activeEditRoomStore();
                 const { activeTool, transformMode } = store.getState();
-                if (activeTool !== 'transform' || (transformMode !== 'translate' && transformMode !== 'rotate')) {
-                    store.setState({ activeTool: 'transform', transformMode: 'translate' });
-                }
+                const keepMode = activeTool === 'transform' && (transformMode === 'translate' || transformMode === 'rotate');
+                store.setState({
+                    activeFrame: next,
+                    activeTool: 'transform',
+                    transformMode: keepMode ? transformMode : 'translate',
+                });
             }}
             className={`flex items-center gap-0.5 px-1 text-[10px] font-mono cursor-pointer ${
                 armed ? 'bg-accent text-on-accent' : 'bg-surface-muted text-fg-muted hover:text-fg'
