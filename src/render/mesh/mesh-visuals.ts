@@ -307,6 +307,12 @@ function writeInstances(visuals: MeshVisuals, batch: MeshBatch, modelResources: 
             dirtySlotCount++;
             if (slot < dirtyMinSlot) dirtyMinSlot = slot;
             if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
+            // ONE RANGE PER DIRTY SLOT, not a single min..max span. Dirty slots scatter - the
+            // light resample is phased by slot, so only every Nth re-samples on a given frame -
+            // and one span across them re-sends every untouched slot in the gap at 160 B each.
+            // gpucat merges adjacent ranges before uploading, so contiguous runs still cost one
+            // write, and a fully-dirty batch collapses back to the single span this replaces.
+            batch.instanceDataBuf.addUpdateRange(slot * MODEL_INSTANCE_STRIDE_F32, MODEL_INSTANCE_STRIDE_F32);
         }
 
         let bucket = buckets.get(state.meshSlot);
@@ -318,8 +324,6 @@ function writeInstances(visuals: MeshVisuals, batch: MeshBatch, modelResources: 
     }
 
     if (dirtyMaxSlot >= 0) {
-        const base = dirtyMinSlot * MODEL_INSTANCE_STRIDE_F32;
-        batch.instanceDataBuf.addUpdateRange(base, (dirtyMaxSlot - dirtyMinSlot + 1) * MODEL_INSTANCE_STRIDE_F32);
         batch.instanceDataBuf.needsUpdate = true;
     }
 
@@ -328,6 +332,8 @@ function writeInstances(visuals: MeshVisuals, batch: MeshBatch, modelResources: 
     // diverge when dirty slots scatter (the light resample is phased by slot).
     batch.aliveInstances = aliveStates.length;
     batch.dirtyInstances = dirtySlotCount;
+    // what a single min..max span WOULD have uploaded, kept as the comparison against
+    // `dirtyInstances`: the gap between them is what per-slot ranges now avoid sending.
     batch.dirtySpan = dirtyMaxSlot >= 0 ? dirtyMaxSlot - dirtyMinSlot + 1 : 0;
 }
 
