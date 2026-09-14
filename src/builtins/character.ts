@@ -74,7 +74,6 @@ import {
     destroyNode,
     findByName,
     getTrait,
-    hasTrait,
     isLocalNode,
     type Node,
 } from '../api/scene-tree';
@@ -500,7 +499,6 @@ function emptyRigNodes(): RigNodes {
 }
 
 function ensureCanonicalBones(playerNode: Node): void {
-    if (!hasTrait(playerNode, AnimatorTrait)) addTrait(playerNode, AnimatorTrait);
     const byName = new Map<string, Node>();
     for (const name of RIG_6BONE_PERSISTENT_NODES) {
         const existing = findByName(playerNode, name);
