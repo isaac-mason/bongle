@@ -7,9 +7,9 @@
 // attaches the /game WS transport, runs the 60Hz sim.
 
 import type { Server as HttpServer } from 'node:http';
-import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
+import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { env } from 'bongle/env';
-import { createClientTable, serverTick } from '../../../build';
+import { createClientTable } from '../../../build';
 import type { ServerApp } from '../../../interface/index';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import { openNodeFs } from '../../node-fs';
@@ -58,16 +58,16 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     const app = EngineServer.app('play');
     const transport = attachGameTransport({ httpServer, app, state, clients });
-    const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ);
+    app.start(state);
 
     return {
         app,
         state,
         transport,
-        stop: () => {
-            stopTick();
+        stop: async () => {
+            // dispose stops the loop, so it goes first: nothing ticks into a closed transport.
+            await EngineServer.dispose(state);
             transport.close();
-            EngineServer.dispose(state);
         },
     };
 }

@@ -35,7 +35,7 @@ export function recordRegionDecodeTime(voxelNet: VoxelNet, playerId: number, ela
     voxelNet.batchNanos.set(playerId, (voxelNet.batchNanos.get(playerId) ?? 0) + elapsedMs * 1_000_000);
 }
 
-export function flushAcks(voxelNet: VoxelNet, net: ClientNet): void {
+export function flushAcks(voxelNet: VoxelNet, net: ClientNet, frameSeconds: number): void {
     const playerIds = new Set<number>([...voxelNet.ackBuffer.keys(), ...voxelNet.regionAckBuffer.keys()]);
     for (const playerId of playerIds) {
         const full = voxelNet.ackBuffer.get(playerId) ?? [];
@@ -48,13 +48,14 @@ export function flushAcks(voxelNet: VoxelNet, net: ClientNet): void {
             voxelNet.pacing.set(playerId, pacing);
         }
         Pacing.recordBatch(pacing, regions.length, voxelNet.batchNanos.get(playerId) ?? 0);
+        Pacing.recordFrame(pacing, frameSeconds);
 
         Net.send(net, {
             type: 'voxel_ack',
             playerId,
             full,
             regions,
-            desiredRegionsPerTick: Pacing.desiredRegionsPerTick(pacing),
+            desiredRegionsPerSecond: Pacing.desiredRegionsPerSecond(pacing),
         });
     }
     voxelNet.batchNanos.clear();

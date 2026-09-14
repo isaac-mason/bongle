@@ -14,9 +14,8 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import { unzipSync } from 'fflate';
-import { avatarPicker, contentType, createClientTable, serverTick } from '../build';
+import { avatarPicker, contentType, createClientTable, withTimeout } from '../build';
 import type { ServerApp } from '../interface/index';
 import { createFallbackAvatarsDriver, resolveSampleAvatarFile } from '../src/node/sample-avatars-driver';
 import { nodeZstd } from '../src/node/zstd';
@@ -180,17 +179,19 @@ export async function startCommand(bundleArg: string, opts: { port?: number } = 
 
     const httpServer: HttpServer = createServer((req, res) => handleRequest(req, res, clientDir, html));
     const transport = attachGameTransport({ httpServer, app, state, clients, resolveAvatar: picker.resolve });
-    // a fixed step, like the play fleet, not the measured dt the dev realms use.
-    const stopTick = serverTick(() => app.update(state, 1 / SERVER_TICK_HZ), SERVER_TICK_HZ);
+    app.start(state);
 
     await new Promise<void>((resolve) => httpServer.listen(port, resolve));
     console.log(`\nbongle start → http://localhost:${port}`);
 
-    const shutdown = () => {
+    // a ctrl-c should not hang on a wedged teardown; the loop is already stopped by then.
+    const SHUTDOWN_TIMEOUT_MS = 5_000;
+    const shutdown = async () => {
         console.log('\n[bongle start] shutting down…');
-        stopTick();
+        // dispose stops the loop first; bounded here so a wedged teardown can't
+        // outlive the ctrl-c that asked for it.
+        await withTimeout(app.dispose(state), SHUTDOWN_TIMEOUT_MS);
         transport.close();
-        app.dispose?.(state);
         httpServer.close(() => process.exit(0));
     };
     process.on('SIGINT', shutdown);

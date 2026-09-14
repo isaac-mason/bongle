@@ -60,22 +60,22 @@ export function frameLoop(
     return () => cancelAnimationFrame(handle);
 }
 
-/** a setInterval loop around `step` at `hz`; returns stop. a throw is reported,
- *  not fatal. */
-export function serverTick(step: (dt: number) => void, hz: number, o?: { onError?: (message: string) => void }): () => void {
-    const report = o?.onError ?? ((message: string) => console.error(message));
-    let last = performance.now();
-    const timer = setInterval(() => {
-        const now = performance.now();
-        const dt = (now - last) / 1000;
-        last = now;
-        try {
-            step(dt);
-        } catch (err) {
-            report(`tick error: ${(err as Error)?.message ?? String(err)}`);
-        }
-    }, 1000 / hz);
-    return () => clearInterval(timer);
+/** race a teardown against a deadline: `EngineServer.dispose` awaits honestly, and a
+ *  host that can't wait forever (a ctrl-c, a container with a grace period) bounds it
+ *  here rather than the engine guessing a budget for every host. */
+export async function withTimeout(work: Promise<void>, ms: number, o?: { onTimeout?: () => void }): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+            o?.onTimeout?.();
+            resolve();
+        }, ms);
+    });
+    try {
+        await Promise.race([work, deadline]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
 }
 
 /* ── the inert dev driver ── */

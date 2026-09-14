@@ -72,6 +72,29 @@ and appear in the editor palette (it keeps the declarations alive through
 bundling). `matchmaking({ maxPlayers: 32 })` sets how many players matchmaking
 puts in one room.
 
+### Server tick rate
+
+`config({ server: { tickRate } })` sets how often the server simulates, an integer
+between 15 and 60, defaulting to 60. A game that does not need 60 halves the CPU its
+rooms cost, which is what decides how many rooms fit on a machine.
+
+The client always simulates at 60 regardless. Owner-authority motion (the local
+character above all) is stepped only on its owner's client, so a cheaper server
+cadence does not make your own character feel coarser. What it does affect:
+
+- **server-owned characters**, such as an NPC with a CharacterControllerTrait owned
+  by the server, step at `tickRate` and respond that much less often.
+- **server-owned dynamic rigid bodies** integrate at `tickRate`: stacking is less
+  stable and fast bodies are likelier to tunnel.
+- **bodies with `prediction`**, which are simulated on both sides at different rates
+  and so need more correction.
+- **`rate.hz(n)` above the tick rate** silently becomes the tick rate. At
+  `tickRate: 30`, `rate.hz(20)` still sends 20 times a second but `rate.hz(60)`
+  sends 30.
+
+Voxel streaming budgets are expressed per second, so a slower room streams the world
+in at the same speed.
+
 Next, a script that sets up the sky and sun:
 
 <Snippet source="first-game.snippet.ts" select="environment" />
@@ -298,8 +321,11 @@ editor, as the kit's environment script does.
 
 ### Ticks, frames, and interpolation
 
-The simulation advances on a fixed 60 Hz timestep, while rendering runs as fast as
-the display allows. Each rendered frame the engine runs zero or more fixed ticks
+The simulation advances on a fixed timestep while rendering runs as fast as the
+display allows. On the client that timestep is always 60 Hz; the server runs at the
+game's `tickRate`, so a script's `onTick` can fire at different rates on the two
+sides and should scale by its `step` rather than counting ticks. Frame hooks
+(`onUpdate`, `onFrame`, `onInput`) get a real, variable `delta` instead. Each rendered frame the engine runs zero or more fixed ticks
 (`onTick`) to catch up to real time, then renders. Because a frame usually falls
 between two ticks, it interpolates: each moving object is drawn a fraction of the
 way from its previous tick position to its current one, so motion stays smooth at
@@ -1156,8 +1182,8 @@ moon, and sky color all follow from it.
 
 ```ts
 // a slow day/night cycle: one in-game day every 20 real minutes
-onTick(ctx, ({ delta }) => {
-    setEnvironmentTime(ctx, getEnvironmentTime(ctx) + (24 / 1200) * delta);
+onTick(ctx, ({ step }) => {
+    setEnvironmentTime(ctx, getEnvironmentTime(ctx) + (24 / 1200) * step);
 });
 ```
 

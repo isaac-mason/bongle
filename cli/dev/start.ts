@@ -101,7 +101,7 @@ export async function startDevServer(opts: { projectDir: string; port?: number }
             do {
                 queued = false;
                 try {
-                    game.stop();
+                    await game.stop();
                 } catch (err) {
                     console.warn('[bongle dev] reboot: server stop failed:', err);
                 }
@@ -156,7 +156,7 @@ export async function startDevServer(opts: { projectDir: string; port?: number }
             clearTimeout(bakeTimer);
             watcher.close();
             try {
-                game.stop();
+                await game.stop();
             } catch {}
             try {
                 pipeline.stop();

@@ -3,7 +3,7 @@ import { emptyArgsSchema, noopApply, type PrefabOptions } from '../api/prefabs';
 import { resolveAssetMeta } from './asset-meta';
 import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
 import { onModulePop, onModulePush, owningModule, recordDeclaration } from './capture/module-scope';
-import { CONFIG_ID, type Config, DEFAULT_CONFIG, HARD_MAX_PLAYERS_PER_ROOM } from './config';
+import { CONFIG_ID, type Config, DEFAULT_CONFIG, HARD_MAX_PLAYERS_PER_ROOM, MAX_TICK_RATE, MIN_TICK_RATE } from './config';
 import type { ScenePayload } from './content/scene-store';
 import type { ModelDef, ModelHandle } from './models/handle';
 import { createModelPlaceholderDef, type ModelHandleMap, type ModelOptions } from './models/models';
@@ -990,6 +990,12 @@ export function config(c: Config): Config {
         if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > HARD_MAX_PLAYERS_PER_ROOM) {
             throw new Error(
                 `config({ server: { maxPlayers } }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`,
+            );
+        }
+        const tickRate = server.tickRate;
+        if (tickRate !== undefined && (!Number.isInteger(tickRate) || tickRate < MIN_TICK_RATE || tickRate > MAX_TICK_RATE)) {
+            throw new Error(
+                `config({ server: { tickRate } }): expected integer in [${MIN_TICK_RATE}, ${MAX_TICK_RATE}], got ${tickRate}`,
             );
         }
     }

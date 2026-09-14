@@ -35,12 +35,12 @@ script(CharacterControllerTrait, 'npc-nav', (ctx) => {
     let waypoint = 0;
     let repathIn = 0;
 
-    onTick(ctx, ({ delta }) => {
+    onTick(ctx, ({ step }) => {
         const controller = ctx.trait;
         const pos = getWorldPosition(transform);
 
         // repath a couple of times a second rather than every tick
-        repathIn -= delta;
+        repathIn -= step;
         if (repathIn <= 0) {
             repathIn = 0.5;
             const start: Vec3 = [Math.floor(pos[0]), Math.floor(pos[1]), Math.floor(pos[2])];

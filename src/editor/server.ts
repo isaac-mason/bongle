@@ -2,7 +2,7 @@ import type { Client } from 'bongle/interface';
 import * as chat from '../api/chat';
 import { WorldTrait } from '../builtins/world';
 import type { ScenePayload } from '../core/content/scene-store';
-import { registry } from '../core/registry';
+import { registry, script } from '../core/registry';
 import {
     addChild,
     addTrait,
@@ -23,7 +23,6 @@ import {
     setRealm,
 } from '../core/scene/scene-tree';
 import { listen, onJoin, onLeave, onTick } from '../core/scene/scripts';
-import { script } from '../core/registry';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { setBlock } from '../core/voxels/voxels';
@@ -69,7 +68,7 @@ script(
         // an editor leaving persists what they did; the shutdown flush is engine-server-editor's `dispose`.
         const persist = ctx.mode === 'edit' ? Persist.open(state, room, (message) => chat.message(ctx, message)) : null;
         if (persist) {
-            onTick(ctx, ({ delta }) => Persist.tick(persist, delta));
+            onTick(ctx, ({ step }) => Persist.tick(persist, step));
             onLeave(ctx, () => Persist.flush(persist));
         }
 

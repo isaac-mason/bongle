@@ -306,7 +306,7 @@ export function recordStats(profiler: Debug.Profiler, physics: Physics): void {
 }
 
 export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
-    runOnPrePhysicsStep(sceneTree, { delta: dt });
+    runOnPrePhysicsStep(sceneTree, { step: dt });
 
     beginPhysicsContactsFrame(physics.contacts, physics.contactPairPool);
 
@@ -321,7 +321,7 @@ export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
 
     fanOutContacts(physics, sceneTree);
 
-    runOnPostPhysicsStep(sceneTree, { delta: dt });
+    runOnPostPhysicsStep(sceneTree, { step: dt });
 }
 
 export function dispose(physics: Physics): void {

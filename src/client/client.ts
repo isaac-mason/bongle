@@ -536,7 +536,7 @@ export function update(state: EngineClient, delta: number) {
 
             Clock.tick(room.clock, timestep);
             Interpolation.snapshot(room.scene);
-            SceneTree.runOnTick(room.scene, { delta: timestep }, state.profiler);
+            SceneTree.runOnTick(room.scene, { step: timestep }, state.profiler);
             Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'client');
 
             Debug.begin(state.profiler, 'physics/pre');

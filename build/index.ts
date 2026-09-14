@@ -37,8 +37,8 @@ export {
     inertPlatform,
     joinClient,
     type NetSimKnobs,
-    serverTick,
     transferNotWired,
+    withTimeout,
 } from './dev/host';
 export { contentType } from './dev/mime';
 export { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './dev/net-sim';

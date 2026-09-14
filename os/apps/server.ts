@@ -1,8 +1,7 @@
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
-import { SERVER_TICK_HZ } from 'bongle/engine-server';
 import type { ResolvedAvatar, ServerDriver } from 'bongle/interface';
 import { initZstd, zstdCompress } from 'bongle/zstd-wasm';
-import { avatarPicker, closeClients, createClientTable, joinClient, serverTick } from '../../build/dev/host';
+import { avatarPicker, closeClients, createClientTable, joinClient } from '../../build/dev/host';
 import { bootMarks } from '../boot-marks';
 import { exposeDevtools } from '../devtools';
 import type { App, AppInit } from '../interface';
@@ -103,17 +102,18 @@ const server: App<AppInit> = async (env) => {
     const app = EngineServer.app('edit');
     exposeDevtools('server', { fs, server: EngineServer, state, app, editor: EngineServerEditor });
 
-    const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ, { onError: (message) => env.err(message) });
+    app.start(state);
 
-    // graceful shutdown: stop the loop, drain the transport, dispose (the rooms'
+    // graceful shutdown: dispose (stops the loop; the rooms'
     // leave hooks flush the last edits), then wait for those bytes to reach OPFS
     // before the realm dies and a fresh one reloads from disk. AWAITED, so the OS
     // holds teardown until the writes land.
     env.onDispose(async () => {
-        stopTick();
+        // dispose stops the loop and runs the rooms' leave hooks; everything after it
+        // would otherwise be racing a live tick against a closed client table.
+        await EngineServer.dispose(state);
         closeClients(clients);
         unwatch();
-        EngineServer.dispose(state);
         await EngineServerEditor.drainWrites();
     });
 

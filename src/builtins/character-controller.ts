@@ -1356,7 +1356,7 @@ script(
             setInterpolation(ctx.node, false);
         });
 
-        onTick(ctx, ({ delta }) => {
+        onTick(ctx, ({ step }) => {
             const cc = ctx.trait;
             const transform = getTrait(ctx.node, TransformTrait);
             if (!transform) return;
@@ -1368,7 +1368,7 @@ script(
             if (isOwner(ctx, ctx.node)) {
                 // noclip drives motion from the writer (PlayerController); the sim bails so it doesn't fight the displacement.
                 if (cc.input.noclip) return;
-                tickCharacterController(cc, transform, ctx.physics, delta);
+                tickCharacterController(cc, transform, ctx.physics, step);
                 if (room && ctx.node !== room.playerNode) {
                     const pt = getTrait(room.playerNode, TransformTrait);
                     if (pt) setWorldPosition(pt, getWorldPosition(transform));

@@ -1,6 +1,7 @@
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
+import { serverTickRate } from '../core/config';
 import * as Content from '../core/content';
-import { bumpVersion, logPendingChanges, protocolManifest, registry, reindexRegistry } from '../core/registry';
+import { bumpVersion, logPendingChanges, protocolManifest, registry, reindexRegistry, resolveConfig } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -26,6 +27,12 @@ export function seedModels(state: EngineServer): void {
 }
 
 export function applyRegistryChanges(state: EngineServer): void {
+    // an HMR edit to config() re-paces a live server: `start`'s loop re-reads `step`
+    // on every wake-up, so writing it here is all the re-pacing there is.
+    const tickHz = serverTickRate(resolveConfig(registry)) ?? state.tickHz;
+    state.tickHz = tickHz;
+    state.step = 1 / tickHz;
+
     const allStores = [
         registry.tiles,
         registry.blocks,

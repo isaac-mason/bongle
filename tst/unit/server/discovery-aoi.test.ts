@@ -52,8 +52,11 @@ function setup() {
     return { server, discovery, net, player, resources, moveAnchor };
 }
 
+/** the rate these rooms tick at; the send-path gate counts ticks against it. */
+const TICK_HZ = 60;
+
 function flush(discovery: Discovery.Discovery, rooms: Rooms.Rooms, resources: Resources.Resources) {
-    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false));
+    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false), TICK_HZ);
 }
 
 /** all scene_sync updates for a client across one flush result (default: FAKE_CLIENT). */

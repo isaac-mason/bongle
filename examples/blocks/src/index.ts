@@ -559,8 +559,8 @@ script(GameplayTrait, 'session', (ctx) => {
         [true, true],
     ];
 
-    onTick(ctx, ({ delta }) => {
-        demoAccum += delta;
+    onTick(ctx, ({ step }) => {
+        demoAccum += step;
         if (demoAccum < 0.8) return;
         demoAccum -= 0.8;
         demoStep++;

@@ -13,8 +13,8 @@ const HealthTrait = trait('health', {
 
 // attach behaviour with script(). ctx.trait is typed as the HealthTrait instance.
 script(HealthTrait, 'regen', (ctx) => {
-    onTick(ctx, ({ delta }) => {
-        ctx.trait.current = Math.min(ctx.trait.max, ctx.trait.current + 5 * delta);
+    onTick(ctx, ({ step }) => {
+        ctx.trait.current = Math.min(ctx.trait.max, ctx.trait.current + 5 * step);
     });
 });
 /* SNIPPET_END: define */

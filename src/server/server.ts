@@ -7,11 +7,12 @@ import type {
     ServerApp,
     ServerDriver,
     ServerInitOptions,
+    TickStats,
     User,
 } from 'bongle/interface';
 import { registerFlushHandler, requestFlush } from '../core/capture/flush';
 import * as Clock from '../core/clock';
-import { serverMaxPlayers } from '../core/config';
+import { DEFAULT_TICK_RATE, serverMaxPlayers, serverTickRate } from '../core/config';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
@@ -71,6 +72,11 @@ export type InitOptions = {
     send: ServerInitOptions['send'];
 };
 
+/** where a server is in its `init`, `load`, `start`, `dispose` lifecycle; each step
+ *  checks the previous one so a host calling them out of order gets a throw at the
+ *  call site instead of a loop ticking a state that isn't ready. */
+export type Phase = 'init' | 'loaded' | 'running' | 'disposed';
+
 // runtime avatars carry absolute http(s) urls or a `file://` OPFS path (editor);
 // branch on scheme.
 function createResourceLoader(fs: Filesystem, resourceManager: ReturnType<typeof ResourceManager.init>) {
@@ -103,6 +109,9 @@ export function init(opts: InitOptions) {
     const content = Content.init();
     const resources = Resources.init(createResourceLoader(opts.fs, resourceManager), 'server');
     const discovery = Discovery.init(opts.zstd);
+    // the game's own cadence, not the host's. A standalone game runs no server loop,
+    // so the default is only a placeholder for a server that will never tick.
+    const tickHz = serverTickRate(resolveConfig(registry)) ?? DEFAULT_TICK_RATE;
     // one shared rpc across all rooms; listen() scopes per-room via runtime.roomId.
     const rpc = Rpc.init(ServerRpc.createDriver(rooms, discovery));
 
@@ -121,6 +130,21 @@ export function init(opts: InitOptions) {
         discovery,
         rpc,
         defaultRoomId: null as string | null,
+        phase: 'init' as Phase,
+        /** the sim loop's rate, resolved from the game's config. `start` paces on it
+         *  and the send-path rate gate counts ticks against it. */
+        tickHz,
+        /** the fixed step every tick advances by (seconds); `1 / tickHz`. */
+        step: 1 / tickHz,
+        loop: {
+            timer: null as ReturnType<typeof setTimeout> | null,
+            last: 0,
+            accumulator: 0,
+            // tick timing since the host last drained it via `stats`.
+            ticks: 0,
+            maxMs: 0,
+            totalMs: 0,
+        },
         // nobody is watching at boot: enabled flips with the first panel subscribe.
         profiler: Debug.createProfiler(false) as Debug.Profiler,
         /** monotonic server time (ms), the clock the per-connection ping RTT is
@@ -221,6 +245,7 @@ export function receive(state: EngineServer, client: Client, channel: Channel, b
 /** completes initialization after init(): loads module, creates rooms, loads
  *  scenes. async so scene loading can happen after module load. */
 export async function load(state: EngineServer) {
+    expectPhase(state, 'init', 'load');
     const mode = state.mode;
 
     // seed the authored-scene store from the project fs; async since the host's fs
@@ -272,6 +297,8 @@ export async function load(state: EngineServer) {
         registry.config,
         registry.sounds,
     ]);
+
+    state.phase = 'loaded';
 }
 
 /** applies an authored scene payload: stores its json in the scene store so an
@@ -416,12 +443,19 @@ export function processInbox(state: EngineServer) {
     }
 }
 
-export function update(state: EngineServer, delta: number) {
+/**
+ * one tick. `step` is the fixed step the sim advances by; `wallDelta` is the real time
+ * that elapsed for it. They diverge on an overrunning server, where the loop drops
+ * backlog rather than catching up: the sim then runs slower than the wall. Clocks and
+ * scripts take the fixed step so tick counting stays canonical, while the net clock and
+ * telemetry take wall time so RTT and per-second rates keep describing reality.
+ */
+export function update(state: EngineServer, step: number, wallDelta: number = step) {
     Debug.frameStart(state.profiler);
 
     // advance the net clock first, so ping-ack RTT and the net_ping stamps sent
     // below read the same "now" this tick.
-    state.netTimeMs += delta * 1000;
+    state.netTimeMs += wallDelta * 1000;
 
     Debug.begin(state.profiler, 'inbox');
     processInbox(state);
@@ -431,8 +465,8 @@ export function update(state: EngineServer, delta: number) {
         Debug.begin(state.profiler, room.profileKey);
 
         room.tick++;
-        Clock.tick(room.clock, delta);
-        Clock.advanceWall(room.clock, delta); // server has no render frames, wall tracks time
+        Clock.tick(room.clock, step);
+        Clock.advanceWall(room.clock, step); // server has no render frames, wall tracks time
 
         // sent every tick since the client stamps remote-transform snapshot keyframes
         // off the raw per-tick value, even though it decimates for its offset estimator.
@@ -443,23 +477,23 @@ export function update(state: EngineServer, delta: number) {
         });
 
         Debug.begin(state.profiler, 'nodes/update');
-        SceneTree.runOnUpdate(room.scene, { delta }, state.profiler);
+        SceneTree.runOnUpdate(room.scene, { delta: step }, state.profiler);
         Debug.end(state.profiler, 'nodes/update');
 
         // game-script onTick, also timed per-script as `script/<key>`.
         Debug.begin(state.profiler, 'nodes/tick');
-        SceneTree.runOnTick(room.scene, { delta }, state.profiler);
+        SceneTree.runOnTick(room.scene, { step }, state.profiler);
         Debug.end(state.profiler, 'nodes/tick');
 
         // before physics so the teleport detector picks up the new pose this tick.
         Debug.begin(state.profiler, 'animation');
-        Animation.tick(room.animations, state.resources, delta);
+        Animation.tick(room.animations, state.resources, step);
         Debug.end(state.profiler, 'animation');
 
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(state.profiler, 'nodes/post-animate');
-        SceneTree.runOnPostAnimate(room.scene, { delta }, state.profiler);
+        SceneTree.runOnPostAnimate(room.scene, { delta: step }, state.profiler);
         Debug.end(state.profiler, 'nodes/post-animate');
 
         Debug.begin(state.profiler, 'prefab');
@@ -471,7 +505,7 @@ export function update(state: EngineServer, delta: number) {
         Debug.end(state.profiler, 'physics/pre');
 
         Debug.begin(state.profiler, 'physics');
-        physics.tick(room.physics, room.scene, delta);
+        physics.tick(room.physics, room.scene, step);
         Debug.end(state.profiler, 'physics');
 
         Debug.begin(state.profiler, 'physics/post');
@@ -487,7 +521,7 @@ export function update(state: EngineServer, delta: number) {
         Debug.end(state.profiler, 'lighting');
 
         Debug.begin(state.profiler, 'nodes/frame');
-        SceneTree.runOnFrame(room.scene, { delta }, state.profiler);
+        SceneTree.runOnFrame(room.scene, { delta: step }, state.profiler);
         Debug.end(state.profiler, 'nodes/frame');
 
         Debug.begin(state.profiler, 'chat');
@@ -509,7 +543,7 @@ export function update(state: EngineServer, delta: number) {
     // runs diff detection per room (serialize once), then distributes updates to
     // clients based on per-client knowledge.
     Debug.begin(state.profiler, 'discovery');
-    const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.profiler);
+    const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.profiler, state.tickHz);
     const discoveryMs = Debug.end(state.profiler, 'discovery');
 
     for (const [client, message] of pending) {
@@ -526,7 +560,7 @@ export function update(state: EngineServer, delta: number) {
     Debug.record(state.profiler, 'discovery', discoveryMs, 'ms');
 
     Telemetry.pushDebugLogs(state);
-    Telemetry.pushRoomFrames(state, delta);
+    Telemetry.pushRoomFrames(state, wallDelta);
 
     // per-connection ping beacon: stamps each client with the net clock (echoed back
     // via net_ping_ack) and its current server-measured ping for the HUD.
@@ -540,15 +574,112 @@ export function update(state: EngineServer, delta: number) {
     Debug.end(state.profiler, 'netflush');
 
     const netStats = Net.drainNetStats(state.net);
-    Telemetry.recordNetStats(state.profiler, netStats, delta, state.rooms.rooms.size || 1);
-    Telemetry.recordProcessStats(state.profiler, delta);
+    Telemetry.recordNetStats(state.profiler, netStats, wallDelta, state.rooms.rooms.size || 1);
+    Telemetry.recordProcessStats(state.profiler, wallDelta);
 
     Debug.frameEnd(state.profiler);
 }
 
-/** tear down the server: destroy all rooms. An edit host lands unsaved edits first
- *  (engine-server-editor's `dispose`); the runtime knows nothing about saving. */
-export function dispose(state: EngineServer): void {
+/** how much backlog a slow tick may work off before the rest is dropped. One step:
+ *  an overrunning server ticks late rather than spiralling, and the room clock simply
+ *  advances slower than the wall (which `update` keeps telemetry honest about). */
+const MAX_CATCHUP_STEPS = 1;
+
+function expectPhase(state: EngineServer, expected: Phase, step: string): void {
+    if (state.phase === expected) return;
+    throw new Error(`[engine-server] ${step}() called in phase '${state.phase}', expected '${expected}'`);
+}
+
+/**
+ * start the sim loop at the game's configured rate. Self-rescheduling `setTimeout`
+ * rather than `setInterval`: it re-reads `state.step` every wake-up, so an HMR config
+ * edit re-paces a live server, and it corrects for its own lateness instead of letting
+ * it accumulate. A second call while running is a no-op; any other phase throws.
+ */
+export function start(state: EngineServer): void {
+    if (state.phase === 'running') return;
+    expectPhase(state, 'loaded', 'start');
+    state.phase = 'running';
+    state.loop.last = performance.now();
+    state.loop.accumulator = 0;
+    scheduleTick(state, 0);
+}
+
+function scheduleTick(state: EngineServer, delayMs: number): void {
+    state.loop.timer = setTimeout(() => {
+        state.loop.timer = null;
+        runTicks(state);
+    }, delayMs);
+}
+
+function runTicks(state: EngineServer): void {
+    const step = state.step;
+    const loop = state.loop;
+
+    const now = performance.now();
+    const elapsed = (now - loop.last) / 1000;
+    loop.last = now;
+    loop.accumulator += elapsed;
+
+    const budget = step * (1 + MAX_CATCHUP_STEPS);
+    if (loop.accumulator > budget) loop.accumulator = budget;
+
+    const steps = Math.floor(loop.accumulator / step);
+    // the reschedule is in a finally and nothing here catches: game script errors are
+    // already contained per hook (scripts.ts logScriptError), so anything that escapes
+    // `update` is an engine bug, and what that means is the host runtime's call. Node's
+    // default takes the room down to be respawned; a dev host's error handler logs it
+    // and the loop, still scheduled, carries on.
+    try {
+        if (steps > 0) {
+            // each tick is told the share of real time it stands for; a catch-up tick
+            // reporting ~0 wall seconds would send every kb/s rate to infinity.
+            const wallPerTick = elapsed / steps;
+            loop.accumulator -= steps * step;
+            for (let i = 0; i < steps; i++) {
+                const tickStart = performance.now();
+                update(state, step, wallPerTick);
+                const ms = performance.now() - tickStart;
+                loop.ticks++;
+                loop.totalMs += ms;
+                if (ms > loop.maxMs) loop.maxMs = ms;
+            }
+        }
+    } finally {
+        // a dispose from inside a tick (a script asking the host to shut down) leaves
+        // no timer to replace; anything else reschedules, even after a throw.
+        if (state.phase === 'running') {
+            // floor, so we wake a touch early and the accumulator carries the remainder,
+            // rather than rounding up every tick into a slow drift.
+            scheduleTick(state, Math.max(0, Math.floor((step - loop.accumulator) * 1000)));
+        }
+    }
+}
+
+/** drain tick timing accumulated since the previous call; a host samples this on its
+ *  own cadence rather than being called back every tick. */
+export function stats(state: EngineServer): TickStats {
+    const loop = state.loop;
+    const out = { tickHz: state.tickHz, ticks: loop.ticks, maxMs: loop.maxMs, totalMs: loop.totalMs };
+    loop.ticks = 0;
+    loop.maxMs = 0;
+    loop.totalMs = 0;
+    return out;
+}
+
+/** tear down the server: stop the loop, then destroy all rooms. An edit host lands
+ *  unsaved edits first (engine-server-editor's `dispose`); the runtime knows nothing
+ *  about saving. Async because tearing down will grow things to await (draining
+ *  in-flight script storage writes); hosts bound the wait themselves. */
+export async function dispose(state: EngineServer): Promise<void> {
+    // before anything else: a queued tick must never land on a disposed state, and a
+    // tick mid-flight must not reschedule past this point.
+    state.phase = 'disposed';
+    if (state.loop.timer !== null) {
+        clearTimeout(state.loop.timer);
+        state.loop.timer = null;
+    }
+
     for (const roomId of [...state.rooms.rooms.keys()]) {
         Rooms.destroyRoom(state.rooms, roomId);
     }
@@ -563,8 +694,9 @@ export function app(mode: InitOptions['mode']): ServerApp<EngineServer> {
     return {
         init: (opts) => init({ mode, ...opts }),
         load,
-        update,
+        start,
         dispose,
+        stats,
         onClientJoin,
         onClientLeave,
         receive,

@@ -74,6 +74,13 @@ export type TestHarness<D> = {
     /** advance N ticks */
     tickN(n: number, dt?: number): void;
 
+    /**
+     * advance `seconds` of wall time with the server ticking at `serverHz` and the
+     * clients at their own fixed 60, interleaved as they really run. `tick`/`tickN`
+     * drive both sides in lockstep and so cannot observe a rate split at all.
+     */
+    tickSplit(seconds: number, serverHz: number): void;
+
     /** cleanup — closes file watcher, restores cwd, removes tmp dir */
     dispose(): void;
 };
@@ -341,6 +348,42 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
 
         tickN(n: number, dt = DEFAULT_DT) {
             for (let i = 0; i < n; i++) this.tick(dt);
+        },
+
+        /**
+         * advance both sides for `seconds` of wall time with the server ticking at
+         * `serverHz` and the clients at their own fixed 60, which is what a game
+         * choosing `config({ server: { tickRate } })` actually runs. `tick` keeps both
+         * in lockstep and can't observe the split at all.
+         */
+        tickSplit(seconds: number, serverHz: number) {
+            const serverStep = 1 / serverHz;
+            const clientStep = DEFAULT_DT;
+            let serverDue = serverStep;
+            let clientDue = clientStep;
+            let elapsed = 0;
+
+            // walk whichever side is due next, so the interleaving is the real one
+            // rather than a whole second of server ticks followed by client ticks.
+            while (elapsed < seconds - 1e-9) {
+                const next = Math.min(serverDue, clientDue);
+                elapsed = next;
+                if (next === serverDue) {
+                    for (const client of clients) ClientNet.flush(client.state.net, client.state.driver.send);
+                    env.server = true;
+                    env.client = false;
+                    EngineServerModule.update(server, serverStep);
+                    serverDue += serverStep;
+                }
+                if (next === clientDue) {
+                    env.server = false;
+                    env.client = true;
+                    for (const client of clients) EngineClientModule.update(client.state, clientStep);
+                    clientDue += clientStep;
+                }
+            }
+            env.server = false;
+            env.client = true;
         },
 
         dispose() {

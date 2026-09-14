@@ -888,14 +888,14 @@ script(
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });
 
-        onTick(ctx, ({ delta }) => {
+        onTick(ctx, ({ step }) => {
             // noclip drives the player's transform from input; gated on control so a non-control player can't keep flying.
             if (getSubject(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc?.input.noclip) return;
             const transform = getTrait(ctx.node, TransformTrait);
             if (!transform) return;
-            tickPlayerNoclip(ctx.trait, cc, transform, ctx.physics, delta);
+            tickPlayerNoclip(ctx.trait, cc, transform, ctx.physics, step);
         });
 
         onFrame(ctx, ({ delta }) => {

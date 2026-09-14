@@ -2,7 +2,6 @@ import type { Client } from 'bongle/interface';
 import { PlayerTrait } from '../builtins/player';
 import { getWorldPosition, TransformTrait } from '../builtins/transform';
 import type { PlayerId } from '../core/client';
-import { SERVER_TICK_HZ } from '../core/clock';
 import * as Debug from '../core/debug';
 import type { BinaryField, BinaryTrait, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
 import { registry } from '../core/registry';
@@ -169,8 +168,8 @@ type ClientVoxelKnowledge = {
     inFlightRegions: Set<string>;
     // starts at 1 so a fresh join doesn't demand a burst of compression; bumped to MAX_IN_FLIGHT_REGIONS on the first region ack.
     maxInFlightRegions: number;
-    // self-reported, smoothed decode rate (regions/tick); starts at the default and only moves once a real ack lands.
-    fullRegionsPerTick: number;
+    // self-reported, smoothed decode rate (regions/second); starts at the default and only moves once a real ack lands.
+    fullRegionsPerSecond: number;
     // chunks whose light changed but hasn't shipped yet; survives across ticks.
     pendingLight: Set<string>;
     // chunks needing an individual voxel_chunk_full re-send (promotion, too many block-ops in an already-known chunk); fixed-rate.
@@ -301,7 +300,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
         pendingRegions: new Map(),
         inFlightRegions: new Set(),
         maxInFlightRegions: 1,
-        fullRegionsPerTick: DEFAULT_REGIONS_PER_TICK,
+        fullRegionsPerSecond: DEFAULT_REGIONS_PER_SECOND,
         pendingLight: new Set(),
         pendingFull: new Set(),
         inFlightFull: new Set(),
@@ -499,6 +498,7 @@ export function flush(
     rooms: Rooms,
     resources: Resources,
     profiler: Debug.Profiler,
+    tickHz: number,
 ): Array<[Client, ServerMessage]> {
     const out: Array<[Client, ServerMessage]> = [];
 
@@ -514,7 +514,7 @@ export function flush(
         reconcileRootRegions(room.scene);
         const auth = room.voxels.authority;
         if (!auth) continue;
-        flushVoxelsForRoom(state, rooms, room, out);
+        flushVoxelsForRoom(state, rooms, room, out, tickHz);
         clearVoxelChanges(auth.changes);
         // mask + count aren't cleared here; unshipped chunks keep their accumulated light delta for next tick.
         for (const chunk of room.voxels.dirty.light) {
@@ -576,6 +576,7 @@ export function flush(
                 nodeKnowledge,
                 nodeSyncKnowledge,
                 room.tick,
+                tickHz,
                 player.mode,
                 player.id,
                 presence,
@@ -641,6 +642,7 @@ function buildSceneSyncUpdates(
     nodeKnowledge: Map<number, ClientNodeKnowledge>,
     nodeSyncKnowledge: Set<Node>,
     currentTick: number,
+    tickHz: number,
     mode: RoomMode,
     playerId: PlayerId,
     presence: ClientEntityPresence | undefined,
@@ -658,7 +660,8 @@ function buildSceneSyncUpdates(
         walkReplicable(root, mode, 'shared', (n) => {
             // only settle nodes we actually create; an already-known node may carry a pending field update, left for the diff path.
             if (!nodeKnowledge.has(n.id)) {
-                (creates ??= new Set()).add(n);
+                if (creates === null) creates = new Set();
+                creates.add(n);
                 presenceSettled.add(n.id);
             }
         });
@@ -666,7 +669,8 @@ function buildSceneSyncUpdates(
     const destroySubtree = (root: Node): void => {
         walkReplicable(root, mode, 'shared', (n) => {
             if (nodeKnowledge.has(n.id)) {
-                (destroys ??= []).push({ type: 'node_destroyed', id: n.id });
+                if (destroys === null) destroys = [];
+                destroys.push({ type: 'node_destroyed', id: n.id });
                 nodeKnowledge.delete(n.id);
                 nodeSyncKnowledge.delete(n);
             }
@@ -706,7 +710,8 @@ function buildSceneSyncUpdates(
         // detached at flush = destroyed this tick (destroyed-then-re-added the same tick has node.scene set).
         if (node.scene === null) {
             if (known) {
-                (destroys ??= []).push({ type: 'node_destroyed', id: node.id });
+                if (destroys === null) destroys = [];
+                destroys.push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
                 nodeSyncKnowledge.delete(node);
             }
@@ -717,9 +722,10 @@ function buildSceneSyncUpdates(
         if (known) {
             if (mode === 'edit' || isReplicable(node)) {
                 diffNodeStructure(node, known, updateList, mode);
-                diffNodeTraits(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
+                diffNodeTraits(node, known, updateList, currentTick, tickHz, playerId, nodeSyncKnowledge);
             } else {
-                (destroys ??= []).push({ type: 'node_destroyed', id: node.id });
+                if (destroys === null) destroys = [];
+                destroys.push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
                 nodeSyncKnowledge.delete(node);
             }
@@ -728,14 +734,16 @@ function buildSceneSyncUpdates(
 
         // not known: decide creation. edit sees everything; play needs replicable.
         if (mode === 'edit') {
-            (creates ??= new Set()).add(node);
+            if (creates === null) creates = new Set();
+            creates.add(node);
             continue;
         }
         if (!isReplicable(node)) continue;
         // no transform root (or a non-voxel room) means not region-gated, always visible.
         const root = presence ? transformRootOf(node) : null;
         if (root === null) {
-            (creates ??= new Set()).add(node);
+            if (creates === null) creates = new Set();
+            creates.add(node);
             continue;
         }
         // createSubtree only walks not-yet-known nodes, so an incremental add under a present root emits just the new nodes.
@@ -759,7 +767,7 @@ function buildSceneSyncUpdates(
             continue;
         }
         // not in replication.dirty, so only the rate gate's timing changed; fields only.
-        retryPendingFields(node, known, updateList, currentTick, playerId, nodeSyncKnowledge);
+        retryPendingFields(node, known, updateList, currentTick, tickHz, playerId, nodeSyncKnowledge);
     }
     _pendingSyncScratch.length = 0; // don't retain nodes between flushes
 
@@ -842,6 +850,7 @@ function emitChangedFields(
     handle: TraitHandle,
     updates: SceneSyncUpdate[],
     currentTick: number,
+    tickHz: number,
     playerId: PlayerId,
 ): boolean {
     // cleared before the early returns: a trait that can't ship anything owes nothing.
@@ -868,7 +877,7 @@ function emitChangedFields(
         // the first delivery of a dirty value is never rate-gated, only the cadence between repeated sends is.
         const lastSent = known.lastSentTicks[i] ?? NEVER_SENT;
         if (hz !== null && !ownerHandoff && lastSent !== NEVER_SENT) {
-            if (!SyncRate.shouldSendThisTick(hz, lastSent, currentTick, SERVER_TICK_HZ)) {
+            if (!SyncRate.shouldSendThisTick(hz, lastSent, currentTick, tickHz)) {
                 // held back this tick: the node stays pending so the field retries.
                 known.behind = true;
                 continue;
@@ -881,7 +890,8 @@ function emitChangedFields(
             data = codecs[i].pack(instance, node);
         }
 
-        (entries ??= []).push({ index: i, data });
+        if (entries === null) entries = [];
+        entries.push({ index: i, data });
         known.versions[i] = fieldVersion;
         known.lastSentTicks[i] = currentTick;
     }
@@ -1013,6 +1023,7 @@ function diffNodeTraits(
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],
     currentTick: number,
+    tickHz: number,
     playerId: PlayerId,
     nodeSyncKnowledge: Set<Node>,
 ): void {
@@ -1046,7 +1057,7 @@ function diffNodeTraits(
             continue;
         }
 
-        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, playerId)) behind = true;
+        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, tickHz, playerId)) behind = true;
     }
     setPending(node, nodeSyncKnowledge, behind);
 }
@@ -1057,6 +1068,7 @@ function retryPendingFields(
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],
     currentTick: number,
+    tickHz: number,
     playerId: PlayerId,
     nodeSyncKnowledge: Set<Node>,
 ): void {
@@ -1069,7 +1081,7 @@ function retryPendingFields(
         if (instance === undefined) continue;
         const handle = registry.slotToTrait[traitSlot];
         if (!handle) continue;
-        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, playerId)) behind = true;
+        if (emitChangedFields(node, instance, traitKnowledge, handle, updates, currentTick, tickHz, playerId)) behind = true;
     }
     setPending(node, nodeSyncKnowledge, behind);
 }
@@ -1108,7 +1120,8 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
     }
     // include unresolved traits so the diff system knows we already sent them
     for (const id of node.unresolved?.keys() ?? []) {
-        (unresolvedTraits ??= new Map()).set(id, { id, behind: false, versions: [], lastSentTicks: [] });
+        if (unresolvedTraits === null) unresolvedTraits = new Map();
+        unresolvedTraits.set(id, { id, behind: false, versions: [], lastSentTicks: [] });
     }
 
     nodeKnowledge.set(node.id, {
@@ -1148,14 +1161,17 @@ function snapshotAllNodeKnowledge(
 // plus a dense list of only the occupied chunks' payloads. ops are coalesced (dedup by voxel index); too many ops in an already-known
 // chunk promote to an individual voxel_chunk_full re-send on its own fixed-rate channel.
 
-/** default (and seed value before any ack has landed) for a client's voxel_region_full budget per tick. */
-const DEFAULT_REGIONS_PER_TICK = 1;
+/** default (and seed value before any ack has landed) for a client's voxel_region_full
+ *  budget, per SECOND. Every streaming budget here is per-second and divided by the
+ *  room's tick rate at use: expressed per-tick, a game choosing a cheaper server cadence
+ *  would silently stream its world at half speed. */
+const DEFAULT_REGIONS_PER_SECOND = 60;
 
 /** max regions in flight (shipped as voxel_region_full, awaiting voxel_ack) per client. */
 const MAX_IN_FLIGHT_REGIONS = 4;
 
-/** max voxel_chunk_full messages per client per tick for the promotion channel; fixed, not adaptive. */
-const FULL_CHUNKS_PER_CLIENT_PER_TICK = 6;
+/** max voxel_chunk_full messages per client per SECOND for the promotion channel; fixed, not adaptive. */
+const FULL_CHUNKS_PER_CLIENT_PER_SECOND = 360;
 
 /** max promotion chunks in flight per client, same backpressure idea as MAX_IN_FLIGHT_REGIONS scoped to the promotion channel. */
 const MAX_IN_FLIGHT_FULL = 24;
@@ -1180,8 +1196,8 @@ const RETENTION_MARGIN = 6;
 /** if a chunk has more ops than this, promote to chunk_full re-send. */
 const PROMOTION_THRESHOLD = CHUNK_VOLUME / 2;
 
-/** max voxel_chunk_light chunks per client per tick, drained by the room-level dispatch. */
-const LIGHT_CHUNKS_PER_CLIENT_PER_TICK = 8;
+/** max voxel_chunk_light chunks per client per SECOND, drained by the room-level dispatch. */
+const LIGHT_CHUNKS_PER_CLIENT_PER_SECOND = 480;
 
 /** if a chunk has at most this many dirty light voxels, send a per-voxel delta instead of the compressed whole-chunk light. */
 const LIGHT_DELTA_THRESHOLD = 100;
@@ -1213,9 +1229,10 @@ export function resetAllVoxelKnowledge(state: Discovery): void {
     }
 }
 
-/** clamp bounds for the client-reported adaptive region rate; the ceiling matches MAX_IN_FLIGHT_REGIONS. */
-const MIN_ADAPTIVE_REGION_CAP = 1;
-const MAX_ADAPTIVE_REGION_CAP = MAX_IN_FLIGHT_REGIONS;
+/** clamp bounds (regions/second) for the client-reported adaptive region rate; the ceiling
+ *  is MAX_IN_FLIGHT_REGIONS spent every tick of a 60Hz room. */
+const MIN_ADAPTIVE_REGION_CAP = 60;
+const MAX_ADAPTIVE_REGION_CAP = MAX_IN_FLIGHT_REGIONS * 60;
 
 /** applies a client's voxel_ack: frees in-flight slots for decoded regions/chunks, and adopts its reported adaptive pacing rate. */
 export function handleVoxelAck(state: Discovery, client: Client, message: VoxelAck): void {
@@ -1232,10 +1249,10 @@ export function handleVoxelAck(state: Discovery, client: Client, message: VoxelA
     if (message.regions.length > 0) {
         knowledge.maxInFlightRegions = MAX_IN_FLIGHT_REGIONS;
     }
-    if (Number.isFinite(message.desiredRegionsPerTick)) {
-        knowledge.fullRegionsPerTick = Math.min(
+    if (Number.isFinite(message.desiredRegionsPerSecond)) {
+        knowledge.fullRegionsPerSecond = Math.min(
             MAX_ADAPTIVE_REGION_CAP,
-            Math.max(MIN_ADAPTIVE_REGION_CAP, Math.round(message.desiredRegionsPerTick)),
+            Math.max(MIN_ADAPTIVE_REGION_CAP, Math.round(message.desiredRegionsPerSecond)),
         );
     }
 }
@@ -1351,7 +1368,13 @@ function flushEntityPresenceForPlayer(room: Room, player: Player, presence: Clie
 }
 
 /** produces voxel messages for every Player in a room; each Player has its own streaming anchor and chunk-knowledge set. */
-function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Array<[Client, ServerMessage]>): void {
+function flushVoxelsForRoom(
+    state: Discovery,
+    rooms: Rooms,
+    room: Room,
+    out: Array<[Client, ServerMessage]>,
+    tickHz: number,
+): void {
     const voxels = room.voxels;
     const auth = voxels.authority;
     if (!auth) return;
@@ -1374,7 +1397,7 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
                 pendingRegions: new Map(),
                 inFlightRegions: new Set(),
                 maxInFlightRegions: 1,
-                fullRegionsPerTick: DEFAULT_REGIONS_PER_TICK,
+                fullRegionsPerSecond: DEFAULT_REGIONS_PER_SECOND,
                 pendingLight: new Set(),
                 pendingFull: new Set(),
                 inFlightFull: new Set(),
@@ -1387,13 +1410,19 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
     }
 
     // dispatchRegionFull and dispatchFull run before dispatchLight and return the chunks they shipped, whose payloads carry fresh light.
-    const regionShippedChunks = dispatchRegionFull(state, room, voxels, players, out);
-    const fullShippedChunks = dispatchFull(state, room, voxels, players, out);
+    const regionShippedChunks = dispatchRegionFull(state, room, voxels, players, out, tickHz);
+    const fullShippedChunks = dispatchFull(state, room, voxels, players, out, tickHz);
     for (const chunk of regionShippedChunks) fullShippedChunks.add(chunk);
-    dispatchLight(state, room, voxels, players, out, fullShippedChunks);
+    dispatchLight(state, room, voxels, players, out, fullShippedChunks, tickHz);
 }
 
 type DispatchCandidate = { d2: number; key: string; pid: PlayerId; chunk: Chunk };
+
+/** a per-second streaming budget as a per-tick one, floored at 1 so a slow room still
+ *  makes progress every tick rather than stalling on a sub-one budget. */
+function perTick(perSecond: number, tickHz: number): number {
+    return Math.max(1, Math.round(perSecond / tickHz));
+}
 
 /** shared room-wide priority dispatch: each player's `selectPending` queue is gathered into one candidate list, shipped nearest-first under a per-client cap plus a global cap. */
 function dispatchChannel(
@@ -1470,13 +1499,14 @@ function dispatchFull(
     voxels: Voxels,
     players: Player[],
     out: Array<[Client, ServerMessage]>,
+    tickHz: number,
 ): Set<Chunk> {
     return dispatchChannel(
         state,
         room,
         voxels,
         players,
-        FULL_CHUNKS_PER_CLIENT_PER_TICK,
+        perTick(FULL_CHUNKS_PER_CLIENT_PER_SECOND, tickHz),
         (k) => k.pendingFull,
         (c, knowledge, client) => {
             const { compressed, palette } = getCompressedSnapshot(c.chunk, state.zstd);
@@ -1515,6 +1545,7 @@ function dispatchRegionFull(
     voxels: Voxels,
     players: Player[],
     out: Array<[Client, ServerMessage]>,
+    tickHz: number,
 ): Set<Chunk> {
     type RegionCandidate = { d2: number; key: string; pid: PlayerId; rx: number; ry: number; rz: number };
 
@@ -1547,7 +1578,7 @@ function dispatchRegionFull(
     if (candidates.length === 0) return shipped;
     candidates.sort((a, b) => a.d2 - b.d2);
 
-    const globalCap = Math.floor(((players.length + ROOM_MAX_USERS) * DEFAULT_REGIONS_PER_TICK) / 4) + 1;
+    const globalCap = Math.floor(((players.length + ROOM_MAX_USERS) * perTick(DEFAULT_REGIONS_PER_SECOND, tickHz)) / 4) + 1;
     const perClientCount = new Map<PlayerId, number>();
     let totalSent = 0;
 
@@ -1555,7 +1586,7 @@ function dispatchRegionFull(
         if (totalSent >= globalCap) break;
         const knowledge = knowledgeByPid.get(c.pid)!;
         const sent = perClientCount.get(c.pid) ?? 0;
-        if (sent >= knowledge.fullRegionsPerTick) continue;
+        if (sent >= perTick(knowledge.fullRegionsPerSecond, tickHz)) continue;
         if (knowledge.inFlightRegions.size >= knowledge.maxInFlightRegions) continue;
 
         const bx = c.rx * REGION_CHUNKS_PER_AXIS;
@@ -1606,13 +1637,14 @@ function dispatchLight(
     players: Player[],
     out: Array<[Client, ServerMessage]>,
     fullShippedChunks: Set<Chunk>,
+    tickHz: number,
 ): void {
     const shipped = dispatchChannel(
         state,
         room,
         voxels,
         players,
-        LIGHT_CHUNKS_PER_CLIENT_PER_TICK,
+        perTick(LIGHT_CHUNKS_PER_CLIENT_PER_SECOND, tickHz),
         (k) => k.pendingLight,
         (c, _knowledge, client) => {
             const dirtyCount = c.chunk.lightDirtyCount;

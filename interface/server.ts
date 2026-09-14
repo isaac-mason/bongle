@@ -81,11 +81,33 @@ export type ServerInitOptions = {
     send(client: Client, channel: Channel, bytes: Uint8Array): void;
 };
 
-export type ServerApp<S = any> = {
+/** tick timing since the previous `stats` call, for a host that samples room metrics. */
+export type TickStats = {
+    /** the rate the loop is paced at, the denominator for utilisation. */
+    tickHz: number;
+    ticks: number;
+    maxMs: number;
+    totalMs: number;
+};
+
+/**
+ * The host-facing server. Lifecycle is `init`, `load`, `start`, `dispose`, in that
+ * order, and the engine throws on any other order rather than ticking a state that
+ * isn't ready. The host never paces the loop or decides what a throwing tick means:
+ * the engine reschedules regardless and lets the exception propagate, so a deployed
+ * room dies and is respawned while a dev host's own error handler keeps it up.
+ */
+export type ServerApp<S = unknown> = {
+    /** sync: wires capabilities, so `send` closures exist before anything async. */
     init: (opts: ServerInitOptions) => S;
     load: (state: S) => Promise<void>;
-    update: (state: S, dt: number) => void;
-    dispose?: (state: S) => void;
+    /** owns the fixed-step loop, paced at the game's configured tick rate. */
+    start: (state: S) => void;
+    /** stops the loop, then tears down. awaits honestly and unboundedly; bounding the
+     *  wait is the host's call. */
+    dispose: (state: S) => Promise<void>;
+    /** drains tick timing accumulated since the last call. */
+    stats: (state: S) => TickStats;
 
     onClientJoin: (state: S, client: Client, user: User, joinData: Record<string, JsonValue>, avatar?: ResolvedAvatar) => void;
     onClientLeave: (state: S, client: Client) => void;

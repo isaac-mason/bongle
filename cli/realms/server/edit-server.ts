@@ -6,10 +6,10 @@
 // noExternal gives one shared bongle instance with the user code (userEntry).
 
 import type { Server as HttpServer } from 'node:http';
-import { createInMemoryStorageDriver, EngineServer, SERVER_TICK_HZ } from 'bongle/engine-server';
+import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import 'bongle/engine-server-editor';
 import { env } from 'bongle/env';
-import { avatarPicker, createClientTable, serverTick } from '../../../build';
+import { avatarPicker, createClientTable } from '../../../build';
 import type { ServerApp } from '../../../interface/index';
 import { createFallbackAvatarsDriver } from '../../../src/node/sample-avatars-driver';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
@@ -66,16 +66,16 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     const app = EngineServer.app('edit');
     const picker = await avatarPicker(avatars);
     const transport = attachGameTransport({ httpServer, app, state, clients, resolveAvatar: picker.resolve });
-    const stopTick = serverTick((dt) => app.update(state, dt), SERVER_TICK_HZ);
+    app.start(state);
 
     return {
         app,
         state,
         transport,
-        stop: () => {
-            stopTick();
+        stop: async () => {
+            // dispose stops the loop, so it goes first: nothing ticks into a closed transport.
+            await EngineServer.dispose(state);
             transport.close();
-            EngineServer.dispose(state);
         },
     };
 }

@@ -17,6 +17,7 @@ export type {
     StorageListPage,
     StorageServerDriver,
     StorageSetResult,
+    TickStats,
     User,
     Zstd,
 } from './server';

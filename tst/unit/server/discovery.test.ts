@@ -108,21 +108,25 @@ function regionFullMessages(
     return regions;
 }
 
+// the rate every room in these tests ticks at; the per-tick budgets asserted below are
+// the per-second constants divided by it.
+const TICK_HZ = 60;
+
 // a fast, steady client for these fairness tests — reports the seeded default
 // rate, so acking never itself changes the per-tick budget these tests assert on.
-const DEFAULT_DESIRED_REGIONS_PER_TICK = 1; // matches DEFAULT_REGIONS_PER_TICK
+const DEFAULT_DESIRED_REGIONS_PER_SECOND = 60; // matches DEFAULT_REGIONS_PER_SECOND
 
 /** simulate a client decoding + acking every region in a flush (voxel_region_full,
- *  the DISCOVERY channel), reporting `desiredRegionsPerTick`. */
+ *  the DISCOVERY channel), reporting `desiredRegionsPerSecond`. */
 function ackRegions(
     discovery: Discovery.Discovery,
     playerId: number,
     out: Array<[Client, { type: string }]>,
-    desiredRegionsPerTick = DEFAULT_DESIRED_REGIONS_PER_TICK,
+    desiredRegionsPerSecond = DEFAULT_DESIRED_REGIONS_PER_SECOND,
 ): void {
     const regions = regionFullMessages(out).map((r) => ({ rx: r.rx, ry: r.ry, rz: r.rz }));
     if (regions.length === 0) return;
-    Discovery.handleVoxelAck(discovery, FAKE_CLIENT, { type: 'voxel_ack', playerId, full: [], regions, desiredRegionsPerTick });
+    Discovery.handleVoxelAck(discovery, FAKE_CLIENT, { type: 'voxel_ack', playerId, full: [], regions, desiredRegionsPerSecond });
 }
 
 function setupRoom(mode: 'edit' | 'play') {
@@ -146,7 +150,7 @@ function takeJoinRoom(net: Net.ServerNet, client: Client) {
 }
 
 function flushUntilQuiet(discovery: Discovery.Discovery, rooms: Rooms.Rooms, resources: Resources.Resources) {
-    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false));
+    return Discovery.flush(discovery, rooms, resources, Debug.createProfiler(false), TICK_HZ);
 }
 
 /* ── tests ── */
@@ -353,7 +357,7 @@ describe('discovery — realm filtering', () => {
 });
 
 describe('discovery — region_full fairness (dispatchRegionFull)', () => {
-    const DEFAULT_CAP = 1; // DEFAULT_REGIONS_PER_TICK
+    const DEFAULT_CAP = 1; // DEFAULT_REGIONS_PER_SECOND / TICK_HZ
     const MAX_IN_FLIGHT_REGIONS = 4; // MAX_IN_FLIGHT_REGIONS
 
     it('caps voxel_region_full per tick and eventually delivers every occupied region', () => {
@@ -431,7 +435,7 @@ describe('discovery — region_full fairness (dispatchRegionFull)', () => {
             playerId: player.id,
             full: [],
             regions: shipped,
-            desiredRegionsPerTick: DEFAULT_DESIRED_REGIONS_PER_TICK,
+            desiredRegionsPerSecond: DEFAULT_DESIRED_REGIONS_PER_SECOND,
         });
         expect(k.maxInFlightRegions).toBe(MAX_IN_FLIGHT_REGIONS);
         expect(k.inFlightRegions.size).toBe(0);
@@ -574,7 +578,7 @@ describe('discovery — region_full fairness (dispatchRegionFull)', () => {
                     playerId: owner.id,
                     full: [],
                     regions,
-                    desiredRegionsPerTick: DEFAULT_DESIRED_REGIONS_PER_TICK,
+                    desiredRegionsPerSecond: DEFAULT_DESIRED_REGIONS_PER_SECOND,
                 });
             }
         }
@@ -647,7 +651,7 @@ describe('discovery — region_full fairness (dispatchRegionFull)', () => {
 });
 
 describe('discovery — chunk_full fairness (dispatchFull, promotion only)', () => {
-    const FULL_CAP = 6; // FULL_CHUNKS_PER_CLIENT_PER_TICK
+    const FULL_CAP = 6; // FULL_CHUNKS_PER_CLIENT_PER_SECOND / TICK_HZ
     const MAX_IN_FLIGHT = 24; // MAX_IN_FLIGHT_FULL
 
     it('promotion while in-flight re-queues the chunk and drops the in-flight slot', () => {

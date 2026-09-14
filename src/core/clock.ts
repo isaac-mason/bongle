@@ -42,7 +42,7 @@ export type ClockSync = {
     /** false until the first sample lands, `server` rides the join seed until then. */
     synced: boolean;
     /** local-monotonic time of the last sample folded into the estimator. gates
-     *  the feed to ~`SYNC_OBSERVE_MIN_INTERVAL`: `server_clock` is per-tick (~60Hz)
+     *  the feed to ~`SYNC_OBSERVE_MIN_INTERVAL`: `server_clock` is per server tick
      *  so `serverLatest` stays fresh for keyframes, but the least-delayed window
      *  (12s TTL, 16-sample cap) needs samples spread across time, not 16 crammed
      *  into ~0.27s. decimating the feed reproduces the pre-per-tick ~10Hz cadence. */
@@ -78,16 +78,16 @@ const SYNC_MAX_SLEW_RATE = 0.1;
  *  rendering early. */
 export const SERVER_CLOCK_INTERP_DELAY = 0.05;
 
+/** the client sim loop's rate. Fixed, and deliberately not the server's: owner-authority
+ *  motion (the local character above all) is stepped only on its owner's client, so a
+ *  game choosing a cheaper server cadence must not make its own character coarser. */
+export const CLIENT_TICK_HZ = 60;
+
 /** transform broadcast cadence (position + quaternion slices, `dirty.diff` capped).
  *  imported by `builtins/transform` for `rate.hz(...)` and by the remote chase-latest
  *  translator (render/transform/interpolation.ts) as the fallback ease interval, so the
  *  send rate and the chase timing derive from one constant. */
 export const TRANSFORM_SEND_HZ = 30;
-
-/** the sim loop's fixed step. hosts drive `EngineServer.update` at this rate, and the
- *  send-path rate gate converts a sync's `rate.hz(...)` into a tick interval against it,
- *  so a host running some other cadence would silently scale every capped field. */
-export const SERVER_TICK_HZ = 60;
 
 /** scratch for the per-observe percentile sort (<= SYNC_SAMPLES_MAX live samples). */
 const _sortedOffsets = new Float64Array(SYNC_SAMPLES_MAX);

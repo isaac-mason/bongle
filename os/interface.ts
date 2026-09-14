@@ -98,7 +98,7 @@ export type AppInit = {
  *  (bongle.json), so it is stable across engine pins by the same rule as the
  *  manifest schema — narrow, infrastructure-only, additive-only. The engine
  *  re-exports this as its `Config` (src/core/config.ts); one definition. */
-export type Config = { server?: false | { maxPlayers: number } };
+export type Config = { server?: false | { maxPlayers: number; tickRate?: number } };
 
 /**
  * Identity of each artifact the bake has left in `resources/`, as of this report.

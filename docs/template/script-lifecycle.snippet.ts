@@ -1,7 +1,7 @@
 // Typechecked snippets for The programming model — script lifecycle hooks.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { WorldTrait, debug, onDispose, onFrame, onInit, onInput, onJoin, onLeave, onTick, onUpdate, script } from 'bongle';
+import { debug, onDispose, onFrame, onInit, onInput, onJoin, onLeave, onTick, onUpdate, script, WorldTrait } from 'bongle';
 
 /* SNIPPET_START: lifecycle */
 // every lifecycle hook a script can register, with the args each hands you.
@@ -9,9 +9,10 @@ script(WorldTrait, 'hooks', (ctx) => {
     // once, when the script attaches to a node (and again on every hot reload).
     onInit(ctx, () => debug.log(ctx, 'init'));
 
-    // every fixed-timestep tick (60 Hz), on both server and client. gameplay
-    // simulation lives here. delta: seconds since the previous tick.
-    onTick(ctx, ({ delta }) => debug.log(ctx, 'tick', delta));
+    // every fixed-timestep tick, on both server and client. gameplay simulation
+    // lives here. delta: seconds since the previous tick, always the fixed step.
+    // the client ticks at 60; the server ticks at the game's `tickRate`.
+    onTick(ctx, ({ step }) => debug.log(ctx, 'tick', step));
 
     // first thing each frame, ahead of onUpdate and onTick. client only.
     // read input and set intent here. delta: seconds since the previous frame.

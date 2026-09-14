@@ -207,7 +207,7 @@ export type ScriptInstance = {
     onPostPhysicsStep: Set<(args: TickArgs) => void>;
 
     /** fired after animator sampling, before world-matrix recompute. */
-    onPostAnimate: Set<(args: TickArgs) => void>;
+    onPostAnimate: Set<(args: FrameArgs) => void>;
 
     /** fired after every pose writer this frame, right before visibility and draw. */
     onPreRender: Set<(args: FrameArgs) => void>;
@@ -352,7 +352,10 @@ export function onInit(ctx: ScriptContext, fn: () => void): Unsubscribe {
     return () => instance.onInit.delete(fn);
 }
 
-export type TickArgs = { delta: number };
+/** the fixed simulation step, in seconds: `1 / tickRate` on the server, `1 / 60` on the
+ *  client. Constant for the life of a room, and NOT the wall time since the previous
+ *  tick: a server that overruns drops backlog rather than passing a longer step. */
+export type TickArgs = { step: number };
 
 export function onTick(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
     const instance = ctx._instance;
@@ -362,6 +365,7 @@ export function onTick(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubs
     return () => instance.onTick.delete(fn);
 }
 
+/** real elapsed time since the previous frame, in seconds; varies frame to frame. */
 export type UpdateArgs = { delta: number };
 
 /** fires once per frame, before the fixed-timestep tick loop; client-only, no-op on the server. */
@@ -559,7 +563,7 @@ export function onPostPhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => vo
 }
 
 /** fires after animator sampling, before world-matrix recompute; good for head-look, springs/dampers, and constraint clamps. */
-export function onPostAnimate(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
+export function onPostAnimate(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
@@ -800,7 +804,7 @@ export function tickScriptInstance(instance: ScriptInstance, args: TickArgs): vo
     }
 }
 
-export function postAnimateScriptInstance(instance: ScriptInstance, args: TickArgs): void {
+export function postAnimateScriptInstance(instance: ScriptInstance, args: FrameArgs): void {
     for (const fn of instance.onPostAnimate) {
         try {
             fn(args);

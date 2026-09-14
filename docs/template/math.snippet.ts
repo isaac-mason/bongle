@@ -15,7 +15,7 @@ script(MoverTrait, 'move-to-target', (ctx) => {
     const _step: Vec3 = vec3.create();
     const target: Vec3 = [10, 1, 5];
 
-    onTick(ctx, ({ delta }) => {
+    onTick(ctx, ({ step }) => {
         const transform = getTrait(ctx.node, TransformTrait);
         if (!transform) return;
         const position = getWorldPosition(transform);
@@ -24,7 +24,7 @@ script(MoverTrait, 'move-to-target', (ctx) => {
         // scratch buffers instead of allocating a new vector each tick
         vec3.subtract(_toTarget, target, position);
         vec3.normalize(_toTarget, _toTarget);
-        vec3.scaleAndAdd(_step, position, _toTarget, ctx.trait.speed * delta);
+        vec3.scaleAndAdd(_step, position, _toTarget, ctx.trait.speed * step);
         setPosition(transform, _step);
     });
 });

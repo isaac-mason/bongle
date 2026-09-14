@@ -317,8 +317,11 @@ export const VoxelAck = pack.object({
             rz: pack.int32(),
         }),
     ),
-    /** smoothed estimate of decodable voxel_region_full regions per server tick; server clamps defensively. */
-    desiredRegionsPerTick: pack.float32(),
+    /** smoothed estimate of decodable voxel_region_full regions per SECOND; server clamps
+     *  defensively and converts to its own per-tick budget. Per-second because the client
+     *  budgets against its render frame and the server spends against its tick, and the
+     *  two rates are independent. */
+    desiredRegionsPerSecond: pack.float32(),
 });
 
 export type VoxelAck = pack.SchemaType<typeof VoxelAck>;

@@ -999,7 +999,7 @@ export function runOnPostPhysicsStep(sceneTree: SceneTree, args: TickArgs): void
 }
 
 /** fire onPostAnimate hooks on all scripts, after Animation.tick and before world-matrix recompute, so callbacks see fresh local TRS but last-tick world matrices. */
-export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, profiler: Debug.Profiler): void {
+export function runOnPostAnimate(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
