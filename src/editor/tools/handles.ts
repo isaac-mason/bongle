@@ -54,10 +54,29 @@ type Handle = {
 export type HandlesState = {
     handles: Handle[];
     hovered: number;
+    /** the armed handle's own copy: `handles` are pooled and rewritten every frame, so a reference into them goes stale. */
     armed: Handle | null;
     startValue: unknown;
     pool: Handle[];
 };
+
+function sameHandle(a: Handle, b: Handle): boolean {
+    return (
+        a.nodeId === b.nodeId &&
+        a.traitId === b.traitId &&
+        a.controlId === b.controlId &&
+        a.kind === b.kind &&
+        a.field === b.field &&
+        a.axis === b.axis &&
+        a.sign === b.sign &&
+        a.path.length === b.path.length &&
+        a.path.every((key, i) => key === b.path[i])
+    );
+}
+
+function copyHandle(handle: Handle): Handle {
+    return { ...handle, path: [...handle.path], matrix: mat4.clone(handle.matrix), world: vec3.clone(handle.world) };
+}
 
 export function init(): HandlesState {
     return { handles: [], hovered: -1, armed: null, startValue: null, pool: [] };
@@ -94,6 +113,14 @@ export function update(
     }
 
     collect(state, node, camera.position);
+    if (state.armed) {
+        // the live handle carries this frame's matrix and world point (a box face moves as its extent changes).
+        const live = state.handles.find((handle) => sameHandle(handle, state.armed!));
+        if (live) {
+            mat4.copy(state.armed.matrix, live.matrix);
+            vec3.copy(state.armed.world, live.world);
+        }
+    }
     if (!state.armed) {
         state.hovered = nearest(state, cursor, camera, viewportWidth, viewportHeight);
         if (state.hovered !== -1 && isMouseJustDown(mk, 'left')) arm(state, state.handles[state.hovered]!, sceneTree, store);
@@ -123,7 +150,7 @@ function arm(state: HandlesState, handle: Handle, sceneTree: SceneTree, store: E
     }
     const target = resolve(handle, sceneTree);
     if (!target) return;
-    state.armed = handle;
+    state.armed = copyHandle(handle);
     state.startValue = cloneTraitValue(target.control.get(target.instance) as object);
 }
 
@@ -305,12 +332,12 @@ function nearest(state: HandlesState, cursor: Cursor, camera: PerspectiveCamera,
 function draw(state: HandlesState, quads: Quads.QuadBatch, text: Text.TextBatch): void {
     for (let i = 0; i < state.handles.length; i++) {
         const handle = state.handles[i]!;
-        const hot = handle === state.armed || i === state.hovered;
+        const hot = (state.armed !== null && sameHandle(handle, state.armed)) || i === state.hovered;
         const [r, g, b, a] = hot ? HOT_COLOR : handle.kind === 'frame' ? FRAME_COLOR : DOT_COLOR;
         const size = hot ? HANDLE_DOT_HOT_PX : handle.kind === 'frame' ? FRAME_DOT_PX : HANDLE_DOT_PX;
         const [x, y, z] = handle.world;
         Quads.dot(quads, x, y, z, size, r, g, b, a);
-        if (handle !== state.armed) {
+        if (state.armed === null || !sameHandle(handle, state.armed)) {
             Text.labelLeft(text, x, y, z, handleLabel(handle), HANDLE_LABEL_SCALE, size / 2 + HANDLE_LABEL_GAP_PX, 0, r, g, b, a);
         }
     }
