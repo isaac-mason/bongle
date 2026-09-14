@@ -10,7 +10,14 @@ import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { testMask } from '../scene/mask';
 import { samplePattern } from '../scene/pattern';
-import { playBulkEdit } from '../sounds';
+import {
+    createDiggingLoop,
+    type DiggingLoop,
+    playBulkEdit,
+    startDiggingLoop,
+    stopDiggingLoop,
+    updateDiggingLoop,
+} from '../sounds';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
 import { commitVoxelOps } from '../voxel-edit';
 
@@ -94,6 +101,10 @@ export type ElevationState = {
     /** bumps whenever new ops are projected into `forward`, folded into the
      *  preview key so the brush mesh rebuilds as the delta grows. */
     version: number;
+    /** the continuous stroke's sound bed. */
+    digging: DiggingLoop;
+    /** fractional blocks accumulated this frame across live columns, drives the bed's level. */
+    flow: number;
 };
 
 export function createElevationState(): ElevationState {
@@ -110,6 +121,8 @@ export function createElevationState(): ElevationState {
         lastFrameMs: 0,
         previewKey: '',
         version: 0,
+        digging: createDiggingLoop(),
+        flow: 0,
     };
 }
 
@@ -139,6 +152,7 @@ export function updateElevation(
         state.reverse = [];
         state.accum.clear();
         state.previewKey = '';
+        stopDiggingLoop(state.digging);
         store.setState({ brush: null, brushFill: null, brushEdges: null });
         return;
     }
@@ -156,6 +170,7 @@ export function updateElevation(
         state.lastFrameMs = now;
         state.version++;
 
+        if (state.mode === 'continuous') startDiggingLoop(state.digging, ctx, opts.mode);
         if (state.mode === 'single') {
             // Projects the stamp into state.forward/reverse only; nothing hits
             // the voxel grid until release.
@@ -166,19 +181,19 @@ export function updateElevation(
     }
 
     if (state.active && state.mode === 'continuous' && state.opts) {
-        if (held && hv) {
-            const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
-            state.lastFrameMs = now;
-            if (dt > 0) {
-                const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
-                const added = integrateContinuous(state, voxels, hv[0], hv[2], dt, state.opts, active);
-                if (added > 0) state.version++;
-            }
-        } else {
-            // Off-surface: don't accumulate, but advance the clock so re-entry
-            // doesn't dump a giant delta.
-            state.lastFrameMs = now;
+        // The clock advances every frame, on or off the surface, so re-entry
+        // doesn't dump a giant delta.
+        const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
+        state.lastFrameMs = now;
+        state.flow = 0;
+        if (held && hv && dt > 0) {
+            const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
+            const added = integrateContinuous(state, voxels, hv[0], hv[2], dt, state.opts, active);
+            if (added > 0) state.version++;
         }
+        // the grid is untouched until release, so the bed is the stroke's only feedback beyond the
+        // preview mesh; off-surface or with every column capped it settles to silence by itself
+        updateDiggingLoop(state.digging, dt > 0 ? state.flow / dt : 0, dt);
     }
 
     if (state.active && (justUp || !held)) {
@@ -202,6 +217,7 @@ export function updateElevation(
         state.accum.clear();
         state.forward = [];
         state.reverse = [];
+        stopDiggingLoop(state.digging);
     }
 
     // Idle shows the disc footprint at hover; mid-stroke shows the projected
@@ -401,6 +417,7 @@ function integrateContinuous(
             if (col.done) continue;
 
             col.accum += delta;
+            state.flow += delta;
             const newApplied = Math.floor(col.accum);
             if (newApplied <= col.applied) continue;
 

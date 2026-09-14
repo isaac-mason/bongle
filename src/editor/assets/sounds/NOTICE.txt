@@ -1,4 +1,4 @@
-PLACEHOLDERS. Replace before this ships.
+PLACEHOLDERS (the two blips). Replace before this ships.
 
 editor-select.ogg and editor-deselect.ogg are decaying sine blips generated with ffmpeg
 for this repo. They are ours, under the same terms as the rest of the
@@ -22,3 +22,8 @@ Swapping them is a file drop. The ids, the play sites, and the mix live in
 src/editor/sounds.ts and neither depends on the clip's contents; only keep
 them short (roughly under 120ms), since a brush-select drag retriggers
 `editor:select` for as long as it lasts.
+
+editor-digging.ogg is NOT a placeholder: "digging" by freesound_community on Pixabay
+(pixabay id 6691), Creative Commons / Pixabay Content License, no attribution
+required. Cut to a 7s seamless loop (its last 0.68s crossfaded over the head),
+mono, loudness-normalised to -18 LUFS, for the elevation tool's stroke bed.
