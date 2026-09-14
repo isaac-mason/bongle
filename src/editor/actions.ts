@@ -875,14 +875,18 @@ function boundsCenter(bounds: Selection.Bounds): Vec3 {
 function fittedShape(site: ShapeSite, bounds: Selection.Bounds): Record<string, unknown> | null {
     const [dx, dy, dz] = bounds.dimensions;
     const spec = site.spec;
+    // a local shape is centred on the node (which moves to the bounds); a world shape carries the centre itself.
+    const center: Vec3 = site.space === 'world' ? boundsCenter(bounds) : [0, 0, 0];
     if (spec.kind === 'box3') {
+        if (site.space === 'world' && !spec.center) return null;
         const next = { ...site.local, [spec.halfExtents]: [dx / 2, dy / 2, dz / 2] };
-        if (spec.center) next[spec.center] = [0, 0, 0];
+        if (spec.center) next[spec.center] = center;
         return next;
     }
     if (spec.kind === 'sphere') {
+        if (site.space === 'world' && !spec.center) return null;
         const next = { ...site.local, [spec.radius]: Math.max(dx, dy, dz) / 2 };
-        if (spec.center) next[spec.center] = [0, 0, 0];
+        if (spec.center) next[spec.center] = center;
         return next;
     }
     return null;
@@ -901,7 +905,7 @@ export function fitShapeToBoundsAction(
     if (!shape) return false;
     const fitted = fittedShape(shape.site, bounds);
     if (!fitted) return false;
-    const transform = getTrait(node, TransformTrait);
+    const transform = shape.site.space === 'world' ? undefined : getTrait(node, TransformTrait);
     const nextShapeProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
     const prevShapeProps = captureTraitProps(node, shape.traitId);
     const prevTransformProps = transform ? captureTraitProps(node, 'transform') : null;
@@ -983,7 +987,7 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
     const shape = findNodeShape(node);
     if (!shape) return null;
     const { spec, local } = shape.site;
-    const origin = getWorldPosition(transform);
+    const origin: Vec3 = shape.site.space === 'world' ? [0, 0, 0] : getWorldPosition(transform);
     const selection = Selection.create();
     if (spec.kind === 'box3') {
         const half = local[spec.halfExtents] as Vec3;

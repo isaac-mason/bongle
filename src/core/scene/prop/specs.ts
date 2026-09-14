@@ -1,7 +1,7 @@
 import type { PropPath } from './path';
 import type { ObjectSchema, Schema, ShapeSpecData } from './prop';
 
-export type ShapeSite = { path: PropPath; spec: ShapeSpecData; local: Record<string, unknown> };
+export type ShapeSite = { path: PropPath; spec: ShapeSpecData; local: Record<string, unknown>; space: 'local' | 'world' };
 
 /** the first shape-annotated object reachable through `value`: object fields, list items and the union variant the value selects. */
 export function findShape(schema: Schema, value: unknown, path: PropPath = []): ShapeSite | null {
@@ -9,7 +9,7 @@ export function findShape(schema: Schema, value: unknown, path: PropPath = []): 
         case 'object': {
             if (value === null || typeof value !== 'object') return null;
             const local = value as Record<string, unknown>;
-            if (schema.shape) return { path, spec: schema.shape, local };
+            if (schema.shape) return { path, spec: schema.shape, local, space: schema.space ?? 'local' };
             for (const [key, field] of Object.entries(schema.fields)) {
                 const found = findShape(field, local[key], [...path, key]);
                 if (found) return found;

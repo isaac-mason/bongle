@@ -85,6 +85,8 @@ export type ObjectSchema = {
     fields: Record<string, Schema>;
     shape?: ShapeSpecData;
     frame?: FrameSpecData;
+    /** 'world' restarts the frame chain at identity for this object: its frame and shape are absolute, not under the node. */
+    space?: 'local' | 'world';
 };
 
 export type RecordSchema = {
@@ -296,8 +298,8 @@ export const tuple = <T extends Schema[]>(of: [...T]): { type: 'tuple'; of: [...
 
 export const object = <F extends Record<string, Schema>>(
     fields: F,
-    opts?: { shape?: ShapeSpec<F>; frame?: FrameSpec<F> },
-): { type: 'object'; fields: F; shape?: ShapeSpec<F>; frame?: FrameSpec<F> } => ({
+    opts?: { shape?: ShapeSpec<F>; frame?: FrameSpec<F>; space?: 'local' | 'world' },
+): { type: 'object'; fields: F; shape?: ShapeSpec<F>; frame?: FrameSpec<F>; space?: 'local' | 'world' } => ({
     type: 'object',
     fields,
     ...opts,

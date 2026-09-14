@@ -439,11 +439,11 @@ function walk(schema: Schema, value: unknown, matrix: Mat4, path: PropPath): voi
         case 'object': {
             if (value === null || typeof value !== 'object') return;
             const local = value as Record<string, unknown>;
-            let frame = matrix;
+            let frame = schema.space === 'world' ? _identity : matrix;
             const depth = _depth;
             if (schema.frame) {
                 frame = pushFrame(
-                    matrix,
+                    frame,
                     schema.frame.position ? (local[schema.frame.position] as Vec3 | undefined) : undefined,
                     schema.frame.quaternion ? (local[schema.frame.quaternion] as Quat | undefined) : undefined,
                 );
@@ -514,6 +514,7 @@ function shapeHandles(spec: ShapeSpecData, local: Record<string, unknown>, paren
 }
 
 const _centred: Mat4 = mat4.create();
+const _identity: Mat4 = mat4.create();
 const _centerWorld: Vec3 = [0, 0, 0];
 const _ringCenter: Vec3 = [0, 0, 0];
 const _ringU: Vec3 = [0, 0, 0];

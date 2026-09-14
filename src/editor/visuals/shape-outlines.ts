@@ -42,11 +42,11 @@ function walk(lines: Lines.LineBatch, schema: Schema, value: unknown, matrix: Ma
         case 'object': {
             if (value === null || typeof value !== 'object') return;
             const local = value as Record<string, unknown>;
-            let frame = matrix;
+            let frame = schema.space === 'world' ? _identity : matrix;
             if (schema.frame) {
                 const depth = _depth;
                 frame = pushFrame(
-                    matrix,
+                    frame,
                     schema.frame.position ? (local[schema.frame.position] as Vec3 | undefined) : undefined,
                     schema.frame.quaternion ? (local[schema.frame.quaternion] as Quat | undefined) : undefined,
                 );
