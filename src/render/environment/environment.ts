@@ -320,9 +320,9 @@ function buildSkyBodyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyBodyData:
     const cfg = cfgNode;
     // std430 field offsets: color vec3f@0, kind@12, halfSize@16.
     const stride = gpu.layoutStrideOf(SkyBodyInstance);
-    const color = attribute(skyBodyData, d.vec3f, { instanced: true, stride, offset: 0 }).toVar('sbColor');
-    const kind = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 12 }).toVar('sbKind'); // 0 sun, 1 moon
-    const halfSize = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 16 }).toVar('sbHalf');
+    const color = attribute(skyBodyData, d.vec3f, { instanced: true, stride, offset: 0, label: 'sky-bodies' }).toVar('sbColor');
+    const kind = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 12, label: 'sky-bodies' }).toVar('sbKind'); // 0 sun, 1 moon
+    const halfSize = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 16, label: 'sky-bodies' }).toVar('sbHalf');
 
     // Sun/moon directions from time; select by kind (0/1) via mix.
     const TAU = f32(Math.PI * 2);
@@ -393,11 +393,11 @@ function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float
     const cfg = cfgNode;
     // std430 field offsets: dir vec3f@0, size@12, brightness@16, phase@20, gate@24.
     const stride = gpu.layoutStrideOf(StarInstance);
-    const dir = attribute(starData, d.vec3f, { instanced: true, stride, offset: 0 }).toVar('stDir');
-    const baseSize = attribute(starData, d.f32, { instanced: true, stride, offset: 12 }).toVar('stSize');
-    const brightness = attribute(starData, d.f32, { instanced: true, stride, offset: 16 }).toVar('stBright');
-    const phase = attribute(starData, d.f32, { instanced: true, stride, offset: 20 }).toVar('stPhase');
-    const gate = attribute(starData, d.f32, { instanced: true, stride, offset: 24 }).toVar('stGate');
+    const dir = attribute(starData, d.vec3f, { instanced: true, stride, offset: 0, label: 'stars' }).toVar('stDir');
+    const baseSize = attribute(starData, d.f32, { instanced: true, stride, offset: 12, label: 'stars' }).toVar('stSize');
+    const brightness = attribute(starData, d.f32, { instanced: true, stride, offset: 16, label: 'stars' }).toVar('stBright');
+    const phase = attribute(starData, d.f32, { instanced: true, stride, offset: 20, label: 'stars' }).toVar('stPhase');
+    const gate = attribute(starData, d.f32, { instanced: true, stride, offset: 24, label: 'stars' }).toVar('stGate');
 
     const TAU = f32(Math.PI * 2);
     const sunAngle = mul(sub(timeNode.time, f32(0.25)), TAU).toVar('stSunAngle');
