@@ -6,6 +6,11 @@ import { getVisualWorldPosition, getVisualWorldQuaternion, markTransformDirty, T
 import type { MouseKeyboardInput } from '../../client/input';
 import type { Physics } from '../../core/physics/physics';
 import { OBJECT_LAYER_NODE_MOVING } from '../../core/physics/physics';
+import {
+    COLLISION_GROUP_CHARACTERS,
+    COLLISION_GROUP_NODES,
+    COLLISION_GROUP_VOXELS,
+} from '../../core/physics/rigid/rigid-world-settings';
 import type { Resources } from '../../core/resources';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
@@ -132,6 +137,9 @@ export function enterGrab(
         gravityFactor: 0,
         friction: 0.5,
         restitution: 0,
+        // the proxy is placed against the world only: a node's own body (static under the edit lens) would shove it out of itself.
+        collisionGroups: COLLISION_GROUP_NODES,
+        collisionMask: COLLISION_GROUP_VOXELS | COLLISION_GROUP_CHARACTERS,
         // pitch/roll locked, only yaw follows the camera by default; widened to all axes on R-hold.
         allowedDegreesOfFreedom: GRAB_DOF_REST,
     });
