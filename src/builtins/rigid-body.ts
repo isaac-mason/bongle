@@ -20,15 +20,12 @@ export const AutoShapeDef = prop.object({
 /** a box or sphere in the body's frame; a nonzero `center` offsets it. */
 export const ColliderShape = prop.union('type', [prop.box3(), prop.sphere()]);
 
-export const TransformedShapeDef = prop.object({
-    type: prop.literal('transformed'),
-    pose: prop.pose(),
-    shape: ColliderShape,
-});
+/** a collider placed by its own pose inside the body. */
+export const TransformedShapeDef = prop.pose({ type: prop.literal('transformed'), shape: ColliderShape });
 
 export const CompoundShapeDef = prop.object({
     type: prop.literal('compound'),
-    shapes: prop.list(prop.object({ pose: prop.pose(), shape: ColliderShape })),
+    shapes: prop.list(prop.pose({ shape: ColliderShape })),
 });
 
 export const ShapeDef = prop.union('type', [AutoShapeDef, prop.box3(), prop.sphere(), TransformedShapeDef, CompoundShapeDef]);

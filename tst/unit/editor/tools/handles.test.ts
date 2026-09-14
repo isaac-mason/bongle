@@ -32,11 +32,7 @@ describe('shape handles', () => {
         addTrait(node, TransformTrait);
         const body = addTrait(node, RigidBodyTrait);
         body.def = {
-            shape: {
-                type: 'transformed',
-                pose: { position: [2, 0, 0], quaternion: [0, 0, 0, 1] },
-                shape: { type: 'sphere', radius: 1 },
-            },
+            shape: { type: 'transformed', position: [2, 0, 0], quaternion: [0, 0, 0, 1], shape: { type: 'sphere', radius: 1 } },
         };
         computeWorldTransforms(sceneTree);
 
@@ -83,14 +79,14 @@ describe('shape handles', () => {
         // frame 2: press
         mk._gestures.left.pressed = true;
         Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
-        expect(state.activeFrame).toEqual({ nodeId: node.id, traitId: 'rigidbody', controlId: 'def', path: ['shape', 'pose'] });
+        expect(state.activeFrame).toEqual({ nodeId: node.id, traitId: 'rigidbody', controlId: 'def', path: ['shape'] });
         expect(state.activeTool).toBe('transform');
     });
 });
 
 describe('shape handles on a list of posed spheres', () => {
     it('each item gets a pose dot that arms its pose for the gizmo', () => {
-        const Zone = prop.object({ pose: prop.pose(), shape: prop.sphere() });
+        const Zone = prop.pose({ shape: prop.sphere() });
         const ZonesTrait = trait('test-zones', { zones: [] as prop.SchemaType<typeof Zone>[] });
         control(ZonesTrait, 'zones', {
             label: 'Zones',
@@ -108,8 +104,8 @@ describe('shape handles on a list of posed spheres', () => {
         addTrait(node, TransformTrait);
         const zones = addTrait(node, ZonesTrait);
         zones.zones = [
-            { pose: { position: [3, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 1 } },
-            { pose: { position: [-3, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 0.5 } },
+            { position: [3, 0, 0], quaternion: [0, 0, 0, 1], shape: { type: 'sphere', radius: 1 } },
+            { position: [-3, 0, 0], quaternion: [0, 0, 0, 1], shape: { type: 'sphere', radius: 0.5 } },
         ];
         computeWorldTransforms(sceneTree);
 
@@ -148,7 +144,7 @@ describe('shape handles on a list of posed spheres', () => {
 
         mk._gestures.left.pressed = true;
         Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
-        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1, 'pose'] });
+        expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1] });
         expect(state.activeTool).toBe('transform');
     });
 });
@@ -238,10 +234,10 @@ describe('shape handles: drags and spaces', () => {
     });
 
     it('a world-space pose ignores the node transform, and a bare shape has no dot', () => {
-        const Placed = prop.object({ pose: prop.pose({ space: 'world' }), shape: prop.sphere() });
+        const Placed = prop.pose({ shape: prop.sphere() }, { space: 'world' });
         const h = harness(
             Placed,
-            { pose: { position: [1, 0, 0], quaternion: [0, 0, 0, 1] }, shape: { type: 'sphere', radius: 1 } },
+            { position: [1, 0, 0], quaternion: [0, 0, 0, 1], shape: { type: 'sphere', radius: 1 } },
             [5, 0, 0],
         );
         h.tick();

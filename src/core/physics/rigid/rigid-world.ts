@@ -202,14 +202,14 @@ function resolveLiteralShape(shapeDef: ShapeDef): Shape | null {
         case 'transformed': {
             const inner = resolveLiteralShape(shapeDef.shape);
             return inner
-                ? transformed.create({ shape: inner, position: shapeDef.pose.position, quaternion: shapeDef.pose.quaternion })
+                ? transformed.create({ shape: inner, position: shapeDef.position, quaternion: shapeDef.quaternion })
                 : null;
         }
         case 'compound': {
             const children: { shape: Shape; position: Vec3; quaternion: Quat }[] = [];
             for (const part of shapeDef.shapes) {
                 const s = resolveLiteralShape(part.shape);
-                if (s) children.push({ shape: s, position: part.pose.position, quaternion: part.pose.quaternion });
+                if (s) children.push({ shape: s, position: part.position, quaternion: part.quaternion });
             }
             return children.length > 0 ? compound.create({ children }) : null;
         }

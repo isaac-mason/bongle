@@ -16,28 +16,13 @@ export type ObjectSite = {
 };
 
 const IDENTITY: Mat4 = mat4.create();
-const POOL: { frame: Mat4; own: Mat4 }[] = [];
+const POOL: Mat4[] = [];
 const _p: Vec3 = [0, 0, 0];
 const _q: Quat = [0, 0, 0, 1];
 
-/** the pose field that frames `schema`'s other fields, seen through optional wrappers; null when it has none. */
-export function poseFieldOf(schema: ObjectSchema): string | null {
-    for (const [key, field] of Object.entries(schema.fields)) {
-        if (unwrap(field).kind === 'pose') return key;
-    }
-    return null;
-}
-
-function unwrap(schema: Schema): { kind: ObjectKind | undefined; space: 'local' | 'world' } {
-    let inner = schema;
-    while (inner.type === 'nullable' || inner.type === 'optional' || inner.type === 'nullish') inner = inner.of;
-    return inner.type === 'object' ? { kind: inner.kind, space: inner.space ?? 'local' } : { kind: undefined, space: 'local' };
-}
-
 /**
  * visits every shape and pose in `value` (through fields, list items, the union variant the value selects and optional
- * wrappers). an object holding a pose field is framed by it; `space: 'world'` restarts the chain at identity.
- * `visit` returns true to stop.
+ * wrappers), composing each pose into its contents; `space: 'world'` restarts the chain at identity. `visit` returns true to stop.
  */
 export function walkObjects(
     schema: Schema,
@@ -52,39 +37,26 @@ export function walkObjects(
         case 'object': {
             if (value === null || typeof value !== 'object') return false;
             const local = value as Record<string, unknown>;
-            while (POOL.length <= depth) POOL.push({ frame: mat4.create(), own: mat4.create() });
-            const pool = POOL[depth]!;
             const parent = schema.space === 'world' ? IDENTITY : matrixIn;
-            if (schema.kind === 'pose') {
-                const position = local.position as Vec3 | undefined;
-                const quaternion = local.quaternion as Quat | undefined;
-                mat4.fromRotationTranslation(pool.own, quaternion ?? quat.identity(_q), position ?? vec3.set(_p, 0, 0, 0));
-                mat4.multiply(pool.own, parent, pool.own);
-                return (
-                    visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: pool.own, posePath }) === true
-                );
+            if (schema.kind === undefined) {
+                for (const [key, field] of Object.entries(schema.fields)) {
+                    if (walkObjects(field, local[key], parent, visit, [...path, key], depth, posePath)) return true;
+                }
+                return false;
             }
-            if (schema.kind !== undefined) {
+            if (schema.kind !== 'pose') {
                 return visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix: parent, posePath }) === true;
             }
-            let matrix = parent;
-            const poseField = poseFieldOf(schema);
-            if (poseField !== null) {
-                const poseSpace = unwrap(schema.fields[poseField]!).space;
-                const pose = local[poseField] as { position?: Vec3; quaternion?: Quat } | null | undefined;
-                mat4.fromRotationTranslation(
-                    pool.frame,
-                    pose?.quaternion ?? quat.identity(_q),
-                    pose?.position ?? vec3.set(_p, 0, 0, 0),
-                );
-                matrix = mat4.multiply(pool.frame, poseSpace === 'world' ? IDENTITY : parent, pool.frame);
-            }
+            while (POOL.length <= depth) POOL.push(mat4.create());
+            const matrix = POOL[depth]!;
+            const position = local.position as Vec3 | undefined;
+            const quaternion = local.quaternion as Quat | undefined;
+            mat4.fromRotationTranslation(matrix, quaternion ?? quat.identity(_q), position ?? vec3.set(_p, 0, 0, 0));
+            mat4.multiply(matrix, parent, matrix);
+            if (visit({ schema: schema as ObjectSite['schema'], local, path, parent, matrix, posePath })) return true;
+            // the contents live in the pose's frame, and this pose is what places them
             for (const [key, field] of Object.entries(schema.fields)) {
-                // the pose is visited in the frame it is expressed in, its siblings in the frame it makes
-                const isPose = key === poseField;
-                const fieldMatrix = isPose ? parent : matrix;
-                const fieldPose = isPose || poseField === null ? posePath : [...path, poseField];
-                if (walkObjects(field, local[key], fieldMatrix, visit, [...path, key], depth + 1, fieldPose)) return true;
+                if (walkObjects(field, local[key], matrix, visit, [...path, key], depth + 1, path)) return true;
             }
             return false;
         }
@@ -130,35 +102,4 @@ export function findShape(schema: Schema, value: unknown): ShapeSite | null {
         return true;
     });
     return found;
-}
-
-/** every object in `schema` whose frame is ambiguous because it holds more than one pose field. */
-export function checkSpecs(schema: Schema, path = ''): string[] {
-    const problems: string[] = [];
-    switch (schema.type) {
-        case 'object': {
-            const poses = Object.entries(schema.fields)
-                .filter(([, field]) => unwrap(field).kind === 'pose')
-                .map(([key]) => key);
-            if (poses.length > 1)
-                problems.push(`${path}: holds ${poses.length} pose fields (${poses.join(', ')}), only one can frame it`);
-            for (const [key, field] of Object.entries(schema.fields)) problems.push(...checkSpecs(field, `${path}.${key}`));
-            return problems;
-        }
-        case 'union':
-            for (const variant of schema.variants) problems.push(...checkSpecs(variant, path));
-            return problems;
-        case 'list':
-        case 'nullable':
-        case 'optional':
-        case 'nullish':
-            return checkSpecs(schema.of, `${path}[]`);
-        case 'record':
-            return checkSpecs(schema.field, `${path}[]`);
-        case 'tuple':
-            for (const [i, of] of schema.of.entries()) problems.push(...checkSpecs(of, `${path}[${i}]`));
-            return problems;
-        default:
-            return problems;
-    }
 }

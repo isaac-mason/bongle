@@ -10,7 +10,6 @@ import { createModelPlaceholderDef, type ModelHandleMap, type ModelOptions } fro
 import type { ParticleDef, ParticleHandle, ParticleOptions } from './particles/particles';
 import type { CommandDef, CommandHandle, RpcDirection } from './rpc';
 import type { PrefabApplyContext } from './scene/prefab';
-import { checkSpecs } from './scene/prop';
 import type { Schema, SchemaType } from './scene/prop/prop';
 import { createSceneDef, createSceneHandle, type SceneDef, type SceneHandle, type SceneOptions } from './scene/scene-handle';
 import type { Realm } from './scene/scene-tree';
@@ -861,7 +860,6 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
         console.warn(`[bongle] trait '${target.id}' already has a control with id '${controlId}'; ignoring re-register`);
         return;
     }
-    for (const problem of checkSpecs(body.schema)) console.warn(`[bongle] trait '${target.id}' control '${controlId}'${problem}`);
     // into the per-kind store so HMR detects individual control edits without flipping the parent trait hash.
     const key = `${target.id}.${controlId}`;
     const reg = declare(controlStore, key, { ...body, traitId: target.id, controlId } as unknown as ControlDef).def;

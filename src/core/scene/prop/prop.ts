@@ -51,7 +51,7 @@ export type TupleSchema = {
     of: Schema[];
 };
 
-/** an object with a fixed layout the editor knows: a shape sits at its frame's origin and gets outlines and handles, a pose frames its sibling fields. */
+/** an object with a fixed layout the editor knows: a shape sits at its frame's origin and gets outlines and handles, a pose frames what it holds. */
 export type ObjectKind = 'sphere' | 'box3' | 'segment' | 'pose';
 
 export type ObjectSchema = {
@@ -325,18 +325,25 @@ export const segment = (
     ...opts,
 });
 
-/** value `{ position, quaternion }`; an object holding a pose field is framed by it, so its other fields live inside that pose. */
-export const pose = (
+/** a pose's contents may not shadow its own position and quaternion. */
+export type PoseContents = Record<string, Schema> & { position?: never; quaternion?: never };
+
+/**
+ * value `{ position, quaternion, ...contents }`: a frame, holding what it places. a shape inside a pose sits at the pose, a
+ * pose inside a pose composes; a shape with no enclosing pose sits at the node.
+ */
+export const pose = <F extends PoseContents = Record<never, never>>(
+    contents?: F,
     opts?: ShapeOptions,
 ): {
     type: 'object';
     kind: 'pose';
-    fields: { position: { type: 'vector3'; subtype: 'point' }; quaternion: QuaternionSchema };
+    fields: F & { position: { type: 'vector3'; subtype: 'point' }; quaternion: QuaternionSchema };
     space?: 'local' | 'world';
 } => ({
     type: 'object',
     kind: 'pose',
-    fields: { position: point(), quaternion: quaternion() },
+    fields: { ...(contents as F), position: point(), quaternion: quaternion() },
     ...opts,
 });
 
