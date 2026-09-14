@@ -31,6 +31,8 @@ import { updateSelectionMeshes } from '../visuals/selection-mesh';
 import type { GrabTool } from './grab';
 import * as Grab from './grab';
 import { type HandlesState, isEngaged } from './handles';
+import type { PlacementTool } from './placement';
+import * as Placement from './placement';
 import type { TransformToolState } from './transform';
 import * as TransformTool from './transform';
 
@@ -139,7 +141,7 @@ export function openViewportContextMenu(
     if (shouldOpen) {
         const world: Vec3 | null =
             voxelWins && voxelHit
-                ? TransformTool.placePointOnFace(
+                ? Placement.placePointOnFace(
                       [voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ],
                       [voxelHit.nx, voxelHit.ny, voxelHit.nz],
                       [voxelHit.px, voxelHit.py, voxelHit.pz],
@@ -167,6 +169,7 @@ export function updateInspect(
     ctx: ScriptContext,
     nodeBodies: NodeBodies,
     transformToolState: TransformToolState,
+    placement: PlacementTool,
     grab: GrabTool,
     handles: HandlesState,
     pivotPoint: PivotPoint,
@@ -176,11 +179,11 @@ export function updateInspect(
     const cursor = getCursor(client.input.mouseKeyboard);
     // Place-mode cursor follow is a non-destructive preview: a click commits with
     // a history entry, any other exit reverts to the snapshot positions.
-    if (transformToolState.placeSnapshots !== null) {
+    if (placement.placeSnapshots !== null) {
         const s0 = store.getState();
         const stillActive = activeTool === 'transform' && s0.transformMode === 'place' && s0.selection.nodes.size > 0;
         if (!stillActive) {
-            TransformTool.revertPlaceSelection(transformToolState, room.scene);
+            Placement.revertPlaceSelection(placement, room.scene);
         }
     }
 
@@ -209,16 +212,16 @@ export function updateInspect(
         // ctrl+v paste leaves it false). If the active hotbar slot no longer matches
         // the in-flight placement, drop the ghost and bounce back to the build tool.
         const { placementContinuous, activeSlotIndex } = store.getState();
-        if (placementContinuous && transformToolState.placement) {
-            const placementPrefabId = transformToolState.placement.sourcePrefabId;
-            const placementSceneId = transformToolState.placement.sourceSceneId;
+        if (placementContinuous && placement.current) {
+            const placementPrefabId = placement.current.sourcePrefabId;
+            const placementSceneId = placement.current.sourceSceneId;
             const slot = useEditor.getState().hotbar[activeSlotIndex] ?? null;
             const slotPrefabId = slot && slot.kind === 'prefab' ? slot.prefabId : null;
             const slotSceneId = slot && slot.kind === 'blueprint' ? slot.sceneId : null;
             const prefabMismatch = placementPrefabId !== null && placementPrefabId !== slotPrefabId;
             const sceneMismatch = placementSceneId !== null && placementSceneId !== slotSceneId;
             if (prefabMismatch || sceneMismatch) {
-                TransformTool.cancelPlacement(transformToolState, ctx);
+                Placement.cancelPlacement(placement, ctx);
                 store.setState({ activeTool: 'build' });
             }
         }
@@ -232,16 +235,11 @@ export function updateInspect(
 
         const { transformMode } = store.getState();
         if (transformMode === 'place' && hoverVoxelAtFrame && hoverNormalAtFrame) {
-            TransformTool.updatePlacementFromRaycast(
-                transformToolState,
-                room.scene,
-                hoverVoxelAtFrame,
-                hoverNormalAtFrame,
-                hoverPointAtFrame,
-            );
+            Placement.updatePlacementFromRaycast(placement, room.scene, hoverVoxelAtFrame, hoverNormalAtFrame, hoverPointAtFrame);
         }
         const pivotPos =
             TransformTool.updateTransformTool(transformToolState, room.scene, client.state!.resources) ??
+            Placement.pivotPosition(placement) ??
             Grab.pivotPosition(grab, room.scene);
         PivotPointMod.update(pivotPoint, pivotPos ?? [0, 0, 0], pivotPos !== null);
     } else {
@@ -305,19 +303,19 @@ export function updateInspect(
         }
     }
 
-    if (inPlaceMode && TransformTool.isInPlacement(transformToolState)) {
+    if (inPlaceMode && Placement.isInPlacement(placement)) {
         if (rightClicked) {
-            TransformTool.commitPlacement(transformToolState, room.scene, ctx.voxels, ctx);
+            Placement.commitPlacement(placement, room.scene, ctx.voxels, ctx);
         } else if (clicked) {
             // Left click pins the ghost here and switches to the translate gizmo for fine-tuning.
-            if (transformToolState.placement) transformToolState.placement.placed = true;
+            if (placement.current) placement.current.placed = true;
             store.setState({ transformMode: 'translate' });
         }
     } else if (inPlaceMode && store.getState().selection.nodes.size > 0) {
         // Place mode driving a plain selection (no ghost): either click pins the
         // cursor-follow position as a history entry and exits back to translate.
         if (clicked || rightClicked) {
-            TransformTool.commitPlaceSelection(transformToolState, room.scene, ctx);
+            Placement.commitPlaceSelection(placement, room.scene, ctx);
             store.setState({ transformMode: 'translate' });
         }
     } else if (clicked && !gizmoDragging && !inPlaceMode && !inGrabMode) {
@@ -418,15 +416,19 @@ export function updateInspect(
                 else if (Selection.countVoxels(store.getState().selection) > 0) store.getState().clearSelection();
             }
         } else if (activeTool === 'transform') {
-            TransformTool.handleTransformKeys(
-                mk,
-                client.input,
-                camera.quaternion,
-                transformToolState,
-                room.scene,
-                ctx,
-                Grab.isInGrab(grab),
-            );
+            if (Placement.isInPlacement(placement)) {
+                Placement.handleKeys(placement, mk, client.input, camera.quaternion, room.scene, ctx);
+            } else {
+                TransformTool.handleTransformKeys(
+                    mk,
+                    client.input,
+                    camera.quaternion,
+                    transformToolState,
+                    room.scene,
+                    ctx,
+                    Grab.isInGrab(grab),
+                );
+            }
         }
     }
 

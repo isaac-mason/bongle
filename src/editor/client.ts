@@ -79,6 +79,7 @@ import { openViewportContextMenu, resolveSelectionTarget, updateInspect } from '
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
 import { createPainterState, updatePainter } from './tools/painter';
+import * as Placement from './tools/placement';
 import { createSmoothState, updateSmooth } from './tools/smooth';
 import * as TransformTool from './tools/transform';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';
@@ -154,11 +155,11 @@ script(
 
             const active = editorViewActive(room);
             // avoids leaving preview ghosts armed after a play/POV swap mid placement.
-            if (transform.placement && (!active || store.getState().activeTool !== 'transform')) {
-                TransformTool.cancelPlacement(transform, ctx);
+            if (s.placement.current && (!active || store.getState().activeTool !== 'transform')) {
+                Placement.cancelPlacement(s.placement, ctx);
             }
             // backstop for any path that dropped the placement without a clean teardown.
-            TransformTool.reconcilePlacementGhosts(transform);
+            Placement.reconcilePlacementGhosts(s.placement);
             if (!active) {
                 MarkerVisuals.clear(s.markers, room.visibility);
                 hideVisuals(s.visuals, transform);
@@ -213,6 +214,7 @@ script(
                     ctx,
                     s.nodeBodies,
                     transform,
+                    s.placement,
                     s.grab,
                     s.handles,
                     s.visuals.pivot,
@@ -252,6 +254,7 @@ type Session = {
     room: ClientRoom;
     store: EditRoomStoreApi;
     transform: TransformTool.TransformToolState;
+    placement: Placement.PlacementTool;
     grab: Grab.GrabTool;
     handles: Handles.HandlesState;
     nodeBodies: NodeBodies.NodeBodies;
@@ -275,14 +278,16 @@ function openSession(ctx: ScriptContext): Session {
     // seeds the gizmo; the per-frame sync keeps it on the active POV.
     const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
     const transform = TransformTool.createTransformTool(initialCamera, client.render.scene, room.scene, ctx);
-    const store = createEditRoomStore({ ctx, room, transformToolState: transform });
+    const placement = Placement.init(transform);
+    const store = createEditRoomStore({ ctx, room, placement });
     transform.store = store;
+    placement.store = store;
     const nodeBodies = NodeBodies.init(store, room.physics);
     useEditor.getState().registerEditRoomStore(room, store);
 
     // clipboard: page-level listeners (installed by mountEditUI) dispatch to the
     // active room's handlers through its edit store.
-    store.setState({ clipboard: createClipboardHandlers(store, ctx, room, transform) });
+    store.setState({ clipboard: createClipboardHandlers(store, ctx, room, placement) });
 
     const unsubs: Array<() => void> = [];
     // builtin slash commands (/set, undo, redo, help, selection ops).
@@ -303,6 +308,7 @@ function openSession(ctx: ScriptContext): Session {
         room,
         store,
         transform,
+        placement,
         grab: Grab.init(store),
         handles: Handles.init(),
         nodeBodies,
@@ -464,7 +470,7 @@ function redrawInspectMesh(v: Visuals, s: Session, time: TimeResources): void {
         if (node !== s.room.scene.root) SelectionBox.draw(v.lines, node, s.client.state!.resources, time.seconds);
     }
     // the placement ghost is a preview the transform tool owns, never selected: its box, no card.
-    const placement = s.transform.placement;
+    const placement = s.placement.current;
     if (placement) SelectionBox.draw(v.lines, placement.voxelNode ?? placement.rootNode, s.client.state!.resources, time.seconds);
     drawCards(v, s, selectedNodes);
     drawDragReadout(v, s);
@@ -799,12 +805,12 @@ function updateGrabRotate(s: Session): void {
 }
 
 function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
-    const { store, ctx, client, room, nodeBodies, transform, strokes } = s;
+    const { store, ctx, client, room, nodeBodies, strokes } = s;
     const mk = client.input.mouseKeyboard;
     const { activeTool } = store.getState();
 
     if (activeTool === 'build') {
-        updateBuild(store, ctx, client.input, ctx.voxels, transform, camera);
+        updateBuild(store, ctx, client.input, ctx.voxels, s.placement, camera);
     }
     if (activeTool === 'box-select') {
         const boxNudge = !isInputFocused() ? readNudgeDelta(client.input, camera.quaternion) : null;

@@ -13,8 +13,8 @@ import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { playBlockEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
-import type { TransformToolState } from './transform';
-import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
+import type { PlacementTool } from './placement';
+import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './placement';
 
 type Op = { wx: number; wy: number; wz: number; key: string };
 
@@ -23,7 +23,7 @@ export function updateBuild(
     ctx: ScriptContext,
     input: Input,
     voxels: Voxels,
-    transformToolState: TransformToolState,
+    placement: PlacementTool,
     camera: PerspectiveCamera,
 ): void {
     const s = store.getState();
@@ -33,25 +33,25 @@ export function updateBuild(
     const hotbar = useEditor.getState().hotbar;
     const activeSlotIndex = s.activeSlotIndex;
     const slot = hotbar[activeSlotIndex] ?? null;
-    if (slot && slot.kind === 'prefab' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
+    if (slot && slot.kind === 'prefab' && !isInPlacement(placement) && s.hoverVoxel && s.hoverNormal) {
         const anchor: Vec3 = [
             s.hoverVoxel[0] + s.hoverNormal[0],
             s.hoverVoxel[1] + s.hoverNormal[1],
             s.hoverVoxel[2] + s.hoverNormal[2],
         ];
         store.setState({ placementContinuous: true });
-        enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.scene, ctx);
+        enterPrefabPlacement(placement, slot.prefabId, anchor, ctx.scene, ctx);
         return;
     }
     // same auto-enter flow for saved blueprints; the placement preview is the saved scene's voxels + nodes
-    if (slot && slot.kind === 'blueprint' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
+    if (slot && slot.kind === 'blueprint' && !isInPlacement(placement) && s.hoverVoxel && s.hoverNormal) {
         const anchor: Vec3 = [
             s.hoverVoxel[0] + s.hoverNormal[0],
             s.hoverVoxel[1] + s.hoverNormal[1],
             s.hoverVoxel[2] + s.hoverNormal[2],
         ];
         store.setState({ placementContinuous: true });
-        enterBlueprintPlacement(transformToolState, slot.sceneId, anchor, ctx.scene, ctx);
+        enterBlueprintPlacement(placement, slot.sceneId, anchor, ctx.scene, ctx);
         return;
     }
 

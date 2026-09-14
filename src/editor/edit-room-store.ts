@@ -21,8 +21,8 @@ import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
 import type { Pattern } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
-import type { PivotPreset, TransformToolState } from './tools/transform';
-import * as TransformTool from './tools/transform';
+import type { PivotPreset, PlacementTool } from './tools/placement';
+import * as Placement from './tools/placement';
 import type { Rgba } from './visuals/editor-colors';
 import { commitVoxelOps } from './voxel-edit';
 
@@ -384,7 +384,7 @@ export type EditRoomStoreApi = StoreApi<EditRoomState>;
 export type EditRoomStoreRefs = {
     ctx: ScriptContext;
     room: ClientRoom;
-    transformToolState: TransformToolState;
+    placement: PlacementTool;
 };
 
 const HOTBAR_SIZE = 9;
@@ -520,7 +520,7 @@ function initialFields() {
 }
 
 export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
-    const { ctx, room, transformToolState } = refs;
+    const { ctx, room, placement } = refs;
     // actions need the StoreApi to read/write fresh state, but create() only provides set/get inside the factory.
     let api: EditRoomStoreApi;
 
@@ -686,7 +686,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
 
             set({ selection: Selection.create() });
 
-            TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.scene, ctx);
+            Placement.enterPlacement(placement, blueprint, true, cutReverseOps, room.scene, ctx);
             return blueprint;
         },
         rotate: (yawTurns, pitchTurns, rollTurns) => {
@@ -699,9 +699,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 const dir: 1 | -1 = turns > 0 ? 1 : -1;
                 for (let i = 0; i < Math.abs(turns); i++) {
                     next = Blueprint.rotateAxis(next, axis, dir);
-                    if (transformToolState.placement) {
-                        TransformTool.rotatePlacement(transformToolState, dir, axis);
-                    }
+                    if (placement.current) Placement.rotatePlacement(placement, dir, axis);
                 }
             };
             step(yawTurns, 'y');
@@ -715,16 +713,14 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             if (!bp) return false;
             const next = Blueprint.flipAxis(bp, axis);
             set({ activeBlueprint: next });
-            if (transformToolState.placement) {
-                TransformTool.flipPlacement(transformToolState, axis);
-            }
+            if (placement.current) Placement.flipPlacement(placement, axis);
             return true;
         },
         setBlock: (wx, wy, wz, key) => {
             commitVoxelOps(ctx, [{ wx, wy, wz, key }]);
         },
         setPlacementPivotPreset: (preset) => {
-            TransformTool.setPlacementPivot(transformToolState, preset);
+            Placement.setPlacementPivot(placement, preset);
         },
 
         setActiveTool: (activeTool) => set({ activeTool, brushFill: null, brushEdges: null }),
@@ -770,7 +766,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
     api = store;
     store.subscribe((state, previous) => {
         if (state.selection === previous.selection) return;
-        if (env.editor) checkSelectionInvariants(state.selection, transformToolState);
+        if (env.editor) checkSelectionInvariants(state.selection, placement);
         const inspectedVoxel = inspectedVoxelOf(state.selection);
         if (!sameInspectedVoxel(inspectedVoxel, state.inspectedVoxel)) store.setState({ inspectedVoxel });
     });
@@ -778,8 +774,8 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
 }
 
 // placement ghosts are previews the transform tool owns; the active id is one of the selected nodes or nothing.
-function checkSelectionInvariants(selection: Selection.Selection, transformToolState: TransformToolState): void {
-    for (const ghost of transformToolState._ghostNodes) {
+function checkSelectionInvariants(selection: Selection.Selection, placement: PlacementTool): void {
+    for (const ghost of placement._ghostNodes) {
         if (selection.nodes.has(ghost.id)) console.error(`[bongle] selection holds placement ghost '${ghost.name}'`);
     }
     if (selection.active !== null && !selection.nodes.has(selection.active)) {

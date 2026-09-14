@@ -4,8 +4,8 @@ import * as Selection from '../core/scene/selection';
 import * as Blueprint from './blueprint';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { isInputFocused } from './input';
-import type { TransformToolState } from './tools/transform';
-import * as TransformTool from './tools/transform';
+import type { PlacementTool } from './tools/placement';
+import * as Placement from './tools/placement';
 
 export type ClipboardHandlers = {
     onCopy: (e: ClipboardEvent) => void;
@@ -38,7 +38,7 @@ export function createClipboardHandlers(
     api: EditRoomStoreApi,
     ctx: ScriptContext,
     room: ClientRoom,
-    transformToolState: TransformToolState,
+    placement: PlacementTool,
 ): ClipboardHandlers {
     // ClipboardEvent has no modifier-key info, so shift state is sampled from the triggering
     // keydown; holding shift turns the placement into a continuous loop.
@@ -82,7 +82,7 @@ export function createClipboardHandlers(
 
         api.setState({ activeBlueprint: blueprint, placementContinuous: shiftHeldAtTrigger });
         console.log(`[bongle] pasted blueprint from clipboard: ${blueprint.label}${shiftHeldAtTrigger ? ' (continuous)' : ''}`);
-        TransformTool.enterPlacement(transformToolState, blueprint, false, null, room.scene, ctx);
+        Placement.enterPlacement(placement, blueprint, false, null, room.scene, ctx);
     };
 
     // one cut: the store's action does the work, the clipboard event only carries the text out.
