@@ -2,9 +2,12 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import {
+    addChild,
+    addTrait,
     asset,
     CameraTrait,
     configureFloodFillLighting,
+    createNode,
     ENVIRONMENT_OVERWORLD,
     getCamera,
     getSubject,
@@ -15,8 +18,10 @@ import {
     particle,
     particleUpdate,
     type ScriptContext,
+    SpriteTrait,
     script,
     setEnvironment,
+    setPosition,
     setSubject,
     spawnParticle,
     sprite,
@@ -24,6 +29,7 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
+import { sprites } from 'bongle/kit';
 
 /* SNIPPET_START: camera */
 // the room already has a camera node; read its CameraTrait to set field of view
@@ -158,3 +164,37 @@ system('sparks', (ctx) => {
     });
 });
 /* SNIPPET_END: varied */
+
+/* SNIPPET_START: glyphs */
+// the kit's font is ordinary sprites, so anything that draws a sprite can draw text
+function spellOut(parent: Node, text: string, worldScale = 1 / 16): void {
+    const { width, height, advance } = sprites.glyphMetrics;
+    sprites.glyphs(text).forEach((glyph, i) => {
+        const node = createNode({ name: `glyph-${i}` });
+        setPosition(addTrait(node, TransformTrait), [i * advance * worldScale, 0, 0]);
+        const quad = addTrait(node, SpriteTrait);
+        quad.sprite = glyph;
+        quad.width = width;
+        quad.height = height;
+        quad.worldScale = worldScale;
+        addChild(parent, node);
+    });
+}
+
+// a particle's sprite is fixed at declaration, so a character you want to fling needs its own type
+const DamageDigits = Array.from({ length: 10 }, (_, digit) =>
+    particle(`damage-${digit}`, {
+        sprite: sprites.glyph(String(digit)),
+        playback: 'once',
+        glow: 1,
+        update: particleUpdate.spark,
+    }),
+);
+
+system('glyph-demo', (ctx) => {
+    onInit(ctx, () => {
+        spellOut(ctx.node, 'HELLO');
+        spawnParticle(ctx, DamageDigits[7]!, [0, 2, 0], { lifetime: 0.8 });
+    });
+});
+/* SNIPPET_END: glyphs */

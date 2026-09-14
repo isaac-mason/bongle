@@ -1422,6 +1422,19 @@ characters.
 of `depth`, the chunky paper-craft look (think Crossy Road) that reads from any
 angle rather than only head-on.
 
+#### Text from glyphs
+
+`bongle/kit` ships a 5x7 pixel font cut into ordinary sprites, one per printable
+ASCII character. `glyphs(text)` hands back a handle per character, `glyph(char)` one
+at a time (anything unprintable comes back as `?`), and `glyphMetrics` gives the
+`width`, `height`, and per-character `advance` in font pixels to step a run by.
+Because they are just sprites, anything that draws a sprite can draw text: a
+`SpriteTrait` per character for a world-space label, or a particle per character for
+numbers that fly off a hit. A particle's sprite is fixed when the type is declared,
+so each character you want to fling needs its own `particle()`.
+
+<Snippet source="visuals.snippet.ts" select="glyphs" />
+
 ### Particles
 
 Particles are short-lived sprites for effects like smoke, sparks, and dust.
