@@ -962,8 +962,8 @@ export function InspectorPanel() {
             );
         }
 
-        const blockIndex = blockRegistry.stateToBlockIndex[stateId];
-        const def = blockRegistry.defs[blockIndex];
+        // handles is keyed by reserved block index; defs is declaration order and does not line up with stateToBlockIndex.
+        const def = blockRegistry.handles[blockRegistry.stateToBlockIndex[stateId]].def;
         const propNames = Object.keys(def.states.props);
         const decoded = def.states.decode(blockRegistry.stateToLocalIndex[stateId]) as Record<string, unknown>;
 

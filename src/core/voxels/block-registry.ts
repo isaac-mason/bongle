@@ -254,9 +254,9 @@ export type Blocks = {
     /** number of registered block types (not counting the implicit missing sentinel). */
     blockCount: number;
 
-    defs: BlockDef[]; // registration order, indexed by dense block type index
+    defs: BlockDef[]; // declaration order, dense; NOT aligned with stateToBlockIndex
     idToDef: Map<string, BlockDef>;
-    handles: BlockHandle[]; // registration order
+    handles: BlockHandle[]; // keyed by reserved block index (holes for removed ids); use with stateToBlockIndex
     idToHandle: Map<string, BlockHandle>;
 
     stateToBlockIndex: Uint16Array; // global state id -> dense block type index
