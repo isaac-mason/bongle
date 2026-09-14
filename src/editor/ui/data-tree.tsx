@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../../client/ui/components';
 import type { Node } from '../../core/scene/scene-tree';
 import type { TraitBase } from '../../core/scene/traits';
 import { useEditRoom } from '../edit-room-store';
@@ -7,6 +8,8 @@ import { useEditRoom } from '../edit-room-store';
 const LIVE_HZ = 10;
 const MAX_DEPTH = 12;
 const INLINE_TYPED_ARRAY = 8;
+const INLINE_LIST = 8;
+const INLINE_KEYS = 4;
 const MAX_LIST_ROWS = 100;
 
 type Kind = 'primitive' | 'node' | 'trait' | 'function' | 'typed' | 'array' | 'map' | 'set' | 'object';
@@ -56,15 +59,25 @@ function summarize(value: unknown, kind: Kind): string {
             const head = Array.from({ length: Math.min(view.length, INLINE_TYPED_ARRAY) }, (_, i) => formatPrimitive(view[i]));
             return `${view.constructor.name}(${view.length}) [${head.join(', ')}${view.length > INLINE_TYPED_ARRAY ? ', ...' : ''}]`;
         }
-        case 'array':
-            return `Array(${(value as unknown[]).length})`;
+        case 'array': {
+            const list = value as unknown[];
+            if (list.length <= INLINE_LIST && list.every((item) => kindOf(item) === 'primitive')) {
+                return `[${list.map(formatPrimitive).join(', ')}]`;
+            }
+            return `Array(${list.length})`;
+        }
         case 'map':
             return `Map(${(value as Map<unknown, unknown>).size})`;
         case 'set':
             return `Set(${(value as Set<unknown>).size})`;
         case 'object': {
-            const keys = Object.keys(value as object);
-            return keys.length === 0 ? '{}' : `{ ${keys.slice(0, 4).join(', ')}${keys.length > 4 ? ', ...' : ''} }`;
+            const record = value as Record<string, unknown>;
+            const keys = Object.keys(record);
+            if (keys.length === 0) return '{}';
+            if (keys.length <= INLINE_KEYS && keys.every((key) => kindOf(record[key]) === 'primitive')) {
+                return `{ ${keys.map((key) => `${key}: ${formatPrimitive(record[key])}`).join(', ')} }`;
+            }
+            return `{ ${keys.slice(0, INLINE_KEYS).join(', ')}${keys.length > INLINE_KEYS ? ', ...' : ''} }`;
         }
     }
 }
@@ -119,6 +132,30 @@ function entriesOf(value: unknown, kind: Kind): { entries: Entry[]; internals: E
         else entries.push(entry);
     }
     return { entries, internals };
+}
+
+// what a right-click copies: the row's key and a JSON rendering of its live value.
+type CopyTarget = { label: string; get: () => unknown };
+const CopyTargetContext = createContext<(target: CopyTarget) => void>(() => {});
+
+function serialize(value: unknown): string {
+    const seen = new WeakSet<object>();
+    return JSON.stringify(
+        value,
+        (_key, v) => {
+            const kind = kindOf(v);
+            if (kind === 'primitive') return v;
+            if (kind === 'function') return undefined;
+            if (kind === 'node' || kind === 'trait') return summarize(v, kind);
+            if (seen.has(v as object)) return '[circular]';
+            seen.add(v as object);
+            if (kind === 'typed') return Array.from(v as ArrayLike<number>);
+            if (kind === 'map') return Object.fromEntries(v as Map<string, unknown>);
+            if (kind === 'set') return Array.from(v as Set<unknown>);
+            return v;
+        },
+        2,
+    );
 }
 
 function PrimitiveValue({ value, set }: { value: unknown; set: ((v: unknown) => void) | null }) {
@@ -186,6 +223,7 @@ function Row({
 }) {
     const [open, setOpen] = useState(false);
     const selectNode = useEditRoom((s) => s.selectNode);
+    const setCopyTarget = useContext(CopyTargetContext);
     const value = get();
     const kind = kindOf(value);
     const expandable =
@@ -198,23 +236,37 @@ function Row({
     const ref = kind === 'node' ? (value as Node) : kind === 'trait' ? (value as TraitBase)._node : null;
     return (
         <div>
-            <div className="flex items-center gap-1 text-[10px] font-mono leading-4" style={{ paddingLeft: depth * 10 }}>
+            <div
+                className="flex items-center gap-1 text-[10px] font-mono leading-4"
+                style={{ paddingLeft: depth * 10 }}
+                onContextMenu={() => setCopyTarget({ label, get })}
+            >
                 {expandable ? (
-                    <button type="button" className="w-3 text-fg-muted" onClick={() => setOpen(!open)}>
-                        {open ? <Icons.ChevronDown size={12} /> : <Icons.ChevronRight size={12} />}
+                    <button type="button" className="flex items-center gap-1 min-w-0 text-left" onClick={() => setOpen(!open)}>
+                        <span className="w-3 text-fg-muted">
+                            {open ? <Icons.ChevronDown size={12} /> : <Icons.ChevronRight size={12} />}
+                        </span>
+                        <span className="text-fg-muted shrink-0">{label}:</span>
+                        <span className="text-fg truncate">{summarize(value, kind)}</span>
                     </button>
                 ) : (
-                    <span className="w-3" />
-                )}
-                <span className="text-fg-muted shrink-0">{label}:</span>
-                {kind === 'primitive' ? (
-                    <PrimitiveValue value={value} set={set} />
-                ) : ref ? (
-                    <button type="button" className="text-accent hover:underline truncate" onClick={() => selectNode(ref.id)}>
-                        {summarize(value, kind)}
-                    </button>
-                ) : (
-                    <span className="text-fg truncate">{summarize(value, kind)}</span>
+                    <>
+                        <span className="w-3" />
+                        <span className="text-fg-muted shrink-0">{label}:</span>
+                        {kind === 'primitive' ? (
+                            <PrimitiveValue value={value} set={set} />
+                        ) : ref ? (
+                            <button
+                                type="button"
+                                className="text-accent hover:underline truncate"
+                                onClick={() => selectNode(ref.id)}
+                            >
+                                {summarize(value, kind)}
+                            </button>
+                        ) : (
+                            <span className="text-fg truncate">{summarize(value, kind)}</span>
+                        )}
+                    </>
                 )}
             </div>
             {open && expandable && <Children value={value} kind={kind} depth={depth + 1} />}
@@ -254,13 +306,36 @@ function Children({ value, kind, depth }: { value: unknown; kind: Kind; depth: n
 /** a live view of an object the way a devtools console shows it; primitives edit in place, refs select their node. */
 export function DataTree({ root }: { root: object }) {
     const [, setTick] = useState(0);
+    // one menu for the whole tree; the row under the right-click records itself just before it opens.
+    const copyTarget = useRef<CopyTarget | null>(null);
     useEffect(() => {
-        const id = setInterval(() => setTick((t) => t + 1), 1000 / LIVE_HZ);
+        const id = setInterval(() => {
+            if (!document.hidden) setTick((t) => t + 1);
+        }, 1000 / LIVE_HZ);
         return () => clearInterval(id);
     }, []);
+    const copy = (text: string) => void navigator.clipboard.writeText(text);
     return (
-        <div className="px-1 py-1 border-t border-border">
-            <Children value={root} kind={kindOf(root)} depth={0} />
-        </div>
+        <CopyTargetContext.Provider
+            value={(target) => {
+                copyTarget.current = target;
+            }}
+        >
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    <div className="px-1 py-1 border-t border-border">
+                        <Children value={root} kind={kindOf(root)} depth={0} />
+                    </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => copyTarget.current && copy(serialize(copyTarget.current.get()))}>
+                        <Icons.ClipboardCopy size={12} /> Copy value
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => copyTarget.current && copy(copyTarget.current.label)}>
+                        <Icons.ClipboardCopy size={12} /> Copy key
+                    </ContextMenuItem>
+                </ContextMenuContent>
+            </ContextMenu>
+        </CopyTargetContext.Provider>
     );
 }
