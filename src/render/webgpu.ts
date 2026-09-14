@@ -159,6 +159,9 @@ export function updateFrame(state: WebGpuState, activeRoom: ClientRoom | null, c
 }
 
 /** Renders the active room, draws with `state.pipeline.camera`, queues the voxel compute cull/emit, then runs the pipeline. */
+/** reused by the per-frame upload grouping; module scope so it allocates once. */
+const _uploadScratch = new Map<string, { bytes: number; changed: number; writes: number; scope: string }>();
+
 export function render(state: WebGpuState, voxelViewChunkRadius: number): void {
     if (!state.active) return;
     // A game's `setRenderPipeline` may have re-declared the stages since the last frame; rebuild ahead of `setActiveScene`.
@@ -762,12 +765,50 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
 
     // gpucat zeroes the per-frame fields itself at its own frame boundary, so this just reads them.
     // Sampled before this frame's render, so a reading describes the previous frame.
+    // Per-write records cost an allocation-free fill but are only worth collecting
+    // while something reads them, so they follow the profiler rather than being on
+    // always. Set BEFORE the frame that will be sampled next.
+    state.renderer.info.buffers.detailedWrites = ctx.profiler.enabled;
     if (ctx.profiler.enabled) {
         const info = state.renderer.info;
         // Read bytes with calls: a batch re-uploading its whole capacity when one slot moved
         // spikes bytes with calls flat, while a caller queueing many tiny ranges does the reverse.
         Debug.record(ctx.profiler, 'gpu/upload/bytes', info.buffers.writeBytes, 'B');
         Debug.record(ctx.profiler, 'gpu/upload/calls', info.buffers.writeCalls, 'count');
+        // WHAT sent the bytes. gpucat hands back raw per-write records rather than a
+        // grouping of its own, so the axis is ours to choose - and can change here
+        // without a renderer round-trip.
+        //
+        // Grouped by the most specific identity each write actually has: a uniform
+        // block knows its material, everything else knows only its usage. A vertex
+        // buffer belongs to a geometry shared across draws, so there is no honest
+        // per-material answer for it.
+        //
+        // Aggregated first because `record` SETS a counter and many writes share a
+        // key - an object-scoped block writes once per mesh, so recording per write
+        // would leave the last one standing instead of the total.
+        const byKey = _uploadScratch;
+        byKey.clear();
+        for (let i = 0; i < info.buffers.writeCount; i++) {
+            const write = info.buffers.writes[i]!;
+            const key = write.material ? `${write.usage}/${write.material}` : (write.label ?? write.usage);
+            const entry = byKey.get(key) ?? { bytes: 0, changed: 0, writes: 0, scope: '' };
+            entry.bytes += write.bytes;
+            entry.changed += write.changedBytes ?? 0;
+            entry.writes++;
+            if (write.updateType !== undefined) entry.scope = write.updateType;
+            byKey.set(key, entry);
+        }
+        for (const [key, entry] of byKey) {
+            Debug.record(ctx.profiler, `gpu/upload/by/${key}`, entry.bytes, 'B');
+            // writes-per-frame separates "one big block" from "a small block written
+            // once per mesh": an object-scoped uniform tracks scene population, not
+            // anything actually changing.
+            Debug.record(ctx.profiler, `gpu/upload/writes/${key}`, entry.writes, 'count');
+            // the tell for a large block dragged up by a small per-frame value: bytes
+            // high, changed tiny. Splitting the block is the fix, not uploading less.
+            if (entry.changed > 0) Debug.record(ctx.profiler, `gpu/upload/changed/${key}`, entry.changed, 'B');
+        }
         Debug.record(ctx.profiler, 'gpu/draws', info.render.drawCalls, 'count');
         // A floor, not a total: indirect draws keep their counts in a GPU buffer never read here.
         Debug.record(ctx.profiler, 'gpu/triangles', info.render.triangles, 'count');

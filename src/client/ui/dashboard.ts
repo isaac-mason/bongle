@@ -33,6 +33,39 @@ function serverRoomKey(): string | null {
     return room ? `room:${room.roomId}` : null;
 }
 
+/** every `gpu/upload/*` counter, averaged over the smoothing window, as a sorted
+ *  plain-text report on the clipboard.
+ *
+ *  Sorted by bytes descending and grouped by section, because the question being
+ *  asked of it is always "what is biggest" - a dump in recording order buries that
+ *  under whatever happened to be written first. */
+function copyUploadDump(profiler: Debug.Profiler | null): void {
+    if (!profiler) return;
+    const lines: string[] = [];
+    const total = trailingAvg(profiler, 'gpu/upload/bytes', SMOOTH_TICK);
+    const calls = trailingAvg(profiler, 'gpu/upload/calls', SMOOTH_TICK);
+    lines.push(`gpu upload: ${fmtBytes(total)}/frame over ${calls.toFixed(0)} writeBuffer calls`);
+    lines.push(`draws ${latest(profiler, 'gpu/draws').toFixed(0)}  (avg over ${SMOOTH_TICK} frames)`);
+
+    const section = (title: string, prefix: string, unit: 'B' | 'count'): void => {
+        const rows = Debug.counterNames(profiler)
+            .filter((key) => key.startsWith(prefix))
+            .map((key) => ({ name: key.slice(prefix.length), value: trailingAvg(profiler, key, SMOOTH_TICK) }))
+            .filter((row) => row.value > 0)
+            .sort((a, b) => b.value - a.value);
+        if (rows.length === 0) return;
+        lines.push('', title);
+        for (const row of rows) {
+            lines.push(`  ${row.name.padEnd(40)} ${unit === 'B' ? fmtBytes(row.value) : row.value.toFixed(1)}`);
+        }
+    };
+    section('bytes by buffer:', 'gpu/upload/by/', 'B');
+    section('changed bytes (uniform blocks):', 'gpu/upload/changed/', 'B');
+    section('writes per frame:', 'gpu/upload/writes/', 'count');
+
+    navigator.clipboard?.writeText(lines.join('\n'));
+}
+
 function latest(profiler: Debug.Profiler | null, key: string): number {
     return profiler ? Debug.counter(profiler, key) : 0;
 }
@@ -464,6 +497,11 @@ function build(): DebugDashboard {
     // capacity for one moved slot; the reverse means many tiny queued ranges.
     // WebGPU-only: the WebGL backend records no upload counters, so those rows read 0.
     const gpu = tabs.tab('gpu');
+    // One-press snapshot of everything the upload breakdown knows, as text worth
+    // pasting somewhere. Averaged over SMOOTH_TICK frames rather than sampling one:
+    // a single frame catches whatever happened to upload on it, which for anything
+    // phased across frames is exactly the misleading answer.
+    gpu.button('copy upload dump', () => copyUploadDump(clientProfiler()));
     gpu.monitor(() => trailingAvg(clientProfiler(), 'gpu/upload/bytes', SMOOTH_TICK), {
         label: 'upload / frame',
         format: fmtBytes,
@@ -500,12 +538,11 @@ function build(): DebugDashboard {
         min: 0,
         hover: true,
     });
-    // The subset of the above that re-sent a WHOLE allocation, because `needsUpdate` was set
-    // with no queued range. Fine for a small buffer that genuinely changed everywhere; at size
-    // it is the mistake this breakdown exists to find, and the totals cannot show it - 300 kB
-    // of full re-upload and 300 kB of honest range writes read identically there.
-    gpu.series(() => prefixCounterSeries(clientProfiler(), 'gpu/upload/full/', CHART_HISTORY), {
-        label: 'full re-uploads (B/frame)',
+    // How much of each upload ACTUALLY differed from last frame. Read against the row above:
+    // bytes high with changed tiny is a large mostly-static uniform block being dragged up by
+    // one per-frame value, and the fix is splitting the block rather than uploading less.
+    gpu.series(() => prefixCounterSeries(clientProfiler(), 'gpu/upload/changed/', CHART_HISTORY), {
+        label: 'changed bytes (B/frame)',
         color: (key) => hashColor(key),
         stacked: true,
         height: 120,
