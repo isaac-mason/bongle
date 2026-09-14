@@ -138,6 +138,9 @@ function handleLabel(handle: Handle): string {
 
 function arm(state: HandlesState, handle: Handle, sceneTree: SceneTree, store: EditRoomStoreApi): void {
     if (handle.kind === 'frame') {
+        // arming a frame hands it to the gizmo, which lives in the transform tool
+        const { activeTool, transformMode } = store.getState();
+        const keepMode = activeTool === 'transform' && (transformMode === 'translate' || transformMode === 'rotate');
         store.setState({
             activeFrame: {
                 nodeId: handle.nodeId,
@@ -147,6 +150,8 @@ function arm(state: HandlesState, handle: Handle, sceneTree: SceneTree, store: E
                 position: handle.framePosition,
                 quaternion: handle.frameQuaternion,
             },
+            activeTool: 'transform',
+            transformMode: keepMode ? transformMode : 'translate',
         });
         return;
     }

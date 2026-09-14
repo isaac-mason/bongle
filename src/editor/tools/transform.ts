@@ -24,6 +24,7 @@ import { registry } from '../../core/registry';
 import type { Resources } from '../../core/resources';
 import { prefabHasVoxels } from '../../core/scene/prefab';
 import { getAtPath, setAtPath } from '../../core/scene/prop/path';
+import type { Schema } from '../../core/scene/prop/prop';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -725,20 +726,68 @@ function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): Resolved
     return { activeFrame, node, transform, control, instance, local: local as Record<string, unknown> };
 }
 
+const _frameParent: Mat4 = mat4.create();
+const _frameParentQuaternion: Quat = [0, 0, 0, 1];
+const _frameStep: Mat4 = mat4.create();
+
+// node world times every `frame` annotation enclosing the edited field along the path. the object at the path contributes
+// its own frame only when the field being edited is not that frame (a shape's centre sits inside the object's frame).
+function _enclosingMatrix(frame: ResolvedFrame, out: Mat4): Mat4 {
+    mat4.copy(out, getVisualWorldMatrix(frame.transform));
+    let schema: Schema = frame.control.schema;
+    let value: unknown = frame.control.get(frame.instance);
+    const path = frame.activeFrame.path;
+    for (let i = 0; i <= path.length; i++) {
+        // resolve wrappers to the object they hold
+        for (;;) {
+            if (schema.type === 'optional' || schema.type === 'nullable' || schema.type === 'nullish') schema = schema.of;
+            else if (schema.type === 'union' && value !== null && typeof value === 'object') {
+                const discriminator = (value as Record<string, unknown>)[schema.key];
+                const variant = schema.variants.find((v) => {
+                    const lit = v.fields[schema.type === 'union' ? schema.key : ''];
+                    return lit !== undefined && lit.type === 'literal' && lit.value === discriminator;
+                });
+                if (!variant) return out;
+                schema = variant;
+            } else break;
+        }
+        if (schema.type === 'object' && value !== null && typeof value === 'object') {
+            const local = value as Record<string, unknown>;
+            const editingThisFrame = i === path.length && schema.frame?.position === frame.activeFrame.position;
+            if (schema.frame && !editingThisFrame) {
+                const p: Vec3 = schema.frame.position
+                    ? ((local[schema.frame.position] as Vec3 | undefined) ?? [0, 0, 0])
+                    : [0, 0, 0];
+                const q: Quat = schema.frame.quaternion
+                    ? ((local[schema.frame.quaternion] as Quat | undefined) ?? [0, 0, 0, 1])
+                    : [0, 0, 0, 1];
+                mat4.fromRotationTranslation(_frameStep, q, p);
+                mat4.multiply(out, out, _frameStep);
+            }
+        }
+        if (i === path.length) break;
+        const key = path[i]!;
+        if (schema.type === 'object') {
+            schema = schema.fields[key as string]!;
+            value = (value as Record<string, unknown>)[key as string];
+        } else if (schema.type === 'list') {
+            schema = schema.of;
+            value = (value as unknown[])[key as number];
+        } else {
+            return out;
+        }
+    }
+    return out;
+}
+
 function _frameWorldPose(frame: ResolvedFrame, proxy: Object3D): void {
     const { position, quaternion } = frame.activeFrame;
     const localPosition = position ? (frame.local[position] as Vec3 | undefined) : undefined;
     const localQuaternion = quaternion ? (frame.local[quaternion] as Quat | undefined) : undefined;
-    vec3.transformMat4(
-        proxy.position,
-        localPosition ?? vec3.set(_frameLocalPosition, 0, 0, 0),
-        getVisualWorldMatrix(frame.transform),
-    );
-    quat.multiply(
-        proxy.quaternion,
-        getVisualWorldQuaternion(frame.transform),
-        localQuaternion ?? quat.identity(_frameLocalQuaternion),
-    );
+    const parent = _enclosingMatrix(frame, _frameParent);
+    vec3.transformMat4(proxy.position, localPosition ?? vec3.set(_frameLocalPosition, 0, 0, 0), parent);
+    mat4.getRotation(_frameParentQuaternion, parent);
+    quat.multiply(proxy.quaternion, _frameParentQuaternion, localQuaternion ?? quat.identity(_frameLocalQuaternion));
     vec3.set(proxy.scale, 1, 1, 1);
 }
 
@@ -747,8 +796,9 @@ function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 
     const frame = _resolveFrame(drag, sceneTree);
     if (!frame) return;
     let next: Record<string, unknown> = frame.local;
+    const parent = _enclosingMatrix(frame, _frameParent);
     if (mode === 'translate' && drag.position) {
-        mat4.invert(_frameInvWorld, getVisualWorldMatrix(frame.transform));
+        mat4.invert(_frameInvWorld, parent);
         vec3.transformMat4(_frameLocalPosition, state.proxy.position, _frameInvWorld);
         const step = state.translateStep;
         next = {
@@ -760,7 +810,8 @@ function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 
             ],
         };
     } else if (mode === 'rotate' && drag.quaternion) {
-        quat.invert(_frameInvWorldQuaternion, getVisualWorldQuaternion(frame.transform));
+        mat4.getRotation(_frameParentQuaternion, parent);
+        quat.invert(_frameInvWorldQuaternion, _frameParentQuaternion);
         quat.multiply(_frameLocalQuaternion, _frameInvWorldQuaternion, state.proxy.quaternion);
         next = { ...next, [drag.quaternion]: [..._frameLocalQuaternion] };
     } else {
