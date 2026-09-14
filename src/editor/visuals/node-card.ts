@@ -1,6 +1,6 @@
 import { type Mat4, type Vec3, vec3 } from 'math';
 import { type MarkerShape, MarkerTrait } from '../../builtins/marker';
-import { getVisualWorldMatrix, getVisualWorldPosition, TransformTrait } from '../../builtins/transform';
+import { getVisualWorldMatrix, getVisualWorldPosition, type TransformTrait } from '../../builtins/transform';
 import { registry } from '../../core/registry';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait } from '../../core/scene/scene-tree';
@@ -9,7 +9,7 @@ import * as Quads from '../../render/overlay/quads';
 import * as Text from '../../render/overlay/text';
 import type { SpriteResources } from '../../render/sprites/sprite-resources';
 import { isOwnershipBoundary } from '../node-bodies';
-import { SELECTION_EDGES, SHAPE_OUTLINE_ACTIVE, SHAPE_OUTLINE_HOVER, SHAPE_OUTLINE_SELECTED } from './editor-colors';
+import { SHAPE_OUTLINE_ACTIVE, SHAPE_OUTLINE_HOVER, SHAPE_OUTLINE_SELECTED } from './editor-colors';
 import * as ShapeOutlines from './shape-outlines';
 
 /** what a node shows at its origin; a marker pins it on and may override the parts, every other node gets it while selected. */
@@ -24,7 +24,7 @@ export type NodeCard = {
 
 export type Emphasis = 'pinned' | 'selected' | 'active' | 'hover';
 
-export type CardToggles = { outlines: boolean; names: boolean; relationshipLines: boolean };
+export type CardToggles = { outlines: boolean; names: boolean };
 
 export type CardBatches = {
     lines: Lines.LineBatch;
@@ -120,8 +120,7 @@ export function cardFor(node: Node): NodeCard {
 
 /**
  * everything sits in pixels around the node's projected origin: the marker icon centred on it, the label above
- * on a backing. hover: a faint outline. pinned: icon, figure, label, always. selected and active: label,
- * outline, relationship line.
+ * on a backing. hover: a faint outline. pinned: icon, figure, label, always. selected and active: label and outline.
  */
 export function drawCard(
     batches: CardBatches,
@@ -131,7 +130,6 @@ export function drawCard(
     emphasis: Emphasis,
     eye: Vec3,
     toggles: CardToggles,
-    sceneRoot: Node,
 ): void {
     const origin = getVisualWorldPosition(transform);
     if (emphasis === 'hover') {
@@ -180,12 +178,6 @@ export function drawCard(
 
     if (toggles.outlines) {
         ShapeOutlines.drawNode(batches.lines, node, emphasis === 'active' ? SHAPE_OUTLINE_ACTIVE : SHAPE_OUTLINE_SELECTED, eye);
-    }
-    const parentTransform = node.parent && node.parent !== sceneRoot ? getTrait(node.parent, TransformTrait) : null;
-    if (toggles.relationshipLines && parentTransform) {
-        const q = getVisualWorldPosition(parentTransform);
-        const [er, eg, eb] = SELECTION_EDGES;
-        Lines.line(batches.lines, x, y, z, q[0], q[1], q[2], er, eg, eb, 0.6);
     }
 }
 

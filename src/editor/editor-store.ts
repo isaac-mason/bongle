@@ -81,12 +81,10 @@ export type EditorStore = {
     showMarkers: boolean;
     showOutlines: boolean;
     showHandles: boolean;
-    showRelationshipLines: boolean;
     showNames: boolean;
     setShowMarkers: (show: boolean) => void;
     setShowOutlines: (show: boolean) => void;
     setShowHandles: (show: boolean) => void;
-    setShowRelationshipLines: (show: boolean) => void;
     setShowNames: (show: boolean) => void;
     showOrientationCube: boolean;
     showChunkBoundaries: boolean;
@@ -184,12 +182,10 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     showMarkers: true,
     showOutlines: true,
     showHandles: true,
-    showRelationshipLines: true,
     showNames: true,
     setShowMarkers: (showMarkers) => set({ showMarkers }),
     setShowOutlines: (showOutlines) => set({ showOutlines }),
     setShowHandles: (showHandles) => set({ showHandles }),
-    setShowRelationshipLines: (showRelationshipLines) => set({ showRelationshipLines }),
     setShowNames: (showNames) => set({ showNames }),
     showOrientationCube: false,
     showChunkBoundaries: false,

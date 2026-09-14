@@ -479,8 +479,8 @@ function redrawInspectMesh(v: Visuals, s: Session, time: TimeResources): void {
 // one pass over every node with a card: pinned markers, the selection, the hovered node.
 function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
     const storeState = s.store.getState();
-    const { showOutlines, showRelationshipLines, showNames, showMarkers } = useEditor.getState();
-    const toggles: NodeCard.CardToggles = { outlines: showOutlines, names: showNames, relationshipLines: showRelationshipLines };
+    const { showOutlines, showNames, showMarkers } = useEditor.getState();
+    const toggles: NodeCard.CardToggles = { outlines: showOutlines, names: showNames };
     // the transform tool and a handle drag keep the shape outlines (the radius and box still read) and drop the text;
     // handles themselves are the inspect tool's.
     const transforming = storeState.activeTool === 'transform';
@@ -493,7 +493,6 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
         sprite: s.client.state!.renderer.atlases().sprite,
     };
     const eye = povCamera(s)?.position ?? _noEye;
-    const root = s.room.scene.root;
     const selectedIds = storeState.selection.nodes;
     const activeId = Selection.activeNode(storeState.selection);
 
@@ -506,7 +505,7 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
             const transform = getTrait(owner, TransformTrait);
             if (!transform) continue;
             _pinnedOwners.add(owner.id);
-            NodeCard.drawCard(batches, owner, transform, NodeCard.cardFor(owner), 'pinned', eye, toggles, root);
+            NodeCard.drawCard(batches, owner, transform, NodeCard.cardFor(owner), 'pinned', eye, toggles);
         }
     }
     for (const node of selectedNodes) {
@@ -520,13 +519,12 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
             node.id === activeId && !transforming && !handling ? 'active' : 'selected',
             eye,
             selectedToggles,
-            root,
         );
     }
     const hoverNode = storeState.hoverNodeId !== null ? getNodeById(s.room.scene, storeState.hoverNodeId) : undefined;
     const hoverTransform = hoverNode ? getTrait(hoverNode, TransformTrait) : null;
     if (hoverNode && hoverTransform && !selectedIds.has(hoverNode.id)) {
-        NodeCard.drawCard(batches, hoverNode, hoverTransform, NodeCard.cardFor(hoverNode), 'hover', eye, toggles, root);
+        NodeCard.drawCard(batches, hoverNode, hoverTransform, NodeCard.cardFor(hoverNode), 'hover', eye, toggles);
     }
 }
 

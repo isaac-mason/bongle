@@ -10,10 +10,6 @@ export function addEditorDebugOptions(tabs: TabGroup): void {
     view.add({ get: () => ed().showMarkers, set: (v) => ed().setShowMarkers(v) }, { label: 'markers', listen: true });
     view.add({ get: () => ed().showOutlines, set: (v) => ed().setShowOutlines(v) }, { label: 'outlines', listen: true });
     view.add({ get: () => ed().showHandles, set: (v) => ed().setShowHandles(v) }, { label: 'handles', listen: true });
-    view.add(
-        { get: () => ed().showRelationshipLines, set: (v) => ed().setShowRelationshipLines(v) },
-        { label: 'relationship lines', listen: true },
-    );
     view.add({ get: () => ed().showNames, set: (v) => ed().setShowNames(v) }, { label: 'names', listen: true });
     options.add(
         { get: () => ed().showOrientationCube, set: (v) => ed().setShowOrientationCube(v) },
