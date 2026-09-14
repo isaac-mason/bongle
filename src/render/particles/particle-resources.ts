@@ -87,10 +87,12 @@ function createParticleBatch(material: Material): ParticleBatch {
     const geometry = createPlaneGeometry(1, 1);
 
     const instancePoseBuf = new GpuBuffer(d.array(InstancePose), {
+        label: 'particle-pose',
         data: new Float32Array((instanceCapacity * INSTANCE_POSE_STRIDE) / 4),
         usage: 'vertex',
     });
     const instanceMaterialBuf = new GpuBuffer(d.array(InstanceMaterial), {
+        label: 'particle-material',
         data: new Float32Array((instanceCapacity * INSTANCE_MATERIAL_STRIDE) / 4),
         usage: 'vertex',
     });

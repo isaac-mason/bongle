@@ -186,17 +186,20 @@ function createGeometryPool(
 ): ModelGeometryPool {
     // MANUAL lifecycle: the pool outlives the MeshVisuals geometries that bind to it across reloads.
     const vertices = new GpuBuffer(ModelVertex, {
+        label: 'mesh-vertices',
         data: new Float32Array(initialVertexCapacity * MODEL_VERTEX_STRIDE_F32),
         usage: 'vertex',
         lifecycle: BufferLifecycle.MANUAL,
     });
     const indices = new GpuBuffer(d.u32, {
+        label: 'mesh-indices',
         data: new Uint32Array(initialIndexCapacity),
         usage: 'index',
         lifecycle: BufferLifecycle.MANUAL,
     });
     // allocated eagerly since the outline shell binds it every frame regardless.
     const smoothNormals = new GpuBuffer(d.u32, {
+        label: 'mesh-smooth-normals',
         data: new Uint32Array(initialVertexCapacity),
         usage: 'vertex',
         lifecycle: BufferLifecycle.MANUAL,
@@ -482,10 +485,12 @@ function createMeshBatch(pool: ModelGeometryPool, material: Material, outlineMat
     geometry.setIndex(pool.indices);
 
     const instanceDataBuf = new GpuBuffer(d.array(ModelInstance), {
+        label: 'mesh-instances',
         data: new Float32Array(instanceCapacity * MODEL_INSTANCE_STRIDE_F32),
         usage: 'storage',
     });
     const slotMapBuf = new GpuBuffer(d.array(d.u32), {
+        label: 'mesh-slot-map',
         data: new Uint32Array(instanceCapacity),
         usage: 'storage',
     });
@@ -541,7 +546,7 @@ export function growMeshBatch(batch: MeshBatch, newCapacity: number): void {
         const oldArr = batch.instanceDataBuf.array as Float32Array;
         const newArr = new Float32Array(newCapacity * MODEL_INSTANCE_STRIDE_F32);
         newArr.set(oldArr.subarray(0, Math.min(oldArr.length, newArr.length)));
-        const newBuf = new GpuBuffer(d.array(ModelInstance), { data: newArr, usage: 'storage' });
+        const newBuf = new GpuBuffer(d.array(ModelInstance), { data: newArr, usage: 'storage', label: 'mesh-instances' });
         geometry.setBuffer('instanceData', newBuf);
         batch.instanceDataBuf.dispose();
         batch.instanceDataBuf = newBuf;
@@ -550,7 +555,7 @@ export function growMeshBatch(batch: MeshBatch, newCapacity: number): void {
     // slotMap, rebuilt every frame, no need to preserve.
     {
         const newArr = new Uint32Array(newCapacity);
-        const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage' });
+        const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage', label: 'mesh-slot-map' });
         geometry.setBuffer('slotMap', newBuf);
         batch.slotMapBuf.dispose();
         batch.slotMapBuf = newBuf;

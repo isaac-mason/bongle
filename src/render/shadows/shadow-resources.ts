@@ -53,6 +53,7 @@ function createShadowBatch(material: Material): ShadowBatch {
     const geometry = createPlaneGeometry(1, 1);
 
     const instanceBuf = new GpuBuffer(d.array(ShadowInstance), {
+        label: 'shadow-instances',
         data: new Float32Array((capacity * SHADOW_INSTANCE_STRIDE) / 4),
         usage: 'vertex',
     });
@@ -87,7 +88,7 @@ export function growShadowBatch(batch: ShadowBatch, newCapacity: number): void {
     const floats = (newCapacity * SHADOW_INSTANCE_STRIDE) / 4;
     const newArr = new Float32Array(floats);
     newArr.set(oldArr.subarray(0, Math.min(oldArr.length, floats)));
-    const newBuf = new GpuBuffer(d.array(ShadowInstance), { data: newArr, usage: 'vertex' });
+    const newBuf = new GpuBuffer(d.array(ShadowInstance), { data: newArr, usage: 'vertex', label: 'shadow-instances' });
     batch.geometry.setBuffer('instance', newBuf);
     batch.instanceBuf.dispose();
     batch.instanceBuf = newBuf;

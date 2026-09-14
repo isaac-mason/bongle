@@ -110,7 +110,7 @@ export function createVoxelTextures(registry: Blocks): VoxelTextures {
         entries[base + ANIM_OFFSET + 2] = texAnimData[i * 4 + 2]!;
         entries[base + ANIM_OFFSET + 3] = texAnimData[i * 4 + 3]!;
     }
-    const entriesBuffer = createStorageBuffer(d.array(TextureEntry), entries);
+    const entriesBuffer = createStorageBuffer(d.array(TextureEntry), entries, 'voxel-texture-entries');
 
     const texelSize = uniform('voxelAtlasTexelSize', d.vec2f);
     texelSize.value = [1, 1];

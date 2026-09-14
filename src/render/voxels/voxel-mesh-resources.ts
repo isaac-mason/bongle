@@ -196,6 +196,7 @@ function createVoxelMeshBatch(material: Material, outlineMaterial: Material): Vo
     });
 
     const instanceDataBuf = new GpuBuffer(d.array(ModelInstance), {
+        label: 'voxel-mesh-instances',
         data: new Float32Array(instanceCapacity * MODEL_INSTANCE_STRIDE_F32),
         usage: 'storage',
     });

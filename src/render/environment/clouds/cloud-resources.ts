@@ -137,10 +137,10 @@ export function init(envResources: EnvironmentResources): CloudResources {
     }
     const shapeTableBuf = new GpuBuffer(d.array(d.u32), { data: shapeTableData, usage: 'storage' });
 
-    // compactedInstances is a per-instance vertex attribute; position/normal/index are
+    // cloud-instances is a per-instance vertex attribute; position/normal/index are
     // read-only storage (native SSBO on WebGPU, auto-lowered to buffer-texture reads on
     // WebGL2).
-    geometry.setBuffer('compactedInstances', compactedInstanceBuf);
+    geometry.setBuffer('cloud-instances', compactedInstanceBuf);
     geometry.setBuffer('positionStorage', positionStorageBuf);
     geometry.setBuffer('normalStorage', normalStorageBuf);
     geometry.setBuffer('indexStorage', indexStorageBuf);
@@ -186,13 +186,11 @@ function createCloudMaterial(env: EnvironmentResources): Material {
     // single draw with firstInstance 0, so the divisor'd attributes index the buffer
     // densely from 0. offsets: worldPos@0, scale@12, shapeId@16.
     const S = COMPACTED_CLOUD_INSTANCE_STRIDE;
-    const instWorldPos = attribute('compactedInstances', d.vec3f, { instanced: true, stride: S, offset: 0 }).toVar(
+    const instWorldPos = attribute('cloud-instances', d.vec3f, { instanced: true, stride: S, offset: 0 }).toVar(
         'cloudInstWorldPos',
     );
-    const instScale = attribute('compactedInstances', d.f32, { instanced: true, stride: S, offset: 12 }).toVar('cloudInstScale');
-    const instShapeId = attribute('compactedInstances', d.u32, { instanced: true, stride: S, offset: 16 }).toVar(
-        'cloudInstShape',
-    );
+    const instScale = attribute('cloud-instances', d.f32, { instanced: true, stride: S, offset: 12 }).toVar('cloudInstScale');
+    const instShapeId = attribute('cloud-instances', d.u32, { instanced: true, stride: S, offset: 16 }).toVar('cloudInstShape');
 
     // read-only `storage()`, so gpucat serves them as native SSBO reads on WebGPU and
     // auto-lowers them to rgba32uint buffer-texture fetches on WebGL2.
