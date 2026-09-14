@@ -713,6 +713,7 @@ type GpuSectionTable = {
 function createGpuSectionTable(slotCount: number): GpuSectionTable {
     // GPU side-table (16B/entry): origin + arenaBase; face offsets/counts live in metaBuffer below, AABB lives on ChunkAlloc.
     const buffer = new GpuBuffer(d.array(ChunkInfo), {
+        label: 'voxel-chunk-info',
         count: slotCount,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
@@ -722,6 +723,7 @@ function createGpuSectionTable(slotCount: number): GpuSectionTable {
 
     // Face offsets/counts (14 u32/slot) for the cull compute; explicit data: (not count:) keeps the backing store a Uint32Array for bit-exact writes.
     const metaBuffer = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-meta',
         data: new Uint32Array(slotCount * SECTION_META_U32S),
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
@@ -813,6 +815,7 @@ function createGpuVoxelArena(budget: VoxelArenaBudget): GpuVoxelArena {
     // A chunk occupies >= 1 section slot across the 3 tables, so live chunk count is bounded by the sum of table capacities.
     const maxChunks = tables.opaque.slotCount + tables.transparent.slotCount + tables.translucent.slotCount;
     const cullRecordsBuffer = new GpuBuffer(d.array(ChunkCullRecord), {
+        label: 'voxel-cull-records',
         count: maxChunks,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
@@ -1072,6 +1075,7 @@ function createPassRender(arenas: GpuVoxelArena): Record<VoxelPass, PassRender> 
     for (const pass of PASSES) {
         // Compute-written, never CPU-touched: skip MANUAL lifecycle so gpucat auto-allocates on first use.
         const visibleQuadsBuffer = new GpuBuffer(d.array(VisibleQuad), {
+            label: 'voxel-visible-quads',
             data: new Uint32Array(visibleQuadCap * (VISIBLE_QUAD_STRIDE / 4)),
             usage: 'storage',
         });
@@ -1215,14 +1219,20 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     const maxChunks = budget.maxSections * 3;
     const cullViewData = new Float32Array(CULL_VIEW_STRIDE / 4);
     const cullView = new GpuBuffer(d.array(CullView), {
+        label: 'voxel-cull-view',
         data: cullViewData,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
     });
-    const visibleChunks = new GpuBuffer(d.array(VisibleChunk), { count: maxChunks, usage: 'storage' });
+    const visibleChunks = new GpuBuffer(d.array(VisibleChunk), {
+        count: maxChunks,
+        usage: 'storage',
+        label: 'voxel-visible-chunks',
+    });
     // indirect emit dispatch args; element 0 is the cull's atomic append counter (reset each frame), [_,7,1] = the 7 facings.
     const emitArgsData = new Uint32Array([0, 7, 1]);
     const emitArgs = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-emit-args',
         data: emitArgsData,
         usage: 'indirect',
         lifecycle: BufferLifecycle.MANUAL,
@@ -1230,16 +1240,19 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     // static per-pass config: [passIndex, backFaceCull]. translucent emits every facing.
     const emitConfig: Record<VoxelPass, GpuBuffer> = {
         opaque: new GpuBuffer(d.array(d.u32), {
+            label: 'voxel-emit-config-opaque',
             data: new Uint32Array([0, 1]),
             usage: 'storage',
             lifecycle: BufferLifecycle.MANUAL,
         }),
         transparent: new GpuBuffer(d.array(d.u32), {
+            label: 'voxel-emit-config-transparent',
             data: new Uint32Array([1, 1]),
             usage: 'storage',
             lifecycle: BufferLifecycle.MANUAL,
         }),
         translucent: new GpuBuffer(d.array(d.u32), {
+            label: 'voxel-emit-config-translucent',
             data: new Uint32Array([2, 0]),
             usage: 'storage',
             lifecycle: BufferLifecycle.MANUAL,
@@ -1250,21 +1263,38 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     const bucketCount3 = 3 * BUCKET_COUNT;
     const bucketQuadsData = new Uint32Array(bucketCount3);
     const bucketQuads = new GpuBuffer(d.array(d.atomic(d.u32)), {
+        label: 'voxel-bucket-quads',
         data: bucketQuadsData,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
     });
-    const bucketBase = new GpuBuffer(d.array(d.u32), { data: new Uint32Array(bucketCount3), usage: 'storage' });
-    const bucketCursor = new GpuBuffer(d.array(d.atomic(d.u32)), { data: new Uint32Array(bucketCount3), usage: 'storage' });
+    const bucketBase = new GpuBuffer(d.array(d.u32), {
+        data: new Uint32Array(bucketCount3),
+        usage: 'storage',
+        label: 'voxel-bucket-base',
+    });
+    const bucketCursor = new GpuBuffer(d.array(d.atomic(d.u32)), {
+        data: new Uint32Array(bucketCount3),
+        usage: 'storage',
+        label: 'voxel-bucket-cursor',
+    });
 
     // Radix scratch: (key,idx) ping-pong pairs + payload buffer, sized to the worst case (quadArena.slotCount); flat buffers indexed by global sort position, not part of the arena. Histograms self-zero: count0 zeroes its columns, scans zero the other buffer up to zeroTo.
-    const sortKeys = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
-    const sortKeysAlt = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
-    const sortIdx = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
-    const sortIdxAlt = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
-    const sortPayload = new GpuBuffer(d.array(VisibleQuad), { count: sortCap, usage: 'storage' });
-    const radixHist = new GpuBuffer(d.array(d.atomic(d.u32)), { count: RADIX_DIGITS * maxRadixBlocks, usage: 'storage' });
-    const radixHistAlt = new GpuBuffer(d.array(d.atomic(d.u32)), { count: RADIX_DIGITS * maxRadixBlocks, usage: 'storage' });
+    const sortKeys = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage', label: 'voxel-sort-keys' });
+    const sortKeysAlt = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage', label: 'voxel-sort-keys-alt' });
+    const sortIdx = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage', label: 'voxel-sort-idx' });
+    const sortIdxAlt = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage', label: 'voxel-sort-idx-alt' });
+    const sortPayload = new GpuBuffer(d.array(VisibleQuad), { count: sortCap, usage: 'storage', label: 'voxel-sort-payload' });
+    const radixHist = new GpuBuffer(d.array(d.atomic(d.u32)), {
+        count: RADIX_DIGITS * maxRadixBlocks,
+        usage: 'storage',
+        label: 'voxel-radix-hist',
+    });
+    const radixHistAlt = new GpuBuffer(d.array(d.atomic(d.u32)), {
+        count: RADIX_DIGITS * maxRadixBlocks,
+        usage: 'storage',
+        label: 'voxel-radix-hist-alt',
+    });
     const radixPassConfig: GpuBuffer[] = [0, 8, 16, 24].map(
         (shift) =>
             new GpuBuffer(d.array(d.u32), {
@@ -1273,9 +1303,10 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
                 lifecycle: BufferLifecycle.MANUAL,
             }),
     );
-    const sortCount = new GpuBuffer(d.array(d.atomic(d.u32)), { count: 1, usage: 'storage' });
+    const sortCount = new GpuBuffer(d.array(d.atomic(d.u32)), { count: 1, usage: 'storage', label: 'voxel-sort-count' });
     // indirect args [numBlocks,1,1,N,prevNumBlocks,zeroTo]; prep writes them, radix kernels dispatch from + bind as storage (gpucat gives indirect buffers INDIRECT|STORAGE).
     const sortIndirectArgs = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-sort-indirect-args',
         data: new Uint32Array([0, 1, 1, 0, 0, 0]),
         usage: 'indirect',
         lifecycle: BufferLifecycle.MANUAL,

@@ -59,6 +59,7 @@ type CpuSectionTable = {
 function createCpuSectionTable(slotCount: number): CpuSectionTable {
     // GPU side-table holds only origin + arenaBase (16B/entry); face offsets/counts and dataCount live in the CPU mirrors below.
     const buffer = new GpuBuffer(d.array(ChunkInfo), {
+        label: 'voxel-chunk-info',
         count: slotCount,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
@@ -398,6 +399,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     // Owned here (not the packer); MANUAL lifecycle + explicit Uint32Array so the per-section fill(slot) bit-copies exactly.
     const quadSlotData = new Uint32Array(arenas.quadArena.slotCount);
     const quadSlotBuffer = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-quad-slot',
         data: quadSlotData,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,

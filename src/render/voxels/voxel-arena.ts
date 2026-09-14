@@ -156,6 +156,7 @@ export function createSegmentArena<S extends Record<string, StreamSpec>>(opts: {
         // Uint32Array via `data:` so .set(Uint32...) is a bit-exact copy.
         const elementCount = slotCount * spec.perSlot;
         buffers[key] = new GpuBuffer(d.array(spec.schema), {
+            label: `voxel-arena-${key}`,
             data: new Uint32Array(elementCount) as d.TypedArrayFor<d.Any>,
             usage: 'storage',
             lifecycle: BufferLifecycle.MANUAL,

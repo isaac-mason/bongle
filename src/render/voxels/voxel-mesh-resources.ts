@@ -201,11 +201,13 @@ function createVoxelMeshBatch(material: Material, outlineMaterial: Material): Vo
         usage: 'storage',
     });
     const slotMapBuf = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-mesh-slot-map',
         data: new Uint32Array(instanceCapacity),
         usage: 'storage',
     });
     const chunkInfoData = new Float32Array((maxBuckets * CHUNK_INFO_STRIDE) / 4);
     const chunkInfoBuf = new GpuBuffer(d.array(ChunkInfo), {
+        label: 'voxel-mesh-chunk-info',
         data: chunkInfoData,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
@@ -273,7 +275,7 @@ export function growVoxelMeshBatch(batch: VoxelMeshBatch, newCapacity: number): 
         const oldArr = batch.instanceDataBuf.array as Float32Array;
         const newArr = new Float32Array(newCapacity * MODEL_INSTANCE_STRIDE_F32);
         newArr.set(oldArr.subarray(0, Math.min(oldArr.length, newArr.length)));
-        const newBuf = new GpuBuffer(d.array(ModelInstance), { data: newArr, usage: 'storage' });
+        const newBuf = new GpuBuffer(d.array(ModelInstance), { data: newArr, usage: 'storage', label: 'voxel-mesh-instances' });
         geometry.setBuffer('instanceData', newBuf);
         batch.instanceDataBuf.dispose();
         batch.instanceDataBuf = newBuf;
@@ -282,6 +284,7 @@ export function growVoxelMeshBatch(batch: VoxelMeshBatch, newCapacity: number): 
     // slotMap, rebuilt every frame, no need to preserve.
     {
         const newBuf = new GpuBuffer(d.array(d.u32), {
+            label: 'voxel-mesh-slot-map',
             data: new Uint32Array(newCapacity),
             usage: 'storage',
         });
@@ -303,6 +306,7 @@ export function growVoxelMeshBuckets(batch: VoxelMeshBatch, needed: number): voi
     {
         const newArr = new Float32Array((cap * CHUNK_INFO_STRIDE) / 4);
         const newBuf = new GpuBuffer(d.array(ChunkInfo), {
+            label: 'voxel-mesh-chunk-info',
             data: newArr,
             usage: 'storage',
             lifecycle: BufferLifecycle.MANUAL,

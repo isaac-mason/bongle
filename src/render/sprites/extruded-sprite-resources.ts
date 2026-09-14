@@ -166,11 +166,13 @@ function createGeometryPool(): GeometryPool {
     // REF_COUNTED scheme would let the last `geometry.dispose()` destroy
     // the GPU buffer while the pool still hands the JS object out.
     const vertices = new GpuBuffer(ExtrudedVertex, {
+        label: 'extruded-sprite-vertices',
         data: new Float32Array(INITIAL_VERTEX_CAPACITY * EXTRUDED_VERTEX_STRIDE_F32),
         usage: 'vertex',
         lifecycle: BufferLifecycle.MANUAL,
     });
     const indices = new GpuBuffer(d.u32, {
+        label: 'extruded-sprite-indices',
         data: new Uint32Array(INITIAL_INDEX_CAPACITY),
         usage: 'index',
         lifecycle: BufferLifecycle.MANUAL,
@@ -376,10 +378,12 @@ function createExtrudedSpriteBatch(pool: GeometryPool, material: Material): Extr
     geometry.setIndex(pool.indices);
 
     const instanceDataBuf = new GpuBuffer(d.array(ExtrudedInstance), {
+        label: 'extruded-sprite-instance-data',
         data: new Float32Array(instanceCapacity * EXTRUDED_INSTANCE_STRIDE_F32),
         usage: 'storage',
     });
     const slotMapBuf = new GpuBuffer(d.array(d.u32), {
+        label: 'extruded-sprite-slot-map',
         data: new Uint32Array(instanceCapacity),
         usage: 'storage',
     });
@@ -427,7 +431,11 @@ export function growExtrudedSpriteBatch(batch: ExtrudedSpriteBatch, newCapacity:
         const oldArr = batch.instanceDataBuf.array as Float32Array;
         const newArr = new Float32Array(newCapacity * EXTRUDED_INSTANCE_STRIDE_F32);
         newArr.set(oldArr.subarray(0, Math.min(oldArr.length, newArr.length)));
-        const newBuf = new GpuBuffer(d.array(ExtrudedInstance), { data: newArr, usage: 'storage' });
+        const newBuf = new GpuBuffer(d.array(ExtrudedInstance), {
+            data: newArr,
+            usage: 'storage',
+            label: 'extruded-sprite-instances',
+        });
         geometry.setBuffer('instanceData', newBuf);
         batch.instanceDataBuf.dispose();
         batch.instanceDataBuf = newBuf;
@@ -435,7 +443,7 @@ export function growExtrudedSpriteBatch(batch: ExtrudedSpriteBatch, newCapacity:
 
     {
         const newArr = new Uint32Array(newCapacity);
-        const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage' });
+        const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage', label: 'extruded-sprite-slot-map' });
         geometry.setBuffer('slotMap', newBuf);
         batch.slotMapBuf.dispose();
         batch.slotMapBuf = newBuf;

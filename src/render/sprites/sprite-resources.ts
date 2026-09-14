@@ -133,10 +133,12 @@ function createSpriteBatch(material: Material): SpriteBatch {
     const geometry = createPlaneGeometry(1, 1);
 
     const instancePoseBuf = new GpuBuffer(d.array(InstancePose), {
+        label: 'sprite-instance-pose',
         data: new Float32Array((instanceCapacity * INSTANCE_POSE_STRIDE) / 4),
         usage: 'vertex',
     });
     const instanceMaterialBuf = new GpuBuffer(d.array(InstanceMaterial), {
+        label: 'sprite-instance-material',
         data: new Float32Array((instanceCapacity * INSTANCE_MATERIAL_STRIDE) / 4),
         usage: 'vertex',
     });
@@ -174,7 +176,7 @@ export function growSpriteBatch(batch: SpriteBatch, newCapacity: number): void {
         const floats = (newCapacity * INSTANCE_POSE_STRIDE) / 4;
         const newArr = new Float32Array(floats);
         newArr.set(oldArr.subarray(0, Math.min(oldArr.length, floats)));
-        const newBuf = new GpuBuffer(d.array(InstancePose), { data: newArr, usage: 'vertex' });
+        const newBuf = new GpuBuffer(d.array(InstancePose), { data: newArr, usage: 'vertex', label: 'sprite-pose' });
         batch.instancePoseBuf.dispose();
         batch.instancePoseBuf = newBuf;
         batch.geometry.setBuffer('instancePose', newBuf);
@@ -184,7 +186,7 @@ export function growSpriteBatch(batch: SpriteBatch, newCapacity: number): void {
         const floats = (newCapacity * INSTANCE_MATERIAL_STRIDE) / 4;
         const newArr = new Float32Array(floats);
         newArr.set(oldArr.subarray(0, Math.min(oldArr.length, floats)));
-        const newBuf = new GpuBuffer(d.array(InstanceMaterial), { data: newArr, usage: 'vertex' });
+        const newBuf = new GpuBuffer(d.array(InstanceMaterial), { data: newArr, usage: 'vertex', label: 'sprite-material' });
         batch.instanceMaterialBuf.dispose();
         batch.instanceMaterialBuf = newBuf;
         batch.geometry.setBuffer('instanceMaterial', newBuf);

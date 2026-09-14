@@ -113,6 +113,7 @@ export function init(envResources: EnvironmentResources): CloudResources {
 
     const compactedInstanceData = new Float32Array((M_CLOUD_INSTANCES * COMPACTED_CLOUD_INSTANCE_STRIDE) / 4);
     const compactedInstanceBuf = new GpuBuffer(d.array(CompactedCloudInstance), {
+        label: 'cloud-compacted-instance',
         data: compactedInstanceData,
         usage: 'vertex',
     });
@@ -125,9 +126,17 @@ export function init(envResources: EnvironmentResources): CloudResources {
     // element stride in WGSL std430.
     const positionsVec4 = padVec3ToVec4(positions);
     const normalsVec4 = padVec3ToVec4(normals);
-    const positionStorageBuf = new GpuBuffer(d.array(d.vec4f), { data: positionsVec4, usage: 'storage' });
-    const normalStorageBuf = new GpuBuffer(d.array(d.vec4f), { data: normalsVec4, usage: 'storage' });
-    const indexStorageBuf = new GpuBuffer(d.array(d.u32), { data: indices, usage: 'storage' });
+    const positionStorageBuf = new GpuBuffer(d.array(d.vec4f), {
+        data: positionsVec4,
+        usage: 'storage',
+        label: 'cloud-position-storage',
+    });
+    const normalStorageBuf = new GpuBuffer(d.array(d.vec4f), {
+        data: normalsVec4,
+        usage: 'storage',
+        label: 'cloud-normal-storage',
+    });
+    const indexStorageBuf = new GpuBuffer(d.array(d.u32), { data: indices, usage: 'storage', label: 'cloud-index-storage' });
     // [start, count] per shape. Uploaded once; every instance references a row instead of
     // carrying a copy of one.
     const shapeTableData = new Uint32Array(shapes.length * 2);
@@ -135,7 +144,7 @@ export function init(envResources: EnvironmentResources): CloudResources {
         shapeTableData[i * 2] = shapes[i]!.indexStart;
         shapeTableData[i * 2 + 1] = shapes[i]!.indexCount;
     }
-    const shapeTableBuf = new GpuBuffer(d.array(d.u32), { data: shapeTableData, usage: 'storage' });
+    const shapeTableBuf = new GpuBuffer(d.array(d.u32), { data: shapeTableData, usage: 'storage', label: 'cloud-shape-table' });
 
     // cloudInstances is a per-instance vertex attribute; position/normal/index are
     // read-only storage (native SSBO on WebGPU, auto-lowered to buffer-texture reads on

@@ -82,12 +82,14 @@ export function createLightVolume(viewChunkRadius: number, maxTiles: number): Li
     // gpucat's count: path picks Float32Array for d.array(d.u32); pass an explicit
     // Uint32Array via data: so writes are bit-exact (same trap as voxel-arena.ts).
     const buffer = new GpuBuffer(d.array(d.u32), {
+        label: 'voxel-light-tiles',
         data: data as d.TypedArrayFor<d.Any>,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
     });
     const grid = new Int32Array(dim * dim * dim * ENTRY_INTS);
     const gridBuffer = new GpuBuffer(d.array(d.i32), {
+        label: 'voxel-light-grid',
         data: grid as d.TypedArrayFor<d.Any>,
         usage: 'storage',
         lifecycle: BufferLifecycle.MANUAL,
