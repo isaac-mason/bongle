@@ -182,7 +182,7 @@ script(
             const canvas = client.state!.renderer.canvas;
             Handles.update(
                 s.handles,
-                useEditor.getState().showHandles,
+                useEditor.getState().showHandles && store.getState().activeTool === 'inspect',
                 client.input.mouseKeyboard,
                 camera,
                 canvas.clientWidth,
@@ -481,9 +481,9 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
     const storeState = s.store.getState();
     const { showOutlines, showRelationshipLines, showNames, showMarkers } = useEditor.getState();
     const toggles: NodeCard.CardToggles = { outlines: showOutlines, names: showNames, relationshipLines: showRelationshipLines };
-    // the gizmo sits at the node origin, so the selection's text and strip get out of its way.
-    const gizmoOnSelection = (storeState.activeTool === 'transform' && s.transform.gizmoAttached) || s.handles.armed !== null;
-    const selectedToggles: NodeCard.CardToggles = gizmoOnSelection ? { ...toggles, names: false } : toggles;
+    // the transform tool is the gizmo's: selected nodes keep their box and nothing else in its way.
+    const transforming = storeState.activeTool === 'transform' || s.handles.armed !== null;
+    const selectedToggles: NodeCard.CardToggles = transforming ? { ...toggles, names: false, outlines: false } : toggles;
     const batches: NodeCard.CardBatches = {
         lines: v.lines,
         quads: v.quads,
@@ -515,7 +515,7 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
             node,
             transform,
             NodeCard.cardFor(node),
-            node.id === activeId && !gizmoOnSelection ? 'active' : 'selected',
+            node.id === activeId && !transforming ? 'active' : 'selected',
             eye,
             selectedToggles,
             root,
