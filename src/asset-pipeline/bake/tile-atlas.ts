@@ -1,29 +1,3 @@
-// builds the voxel tile atlas from block registry data.
-//
-// reads source images (the textures a tile's frames name), packs them into
-// one atlas image, and writes:
-//   resources/client/voxels-atlas.png, the atlas image
-//   resources/client/voxels-atlas.<L>.png, mip level L of the atlas
-//   resources/client/voxels-atlas.json, metadata (rects per texture, sizes, hash)
-//
-// `rects[i]` is the atlas rect of `BlockRegistryData.textures[i]`, so the
-// client can use textureIndex values directly to look up where a tile lives.
-// Tiles are any multiple of TILE_ALIGN per side and packed in TILE_ALIGN-texel
-// cells, so every tile keeps whole texels through MIP_LEVELS halvings and the
-// atlas needs no gutters (Sodium's `smallestFittingMinTexel`).
-//
-// rebuild is gated by the `hash` field in voxels-atlas.json (content hash over
-// the source bytes and the artifact version), the artifact IS the cache marker.
-// Missing source images get a magenta placeholder tile.
-//
-// the mip chain is built here per tile, before packing: cutout tiles need
-// coverage-preserving alpha and premultiplied colour (see core/voxels/mip-levels),
-// and a client that decodes five PNGs does no per-load filtering work.
-//
-// computed textures are baked upstream by `bake-textures.ts` and threaded in
-// via `bakedTextures` as raster surfaces, keyed by texture id; the composite
-// loop draws them directly.
-
 import type { Filesystem } from '../../../os/interface';
 import { packAtlas } from '../../core/atlas/pack';
 import type { Region } from '../../core/atlas/skyline';
@@ -102,10 +76,8 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
     const textures = module.blocks.textures;
 
     if (textures.length === 0) {
-        // No textures, but still emit a valid empty manifest so the client
-        // always gets a well-formed atlas (0 rects) rather than a 404. Drop
-        // the PNGs (nothing references them). The empty `hash` reads back
-        // falsy, so change gates treat it like a missing atlas.
+        // emit a valid empty manifest so the client always gets a well-formed atlas rather than
+        // a 404; the empty `hash` reads back falsy, so change gates treat it like a missing atlas.
         await fs.remove(ATLAS_PNG);
         for (let level = 1; level <= MIP_LEVELS; level++) await fs.remove(atlasLevelPng(level));
         const empty: TileAtlasMetadata = {
@@ -123,13 +95,9 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
 
     const sources = resolveSources(textures, module);
 
-    // load phase: pull bytes / baked canvases up front so we can content-hash
-    // before deciding whether to composite.
+    // pulls bytes/baked canvases up front so we can content-hash before deciding whether to composite.
     const loaded: LoadedTile[] = await Promise.all(
         sources.map(async (src, i): Promise<LoadedTile> => {
-            // resolve through the texture store: a computed texture was baked upstream,
-            // a file one is loaded here, and an undeclared name falls back to the path
-            // convention.
             let path: string | null = 'path' in src ? src.path : null;
             if ('textureId' in src) {
                 const def = textureStore.byId.get(src.textureId);
@@ -168,7 +136,7 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
 
     const buildStart = performance.now();
 
-    // decode phase: sizes are needed to pack, and only a rebuild pays for decoding.
+    // sizes are needed to pack; only a rebuild pays for decoding.
     const images: TileImage[] = await Promise.all(
         loaded.map(async (tile, i): Promise<TileImage> => {
             if (tile.kind === 'draw') {
@@ -204,8 +172,7 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
     }
     await fs.write(ATLAS_PNG, await raster.encodePng(atlas));
 
-    // mip levels: each tile's own chain, blitted into the atlas level at the
-    // tile's rect halved per level. Aligned cells keep every level on whole texels.
+    // each tile's own mip chain, blitted into the atlas level at the tile's rect halved per level.
     const levelPixels: Uint8Array[] = [];
     for (let level = 1; level <= MIP_LEVELS; level++) {
         const size = atlasSize >> level;
@@ -244,10 +211,7 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
     return true;
 }
 
-// ── internals ───────────────────────────────────────────────────────
-
-/** the same rule `tile()` applies to computed frames at declaration; file
- *  frames are only sized here. */
+/** the same rule `tile()` applies to computed frames at declaration; file frames are only sized here. */
 function assertTileSize(name: string, w: number, h: number): void {
     if (w > 0 && h > 0 && w % TILE_ALIGN === 0 && h % TILE_ALIGN === 0) return;
     throw new Error(
@@ -264,12 +228,8 @@ async function artifactsPresent(fs: Filesystem): Promise<boolean> {
     return true;
 }
 
-/**
- * resolve each texture name to its raw source ref (URL / project-relative
- * string) or the DrawSource descriptor. Animated textures store one frame
- * per registry entry ("lava:0", "lava:1", …); static ones store one. An
- * undeclared name falls back to the `textures/{name}.png` convention.
- */
+/** animated textures store one frame per registry entry ("lava:0", "lava:1", ...); static ones
+ *  store one. an undeclared name falls back to the `textures/{name}.png` convention. */
 function resolveSources(textures: string[], module: ModuleVersion): TileSource[] {
     return textures.map((name) => {
         const colonIdx = name.lastIndexOf(':');

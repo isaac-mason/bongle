@@ -3,24 +3,15 @@ import { ChevronDown } from '../../../../icons';
 import { termsMatch } from '../../../core/asset-meta';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
-/**
- * an item in a SearchableSelect.
- *
- * `id` is what's passed to onSelect. `label` is what the user types against
- * and what's shown in the row. `sublabel` (optional) renders on a second line
- * underneath the label in a smaller, dimmer mono font, for displaying the
- * stable id beneath a human-readable name. `leading` is an optional
- * thumbnail/icon shown before the label. `badge` is an optional trailing label
- * (e.g. "(missing)"). `keywords` are extra words the search hits (an asset's
- * tags); the query is matched against label, sublabel and keywords together,
- * every word of it somewhere, the rule `assetMatches` applies everywhere.
- */
 export type SearchableSelectItem<T extends string | number = string> = {
     id: T;
     label: string;
+    /** shown on a second line under the label, e.g. a stable id under a human-readable name. */
     sublabel?: string;
+    /** extra words the search matches against, e.g. an asset's tags. */
     keywords?: readonly string[];
     leading?: ReactNode;
+    /** trailing label, e.g. "(missing)". */
     badge?: ReactNode;
     disabled?: boolean;
 };
@@ -30,13 +21,9 @@ export type SearchableSelectProps<T extends string | number = string> = {
     /** Currently-selected id. Omit for "add" semantics (no current value). */
     value?: T;
     onSelect: (id: T) => void;
-    /** Search input placeholder (e.g. "search traits…"). */
+    /** Search input placeholder (e.g. "search traits"). */
     placeholder?: string;
-    /**
-     * Custom trigger element. Rendered inside `<PopoverTrigger asChild>` so
-     * it must forward refs / spread props. If omitted, a default native-Select-
-     * style trigger button is rendered showing the current selection's label.
-     */
+    /** Custom trigger, rendered inside `<PopoverTrigger asChild>` so it must forward refs / spread props. */
     trigger?: ReactNode;
     /** Class merged onto the default trigger. Ignored when `trigger` is set. */
     triggerClassName?: string;
@@ -46,16 +33,8 @@ export type SearchableSelectProps<T extends string | number = string> = {
     emptyLabel?: string;
 };
 
-/**
- * a popover-driven select with a searchable, keyboard-navigable list.
- * arrow keys move highlight, Enter chooses, Escape closes.
- *
- * shape covers two patterns:
- *   - "select" (pass `value`): default trigger renders like a native <select>
- *     showing the current label + chevron.
- *   - "add" (omit `value`, pass `trigger`): caller supplies a custom trigger
- *     such as a "+" icon button.
- */
+// two patterns: pass `value` for a native-select-style trigger, or omit it and pass a
+// custom `trigger` (e.g. a "+" icon button) for "add" semantics.
 export function SearchableSelect<T extends string | number = string>({
     items,
     value,

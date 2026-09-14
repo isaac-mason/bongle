@@ -7,15 +7,8 @@ import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
 import { TOOL_CATEGORIES, type ToolCategory, type ToolDef } from '../tool-categories';
 import { Kbd } from './kbd';
 
-/**
- * the tool's slot digit — the number you press after holding the category key.
- * A white tag hung off the button's bottom-right corner, outset far enough to
- * clear the glyph: inside the button it either sat on the icon's own pixels or,
- * filled in the border colour, fused with the border and lost its edges.
- *
- * The outset is why the tool list below carries horizontal padding — `overflow-y`
- * forces `overflow-x: auto`, so without it the scroll box clips the tag.
- */
+// outset far enough off the corner to clear the icon glyph; the tool list below carries
+// horizontal padding for this, since overflow-y forces overflow-x: auto and would clip the tag.
 function SlotBadge({ digit }: { digit: number }) {
     return (
         <span className="pointer-events-none absolute right-[-3px] bottom-[-3px] inline-flex h-[12px] min-w-[12px] select-none items-center justify-center bg-fg px-[2px] font-pixel text-[8px] text-desktop leading-none">
@@ -39,8 +32,7 @@ function ToolButton({
     showSlot: boolean;
     onSelect: () => void;
 }) {
-    // Popover position measured on hover. Fixed-positioned (below) so it escapes
-    // the toolbar's scroll clip; left/top come from the button's viewport rect.
+    // fixed-positioned (below) so the popover escapes the toolbar's scroll clip.
     const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
     const btnRef = useRef<HTMLButtonElement>(null);
     const Icon = def.icon;
@@ -66,7 +58,6 @@ function ToolButton({
                 {showSlot && <SlotBadge digit={slotDigit} />}
             </Button>
 
-            {/* hover popover — fixed so the toolbar's scroll clip can't cut it off */}
             {pos && (
                 <div
                     className="fixed -translate-y-1/2 z-50 pointer-events-none select-none"
@@ -100,7 +91,6 @@ function InventoryButton() {
 
     return (
         <div className="flex flex-col items-center gap-1 pb-1">
-            {/* control indicator: the key that toggles the inventory */}
             <Kbd size="xs">{keyLabel}</Kbd>
             <Button
                 size="icon"
@@ -115,8 +105,7 @@ function InventoryButton() {
     );
 }
 
-// debug dashboard toggle, pinned to the bottom of the strip. mirrors the `
-// backtick key that opens the same perf/logs panel.
+// mirrors the backtick key that opens the same perf/logs panel.
 function DebugButton() {
     const debugOpen = useClient((s) => s.debugOpen);
     const toggleDebug = useClient((s) => s.toggleDebugOpen);
@@ -138,12 +127,8 @@ export function LeftToolbar() {
 
     return (
         <div className="w-12 flex-shrink-0 flex flex-col items-center pt-2 pb-2 bg-surface border-r border-border">
-            {/* inventory (library) toggle, pinned to the top with an E key hint */}
             <InventoryButton />
 
-            {/* tools, grouped by category. each group has a small header like
-                "scene v", the category name plus its hotkey. per-tool slot
-                digits appear in the bottom-right corner of each icon. */}
             <div className="flex flex-col items-stretch gap-1 min-h-0 flex-1 overflow-y-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {TOOL_CATEGORIES.map((category: ToolCategory, ci) => {
                     const CategoryIcon = category.icon;
@@ -173,7 +158,6 @@ export function LeftToolbar() {
                 })}
             </div>
 
-            {/* debug panel toggle, pushed to the bottom of the strip */}
             <DebugButton />
         </div>
     );

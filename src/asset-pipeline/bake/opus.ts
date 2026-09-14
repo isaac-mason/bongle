@@ -1,18 +1,8 @@
-// bake/opus.ts — encode a mono s16 PCM atlas to WebM-Opus. Lossy but ~4x smaller than
-// FLAC on real SFX, and gapless enough for the atlas-offset scheme: the front pre-skip
-// is trimmed by the OpusHead CodecDelay (so decoded audio aligns to sample 0), and the
-// ragged tail is trailing silence PAST the last clip (nothing references it). Per-clip
-// offsets stay time-accurate — the atlas decodes to the same interior sample positions.
-//
-// Codec = our own libopus wasm (lib/opus-wasm), container = mediabunny's WebMOutputFormat
-// — both host-neutral (browser editor + node CLI), so this stays codec-owning like
-// mp3.ts with no native FFmpeg and no WebCodecs.
-
 import { BufferTarget, EncodedAudioPacketSource, EncodedPacket, Output, WebMOutputFormat } from 'mediabunny';
 import { encodeOpusMono, initOpus, OPUS_FRAME_SIZE, OPUS_SAMPLE_RATE } from '../../../opus-wasm';
 
-/** OpusHead — the WebM CodecPrivate. `preskip` here is what makes the decoder trim the
- *  encoder lookahead (via the derived Matroska CodecDelay), aligning audio to sample 0. */
+/** the WebM CodecPrivate. `preskip` is what makes the decoder trim the encoder lookahead
+ *  (via the derived Matroska CodecDelay), aligning audio to sample 0. */
 function opusHead(preskip: number): Uint8Array {
     const b = new Uint8Array(19);
     b.set([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64], 0); // 'OpusHead'

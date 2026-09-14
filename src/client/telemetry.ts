@@ -17,16 +17,15 @@ export function init(): Telemetry {
     return { metricsSubscribed: false, debugLogsSubscribed: false };
 }
 
-// a rejoin drops the server's subscription (disconnect cleanup); clear the edge
-// flags so the next reconcile re-subscribes if the panel is still open.
+// a rejoin drops the server's subscription; clear the flags so the next
+// reconcile re-subscribes if the panel is still open
 export function resetSubscriptions(telemetry: Telemetry): void {
     telemetry.metricsSubscribed = false;
     telemetry.debugLogsSubscribed = false;
 }
 
-// gate frame recording on the panel being open: the scope calls add up on profile
-// traces, only the panel consumes them, and a disabled profiler releases its ring.
-// opening the panel builds the dashboard and subscribes to the server's frames.
+// gate frame recording on the panel being open: a disabled profiler releases its
+// ring, since only the panel consumes the recorded scopes
 export function bindToStore(state: EngineClient): void {
     let prevDebugOpen = useClient.getState().debugOpen;
     Debug.setEnabled(state.profiler, prevDebugOpen);
@@ -40,9 +39,7 @@ export function bindToStore(state: EngineClient): void {
     });
 }
 
-// edge-triggered subscribe/unsubscribe: one message per open/close. server
-// pushes room_frames (server-throttled) for every room we hold a Player in
-// while subscribed. debug_logs is editor-only.
+// edge-triggered: one message per open/close. debug_logs is editor-only.
 export function reconcileSubscriptions(state: EngineClient): void {
     const debugOpen = useClient.getState().debugOpen;
 
@@ -57,9 +54,9 @@ export function reconcileSubscriptions(state: EngineClient): void {
     }
 }
 
-/** mirror a server frame into the room's server-side ring. the packet carries the
- *  names minted since our last one (ids are dense and assigned in order, so the
- *  tail is all we need) followed by the frame's columns. */
+/** mirror a server frame into the room's server-side ring. the packet carries
+ *  only the names minted since our last one, since ids are dense and assigned
+ *  in order. */
 export function applyRoomFrames(rooms: Rooms.Rooms, message: Protocol.RoomFrames): void {
     for (const room of Rooms.getRoomsByRoomId(rooms, message.roomId)) {
         const profiler = room.serverProfiler;
@@ -98,10 +95,8 @@ export function applyDebugLogs(rooms: Rooms.Rooms, message: Protocol.DebugLogs):
     }
 }
 
-// per-message-type net rates (net/{in,out}/<type>), a game headline excluding
-// debug traffic (net/ingress|egress), and true totals (net/{in,out}/total). a type
-// that goes quiet simply records nothing that frame, and the panel's history reads
-// the gap as zero — no stale value to decay.
+// per-message-type net rates, a game headline excluding debug traffic
+// (net/ingress|egress), and true totals (net/{in,out}/total)
 export function recordNetStats(profiler: Debug.Profiler, stats: NetStats, delta: number): void {
     let inGame = 0;
     let outGame = 0;

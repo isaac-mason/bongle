@@ -5,37 +5,20 @@ import { enumValue } from './prop/prop';
 import type { Node } from './scene-tree';
 import { clearSyncDirty, type SyncDef, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
-/* ── per-sync codecs (replication) ── */
-
-/**
- * pack/apply closures for a single SyncDef on a trait. positional,
- * the array index matches the SyncDef's index in `def.syncDefs`, which
- * is also its wire key in the BinaryField envelope.
- */
+/** Pack/apply closures for a single SyncDef on a trait. Positional: the array index matches the SyncDef's index in `def.syncDefs`, which is also its wire key in the BinaryField envelope. */
 export type SyncCodec = {
-    /** pack the sync slice from a trait instance to bytes. `node` is the
-     *  owning node, only read (id/name) on error to enrich the log. */
+    /** Packs the sync slice from a trait instance to bytes. `node` is only read (id/name) on error, to enrich the log. */
     pack(instance: TraitBase, node: Node): Uint8Array;
-    /** pack into a caller-provided buffer, the zero-alloc path for per-tick
-     *  diffing. returns the byte length written (>0), `0` when there's nothing
-     *  to pack (no serdes / pack error → caller skips the slice), or the negated
-     *  required size (<0) when `u8` was too small, the caller grows to exactly
-     *  `-n` and retries once. */
+    /** Zero-alloc path for per-tick diffing: packs into a caller-provided buffer. Returns bytes written (>0), 0 when there's nothing to pack, or the negated required size (<0) when `u8` was too small, so the caller can grow to exactly `-n` and retry once. */
     packInto(instance: TraitBase, node: Node, u8: Uint8Array, offset: number): number;
-    /** unpack bytes and apply to an existing instance via syncDef.unpack */
     apply(data: Uint8Array, instance: TraitBase): void;
 };
 
-/**
- * positional array of per-sync codecs, parallel to `def.syncDefs`.
- * returns null when the trait has no syncs registered.
- */
+/** Positional array of per-sync codecs, parallel to `def.syncDefs`. Null when the trait has no syncs registered. */
 const syncCodecs = new WeakMap<TraitDef, { codecs: SyncCodec[] | null }>();
 
 export function getSyncCodecs(handle: TraitHandle): SyncCodec[] | null {
-    // memoised on def identity, so a re-declaration (which mints a fresh def)
-    // rebuilds these with nothing to remember to invalidate. Boxed because the
-    // built value is legitimately `null` for a trait with no syncs.
+    // Memoised on def identity, so a re-declaration rebuilds these with nothing to invalidate. Boxed since the built value is legitimately `null` for a trait with no syncs.
     const def = handle.def;
     let entry = syncCodecs.get(def);
     if (entry === undefined) {
@@ -89,8 +72,6 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
             try {
                 value = syncDef.pack(instance);
                 const res = s.packInto(value, u8, offset);
-                // ok → bytes written; too small → negated required size, so the
-                // caller can grow to exactly that and retry once.
                 return res.ok ? res.size : -res.size;
             } catch (e) {
                 console.error(
@@ -106,38 +87,24 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
             } catch (e) {
                 console.error(`[bongle] failed to apply sync '${label}' (bytes=${data.byteLength}):`, e);
             }
-            // an applied (replicated) write is by definition not a local
-            // change to re-emit. unpack callbacks may call back into
-            // sync.dirty() (e.g. transform.unpack → markTransformDirty →
-            // poseSync.dirty), which would otherwise cause the next diff
-            // pass to re-bump this field's version and echo it back to the
-            // sender. clear the bit so dirty stays purely a local-write hint.
+            // An applied write is not a local change to re-emit. unpack callbacks may call
+            // back into sync.dirty() (e.g. transform.unpack -> markTransformDirty ->
+            // poseSync.dirty), which would otherwise echo this field back to the sender.
             clearSyncDirty(instance, idx);
         },
     };
 }
 
-/* ── per-control codecs (scene-pack persistence) ── */
-
-/**
- * pack/unpack/apply closures for a single ControlDef on a trait.
- * positional, the array index matches the control's index in
- * `def.controls`, which is also its wire key in the persisted format.
- */
+/** Pack/unpack/apply closures for a single ControlDef on a trait. Positional: the array index matches the control's index in `def.controls`, which is also its wire key in the persisted format. */
 export type ControlCodec = {
-    /** pack the control's current value from an instance to bytes. `node`
-     *  is the owning node, only read (id/name) on error to enrich the log. */
+    /** Packs the control's current value from an instance to bytes. `node` is only read (id/name) on error, to enrich the log. */
     pack(instance: TraitBase, node: Node): Uint8Array;
-    /** unpack bytes to a value (used when constructing a fresh instance via props) */
+    /** Unpacks bytes to a value, used when constructing a fresh instance via props. */
     unpack(data: Uint8Array): unknown;
-    /** unpack and apply to an existing instance via control.set */
     apply(data: Uint8Array, instance: TraitBase): void;
 };
 
-/**
- * positional array of per-control codecs, parallel to `def.controls`.
- * returns null when the trait has no controls registered.
- */
+/** Positional array of per-control codecs, parallel to `def.controls`. Null when the trait has no controls registered. */
 const controlCodecs = new WeakMap<TraitDef, { codecs: ControlCodec[] | null }>();
 
 export function getControlCodecs(handle: TraitHandle): ControlCodec[] | null {
@@ -212,8 +179,6 @@ function buildOneControlCodec(reg: TraitDef['controls'][number]): ControlCodec {
     };
 }
 
-/* ── diagnostics ── */
-
 function describeValue(v: unknown): string {
     if (v === undefined) return 'undefined';
     if (v === null) return 'null';
@@ -238,13 +203,7 @@ function describeSchema(s: unknown): string {
     return 'unknown';
 }
 
-/* ── schema conversion: prop.* → packcat ── */
-
-/**
- * convert a prop schema (prop.number, prop.vec3, etc.) to a packcat
- * schema for binary serialization. returns null for types that can't
- * be cleanly mapped (shouldn't happen for well-formed schemas).
- */
+/** Converts a prop schema (prop.number, prop.vec3, etc.) to a packcat schema for binary serialization. Returns null for types that can't be cleanly mapped. */
 export function propToPack(schema: PropSchema): PackcatSchema | null {
     switch (schema.type) {
         case 'boolean':
@@ -317,8 +276,7 @@ export function propToPack(schema: PropSchema): PackcatSchema | null {
             return p.union(schema.key, variants as any);
         }
         case 'mesh':
-            // compound { modelId: string, meshName: string }. nullable because
-            // MeshTrait.meshId defaults to null.
+            // Nullable because MeshTrait.meshId defaults to null.
             return p.nullable(
                 p.object({
                     modelId: p.string(),
@@ -327,8 +285,7 @@ export function propToPack(schema: PropSchema): PackcatSchema | null {
             );
         case 'prefab':
         case 'block':
-            // refs serialize as bare strings (prefab id / block-key). wrap with
-            // nullable() at the schema level if "unset" needs to roundtrip.
+            // Refs serialize as bare strings (prefab id / block-key); wrap with nullable() at the schema level if "unset" needs to roundtrip.
             return p.string();
         default:
             return null;

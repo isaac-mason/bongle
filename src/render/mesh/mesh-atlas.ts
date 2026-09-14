@@ -1,21 +1,3 @@
-// MeshAtlas, single 2D RGBA8 texture with skyline-packed regions.
-//
-// One client-global atlas (owned by `MeshResources`). Skyline allocator caches
-// free-edges; `allocate(w, h, ownerKey)` returns a region or null on
-// overflow. Caller writes pixels into `pixels` at the returned region
-// then calls `markDirty(atlas)` to flag the texture for re-upload on
-// the next render. `defrag()` compacts and reports moved regions so
-// downstream `meshInfo catalog` entries can be patched.
-//
-// Why a single 2D texture (not ArrayTexture): mesh textures are
-// variable-size; skyline packing wastes far less VRAM than rounding
-// every mesh up to a uniform array-layer size.
-//
-// Note on partial uploads: gpucat's `Texture` re-uploads the entire
-// source on `needsUpdate`. For a 2K² rgba8 atlas that's 16 MB / change.
-// future opt: wrap a `GpuTexture` directly to use `device.queue.writeTexture`
-// for sub-region uploads. tracked, not solved here.
-
 import { Texture } from 'gpucat';
 import { addSkylineLevel, emptySkyline, findBestFit, type Region, type SkylineNode } from '../../core/atlas/skyline';
 
@@ -37,9 +19,7 @@ export type MeshAtlas = {
     skyline: SkylineNode[];
 };
 
-/**
- * Construct an empty atlas. `initialSize` defaults to 1024 (1 MiB pixels).
- */
+/** Construct an empty atlas. `initialSize` defaults to 1024 (1 MiB pixels). */
 export function create(initialSize = 1024): MeshAtlas {
     const pixels = new Uint8Array(initialSize * initialSize * 4);
     const texture = new Texture(
@@ -62,17 +42,9 @@ export function create(initialSize = 1024): MeshAtlas {
     };
 }
 
-/**
- * Reserve a `w × h` region tagged with `ownerKey`. Caller writes pixels
- * into `atlas.pixels` at the returned offset, then calls `markDirty`.
- *
- * Idempotent, re-allocating the same `ownerKey` returns the existing
- * region. Caller is responsible for `release` then `allocate` if it
- * wants to resize.
- *
- * Returns `null` on overflow, caller decides whether to defrag, grow,
- * or evict.
- */
+/** Reserve a `w x h` region tagged with `ownerKey`; caller writes pixels into
+ *  `atlas.pixels` at the returned offset, then calls `markDirty`. Idempotent, and
+ *  returns `null` on overflow (caller decides whether to defrag, grow, or evict). */
 export function allocate(atlas: MeshAtlas, w: number, h: number, ownerKey: string): Region | null {
     const existing = atlas.regions.get(ownerKey);
     if (existing) return existing;
@@ -88,11 +60,8 @@ export function allocate(atlas: MeshAtlas, w: number, h: number, ownerKey: strin
     return region;
 }
 
-/**
- * Free a region by ownerKey. Skyline is not restructured (classic skyline
- * allocators are append-only); reclaim happens via `defrag`. Pixels stay
- * in `pixels` until overwritten.
- */
+/** Free a region by ownerKey. Skyline is not restructured (append-only); reclaim
+ *  happens via `defrag`. Pixels stay in `pixels` until overwritten. */
 export function release(atlas: MeshAtlas, ownerKey: string): void {
     atlas.regions.delete(ownerKey);
 }
@@ -108,14 +77,9 @@ export type DefragMove = {
     ownerKey: string;
 };
 
-/**
- * Compact allocated regions to eliminate skyline gaps. Sorts by max-side
- * desc (decreasing-height heuristic) and re-packs. Returns the list of
- * moves so the caller can patch `meshInfo catalog` uvOffset/uvScale entries.
- *
- * Throws if a region no longer fits after compaction (would need a grow,
- * out of scope here).
- */
+/** Compact allocated regions to eliminate skyline gaps: sorts by max-side desc and
+ *  re-packs. Returns the moves so the caller can patch `meshInfo catalog` uv entries.
+ *  Throws if a region no longer fits after compaction (would need a grow). */
 export function defrag(atlas: MeshAtlas): { moved: DefragMove[] } {
     const old = Array.from(atlas.regions.entries()).sort(([, a], [, b]) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
     const oldPixels = new Uint8Array(atlas.pixels); // snapshot for blit source

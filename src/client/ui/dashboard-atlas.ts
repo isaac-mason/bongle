@@ -1,12 +1,3 @@
-// ── debug dashboard: atlas tab ──────────────────────────────────────
-//
-// Draws the two texture atlases the client is actually sampling from, straight
-// off the CPU-side pixels the render resources hold: the packed block atlas
-// (every mip level the bake shipped, with each texture's rect outlined) and the
-// sprite atlas (every frame rect). Hovering a rect names it. This is the view
-// to open when a block draws white, a plane draws nothing, or a texture looks
-// like its neighbour: it shows what the shader can see, not what was declared.
-
 import type { Texture } from 'gpucat';
 import type { RendererAtlases } from '../../render/backend';
 import { type Container, el, hashColor, on, type TabGroup } from '../debug';
@@ -136,16 +127,12 @@ function atlasView(
     };
 }
 
-/**
- * Add the atlas tab. `atlases` is read every repaint so a swapped atlas (HMR,
- * room change) shows up without any wiring; `textureNames` is the block
- * registry's texture list, which is what the entries table is indexed by.
- */
+/** `atlases` is read every repaint so a swapped atlas (HMR, room change) shows
+ *  without wiring; `textureNames` indexes the entries table. */
 export function addAtlasTab(tabs: TabGroup, atlases: () => RendererAtlases, textureNames: () => string[]): void {
     const tab = tabs.tab('atlas');
 
-    // block atlas: level picker + view. the entries table holds each texture's
-    // rect normalised, so it is scaled back to level-0 texels for the outline.
+    // entries table holds each texture's rect normalised; scaled back to level-0 texels.
     let level = 0;
     const levelRow = styled('div', 'display:flex; gap: 6px; align-items:center; font: 11px monospace; padding: 2px 0;');
     const levelSelect = styled('select', 'font: 11px monospace;');
@@ -202,9 +189,7 @@ export function addAtlasTab(tabs: TabGroup, atlases: () => RendererAtlases, text
         };
     });
 
-    // repaint when the content changes, only while the tab is showing. an
-    // inactive tab is detached from the document, which ends the loop; showing
-    // it again restarts it.
+    // an inactive tab is detached from the document, which ends the loop.
     let last = '';
     let running = false;
     const loop = () => {

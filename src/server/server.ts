@@ -48,46 +48,31 @@ import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
 import * as Telemetry from './telemetry';
 
-// runtime avatar swap (editor live preview — re-register the edited glb under a
-// fresh modelId + re-stamp the player without a re-join).
+// runtime avatar swap (editor live preview): re-register the edited glb under a
+// fresh modelId and re-stamp the player without a re-join.
 export { reloadClientAvatar } from './avatars';
 export { DEFAULT_SCENE_ID };
 
 export type InitOptions = {
     mode: 'edit' | 'play';
-    /**
-     * The project filesystem: authored scenes under `content/scenes/`, server
-     * model bins under `resources/server/`. Host-provided (node fs / OPFS / vfs)
-     * so the engine stays node-free; the engine owns the path conventions. Scene
-     * edits persist back through `fs.write` in edit mode; play/solo are read-only.
-     */
+    /** the project filesystem: scenes under `content/scenes/`, server model bins
+     *  under `resources/server/`. host-provided so the engine stays node-free. */
     fs: Filesystem;
-    /**
-     * zstd impl `{ compress(payload, level) }` for the voxel wire codec.
-     * Host-provided so the engine never hard-depends on a node zlib: node hosts
-     * pass the native zstd (`nodeZstd` from engine-server-node), the browser
-     * editor / cli dev loop wrap zstd-wasm's `zstdCompress`.
-     */
+    /** zstd impl `{ compress(payload, level) }` for the voxel wire codec, host-provided
+     *  so the engine never hard-depends on a node zlib. */
     zstd: Zstd;
-    /**
-     * Matchmaker grouping key for this server's `main` namespace. Stamped at
-     * init so scripts can read it via `ctx.server.options`.
-     */
+    /** matchmaker grouping key for this server's `main` namespace, readable by
+     *  scripts via `ctx.server.options`. */
     options?: Record<string, string | number | boolean>;
-    /**
-     * Side-effect handle for persistent KV (projectStorage / userStorage).
-     * Deployed: HTTP driver pointed at the service. bongle dev / editor: an
-     * in-memory impl. Required, scripts can call storage APIs at any
-     * point so a missing driver would only manifest at first call.
-     */
+    /** persistent KV side-effect handle (projectStorage / userStorage); required,
+     *  since scripts can call storage APIs at any point. */
     driver: ServerDriver;
     /** the host's outbound sink, called from inside `update` for every framed batch. */
     send: ServerInitOptions['send'];
 };
 
-// model bins: ModelHandle.bin.server is a path relative to resourcesDir, joined
-// under `resources/server/` for fs.read. Runtime avatars carry absolute http(s)
-// (R2) urls, or a `file://` OPFS path (editor); branch on scheme.
+// runtime avatars carry absolute http(s) urls or a `file://` OPFS path (editor);
+// branch on scheme.
 function createResourceLoader(fs: Filesystem, resourceManager: ReturnType<typeof ResourceManager.init>) {
     return {
         loadBytes: (url: string): Promise<Uint8Array> => {
@@ -138,8 +123,8 @@ export function init(opts: InitOptions) {
         defaultRoomId: null as string | null,
         // nobody is watching at boot: enabled flips with the first panel subscribe.
         profiler: Debug.createProfiler(false) as Debug.Profiler,
-        /** monotonic server time (ms), the engine clock the per-connection ping RTT
-         *  is measured in (NOT performance.now). connection-level, so server-global. */
+        /** monotonic server time (ms), the clock the per-connection ping RTT is
+         *  measured in; not performance.now. */
         netTimeMs: 0,
         telemetry: Telemetry.init(),
     };
@@ -147,19 +132,9 @@ export function init(opts: InitOptions) {
 
 export type EngineServer = ReturnType<typeof init>;
 
-/* ── client join / leave ── */
-
-/**
- * Engine-side join: writes identity to ClientState, runs the cap check,
- * pushes declared scenes, places the client in the default room, and fires
- * the `onJoin` script hook with `user` + `joinData`. The runtime/wrapper
- * calls this directly. `joinData` is a one-shot: scripts that want it past
- * the join must copy it themselves.
- *
- * options are NOT routed here, they live on namespaces (set by the
- * runtime at boot for deployed, or by the `play` handler for in-game
- * `client.matchmake`). The default room's namespace is pre-stamped.
- */
+/** engine-side join: writes identity to ClientState, runs the cap check, places
+ *  the client in the default room, and fires the `onJoin` script hook. `joinData`
+ *  is a one-shot, scripts that want it past the join must copy it themselves. */
 export function onClientJoin(
     state: EngineServer,
     clientId: Client,
@@ -167,31 +142,21 @@ export function onClientJoin(
     joinData: Record<string, JsonValue>,
     avatar?: ResolvedAvatar,
 ) {
-    // seed the client's inbound wire-index tables from our local registry.
-    // both peers built from the same source, so the client's outbound
-    // tables match ours at connect time. subsequent `wire_table` messages
-    // from this client refresh these as its HMR cycles diverge ours.
+    // seed the client's inbound wire-index tables from our local registry; both
+    // peers build from the same source, so they match at connect time.
     Clients.onJoin(state.clients, clientId, user, localInbound(registry));
 
-    // publish our protocol manifest before any packed payload reaches the
-    // client, so it decodes our traits/commands/sync-slots by id. both peers
-    // build tables from module-load order, which can diverge across bundles;
-    // the manifest reconciles that by id rather than by coincidental position.
+    // publish our protocol manifest before any packed payload reaches the client,
+    // reconciling by id since module-load order can diverge across bundles.
     Net.send(state.net, clientId, { type: 'wire_table', ...protocolManifest(registry) });
 
-    // Record the resolved avatar identity (or builtin, dev/edit) and
-    // kick its payload load, BEFORE the player nodes are created below,
-    // so each node's CharacterTrait is stamped with the right
-    // modelId/rigType before its onJoin fires.
+    // record the resolved avatar identity and kick its payload load before player
+    // nodes are created, so each node's CharacterTrait is stamped before onJoin fires.
     const cs = state.clients.connected.get(clientId);
     if (cs) Avatars.setClientAvatar(state, cs, avatar);
 
-    // belt-and-suspenders cap check. the matchmaker (and gatho admission)
-    // are the primary gates and shouldn't let a past-cap client reach
-    // here, but if one does (race, manual connection, whatever), drop
-    // it on the floor rather than silently growing the room. edit mode
-    // is a single-user editor; the cap doesn't apply. by this point
-    // ClientState already includes the new client, so compare against `>`.
+    // belt-and-suspenders cap check: the matchmaker is the primary gate, this drops
+    // a past-cap client rather than silently growing the room. edit mode has no cap.
     if (state.mode === 'play') {
         // only server configs carry a cap; a standalone (client-only) game has
         // no server so no cap to enforce here.
@@ -218,9 +183,6 @@ export function onClientJoin(
 }
 
 export function onClientLeave(state: EngineServer, clientId: Client) {
-    // fire leave hooks and destroy player nodes for every Player this
-    // client holds (across rooms and modes) before dropping the registry
-    // entries.
     const leavingName = state.clients.connected.get(clientId)?.user.username || 'anon';
     for (const player of Rooms.getPlayersForClient(state.rooms, clientId)) {
         const room = Rooms.getRoom(state.rooms, player.roomId);
@@ -256,17 +218,13 @@ export function receive(state: EngineServer, client: Client, channel: Channel, b
     channels[channel].push(bytes);
 }
 
-/**
- * Complete initialization after init() - loads module, creates rooms, loads scenes.
- * This is async so scene loading can happen after module load.
- */
+/** completes initialization after init(): loads module, creates rooms, loads
+ *  scenes. async so scene loading can happen after module load. */
 export async function load(state: EngineServer) {
     const mode = state.mode;
 
-    // seed the authored-scene store from the project fs. Async (the host's fs is
-    // async), so it lives here rather than the sync init(); the sync engine reads
-    // ContentManager during room creation below. sceneId = the path under
-    // `content/scenes/` with `.scene.json` stripped.
+    // seed the authored-scene store from the project fs; async since the host's fs
+    // is async, so this lives here rather than the sync init().
     const sceneText = new TextDecoder();
     for (const entry of await state.fs.list(ContentManager.SCENES_DIR)) {
         if (entry.kind !== 'file') continue;
@@ -275,42 +233,31 @@ export async function load(state: EngineServer) {
         ContentManager.putScene(state.contentManager, sceneId, sceneText.decode(await state.fs.read(entry.path)));
     }
 
-    // In edit mode the realm calls `engine-server-editor.setup(state)` BEFORE this
-    // (mirroring the client's `engine-client-editor.setup`), so the editor's server
-    // commands have already upserted into the registry by now — keeping this runtime
-    // entry free of the `env.editor` branch.
+    // in edit mode the editor's server commands have already upserted into the
+    // registry by now, via `engine-server-editor.setup` running before this.
 
-    // user + editor modules have registered by now (loadModule ran before this).
     // build the derived index fields once so scene population + room creation below
-    // read a live `blockRegistry` / `protocol`. in dev the flush handler reindexes
-    // again on every HMR.
+    // read a live `blockRegistry` / `protocol`; the flush handler reindexes again
+    // on every HMR.
     reindexRegistry(registry);
 
-    // seed Resources.models from the registry. lazy systems (renderer,
-    // animator, auto-collider) trigger ensureModel on first reference.
+    // lazy systems (renderer, animator, auto-collider) trigger ensureModel on first reference.
     seedModels(state);
 
-    // walk declared scenes and apply each handle's authored `_payload` (set
-    // by the codegen barrel's `_registerScenePayload` at module-eval, drained
-    // by `scene()`). `applyScenePayload` also seeds ContentManager's
-    // `_lastWritten` so a subsequent identical flush is skipped (no redundant
-    // write or dev-watcher echo). a handle with `_payload === null` is declared
-    // but has no file on disk yet, the codegen layer already warned at build
-    // time; handle stays empty.
+    // a handle with `_payload === null` is declared but has no file on disk yet
+    // (the codegen layer already warned at build time); it stays empty.
     for (const [sceneId, h] of registry.scenes.byId) {
         const handle = h;
         if (!handle._payload) continue;
         applyScenePayload(state, sceneId, handle._payload);
     }
 
-    // create the default room.
     const defaultRoom =
         mode === 'edit' ? Rooms.findOrCreateEditRoom(state, DEFAULT_SCENE_ID) : Rooms.createPlayRoom(state, DEFAULT_SCENE_ID);
     state.defaultRoomId = defaultRoom.id;
 
-    // initial registry population is consumed directly via the registry,
-    // drop the `added` events accumulated on `pendingChanges` so the first
-    // HMR flush only logs real deltas. (Symmetric with EngineClient.load.)
+    // drop the `added` events accumulated during initial registry population, so
+    // the first HMR flush only logs real deltas.
     clearPendingChanges([
         registry.tiles,
         registry.blocks,
@@ -327,16 +274,8 @@ export async function load(state: EngineServer) {
     ]);
 }
 
-/**
- * apply an authored scene payload: stamp it onto the handle's `_payload`,
- * store its json in the scene store so an identical editor save is a no-op
- * (no redundant write or dev-watcher echo), then `populateScene`. invoked by:
- *   - `load()` at boot for every declared handle whose `_payload` was
- *     seeded by the codegen barrel.
- *   - the boot template's `bongle:scene-update` HMR listener for live
- *     content edits.
- *   - the server registry-dispatch scenes branch for `added` / `changed`.
- */
+/** applies an authored scene payload: stores its json in the scene store so an
+ *  identical editor save is a no-op, then `populateScene`. */
 export function applyScenePayload(state: EngineServer, id: string, payload: Content.ScenePayload): void {
     const previous = registry.scenes.byId.get(id);
     if (!previous) return;
@@ -345,11 +284,7 @@ export function applyScenePayload(state: EngineServer, id: string, payload: Cont
     RegistryStore.setScenePayload(id, payload);
 }
 
-/**
- * clear a scene's authored payload and tear down its populated handle.
- * invoked by the boot template's `bongle:scene-clear` HMR listener (file
- * deletion) and the server registry-dispatch scenes branch for `removed`.
- */
+/** clears a scene's authored payload and tears down its populated handle. */
 export function clearScene(state: EngineServer, id: string): void {
     const previous = registry.scenes.byId.get(id);
     Content.clearScene(state.content, id, 'server');
@@ -359,7 +294,6 @@ export function clearScene(state: EngineServer, id: string): void {
 }
 
 export function processInbox(state: EngineServer) {
-    // process inbox, count ingress bytes
     const inbox = state.net.inbox;
 
     for (const [client, channels] of inbox) {
@@ -386,9 +320,8 @@ export function processInbox(state: EngineServer) {
                 for (const messageBytes of messages) {
                     const message = Protocol.unpackClientMessage(messageBytes);
                     if (!message) continue;
-                    // bill ingress per message.type using the original bytes
-                    // view length, packcat decodes uint8Array as a subarray
-                    // view into the source packet, so this is zero-copy.
+                    // zero-copy: packcat decodes uint8Array as a subarray view into the
+                    // source packet, so this bills the original bytes view length.
                     state.net.bytesInByType.set(
                         message.type,
                         (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength,
@@ -408,8 +341,8 @@ export function processInbox(state: EngineServer) {
                             break;
 
                         case 'net_ping_ack': {
-                            // client echoed the latest net_ping.serverStamp — fold the round trip
-                            // into this connection's smoothed ping (server clock, so no offset).
+                            // fold the round trip into this connection's smoothed ping,
+                            // server clock so no offset entanglement.
                             const cs = state.clients.connected.get(client);
                             if (cs) Clients.recordPingAck(cs, message.serverStampAck, Math.round(state.netTimeMs) >>> 0);
                             break;
@@ -486,17 +419,14 @@ export function processInbox(state: EngineServer) {
 export function update(state: EngineServer, delta: number) {
     Debug.frameStart(state.profiler);
 
-    // advance the server-global net clock first, so both the ping-ack RTT (in processInbox)
-    // and the net_ping stamps sent below read the same "now" this tick.
+    // advance the net clock first, so ping-ack RTT and the net_ping stamps sent
+    // below read the same "now" this tick.
     state.netTimeMs += delta * 1000;
 
-    // inbox drains client messages, joins/room-creates do scene instantiation here,
-    // a one-frame spike source distinct from the per-room tick stages.
     Debug.begin(state.profiler, 'inbox');
     processInbox(state);
     Debug.end(state.profiler, 'inbox');
 
-    // tick all rooms
     for (const room of state.rooms.rooms.values()) {
         Debug.begin(state.profiler, room.profileKey);
 
@@ -504,11 +434,8 @@ export function update(state: EngineServer, delta: number) {
         Clock.tick(room.clock, delta);
         Clock.advanceWall(room.clock, delta); // server has no render frames, wall tracks time
 
-        // push this room's authoritative `server` clock to its clients every tick so
-        // they keep their own locked to it (batched into the per-tick packet, no extra
-        // ws frame). the client decimates this to ~10Hz for the offset estimator but
-        // stamps remote-transform snapshot keyframes off the raw per-tick value, so it
-        // must send every tick. clients render one-way latency behind it, see core/clock.
+        // sent every tick since the client stamps remote-transform snapshot keyframes
+        // off the raw per-tick value, even though it decimates for its offset estimator.
         Net.broadcastToRoom(state.net, state.rooms, room, {
             type: 'server_clock',
             roomId: room.id,
@@ -519,14 +446,12 @@ export function update(state: EngineServer, delta: number) {
         SceneTree.runOnUpdate(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'nodes/update');
 
-        // game-script onTick, the usual home of game-logic spikes (ai, projectile
-        // sweeps, the round reset). also timed per-script as `script/<key>`.
+        // game-script onTick, also timed per-script as `script/<key>`.
         Debug.begin(state.profiler, 'nodes/tick');
         SceneTree.runOnTick(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'nodes/tick');
 
-        // sample animations into rig TransformTraits before physics so the
-        // teleport detector picks up the new pose this tick (matches client).
+        // before physics so the teleport detector picks up the new pose this tick.
         Debug.begin(state.profiler, 'animation');
         Animation.tick(room.animations, state.resources, delta);
         Debug.end(state.profiler, 'animation');
@@ -537,7 +462,6 @@ export function update(state: EngineServer, delta: number) {
         SceneTree.runOnPostAnimate(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'nodes/post-animate');
 
-        // tick prefab system, discovers and re-instantiates stale prefab nodes
         Debug.begin(state.profiler, 'prefab');
         Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'server');
         Debug.end(state.profiler, 'prefab');
@@ -556,8 +480,7 @@ export function update(state: EngineServer, delta: number) {
 
         Telemetry.recordPhysicsStats(state.profiler, room.physics);
 
-        // block hooks settle inline per write (see block-hooks.ts); nothing to
-        // drain here. flush the tick's accumulated light recompute.
+        // block hooks settle inline per write; this flushes accumulated light recompute.
         Debug.begin(state.profiler, 'lighting');
         Light.flushPendingLight(room.voxels);
         Debug.end(state.profiler, 'lighting');
@@ -566,28 +489,24 @@ export function update(state: EngineServer, delta: number) {
         SceneTree.runOnFrame(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'nodes/frame');
 
-        // drain chat inbox/outbox: parse queued `chat_input` lines from
-        // clients (consumed by local handlers or promoted into outbox),
-        // then broadcast every outbox entry as `chat_broadcast`.
         Debug.begin(state.profiler, 'chat');
         Chat.tick(room.chat, state.net, state.rooms, room, state.clients);
         Debug.end(state.profiler, 'chat');
 
-        // release per-tick physics scratch (voxel hit pool). MUST come after
-        // every subShapeId consumer for this room, contact listeners,
-        // getSurfaceNormal, getSupportingFace, has run.
+        // must come after every subShapeId consumer (contact listeners,
+        // getSurfaceNormal, getSupportingFace) has run.
         physics.flush(room.physics);
 
         Debug.end(state.profiler, room.profileKey);
     }
 
-    // drain queued reset/stop requests now that no room is mid-tick.
+    // queued reset/stop requests, now that no room is mid-tick.
     Debug.begin(state.profiler, 'rooms/drain');
     Rooms.drainPending(state);
     Debug.end(state.profiler, 'rooms/drain');
 
-    // flush discovery, runs diff detection per room (serialize once),
-    // then distributes updates to clients based on per-client knowledge
+    // runs diff detection per room (serialize once), then distributes updates to
+    // clients based on per-client knowledge.
     Debug.begin(state.profiler, 'discovery');
     const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.profiler);
     const discoveryMs = Debug.end(state.profiler, 'discovery');
@@ -596,10 +515,9 @@ export function update(state: EngineServer, delta: number) {
         Net.send(state.net, client, message);
     }
 
-    // drain this tick's queued RPC commands AFTER scene distribution, so a
-    // command never lands before the scene state it depends on (e.g. an
-    // onJoin command arrives after the joiner's join_room → its listeners
-    // are already registered). see discovery.ts "RPC command ordering".
+    // after scene distribution, so a command never lands before the scene state
+    // it depends on (an onJoin command arrives after join_room, listeners already
+    // registered). see discovery.ts "RPC command ordering".
     Discovery.flushCommands(state.discovery, state.net, state.rooms);
 
     // discovery is process-wide work, recorded once: every room's panel reads the
@@ -609,29 +527,23 @@ export function update(state: EngineServer, delta: number) {
     Telemetry.pushDebugLogs(state);
     Telemetry.pushRoomFrames(state, delta);
 
-    // per-connection ping beacon: stamp each client with the server-global net clock (it
-    // echoes it back via net_ping_ack) + hand it its current server-measured ping for the HUD.
-    // rides the per-tick packet the client already receives (server_clock), no extra ws frame.
+    // per-connection ping beacon: stamps each client with the net clock (echoed back
+    // via net_ping_ack) and its current server-measured ping for the HUD.
     const netStamp = Math.round(state.netTimeMs) >>> 0;
     for (const cs of state.clients.connected.values()) {
         Net.send(state.net, cs.id, { type: 'net_ping', serverStamp: netStamp, pingMs: Math.min(65535, cs.pingMs) });
     }
 
-    // pack typed outbox messages into Uint8Array packets for the runtime
     Debug.begin(state.profiler, 'netflush');
     Net.flush(state.net, state.send);
     Debug.end(state.profiler, 'netflush');
 
-    // net throughput (global bytes split evenly across rooms, so each panel reads
-    // its share) + process CPU/memory into the frame; both ride the room_frames push.
     const netStats = Net.drainNetStats(state.net);
     Telemetry.recordNetStats(state.profiler, netStats, delta, state.rooms.rooms.size || 1);
     Telemetry.recordProcessStats(state.profiler, delta);
 
     Debug.frameEnd(state.profiler);
 }
-
-/* ── dispose ── */
 
 /** tear down the server: destroy all rooms. An edit host lands unsaved edits first
  *  (engine-server-editor's `dispose`); the runtime knows nothing about saving. */
@@ -658,10 +570,9 @@ export function app(mode: InitOptions['mode']): ServerApp<EngineServer> {
     };
 }
 
-/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),
- *  plus an initial apply; returns an unregister for teardown. Call AFTER `load` so
- *  the first apply sees the loaded rooms. Dev only: a deployed server applies the
- *  registry once in `load()` and never calls this. */
+/** re-applies registry changes to `state` on every settled flush (HMR / re-declare),
+ *  plus an initial apply. Call after `load` so the first apply sees the loaded
+ *  rooms. Dev only: a deployed server applies the registry once in `load()`. */
 export function watchRegistry(state: EngineServer): () => void {
     const unregister = registerFlushHandler(() => applyRegistryChanges(state));
     requestFlush();

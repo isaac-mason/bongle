@@ -7,11 +7,10 @@ import type { TraitHandle } from '../core/scene/traits';
 type WorldScriptBase = typeof WorldTrait extends TraitHandle<infer B> ? B : never;
 
 /**
- * register a **system**: scene-scoped logic hosted on the always-attached
+ * register a system: scene-scoped logic hosted on the always-attached
  * `WorldTrait`, running once per scene per side. sugar for
- * `script(WorldTrait, id, factory, opts)`, and the preferred spelling.
- *
- * use for logic that operates "globally" e.g. via querying entities based on their composition with `query(ctx, [...])`
+ * `script(WorldTrait, id, factory, opts)`, the preferred spelling for logic
+ * that queries entities globally with `query(ctx, [...])`.
  *
  * @example
  * ```ts
@@ -20,7 +19,7 @@ type WorldScriptBase = typeof WorldTrait extends TraitHandle<infer B> ? B : neve
  *     const q = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
  *     onFrame(ctx, ({ delta }) => {
  *         for (const [ch, cc, transform] of q.matches) {
- *             // …drive bones, read camera, etc.
+ *             // drive bones, read camera, etc.
  *         }
  *     });
  * });
@@ -49,9 +48,8 @@ export type {
 
 /**
  * read the editor viewpoint from join data, if this session was launched via
- * the editor "play" button. returns `null` for normal joins (the key is
- * absent), so a game can fall back to its usual spawn. games use this to offer
- * "play from here" during development.
+ * the editor "play" button. returns `null` for normal joins so a game can
+ * fall back to its usual spawn.
  */
 export function editorPlayData(joinData: Record<string, JsonValue>): EditorPlayData | null {
     const raw = joinData[EDITOR_JOIN_KEY];

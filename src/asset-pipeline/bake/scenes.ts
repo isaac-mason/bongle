@@ -1,24 +1,3 @@
-// per-scene codegen barrel.
-//
-// reads the captured `module.scenes` (declared via `scene('<id>')` in user
-// code) and emits `src/generated/scenes.ts`. the barrel static-imports each
-// scene's `.scene.json` and calls `registerScene` (imported from
-// `bongle/internal`) at module-eval.
-// each call stashes the payload into an engine-side map. `EngineClient.load`
-// / `EngineServer.load` walk that map after `Project.load` and apply each
-// payload via `populateScene`.
-//
-// edit mode additionally walks `content/scenes/blueprints/**` and registers
-// every blueprint `.scene.json` found. blueprints are editor-authored, no
-// user code calls `scene('blueprints/foo')`, so the walk is the only path
-// that gets them into the registry where the icon renderer can find them.
-// play mode keeps the strict "declared only" surface so prod bundles don't
-// grow with editor-only artifacts.
-//
-// the module host resolves the JSON imports against the project filesystem;
-// per-chunk binary payloads inside the json are gzip-base64 strings that
-// stay inert until `loadVoxels` decodes them at runtime.
-
 import type { Filesystem } from '../../../os/interface';
 import type { ModuleVersion } from '../../internal';
 
@@ -34,16 +13,12 @@ export {};
 `;
 
 export type BuildScenesOptions = {
-    /** bake invocation mode. `edit` additionally walks
-     *  `content/scenes/blueprints/**` so editor-authored blueprints get a
-     *  SceneHandle (used by the icon renderer + prefab placement). `play`
+    /** `edit` additionally walks `content/scenes/blueprints/**` for a SceneHandle; `play`
      *  registers only ids declared via `scene('id')`. */
     mode: 'edit' | 'play';
-    /** standalone (client-only) build: the client is authoritative — there's no
-     *  server to serve scenes — so bake EVERY authored `content/scenes/*.json`,
-     *  not just `scene()`-declared ids. Otherwise a scene authored in the editor
-     *  with no `scene('id')` call is absent client-side and a local room can't
-     *  boot it. */
+    /** standalone: no server to serve scenes, so bakes every authored `content/scenes/*.json`,
+     *  not just `scene()`-declared ids, or an editor-authored scene with no `scene('id')` call
+     *  would be absent client-side and a local room couldn't boot it. */
     standalone: boolean;
     /** the editor project filesystem (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
@@ -52,22 +27,16 @@ export type BuildScenesOptions = {
 export async function buildScenes(module: ModuleVersion, opts: BuildScenesOptions): Promise<void> {
     const { mode, standalone, fs } = opts;
 
-    // union of declared ids + discovered files. Set preserves dedup; sort for
-    // stable barrel output.
+    // union of declared ids + discovered files; sort for stable barrel output.
     const ids = new Set<string>(module.scenes.keys());
     if (standalone) {
-        // client-only: no server serves scenes, so the client needs EVERY authored
-        // scene baked in (handles + payloads), whether or not `scene('id')` declared
-        // it. Walks all of content/scenes/ (blueprints included, they live here too).
+        // walks all of content/scenes/ (blueprints included, they live here too).
         for (const entry of await fs.list(SCENES_DIR)) {
             if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;
             ids.add(entry.path.slice(SCENES_DIR.length + 1, -SCENE_EXT.length));
         }
     } else if (mode === 'edit') {
-        // multiplayer edit: declared scenes come from module.scenes; additionally
-        // walk `blueprints/` so editor-authored blueprints get a SceneHandle (icon
-        // renderer + prefab placement). An undeclared non-blueprint scene stays
-        // server-only (the server serves it), matching the strict play surface.
+        // an undeclared non-blueprint scene stays server-only, matching the strict play surface.
         const blueprintsDir = `${SCENES_DIR}/blueprints`;
         for (const entry of await fs.list(blueprintsDir)) {
             if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;
@@ -83,8 +52,6 @@ export async function buildScenes(module: ModuleVersion, opts: BuildScenesOption
     for (const id of sortedIds) {
         const scenePath = `${SCENES_DIR}/${id}${SCENE_EXT}`;
         if (!(await fs.exists(scenePath))) {
-            // declaration exists but file doesn't, warn and skip. handle
-            // stays empty; prefabs depending on it won't instantiate.
             console.warn(
                 `[bongle] declared scene "${id}" not found — handle stays empty, prefabs depending on it won't instantiate`,
             );

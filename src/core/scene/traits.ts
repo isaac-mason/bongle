@@ -4,265 +4,121 @@ import type { prop } from './prop';
 import type { Node } from './scene-tree';
 import type { ScriptDef } from './scripts';
 
-/* ── trait body types ── */
-
-/**
- * trait body, a plain object literal whose values are either:
- * - a literal (number, string, boolean, null) shared as the default, or
- * - a factory `() => T` called once per instance to build a fresh value
- *   (required for any mutable default, Vec3, Quat, Mat4, arrays, objects).
- *
- * trait-level options (e.g. persist) live in the third arg to `trait()`,
- * keeping the body purely instance-field shaped.
- */
+/** Trait body: literal values are shared as the default, factories build a fresh value per instance. */
 export type TraitBody = Record<string, unknown>;
 
-/** trait-level options, passed as the third arg to `trait()`. */
 export type TraitOptions = {
-    /** human-readable display name for editor UIs (trait pickers,
-     *  inspectors). falls back to the string id when omitted. */
     name?: string;
-    /**
-     * whether instances of this trait round-trip through scene files.
-     * default `true`. set to `false` for traits attached at runtime that
-     * should never appear on disk (e.g. character controllers, gizmos).
-     * for tag traits (no controls), `persist: false` still strips the
-     * trait from saved scenes, its mere presence on the node is the data
-     * being filtered.
-     */
+    /** Default true; false for runtime-only traits. */
     persist?: boolean;
 };
 
-/** factory marker: a value-producing function called once per instance. */
 type Factory<T> = () => T;
 
-/** sentinel slot marking `Self`; swapped for the owning trait's slot at registration. */
 export const SELF_SLOT = -1;
 
 declare const SELF_MARKER: unique symbol;
-/**
- * Placeholder for "this trait's own instance type", for a field that points at
- * another instance of the trait it is declared on. A trait body cannot name the
- * type being inferred from it, so `Self` stands in and `TraitInstance`
- * substitutes the real type:
- *
- * ```ts
- * const T = trait('transform', { _parent: null as any });
- * const q = query([Ancestor(Self)]); // inside T's own declarations, Self is T
- * ```
- *
- * Extends `TraitBase` so it satisfies `TraitHandle`'s constraint; the brand is
- * what `TraitInstance` matches on to make the substitution.
- */
+/** Placeholder for a field referencing this trait's own instance type; TraitInstance substitutes the real type. */
 export type Self = TraitBase & { readonly [SELF_MARKER]: true };
 
-/**
- * Stand-in handle for "the trait being defined", so a declaration can reference itself,
- * e.g. `Ancestor(Self)` in a query owned by that trait. Resolved to the enclosing trait's
- * slot at registration; it is never a real trait and must not reach `addTrait`.
- */
+/** Stand-in handle for the trait being defined; resolved at registration, must not reach addTrait. */
 export const Self = { id: 'bongle.self', slot: SELF_SLOT } as unknown as TraitHandle<Self>;
 
-/** field names that cannot be used in trait definitions. */
 type ReservedTraitKey = '_node' | '_def' | '_sync';
 
-/**
- * map a TraitBody to its instance shape: factory values are unwrapped
- * to their return type, literals pass through.
- */
 export type TraitInstance<S extends TraitBody> = TraitBase & {
     [K in keyof S as K extends ReservedTraitKey ? never : K]: ResolveField<S[K], TraitInstance<S>>;
 };
 
-/** unwrap a body field to its instance type: factories to their return type,
- *  `Self` to the instance type being built, literals to themselves. */
 type ResolveField<V, TSelf> = V extends Factory<infer R> ? SubstituteSelf<R, TSelf> : SubstituteSelf<V, TSelf>;
 
-// `[Self] extends [V]` asks whether V *contains* the marker, rather than
-// whether V is assignable to it — the latter also matches `null`, which would
-// rewrite every nullable field in the codebase. `0 extends 1 & V` is the
-// standard `any` guard: without it an `any`-typed field would match too.
+// `[Self] extends [V]` checks whether V contains the marker, not whether V is assignable to it.
 type SubstituteSelf<V, TSelf> = 0 extends 1 & V ? V : [Self] extends [V] ? ([null] extends [V] ? TSelf | null : TSelf) : V;
 
-/* ── trait-level registrations: control & sync ───────────────────────
- *
- * each kind follows the same shape: a `Body` describes what the user
- * passes; the corresponding `Def` is `Body & Stamp`, where the stamp is
- * the trait id + the per-kind local id. authoring stays declarative,
- * stored defs are self-describing (consumers don't need traitId threaded
- * through args), and adding a body field only touches the Body type.
- */
-
-/** identifying stamp shared by every per-trait registration. */
 type TraitChildStamp<KindIdKey extends string> = { traitId: string } & { [K in KindIdKey]: string };
 
-/** body passed by the user to `control()`, fields only, no stamps. */
 export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
     label?: string;
     schema: prop.Schema;
     get: (instance: T) => V;
     set: (instance: T, value: V) => void;
-    // optional inspector hints
     category?: string;
     hidden?: boolean;
 };
 
-/** stored ControlDef. body + `{ traitId, controlId }`. */
+/** Stored ControlDef, body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
 
-/**
- * DIRTINESS policy: what counts as a change worth sending. orthogonal to `rate`
- * (how often) — nothing un-dirty ever sends, regardless of rate.
- * - 'diff' (default), dirty whenever the packed bytes differ.
- * - 'explicit', never auto-dirty; only `SyncHandle.dirty()` marks it (set-once
- *   fields whose value the byte-diff can't be trusted to catch cheaply).
- */
+/** What counts as a change worth sending: 'diff' (default) fires when the packed bytes differ, 'explicit' only via SyncHandle.dirty(). */
 export type DirtyConfig = 'diff' | 'explicit';
 
-/**
- * RATE policy: the maximum send cadence for a dirty value. orthogonal to `dirty`.
- * - 'realtime' (default), send every tick the value is dirty (no throttle).
- * - { hz }, send at most `hz` times/sec — a dirty value that comes up before the
- *   interval elapses waits, then sends its latest (Quake's snapshotMsec gate).
- */
+/** Max send cadence for a dirty value: 'realtime' (default) sends every dirty tick, `{ hz }` caps the rate and sends the latest value once it elapses. */
 export type RateConfig = 'realtime' | { hz: number };
 
-/** body passed by the user to `sync()`, fields only, no stamps. */
 export type SyncBody<T extends TraitBase = TraitBase, S = unknown> = {
     schema: pack.Schema;
     pack: (instance: T) => S;
     unpack: (value: S, instance: T) => void;
-    /** what counts as a change worth sending. default 'diff' (byte-diff). */
     dirty?: DirtyConfig;
-    /** max send cadence for a dirty value. default 'realtime'. */
     rate?: RateConfig;
-    /** authority for accepting writes. default 'server'. */
     authority?: 'server' | 'owner';
 };
 
-/** stored SyncDef. body + `{ traitId, syncId }`. wire envelope keys by
- *  registration index (`SyncHandle.index`), not `syncId`. */
+/** Stored SyncDef, body + `{ traitId, syncId }`; wire envelope keys by registration index, not syncId. */
 export type SyncDef<T extends TraitBase = TraitBase, S = unknown> = SyncBody<T, S> & TraitChildStamp<'syncId'>;
 
-/**
- * returned by sync() at registration time. carries the sync index and a
- * producer-side hint to skip byte-diffing.
- *   const poseSync = sync(TransformTrait, { schema, pack, unpack });
- *   poseSync.dirty(t);   // "I changed this, emit on next diff pass
- *                        //  without bothering to byte-diff."
- */
+/** Returned by sync() at registration time; dirty(instance) marks it changed without byte-diffing. */
 export type SyncHandle<T extends TraitBase = TraitBase> = {
     readonly index: number;
     dirty(instance: T): void;
 };
 
-/* ── instance base ── */
-
-/**
- * per-instance replication working-state, array-indexed by sync slice (parallel
- * to `_def.sync`), so the diff is array indexing, not keyed side-map lookups.
- */
 export type TraitSyncState = {
-    /** one "locally dirty" bit per slice, set by producers (SyncHandle.dirty),
-     *  consumed + cleared by the diff pass; cleared by clearSyncDirty on an
-     *  applied replicated write. */
     dirty: Uint32Array;
-    /** [i] = last-emitted serialized bytes for slice i (the byte-diff snapshot). */
+    /** [i] = last-emitted bytes for slice i. */
     bytes: Array<Uint8Array | undefined>;
-    /** [i] = monotonic replication version for slice i. f64 because the version
-     *  counter grows unbounded and must not wrap an int32. */
+    /** [i] = replication version for slice i; f64 so the counter can't wrap an int32. */
     versions: Float64Array;
-    /** max of this trait's field versions, the send-path trait-level gate. */
     traitVersion: number;
 };
 
-/** base shape of every trait instance, has `_node` back-ref + def back-ref. */
 export type TraitBase = {
-    /** reference to the node this trait instance belongs to */
     _node: Node;
-    /** the TraitDef this instance was built from */
     _def: TraitDef;
-    /**
-     * per-instance replication working-state, dirty bits + diff snapshots,
-     * array-indexed by sync slice. allocated in buildTraitInstance when the
-     * trait has syncs; undefined otherwise (helpers no-op in that case).
-     */
+    /** Allocated only when the trait has syncs. */
     _sync?: TraitSyncState;
 };
 
-/**
- * flag sync `idx` as locally dirty so the next diff pass emits it. `idx`
- * is the SyncDef's position in `_def.sync` (also the SyncHandle.index
- * returned from the original `sync()` call).
- */
+/** Flags sync `idx` as locally dirty so the next diff pass emits it. */
 export function setSyncDirty(instance: TraitBase, idx: number): void {
     const s = instance._sync;
     if (!s) return;
     s.dirty[idx >> 5] |= 1 << (idx & 31);
 }
 
-/**
- * clear the dirty flag for sync `idx`. used when a replicated write is
- * applied, the value was just synced from the wire, so it isn't a local
- * change to re-emit. (`idx >> 5` picks the Uint32 word, `idx & 31` is the
- * bit inside it.)
- */
+/** Clears the dirty flag for sync `idx`; used after a replicated write from the wire is applied. */
 export function clearSyncDirty(instance: TraitBase, idx: number): void {
     const s = instance._sync;
     if (!s) return;
     s.dirty[idx >> 5] &= ~(1 << (idx & 31));
 }
 
-/* ── trait handle ── */
-
-/**
- * the handle returned by trait(). used with getTrait, addTrait, hasTrait,
- * query, findAncestor, etc. the __type field carries the instance type for
- * inference; it does not exist at runtime.
- */
+/** The handle returned by trait(). Used with getTrait, addTrait, hasTrait, query, findAncestor, etc. */
 export type TraitHandle<T extends TraitBase = TraitBase> = {
-    /** the declared id (identity, never changes). */
     readonly id: string;
-    /**
-     * runtime slot, stable integer identity assigned the first time `trait(id, ...)`
-     * runs, cached in `traitSlots[id]` for the process lifetime. Used as the key
-     * in `node._traits: Map<number, TraitBase>` and anywhere runtime code indexes
-     * a trait. Distinct from the *wire index* (`netIndex`, recomputed per flush).
-     */
+    /** Stable integer identity assigned the first time trait(id, ...) runs; distinct from netIndex. */
     readonly slot: number;
-    /** DepGraph dependency, see SceneHandle.dependency. */
     readonly dependency: DepKey;
-    /** the authored data. re-pointed on every re-declaration. */
     def: TraitDef;
-    /** sort-by-id wire position, stamped by `reindexRegistry` each flush. Not
-     *  derived from the def but from the registry's ordering, same as a block's
-     *  `_baseStateId`, so it lives on the handle and survives re-declaration. */
+    /** Wire position stamped by reindexRegistry each flush; survives re-declaration. */
     netIndex: number | undefined;
 
-    /** phantom, carries the instance type for inference. not present at runtime. */
+    /** Phantom; carries the instance type for inference, not present at runtime. */
     readonly __type: T;
 };
 
-/*
- * Everything a trait handle used to carry beyond the above — the compiled
- * constructor, the packcat codec memos, the by-id indexes over
- * `def.controls`/`def.sync`/`def.scripts`, and the wire `netIndex` — was state
- * DERIVED from either the def or the registry's own ordering. Holding it on the
- * handle meant `declare` had to rebuild it on every re-declaration, which is
- * what made re-declaring a trait silently drop controls, syncs and scripts
- * registered from OTHER modules: those had been accumulated onto the handle
- * after the fact, and the rebuild started them empty again.
- *
- * It is all derived at the point of use now: `construct()` and the codecs
- * memoise on def identity (see `derived`), the by-id indexes are views over the
- * def's own arrays, and `netIndex`/`slotToTrait` are rebuilt by `reindexTraits`
- * from `traitStore.byId`. A re-declaration mints a new def, so every memo
- * refreshes itself with nothing to remember to invalidate.
- */
-
 const constructors = new WeakMap<TraitDef, () => TraitBase>();
 
-/** compiled instance constructor for `handle`'s current def. */
 export function construct(handle: TraitHandle): () => TraitBase {
     const def = handle.def;
     let compiled = constructors.get(def);
@@ -273,23 +129,11 @@ export function construct(handle: TraitHandle): () => TraitBase {
     return compiled;
 }
 
-/*
- * `controls` and `sync` are appended only by the `control()` / `sync()` calls
- * that follow `trait()` in the same module body, and a re-declaration mints a
- * fresh def — so once module evaluation is over the arrays are frozen in
- * practice and a def-keyed memo is safe. These are read per trait instantiation,
- * which is why they are memoised at all.
- *
- * `scripts` is NOT: `pruneRemovedScript` splices it IN PLACE on the same def
- * when a `script()` call disappears from a file other than its trait's. A memo
- * keyed on def identity would not see that. It is only read on cold paths
- * (registration, HMR swap), so it is built on demand instead — cheaper than the
- * invalidation step it would otherwise need, and impossible to get wrong.
- */
+// scripts isn't memoised this way: pruneRemovedScript splices def.scripts in place, which a def-identity memo would miss
 const controlIndexes = new WeakMap<TraitDef, Map<string, { reg: ControlDef; index: number }>>();
 const syncIndexes = new WeakMap<TraitDef, Map<string, { reg: SyncDef; index: number }>>();
 
-/** `controlId` → its registration + slot index, as a view over `def.controls`. */
+/** `controlId` to its registration and slot index, as a view over `def.controls`. */
 export function controlsById(handle: TraitHandle): Map<string, { reg: ControlDef; index: number }> {
     const def = handle.def;
     let index = controlIndexes.get(def);
@@ -300,7 +144,7 @@ export function controlsById(handle: TraitHandle): Map<string, { reg: ControlDef
     return index;
 }
 
-/** `syncId` → its registration + slot index, as a view over `def.sync`. */
+/** `syncId` to its registration and slot index, as a view over `def.sync`. */
 export function syncById(handle: TraitHandle): Map<string, { reg: SyncDef; index: number }> {
     const def = handle.def;
     let index = syncIndexes.get(def);
@@ -311,8 +155,7 @@ export function syncById(handle: TraitHandle): Map<string, { reg: SyncDef; index
     return index;
 }
 
-/** `scriptId` → its registration + slot index, over `def.scripts`. Built fresh:
- *  the array is spliced in place by `pruneRemovedScript`. */
+/** `scriptId` to its registration and slot index, over `def.scripts`; built fresh each call. */
 export function scriptsById(handle: TraitHandle): Map<string, { reg: ScriptDef; index: number }> {
     return indexBy(handle.def.scripts, (s) => s.scriptId);
 }
@@ -323,58 +166,20 @@ function indexBy<R>(regs: R[], keyOf: (reg: R) => string): Map<string, { reg: R;
     return out;
 }
 
-/** extract the instance type from a trait handle. */
 export type TraitType<H extends TraitHandle> = H['__type'];
 
-/* ── trait definition ── */
-
-/** The authored data for one trait. Everything DERIVED from it — the compiled
- *  constructor, the codec memos, the by-id indexes, the wire index — lives on the
- *  handle, so this stays pure data: hashable, serializable, no back-references. */
+/** The authored data for one trait; pure data, no back-references. */
 export type TraitDef = {
     id: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `id` when the author didn't supply one. */
     name: string;
-    /** raw body of the trait, literals + factories, indexed by field name. */
     body: Record<string, unknown>;
-    /** whether instances of this trait are saved to scene files. default true. */
     persist: boolean;
-    /** appended by this module's `control()` calls, right after `trait()` returns. */
     controls: ControlDef[];
-    /** appended by this module's `sync()` calls. */
     sync: SyncDef[];
-    /** appended by this module's `script()` calls. */
     scripts: ScriptDef[];
 };
 
-/* ── global trait registry ── */
-
-/* ── trait() ── */
-
-
-/* ── trait-level registrars ── */
-
-/* ── instance construction ── */
-
-/**
- * Deep-copy a trait value.
- *
- * In practice this only ever sees JSON: control values on the way out to a scene file, and
- * authored controls on the way back in. Prop schemas cannot describe anything richer, so the
- * array and plain-object branches carry every real call.
- *
- * The typed-array and `structuredClone` branches are a safety net, not a second use case.
- * The construction path cannot reach them today: a mutable default must be a factory (which
- * is called, not cloned) and everything else in a body is a primitive or an array of
- * primitives, which `compileConstructor` inlines as source. Measured at 0 of 107 body fields
- * across the builtin traits (`bench/probe-clone-branches.ts`). They exist because game code
- * defines its own traits and nothing enforces that convention.
- *
- * The return is typed as the input, which holds for JSON, typed arrays, and Map/Set/Date.
- * It does NOT hold for a class instance written as a body literal: `structuredClone` copies
- * own properties and drops the prototype. Use a factory for those.
- */
+/** Deep-copies a trait value (control values in and out of scene files); the typed-array and structuredClone branches are a safety net for game-defined traits. */
 export function cloneTraitValue<T extends object>(value: T): T {
     if (Array.isArray(value)) {
         const length = value.length;
@@ -401,7 +206,6 @@ export function cloneTraitValue<T extends object>(value: T): T {
     return structuredClone(value);
 }
 
-/** a value that can be written straight into generated source, or null if it can't. */
 function primitiveSource(value: unknown): string | null {
     if (value === null) return 'null';
     if (value === undefined) return 'undefined';
@@ -420,7 +224,6 @@ function primitiveSource(value: unknown): string | null {
     }
 }
 
-/** a flat array of primitives as source, so vec3/quat/mat4 defaults allocate inline. */
 function arraySource(value: object): string | null {
     if (!Array.isArray(value)) return null;
     const items: string[] = [];
@@ -432,18 +235,7 @@ function arraySource(value: object): string | null {
     return `[${items.join(',')}]`;
 }
 
-/**
- * compile a constructor that returns a whole instance as one object literal.
- *
- * Two things this buys over assigning fields one at a time. A literal gets fast
- * properties whatever its size, where more than ~16 successive stores puts the
- * object into dictionary mode — 6.6x slower to read and 5.6x larger. And the
- * common defaults (vec3, quat, mat4) become inline array literals instead of a
- * clone call each.
- *
- * Anything that can't be written as source — a factory, a nested object, a Map —
- * is captured in `v` and referenced from the generated body.
- */
+/** Compiles a constructor that returns a whole instance as one object literal, keeping it in V8 fast-property mode. */
 export function compileConstructor(def: TraitDef): () => TraitBase & Record<string, unknown> {
     const fields: string[] = ['_node: null', '_def: d', '_sync: undefined'];
     const captured: unknown[] = [];
@@ -482,35 +274,22 @@ export function compileConstructor(def: TraitDef): () => TraitBase & Record<stri
     return build(def, cloneTraitValue, captured);
 }
 
-/**
- * Build a trait instance from a TraitDef and optional override props (from scene-pack
- * deserialization). Overrides are keyed by control id; fields without a matching control
- * take the body default.
- *
- * Override values are taken BY REFERENCE. A caller passing cached or shared source data is
- * responsible for cloning it (see `cloneTraitValue`) so runtime mutations don't bleed back
- * into the source.
- */
+/** Builds a trait instance from a TraitDef and optional control-keyed override props; override values are taken by reference. */
 export function buildTraitInstance(handle: TraitHandle, overrides?: Record<string, unknown>): TraitBase {
     const instance = construct(handle)() as TraitBase & Record<string, unknown>;
 
     if (overrides) {
         for (const [key, value] of Object.entries(overrides)) {
-            // overrides for control-backed fields go through reg.set so any
-            // side effects (markDirty, etc.) fire as if the field was edited.
-            // overrides for plain fields land via direct assignment.
-            const ci = controlsById(handle).get(key);
-            if (ci) {
-                ci.reg.set(instance as TraitBase, value);
+            // control-backed fields go through reg.set so side effects fire as if the field was edited
+            const controlEntry = controlsById(handle).get(key);
+            if (controlEntry) {
+                controlEntry.reg.set(instance as TraitBase, value);
             } else {
                 instance[key] = value;
             }
         }
     }
 
-    // per-instance sync working-state: one dirty bit per slice (Uint32 words,
-    // realistic counts < 32 fit a single word) + the byte-diff snapshot array
-    // (bytes), indexed by slice.
     if (handle.def.sync.length > 0) {
         instance._sync = {
             dirty: new Uint32Array(Math.ceil(handle.def.sync.length / 32)),

@@ -1,7 +1,3 @@
-// the engine client the editor UI is mounted on. Provided once by mountEditUI;
-// components reach the engine (session verbs, the renderer) through it instead
-// of a module global.
-
 import { createContext, useContext } from 'react';
 import type { EngineClient } from '../../client/client';
 

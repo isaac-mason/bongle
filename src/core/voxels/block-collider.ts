@@ -1,16 +1,10 @@
 import * as crashcat from 'crashcat';
 
-// ── block shape types ───────────────────────────────────────────────
-//
-// pure data objects describing collision shapes in block-local [0,1]³
-// space. rotation operates on these descriptions. conversion to
-// crashcat shapes happens at registry freeze time via blockShapeToShape().
-//
-// taxonomy:
-//   cube, full unit cube (the implicit default; explicit form accepted too)
-//   aabbs, axis-aligned box list (stairs, slabs, fences, walls, panes, ...)
+// collision shapes in block-local [0,1]^3 space; rotation operates on these descriptions, converted to
+// crashcat shapes at registry freeze time via blockShapeToShape(). cube is the full unit cube (the
+// implicit default); aabbs is an axis-aligned box list (stairs, slabs, fences, walls, panes, ...).
 
-/** [minX, minY, minZ, maxX, maxY, maxZ] in block-local [0,1]³. */
+/** [minX, minY, minZ, maxX, maxY, maxZ] in block-local [0,1]^3. */
 export type AABB = readonly [number, number, number, number, number, number];
 
 export type BlockShapeCube = { type: 'cube' };
@@ -18,8 +12,6 @@ export type BlockShapeCube = { type: 'cube' };
 export type BlockShapeAabbs = { type: 'aabbs'; boxes: AABB[] };
 
 export type BlockShape = BlockShapeCube | BlockShapeAabbs;
-
-// ── builder helpers ─────────────────────────────────────────────────
 
 export function cube(): BlockShapeCube {
     return { type: 'cube' };
@@ -29,15 +21,7 @@ export function aabbs(boxes: AABB[]): BlockShapeAabbs {
     return { type: 'aabbs', boxes };
 }
 
-// ── rotation ────────────────────────────────────────────────────────
-//
-// rotate a block shape around the Y axis by steps × 90° CW
-// (viewed from +Y). rotation is around block center (0.5, y, 0.5).
-//
-// step 1: (x,y,z) → (z, y, 1-x)
-// step 2: (x,y,z) → (1-x, y, 1-z)
-// step 3: (x,y,z) → (1-z, y, x)
-
+// Y-axis rotation steps, viewed from +Y: step1 (x,y,z)->(z,y,1-x), step2->(1-x,y,1-z), step3->(1-z,y,x).
 function rotatePosY(x: number, y: number, z: number, steps: number): [number, number, number] {
     switch (steps) {
         case 1:
@@ -65,13 +49,7 @@ function rotateAabbY(box: AABB, steps: number): AABB {
     ];
 }
 
-/**
- * rotate a block shape around the Y axis by steps × 90° CW.
- * rotation is around block center (0.5, y, 0.5).
- *
- * @param shape - input shape (not mutated)
- * @param steps - rotation steps: 0=0°, 1=90° CW, 2=180°, 3=270° CW (viewed from +Y)
- */
+/** Rotates a block shape around the Y axis (viewed from +Y) in 90-degree CW steps (0..3), around block center (0.5, y, 0.5). Input shape is not mutated. */
 export function rotateY(shape: BlockShape, steps: number): BlockShape {
     const s = ((steps % 4) + 4) % 4;
     if (s === 0) return shape;
@@ -85,13 +63,8 @@ export function rotateY(shape: BlockShape, steps: number): BlockShape {
     }
 }
 
-// ── conversion to crashcat shapes ───────────────────────────────────
-//
-// called once at registry freeze time. not exported to user API.
-//
-// cube is intentionally absent, the registry handles cubes via the
+// called once at registry freeze time. cube is intentionally absent: the registry handles cubes via the
 // colliderId=0 sentinel and never builds a crashcat shape for them.
-
 export function blockShapeToShape(shape: Exclude<BlockShape, BlockShapeCube>): crashcat.Shape {
     if (shape.boxes.length === 1) {
         const b = shape.boxes[0]!;

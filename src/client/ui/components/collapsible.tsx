@@ -7,9 +7,6 @@ interface CollapsibleProps {
     children: ReactNode;
 }
 
-/**
- * Collapsible section with a trigger and content.
- */
 export function Collapsible({ open, onOpenChange, children }: CollapsibleProps) {
     return (
         <BaseCollapsible.Root open={open} onOpenChange={(next) => onOpenChange(next)}>

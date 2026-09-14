@@ -1,16 +1,3 @@
-/**
- * Origin-based node selection helper.
- *
- * Given a `Selection` bitmap, recompute `sel.nodes` so it contains exactly the
- * nodes whose visual origin sits inside the selected voxels. Used by the
- * shape-selection chat commands, the region-modification commands (so nodes
- * follow voxel transforms), and box-select.
- *
- * Approach: broadphase-narrow against the selection's AABB, then per-candidate
- * point-in-selection check on the floor of the world-space origin. Exact
- * shape-vs-AABB intersection is intentionally skipped, origin-point-in-set
- * is the contract; it tracks voxel selection exactly across all shape kinds.
- */
 import { type BodyVisitor, broadphase, type RigidBody } from 'crashcat';
 import type { Box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
@@ -42,11 +29,8 @@ const _collector = {
 } satisfies BodyVisitor & { nodeBodies: NodeBodies | null; nodeIds: number[]; reset(nb: NodeBodies): void };
 
 /**
- * Replace `sel.nodes` with the set of nodes whose visual world origin (floored
- * to a voxel) is set in `sel.chunks`. No-op for `sel.chunks` themselves.
- *
- * Pass `null` for physics/nodeBodies to clear nodes (e.g. when running on the
- * server or before bodies are registered).
+ * Replaces `sel.nodes` with nodes whose visual world origin (floored to a voxel) is set in `sel.chunks`.
+ * Pass `null` for physics/nodeBodies to clear nodes.
  */
 export function rebuildNodeSelection(
     sel: Selection.Selection,
@@ -60,8 +44,7 @@ export function rebuildNodeSelection(
     const b = Selection.bounds(sel);
     if (!b) return;
 
-    // +1 on the max so the AABB encloses voxel-aligned corners (matches the
-    // existing convention in commitBoxSelect).
+    // +1 on the max so the AABB encloses voxel-aligned corners.
     _queryBox[0] = b.min[0];
     _queryBox[1] = b.min[1];
     _queryBox[2] = b.min[2];

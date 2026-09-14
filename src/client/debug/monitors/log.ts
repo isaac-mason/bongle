@@ -18,7 +18,7 @@ export type LogOptions = {
     height?: number;
 };
 
-const LINE_H = 18; // fixed row height — virtualization needs a constant
+const LINE_H = 18; // fixed row height, virtualization needs a constant
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const fmtTime = (t: number) => {
@@ -26,12 +26,7 @@ const fmtTime = (t: number) => {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-/**
- * a read-only, tail-following log view over your own `(string | Log)[]` array —
- * you own it, dashcat renders. windowed-virtualized: only the ~visible rows
- * exist in the dom (a pool positioned by transform against a spacer), so the
- * cost is proportional to the viewport, not the scrollback. `max` can be huge.
- */
+/** a read-only, tail-following log view over your own `(string | Log)[]` array. Windowed-virtualized: only the ~visible rows exist in the dom, so `max` can be huge. */
 export function log(opts: LogOptions = {}): Control<LogEntry[]> {
     return (ctx, prop) => {
         const b = base<LogEntry[]>(ctx, prop, opts.label);

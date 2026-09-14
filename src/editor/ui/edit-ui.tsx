@@ -33,11 +33,8 @@ function isInputFocused(): boolean {
     return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable;
 }
 
-// renders the in-progress lasso stroke as an SVG polyline over the canvas.
-// the stroke is captured in NDC (x,y ∈ [-1, 1], y up). we use a
-// non-uniformly-scaled SVG viewbox (0..100 in both axes) so the polyline
-// stretches with the viewport, pixel-perfect alignment with the drawn
-// path because the lasso tool's hit-test is done in NDC too.
+// the viewBox maps NDC (-1..1) to 0..100 so the polyline stays pixel-aligned with the
+// lasso tool's hit-test, which is also done in NDC.
 function LassoOverlay() {
     const points = useEditRoom((s) => s.lasso?.points ?? null);
     if (!points || points.length < 2) return null;
@@ -64,7 +61,6 @@ function LassoOverlay() {
     );
 }
 
-// fly / orbit / character control mode toggle, floats top-right inside canvas
 function ControlModeWidget() {
     const controlMode = useEditRoom((s) => s.controlMode);
     const setControlMode = useEditRoom((s) => s.setControlMode);
@@ -101,10 +97,7 @@ function ControlModeWidget() {
     );
 }
 
-// slim drawer-pull tab on the right edge of the viewport. toggles the docked
-// right panel in and out. chevron points toward the motion: left (pull the
-// panel in) while collapsed, right (push it away) while open. sized with a
-// tall hit area so it's comfortable to tap on touch.
+// chevron points toward the motion: left (pull the panel in) while collapsed, right (push it away) while open.
 function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
     return (
         <button
@@ -118,32 +111,14 @@ function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggl
     );
 }
 
-/**
- * root editor layout.
- *
- *   ┌─────────────────────────────────────────┐
- *   │  TopToolbar                             │
- *   ├────┬────────────────────────────┬───────┤
- *   │Left│                            │ Right │
- *   │bar │   canvas viewport          │ panel │
- *   │    │   (ToolActions overlay)    │       │
- *   │    │   (ControlMode overlay)    │       │
- *   └────┴────────────────────────────┴───────┘
- *
- * left toolbar and right panel are normal flex siblings, they shrink the
- * actual 3d viewport. overlays (ToolActions, ControlModeWidget) are
- * absolute-positioned inside the canvas container. the first-person
- * crosshair is the engine's play-mode HUD widget, driven by the
- * PlayerControllerTrait that character mode installs, not editor chrome.
- */
+// the first-person crosshair is the engine's play-mode HUD widget, driven by the
+// PlayerControllerTrait that character mode installs, not editor chrome.
 const RIGHT_PANEL_MIN = 180;
 const RIGHT_PANEL_MAX = 600;
 const RIGHT_PANEL_DEFAULT = 350;
 
-// whether editor chrome (toolbars, panels, tools) is showing for the active
-// room. no lens: the editor script is on the player node itself, so the
-// player POV *is* the editor POV. with a lens, only the 'edit' POV exposes
-// the UI; switching to 'play' POV keeps the lens warm but hides chrome.
+// no lens: the player POV is the editor POV. with a lens, only the 'edit' POV shows chrome;
+// switching to 'play' POV keeps the lens warm but hides it.
 function editorChromeVisible(s: EditorStore): boolean {
     if (!s.room) return false;
     if (!s.playerEditStores[s.room.playerId]) return false;
@@ -162,37 +137,26 @@ function EditUI() {
         setRightPanelWidth((w) => Math.max(RIGHT_PANEL_MIN, Math.min(RIGHT_PANEL_MAX, w + dx)));
     }, []);
 
-    // the first time the user picks up touch as their input, adapt the editor
-    // defaults for a finger. runs once (a ref latch) so we never fight a user
-    // who undoes either choice by hand afterwards.
+    // adapts editor defaults for touch once (a ref latch), so it never fights a user who
+    // undoes either choice by hand afterwards.
     const inputMode = useClient((s) => s.inputMode);
     const adaptedForTouch = useRef(false);
     useEffect(() => {
         if (inputMode !== 'touch' || adaptedForTouch.current) return;
         adaptedForTouch.current = true;
-        // the docked right panel eats a big slice of a phone/tablet screen, so
-        // tuck it into its drawer and give the viewport the room.
         setRightPanelCollapsed(true);
-        // fly is pointer-lock-only (a finger can't lock it, so it's inert on
-        // touch); default a touch session to the player-controller instead
-        // (walk + on-screen HUD). only when the mode is still the untouched
-        // 'fly' default, so a hybrid user who picked orbit/character with a
-        // mouse keeps their choice.
+        // fly is pointer-lock-only and inert on touch; only override the untouched 'fly'
+        // default so a hybrid user who already picked orbit/character keeps their choice.
         const store = activeEditRoomStore();
         if (store.getState().controlMode === 'fly') store.getState().setControlMode('character');
     }, [inputMode]);
 
-    // global editor hotkeys, must work at the DOM layer because the editor
-    // script's per-frame onInput hook only fires when the editor module is
-    // active for the room. shift+` toggles the editor UI; TAB toggles
-    // play/stop on the active room.
+    // must work at the DOM layer: the editor script's per-frame onInput hook only fires
+    // when the editor module is active for the room.
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
-            // undo/redo routes to the active edit-room history here, at the DOM
-            // layer, so cmd/ctrl+z works even while a tool-option input (brush
-            // size, pattern, …) holds focus, preventDefault stops the field's
-            // native text-undo. handled before the isInputFocused bail for that
-            // reason; the game-loop input path leaves mod combos to us.
+            // handled before the isInputFocused bail so cmd/ctrl+z works even while a tool-option
+            // input holds focus; preventDefault stops the field's native text-undo.
             if (e.metaKey || e.ctrlKey) {
                 const key = e.key.toLowerCase();
                 if (key === 'z' || key === 'y') {
@@ -215,11 +179,9 @@ function EditUI() {
 
             if (isInputFocused()) return;
 
-            // plain backtick toggles the debug panel, for every room the editor
-            // hosts. the SINGLE owner of the key here: the editor's own input loop
-            // used to toggle it too, and a Shift+` lens on a play room runs both
-            // (the lens attaches EditorTrait locally), which toggled it twice in
-            // one press and left the panel looking dead.
+            // this is the single owner of plain backtick for every room the editor hosts: a
+            // Shift+` lens on a play room also runs the editor's own input loop locally, so a
+            // second toggle site here would double-fire and leave the panel looking dead.
             if (e.key === '`' && !e.shiftKey) {
                 e.preventDefault();
                 useClient.getState().toggleDebugOpen();
@@ -247,10 +209,8 @@ function EditUI() {
                 }
             }
 
-            // while editor chrome is showing (edit room, or a lensed play room
-            // on the edit POV) Enter belongs to the tools: rename, accept,
-            // box-select and placement commit. only `/` opens chat there.
-            // without chrome either key works, matching the play client.
+            // while editor chrome is showing, Enter belongs to the tools (rename, accept, box-select,
+            // placement commit); only '/' opens chat there. without chrome either key works.
             const opensChat = e.key === '/' || (e.key === 'Enter' && !editorChromeVisible(useEditor.getState()));
             if (opensChat && !useChatPanel.getState().isOpen) {
                 e.preventDefault();
@@ -262,82 +222,48 @@ function EditUI() {
     }, [engine]);
 
     return (
-        // color-scheme: dark makes native scrollbars (and form controls)
-        // render dark to match the editor theme; it inherits to every
-        // scroll container mounted below this root.
+        // colorScheme: dark makes native scrollbars and form controls match the editor theme;
+        // it inherits to every scroll container mounted below this root.
         <div className="fixed inset-0 flex flex-col" style={{ colorScheme: 'dark' }}>
             <TopToolbar />
 
-            {/* content area, fills remaining height */}
             <div className="flex-1 flex flex-row overflow-hidden">
-                {/* left tool strip */}
                 {editorEnabled && <LeftToolbar />}
 
-                {/* canvas viewport, flex-1 so it fills whatever space is left */}
                 <div className="flex-1 relative overflow-hidden flex flex-col">
                     <Viewport />
 
-                    {/* debug dashboard is plain DOM mounted straight to
-                        the DOM (client/ui/dashboard.ts), toggled by ` via the
-                        `debugOpen` store bit — nothing to render here. */}
-
-                    {/* in-canvas overlays, editor-enabled rooms only */}
                     {editorEnabled && (
                         <>
-                            {/* in-progress lasso stroke */}
                             <LassoOverlay />
-
-                            {/* right-click context menu over the viewport (opened from inspect tool) */}
                             <ViewportContextMenu />
-
-                            {/* tool-aware action buttons, top-left */}
                             <ToolActions />
-
-                            {/* control mode widget, top-right */}
                             <ControlModeWidget />
-
-                            {/* fly-speed indicator, fades in/out on scroll change */}
                             <FlySpeedIndicator />
-
-                            {/* control indicator, bottom-right, per equipped camera controller */}
                             <ControlHints />
-
-                            {/* orientation cube, bottom-left, gated by debug pane checkbox */}
                             {showOrientationCube && <OrientationCube />}
-
-                            {/* hotbar, bottom-center */}
                             <Hotbar />
-
-                            {/* library overlay, floating panel, conditional (E toggles) */}
                             <LibraryOverlay />
                         </>
                     )}
 
-                    {/* chat / slash commands, bottom-left, opens on '/' or 't'.
-                        rendered outside the editorEnabled gate so it works in
-                        play mode too. */}
+                    {/* rendered outside the editorEnabled gate so chat works in play mode too */}
                     <ChatPanel />
 
-                    {/* drawer-pull tab on the right edge, shows/hides the panel.
-                        floats over the canvas so it stays reachable while the
-                        panel is collapsed (mainly a touch affordance). */}
                     {editorEnabled && (
                         <RightPanelToggle collapsed={rightPanelCollapsed} onToggle={() => setRightPanelCollapsed((c) => !c)} />
                     )}
                 </div>
 
-                {/* right panel, collapsible into a drawer (auto-tucked on touch) */}
                 {editorEnabled && !rightPanelCollapsed && <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />}
             </div>
 
-            {/* carried-item cursor preview, follows mouse while picking up an inventory item */}
             {editorEnabled && <CarriedItemCursor />}
         </div>
     );
 }
 
-// floats the picked-up inventory item next to the cursor so the user can see
-// what they're carrying. clears itself when the store's carriedItem goes null.
+// clears itself when the store's carriedItem goes null.
 function CarriedItemCursor() {
     const carried = useEditRoom((s) => s.carriedItem);
     const setCarried = useEditRoom((s) => s.setCarriedItem);
@@ -370,13 +296,8 @@ function CarriedItemCursor() {
     );
 }
 
-/**
- * Mount the editor UI shell into the engine's DOM root and wire the page-level
- * editor pieces that live with the UI: the baked icon loaders, the document
- * clipboard listeners, and the editor's tab on the debug dashboard. Called from
- * `bongle/engine-client-editor`'s `setup(state)`, which only the edit-mode boot
- * template imports, so this chunk only ships in editor builds.
- */
+// called from bongle/engine-client-editor's setup(state), which only the edit-mode boot
+// template imports, so this chunk only ships in editor builds.
 export function mountEditUI(state: EngineClient): Root {
     loadEditorAssets(state);
     installEditorClientListeners();
@@ -392,7 +313,5 @@ export function mountEditUI(state: EngineClient): Root {
 
 export { useClient } from '../../client/ui/stores/client-store';
 export { useEditRoom } from '../edit-room-store';
-// keep these re-exports, script consumers and pane components import the
-// stores from here for convenience (matches the prior `client/ui/ui.tsx`
-// surface).
+// script consumers and pane components import the stores from this file for convenience.
 export { useEditor } from '../editor-store';

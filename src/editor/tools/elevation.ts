@@ -1,27 +1,3 @@
-// elevation tool, axiom-style heightmap sculpt.
-//
-// modes:
-//   raise   extend the top block upward inside the y-limit band.
-//   lower   clear top blocks to air.
-//   flatten drag every column under the disc toward the click y.
-//
-// apply modes:
-//   single      one stamp on click. strength = round(amount · falloff · image).
-//   continuous  per-column fractional accumulator integrated over time.
-//               each frame:  accum += rate · amount · falloff · image · dt.
-//               whenever floor(accum) advances, one block flips. center cells
-//               fill first, edges trail, natural smooth dome / valley shape.
-//
-// the disc footprint preview follows the cursor (idle) and tracks (x,z)
-// only during a stroke (y stays at click level, the y-limit pivot).
-//
-// crucial: the live voxel grid is NEVER mutated mid-stroke. ops accumulate
-// into state.forward/reverse and are committed atomically on release via
-// the action.do callback. mid-stroke, the projected delta cells are drawn
-// as cyan highlights via the brush selection, same render path as the
-// disc footprint. this keeps the raycast surface frozen for the whole
-// stroke so the cursor never climbs the hill it's building.
-
 import type { Input } from '../../client/input';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -46,10 +22,8 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     }
 }
 
-// ── falloff curves ────────────────────────────────────────────────
-// t ∈ [0,1) = distance from disc center / radius. all curves return 1
-// at t=0 and 0 at t=1; cosine has the smoothest boundary.
-
+// t = distance from disc center / radius, in [0,1). All curves return 1 at t=0
+// and 0 at t=1; cosine has the smoothest boundary.
 function falloff(t: number, kind: ElevationFalloff): number {
     if (t >= 1) return 0;
     switch (kind) {
@@ -64,10 +38,8 @@ function falloff(t: number, kind: ElevationFalloff): number {
     }
 }
 
-// ── image sampling ────────────────────────────────────────────────
-// nearest-neighbour. disc-local (dx,dz) ∈ [-size, +size] maps linearly
-// to image uv ∈ [0,1]. luminance is precomputed in loadElevationImage.
-
+// Nearest-neighbour. Disc-local (dx,dz) in [-size,+size] maps linearly to image
+// uv in [0,1]. Luminance is precomputed in loadElevationImage.
 function sampleImage(image: ElevationImage, dx: number, dz: number, size: number): number {
     const u = (dx / size + 1) * 0.5;
     const v = (dz / size + 1) * 0.5;
@@ -76,9 +48,7 @@ function sampleImage(image: ElevationImage, dx: number, dz: number, size: number
     return image.luminance[iy * image.width + ix] ?? 0;
 }
 
-// ── column scan ───────────────────────────────────────────────────
-// topmost non-air voxel inside [yLo, yHi]. null = empty column in band.
-
+// Topmost non-air voxel inside [yLo, yHi]; null means an empty column in the band.
 function findTopH(voxels: Voxels, wx: number, wz: number, yLo: number, yHi: number): { h: number; key: string } | null {
     for (let y = yHi; y >= yLo; y--) {
         const key = getBlock(voxels, wx, y, wz);
@@ -87,11 +57,8 @@ function findTopH(voxels: Voxels, wx: number, wz: number, yLo: number, yHi: numb
     return null;
 }
 
-// ── stroke state (continuous mode) ────────────────────────────────
-// per-column accumulator. captured on first contact during the stroke
-// (a column may enter the disc later via cursor drag, it starts then,
-// not at stroke-start).
-
+// Per-column accumulator, captured on first contact during the stroke (a column
+// dragged into the disc later starts then, not at stroke-start).
 type ColumnAccum = {
     /** topmost surface y in [yMin, yMax] when this column was first touched. */
     baselineH: number;
@@ -107,9 +74,8 @@ type ColumnAccum = {
     done: boolean;
 };
 
-/** per-room elevation stroke state. created once per edit room in
- *  EditorScript onInit and threaded into `updateElevation`, never
- *  module-scoped, so two joined rooms can't share one stroke. */
+/** Per-room elevation stroke state, created once per edit room and threaded
+ *  into `updateElevation`; never module-scoped, so two joined rooms don't share a stroke. */
 export type ElevationState = {
     active: boolean;
     mode: 'single' | 'continuous';
@@ -147,8 +113,6 @@ export function createElevationState(): ElevationState {
     };
 }
 
-// ── per-frame update ──────────────────────────────────────────────
-
 export function updateElevation(
     state: ElevationState,
     store: EditRoomStoreApi,
@@ -166,10 +130,8 @@ export function updateElevation(
     const hv = s.hoverVoxel;
     const now = performance.now();
 
-    // ── right-click cancel ──
-    // drop the projected delta + accumulators and clear the preview. the
-    // release branch below is gated on state.active so it won't commit
-    // when LMB eventually releases. mode-locked stroke opts also reset.
+    // The release branch below is gated on state.active, so clearing it here
+    // stops a later LMB release from committing this stroke.
     if (state.active && cancel) {
         state.active = false;
         state.opts = null;
@@ -181,7 +143,6 @@ export function updateElevation(
         return;
     }
 
-    // ── stroke start ──
     if (justDown && !state.active && hv) {
         state.active = true;
         state.mode = opts.applyMode;
@@ -196,16 +157,14 @@ export function updateElevation(
         state.version++;
 
         if (state.mode === 'single') {
-            // project the stamp into state.forward/reverse only, nothing
-            // hits the voxel grid until release. the cyan preview shows the
-            // affected cells via the brush selection below.
+            // Projects the stamp into state.forward/reverse only; nothing hits
+            // the voxel grid until release.
             const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
             applyElevationStamp(voxels, hv[0], hv[1], hv[2], opts, hv[1], active, state.forward, state.reverse);
             if (state.forward.length > 0) state.version++;
         }
     }
 
-    // ── continuous integration ──
     if (state.active && state.mode === 'continuous' && state.opts) {
         if (held && hv) {
             const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
@@ -216,13 +175,12 @@ export function updateElevation(
                 if (added > 0) state.version++;
             }
         } else {
-            // off-surface, don't accumulate, but advance the clock so re-entry
+            // Off-surface: don't accumulate, but advance the clock so re-entry
             // doesn't dump a giant delta.
             state.lastFrameMs = now;
         }
     }
 
-    // ── release: one action for the whole stroke ──
     if (state.active && (justUp || !held)) {
         const forward = state.forward;
         const reverse = state.reverse;
@@ -246,47 +204,20 @@ export function updateElevation(
         state.reverse = [];
     }
 
-    // ── preview ──
-    //
-    // idle:   disc footprint at the hover y, follows the cursor, tells the
-    //         user where the next click will land.
-    // stroke: drop the disc entirely; only the projected delta cells (the
-    //         "ghost terrain" the stroke will materialise on release) are
-    //         highlighted. the disc would just clutter the actual feedback
-    //         once a stroke is underway. since we never touched voxels
-    //         mid-stroke, the raycast surface (hv) stays anchored to the
-    //         original ground.
-    //
-    // tint reflects intent, warning colours override the default rainbow brush:
-    //   raise   → null  (flowing rainbow, additive)
-    //   lower   → red   (destructive)
-    //   flatten → amber (mixed-effect)
-    // a set tint points at a stable BRUSH_TINTS preset ref, so the uniform
-    // pushes exactly once per mode change (not per frame).
-    // stroke active → show the projected delta ghost, anchored to the click
-    // origin. doesn't need a live hover voxel (the cursor can wander off the
-    // terrain during a stroke without nuking the visual feedback).
-    // idle → needs hv to know where to draw the disc footprint.
+    // Idle shows the disc footprint at hover; mid-stroke shows the projected
+    // delta cells instead, since the grid isn't touched until release. Tint refs
+    // point at stable BRUSH_TINTS presets so the uniform updates only on mode change.
     const showStroke = state.active;
     const showIdle = !state.active && !!hv;
     if (showStroke || showIdle) {
         const size = Math.max(1, Math.floor(opts.size));
         const yLimit = Math.max(1, Math.floor(opts.yLimit));
-        // during a stroke the mode is locked to whatever was active at click;
-        // idle reads from the live UI setting so the tint previews the next
-        // click's behavior.
+        // During a stroke the mode is locked to whatever was active at click.
         const activeMode = state.active && state.opts ? state.opts.mode : opts.mode;
         const tint = activeMode === 'lower' ? BRUSH_TINTS.red : activeMode === 'flatten' ? BRUSH_TINTS.amber : null;
         const tintFill = tint?.fill ?? null;
         const tintEdges = tint?.edges ?? null;
-        // idle preview always marks the hit voxel (cy) so the user sees
-        // where the click lands, plus thin disc layers at the mode's reachable
-        // cap(s) so the y-limit band is visible:
-        //   raise   → disc at cy + cap at cy+yLimit
-        //   lower   → disc at cy + cap at cy-yLimit
-        //   flatten → disc at cy + caps at cy±yLimit
-        // the fill material's depthTest:false means even the disc at cy
-        // (inside terrain) still shows through.
+        // Fill material has depthTest:false, so the cap disc shows through terrain.
         const showUpCap = activeMode === 'raise' || activeMode === 'flatten';
         const showDownCap = activeMode === 'lower' || activeMode === 'flatten';
         const key = showStroke ? `stroke|${state.version}` : `idle|${hv![0]},${hv![1]},${hv![2]}|${size}|${yLimit}|${activeMode}`;
@@ -298,8 +229,8 @@ export function updateElevation(
                     Selection.set(sel, op.wx, op.wy, op.wz);
                 }
             } else {
-                // additive, buildShape clears, so we'd lose all but the last
-                // disc if we called it 2-3 times. inline the disc footprint.
+                // Inlined rather than built via a shape helper, since those clear
+                // the selection each call and would lose all but the last disc.
                 const cy = hv![1];
                 const rsq = size * size + size;
                 const addDisc = (y: number) => {
@@ -317,8 +248,7 @@ export function updateElevation(
             }
             store.setState({ brush: sel, brushFill: tintFill, brushEdges: tintEdges });
         } else if (store.getState().brushFill !== tintFill || store.getState().brushEdges !== tintEdges) {
-            // mode changed without the preview geometry changing, push the new
-            // tint refs anyway so the materials update.
+            // Mode changed without the preview geometry changing; push the tint anyway.
             store.setState({ brushFill: tintFill, brushEdges: tintEdges });
         }
     } else if (state.previewKey !== '') {
@@ -327,10 +257,8 @@ export function updateElevation(
     }
 }
 
-// ── single-shot stamp ─────────────────────────────────────────────
-// also reused by the /elevation region command, `flattenTargetY` is
-// the y for flatten mode (ignored for raise/lower).
-
+// Also reused by the /elevation region command. `flattenTargetY` is the target y
+// for flatten mode, ignored for raise/lower.
 function applyElevationStamp(
     voxels: Voxels,
     cx: number,
@@ -349,10 +277,8 @@ function applyElevationStamp(
     const yMax = cy + yLimit;
     const rng = Math.random;
 
-    // pickFill: source the fill block for raise / flatten-up. null pattern
-    // falls back to the column's existing top block (the natural terrain
-    // default, extend the surface up); otherwise sample the configured
-    // pattern at the cell being placed.
+    // No pattern falls back to the column's existing top block; otherwise sample
+    // the configured pattern at the cell being placed.
     function pickFill(wx: number, wy: number, wz: number, surfaceKey: string): string {
         if (!opts.pattern) return surfaceKey;
         return samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng);
@@ -414,8 +340,6 @@ function applyElevationStamp(
     }
 }
 
-// ── continuous integration ─────────────────────────────────────────
-
 function integrateContinuous(
     state: ElevationState,
     voxels: Voxels,
@@ -450,15 +374,11 @@ function integrateContinuous(
             const k = `${wx},${wz}`;
             let col = state.accum.get(k);
             if (!col) {
-                // baseline reads always hit the *original* grid, we never
-                // mutate during the stroke. that's the whole point: the
-                // raycast surface stays frozen and the cursor doesn't climb
-                // its own hill.
+                // Baseline reads always hit the original grid; the grid is never
+                // mutated during the stroke, so the raycast surface stays frozen.
                 const top = findTopH(voxels, wx, wz, yMin, yMax);
                 if (!top) continue;
-                // mask filters per-column at first contact (sampled on the
-                // surface cell). columns that fail are dropped entirely,
-                // they never get an accumulator entry.
+                // Columns that fail the mask at first contact never get an accumulator entry.
                 if (opts.mask && !testMask(opts.mask, voxels, wx, top.h, wz, rng)) continue;
                 let sign: 1 | -1;
                 if (opts.mode === 'raise') sign = 1;
@@ -520,11 +440,7 @@ function integrateContinuous(
     return added;
 }
 
-// ── image loader ──────────────────────────────────────────────────
-// PNG/JPG/etc via createImageBitmap, drawn to an OffscreenCanvas to
-// pull pixels. luminance via the perceptual coefficients (0.299R +
-// 0.587G + 0.114B), normalised to [0,1].
-
+// Luminance uses the perceptual coefficients (0.299R + 0.587G + 0.114B), normalised to [0,1].
 export async function loadElevationImage(file: File): Promise<ElevationImage> {
     const bitmap = await createImageBitmap(file);
     const w = bitmap.width;

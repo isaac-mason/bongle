@@ -5,9 +5,6 @@ type IconButtonProps = ComponentProps<'button'> & {
     variant?: 'default' | 'danger';
 };
 
-/**
- * Small icon-sized button for inline actions (remove, close, etc).
- */
 export function IconButton({ variant = 'default', className, ...props }: IconButtonProps) {
     const variantClass = variant === 'danger' ? 'text-fg-muted hover:text-danger' : 'text-fg-muted hover:text-fg';
 

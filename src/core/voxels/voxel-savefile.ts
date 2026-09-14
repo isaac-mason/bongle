@@ -1,27 +1,3 @@
-// voxel-savefile, disk persistence for Voxels chunk data.
-//
-// scope: filesystem boundary only (autosave, scene save, blueprint
-// export, room boot). NOT a generic wire codec, network transport of
-// chunk state goes through discovery.ts's chunk_full/chunk_ops messages
-// which read the live chunk by reference.
-//
-// distinction from a future "ser/des":
-//   - save/load (this file), converts to/from a portable byte form.
-//     `saveVoxels` compacts each chunk's palette in the OUTPUT bytes
-//     only; the live chunk is never mutated. `loadVoxels` replaces the
-//     target Voxels' chunks entirely.
-//   - ser/des (does not exist today), would be for in-memory or
-//     network transport. must never mutate the source. add only when a
-//     concrete consumer needs it.
-//
-// chunk data is stored with string-keyed palettes (stable across
-// registry rebuilds). the runtime numeric palette is rebuilt from
-// `palette` on load using the registry.
-//
-// per-chunk binary buffers (`blocks`, `light`) are gzip-compressed then
-// base64-encoded, palette indices repeat heavily so gzip typically buys
-// a 5-10× reduction on disk and over HMR.
-
 import { gunzipSync, gzipSync } from 'fflate';
 import type { Blocks } from './block-registry';
 import { resolveKey } from './block-registry';
@@ -39,8 +15,6 @@ import {
     type Voxels,
 } from './voxels';
 
-// ── save file format ────────────────────────────────────────────────
-
 export type SavedChunk = {
     /** string-keyed palette entries (stable across registry rebuilds) */
     palette: string[];
@@ -55,8 +29,6 @@ export type SavedChunk = {
 export type SavedVoxels = {
     chunks: Record<string, SavedChunk>;
 };
-
-// ── pack / unpack helpers (work in both node and browser) ──────────
 
 function bytesToBase64(bytes: Uint8Array): string {
     if (typeof Buffer !== 'undefined') {
@@ -96,18 +68,7 @@ function unpackChunkBytes(b64: string): Uint16Array {
     return new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
 }
 
-// ── save ────────────────────────────────────────────────────────────
-
-/**
- * produce a save-file payload from a Voxels instance.
- *
- * compacts each chunk's palette in the OUTPUT BYTES only, uses
- * `repackChunkSnapshot` so the live chunk's `paletteKeys`/`data` are
- * never mutated (see invariant on Chunk.paletteKeys).
- *
- * skips chunks whose nonAirCount is zero (all air), they're created
- * lazily by setBlock + ensureChunk but never pruned at runtime.
- */
+/** Compacts each chunk's palette in the output bytes only; the live chunk's paletteKeys/data are never mutated. Skips all-air chunks (nonAirCount === 0), which are never pruned at runtime. */
 export function saveVoxels(voxels: Voxels): SavedVoxels {
     const result: SavedVoxels = { chunks: {} };
 
@@ -125,15 +86,7 @@ export function saveVoxels(voxels: Voxels): SavedVoxels {
     return result;
 }
 
-// ── incremental save ────────────────────────────────────────────────
-//
-// the gzip-per-chunk in `saveVoxels` dominates flush cost on a big world.
-// `saveVoxelsIncremental` re-serializes only chunks whose persisted-data
-// `version` moved since the last flush, reusing cached bytes for the rest,
-// so an auto-flush after a small edit pays only for the chunks that changed.
-
-/** per-chunk serialized-byte cache, keyed by chunkKey. holds the bytes last
- *  written for a chunk and the `chunk.version` they were produced at. */
+/** per-chunk serialized-byte cache keyed by chunkKey; holds the bytes and the `chunk.version` they were produced at. */
 export type VoxelSaveCache = Map<string, { version: number; saved: SavedChunk }>;
 
 /** like `saveVoxels`, but reuses `cache` for chunks whose `version` is
@@ -146,7 +99,7 @@ export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): Sa
         if (chunk.nonAirCount === 0) continue;
         const cached = cache.get(key);
         if (cached && cached.version === chunk.version) {
-            result.chunks[key] = cached.saved; // unchanged, skip the re-gzip
+            result.chunks[key] = cached.saved;
             continue;
         }
         const snap = repackChunkSnapshot(chunk);
@@ -167,9 +120,7 @@ export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): Sa
     return result;
 }
 
-/** seed a save cache from a just-loaded scene so the first flush is already
- *  incremental, an unedited chunk reuses its on-disk bytes verbatim. call
- *  right after `loadVoxels` with the same payload. */
+/** Seeds a save cache from a just-loaded scene so the first flush reuses on-disk bytes for unedited chunks. Call right after `loadVoxels` with the same payload. */
 export function seedVoxelSaveCache(voxels: Voxels, saved: SavedVoxels): VoxelSaveCache {
     const cache: VoxelSaveCache = new Map();
     if (!saved.chunks) return cache;
@@ -180,13 +131,7 @@ export function seedVoxelSaveCache(voxels: Voxels, saved: SavedVoxels): VoxelSav
     return cache;
 }
 
-// ── load ────────────────────────────────────────────────────────────
-
-/**
- * load a save-file payload into a Voxels instance. replaces any
- * existing chunks on the instance. the registry is used to resolve
- * string keys to runtime numeric ids.
- */
+/** Replaces all chunks on `voxels`; the registry resolves string palette keys to runtime numeric ids. */
 export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks): void {
     if (!saved.chunks) return;
 
@@ -198,7 +143,7 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks)
     voxels.dirty.lightVolumeUrgent.clear();
 
     for (const [key, sc] of Object.entries(saved.chunks)) {
-        // parse chunk coords from key "cx,cy,cz"
+        // key format: "cx,cy,cz"
         const parts = key.split(',');
         if (parts.length !== 3) continue;
 
@@ -207,14 +152,10 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks)
         const cz = parseInt(parts[2]!, 10);
         if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(cz)) continue;
 
-        // decode blocks from base64+gzip
         const data = unpackChunkBytes(sc.blocks);
-
-        // sanity check
         if (data.length !== CHUNK_VOLUME) continue;
 
-        // decode baked light. missing/empty `light` field => dark world; the
-        // editor's rebake-light command repairs it.
+        // missing/empty light field means dark world until the editor's rebake-light command runs.
         let light: Uint16Array;
         if (sc.light) {
             const decoded = unpackChunkBytes(sc.light);

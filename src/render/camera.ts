@@ -1,31 +1,17 @@
-// The render camera: one gpucat PerspectiveCamera per backend, minted in the
-// backend's `create()` and exposed as `Renderer.camera`. It's a stable object
-// (created once, matrices updated in place) — the pass binds it, the client resolves
-// it per-frame for cull, the editor reads it. Resolution is pure gpucat camera math
-// (pose from a CameraTrait node, aspect from the viewport) — no device state — so it
-// lives here in backend-shared `common`; consumers get a plain Camera, never reach
-// through the backend for camera behaviour.
-
 import { PerspectiveCamera } from 'gpucat';
 import type { CameraTrait } from '../builtins/camera';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { getTrait } from '../core/scene/scene-tree';
 
-/** default vertical fov (radians); overwritten each frame by `syncCamera` from the
- *  active CameraTrait. */
+/** Default vertical fov in radians; overwritten each frame by `syncCamera` from the active CameraTrait. */
 const DEFAULT_FOV = 75 * (Math.PI / 180);
 
-/** Mint the backend's render camera. Called once in each backend's `create()`. */
+/** Mints the backend's render camera. Called once in each backend's `create()`. */
 export function createCamera(): PerspectiveCamera {
     return new PerspectiveCamera(DEFAULT_FOV);
 }
 
-/**
- * Compose `camera` from the active CameraTrait (and its sibling TransformTrait):
- * pose from the camera node's world transform; fov/near/far from the trait.
- * Projection rebuilds only on change. Idempotent — safe to call repeatedly per
- * frame. No-op when `cameraTrait` is null (no active POV).
- */
+/** Composes `camera` from the active CameraTrait and its sibling TransformTrait. Idempotent; no-op when `cameraTrait` is null. */
 export function syncCamera(camera: PerspectiveCamera, cameraTrait: CameraTrait | null): void {
     if (!cameraTrait) return;
     const cameraNode = cameraTrait._node;
@@ -61,10 +47,7 @@ export function syncCamera(camera: PerspectiveCamera, cameraTrait: CameraTrait |
     camera.updateViewMatrix();
 }
 
-/** Ensure `camera`'s aspect matches the display size. Projection rebuilds only on
- *  change; no-op on a zero size (keeps the last aspect). Aspect is a global property
- *  of the single shared display surface (one room renders at a time), so the client
- *  binds it once per frame from the viewport size rather than per camera-resolve. */
+/** Ensures `camera`'s aspect matches the display size; no-op on a zero size (keeps the last aspect). */
 export function bindAspect(camera: PerspectiveCamera, width: number, height: number): void {
     if (width <= 0 || height <= 0) return;
     const aspect = width / height;
@@ -74,12 +57,7 @@ export function bindAspect(camera: PerspectiveCamera, width: number, height: num
     }
 }
 
-/**
- * Resolve `camera` into the given room's live POV: sync pose/fov from `cameraTrait`,
- * return `camera`. Returns null when `cameraTrait` is null (no active POV) — the
- * camera is left untouched. Aspect is bound separately/globally via `bindAspect`.
- * Used by the client's per-frame cull + the editor tools + the backend's active-room drive.
- */
+/** Resolves `camera` into the given room's live POV, syncing pose/fov from `cameraTrait`. Returns null when `cameraTrait` is null; aspect is bound separately via `bindAspect`. */
 export function resolvePovCamera(camera: PerspectiveCamera, cameraTrait: CameraTrait | null): PerspectiveCamera | null {
     if (!cameraTrait) return null;
     syncCamera(camera, cameraTrait);

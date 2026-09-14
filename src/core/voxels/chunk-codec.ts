@@ -1,43 +1,14 @@
-// ── chunk codec ─────────────────────────────────────────────────────
-//
-// chunk_full payload pipeline:
-//   1. RLE encode data and light as two SEPARATE Uint16 streams
-//   2. concat them under a small length header (data bytes, light bytes)
-//      — this is packChunkStreams(), shared browser+server
-//   3. zstd compress the concatenation. the compress step is SERVER-ONLY
-//      (Node's native zlib zstd) and lives in server/, since only the server
-//      encodes chunks. the client only decodes.
-//
-// decoding: zstd decompress (vendored fzstd, see utils/fzstd), then read the
-// header and RLE decode each stream — decodeChunk() below.
-//
-// data and light are kept as separate streams rather than interleaved:
-// interleaving alternates two unrelated value distributions, which
-// shortens every RLE run and gives the compressor a noisier window. encoding
-// each channel's runs contiguously is both smaller (measured 1.4-6× on
-// structured chunks) and faster to decode. RLE before zstd still earns its
-// keep: it pre-collapses the long air/sky runs so zstd's window isn't spent
-// on them.
-//
-// the light-only codec (encodeLight/decodeLight, used by chunk_light) skips
-// compression entirely — decode cost was the dominant client concern, and RLE
-// alone captures most of the win for low-entropy light data. see notes above
-// encodeLight for the wire format.
-
 import { zstdDecompress } from '../utils/fzstd';
 import { CHUNK_VOLUME } from './voxels';
 
-// ── RLE ─────────────────────────────────────────────────────────────
-//
-// run-length encoding for Uint16Array. output is pairs of (value, count).
-// count is also uint16, so max run length is 65535. for chunks of 8192
-// elements (4096 data + 4096 light interleaved), this is always enough.
+// run-length encoding for Uint16Array: pairs of (value, count). count is
+// uint16, so max run length is 65535, always enough for a CHUNK_VOLUME stream.
 
 /** rle encode a uint16 array. returns (value, count) pairs as Uint16Array. */
 export function rleEncode(input: Uint16Array): Uint16Array {
     if (input.length === 0) return new Uint16Array(0);
 
-    // worst case: every value is different → 2 * input.length pairs
+    // worst case: every value is different, 2 * input.length pairs
     const pairs = new Uint16Array(input.length * 2);
     let pairCount = 0;
 
@@ -63,14 +34,10 @@ export function rleEncode(input: Uint16Array): Uint16Array {
     return pairs.subarray(0, pairCount);
 }
 
-// scratch buffer for the two production RLE call sites below (packChunkStreams's
-// data/light streams, encodeLight's sky/rgb streams) — sized for one
-// CHUNK_VOLUME-length stream's worst case (every element its own run). rleEncode()
-// above allocates that worst case fresh on every call and then throws most of it
-// away; reusing one persistent buffer and copying out only the real pair count
-// (rleEncodeScratch below) turns that into a single one-time allocation plus a
-// right-sized copy. mirrors Minecraft's CompressionEncoder, which reuses one
-// Deflater + one scratch byte[] across every packet rather than allocating per-call.
+// shared scratch buffer for the RLE call sites below, sized for one
+// CHUNK_VOLUME-length stream's worst case (every element its own run), so
+// rleEncodeScratch is a one-time allocation plus a right-sized copy instead of
+// a fresh worst-case buffer per call.
 const RLE_SCRATCH = new Uint16Array(CHUNK_VOLUME * 2);
 
 /** rle encode via the shared scratch buffer, returning a right-sized copy.
@@ -117,12 +84,9 @@ export function rleDecode(pairs: Uint16Array, outputLength: number): Uint16Array
     return output;
 }
 
-// ── compress / decompress ───────────────────────────────────────────
-
 // 8-byte header before the two RLE streams: data byte length, light byte
-// length (both uint32 LE). data starts at offset 8, light right after.
-// both stream offsets are even (header is 8 bytes, RLE streams are an
-// even number of bytes) so decode can view them as Uint16 without a copy.
+// length (both uint32 LE). data starts at offset 8, light right after. both
+// stream offsets are even so decode can view them as Uint16 without a copy.
 const CHUNK_HEADER_BYTES = 8;
 
 /** view a Uint16Array's used bytes (rleEncode returns a subarray view). */
@@ -138,21 +102,19 @@ function bytesAsU16(bytes: Uint8Array): Uint16Array {
         : new Uint16Array(bytes.slice().buffer);
 }
 
-/** a zstd implementation, supplied by whoever runs the server (Node native
- *  zstd, or zstd-wasm in the browser editor / cli dev loop) and injected into
- *  encodeChunk, so this browser-safe module never hard-depends on a particular
- *  zstd build. only `compress` today — the client decodes with fzstd — but the
- *  object shape leaves room for a `decompress` sibling. */
+/** a zstd implementation, injected into encodeChunk so this browser-safe
+ *  module never hard-depends on a particular zstd build. only `compress`
+ *  today, the client decodes with fzstd. */
 export type Zstd = { compress: (payload: Uint8Array, level: number) => Uint8Array };
 
-// zstd level for chunk_full snapshots. level 6 encodes cheaper than the old
-// deflate path with comparable size, and each snapshot is cached after the
-// first build — raise it if egress matters more than server CPU. decode cost is
-// essentially level-independent, so this only trades encode CPU against bytes.
+// each snapshot is cached after the first build; raise this if egress matters
+// more than server CPU (decode cost is essentially level-independent).
 const CHUNK_ZSTD_LEVEL = 6;
 
 /** pack a chunk's data + light into the pre-compression byte payload: two RLE
- *  streams under an 8-byte length header. */
+ *  streams under an 8-byte length header. kept as separate streams rather than
+ *  interleaved so each channel's runs stay contiguous (measured 1.4-6x smaller
+ *  on structured chunks than an interleaved stream). */
 function packChunkStreams(data: Uint16Array, light: Uint16Array): Uint8Array {
     const dataBytes = u16Bytes(rleEncodeScratch(data));
     const lightBytes = u16Bytes(rleEncodeScratch(light));
@@ -189,18 +151,11 @@ export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light:
     return { data, light };
 }
 
-// ── light codec ─────────────────────────────────────────────────────
-//
-// chunk_light payloads split the packed (sky << 12) | rgb light value into
-// two streams before RLE. sky and rgb run under very different distributions,
-// sky correlates with the heightmap (long horizontal runs of 15 above terrain,
-// 0 below), rgb is mostly zero except near emitters. a combined-uint16 RLE
-// breaks runs whenever either channel changes; the split keeps each channel's
-// natural run structure intact.
-//
-// no zstd. light entropy is low enough that RLE alone captures the bulk of the
-// compression win, and the decompress step is the dominant decode cost — not
-// worth paying it here. wire format is rleEncode'd Uint16Array reinterpreted as bytes.
+// chunk_light payloads split the packed (sky << 12) | rgb value into two
+// streams before RLE: sky and rgb run under very different distributions
+// (sky correlates with the heightmap, rgb is mostly zero), so a combined RLE
+// would break a run whenever either channel changes. no zstd here: RLE alone
+// captures most of the win for low-entropy light data.
 
 /** view a Uint16Array's underlying bytes, typically the result of rleEncode
  *  ready to send on the wire as a uint8Array pack field. */

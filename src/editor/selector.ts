@@ -1,12 +1,3 @@
-// selector.ts, scene raycast for the inspect tool.
-//
-// casts a ray against all raycaster-able things in a scene and returns
-// all hits sorted by distance. consumers filter by type.
-//
-// node hits use the crashcat broadphase (editor node bodies layer) for
-// efficient spatial queries instead of iterating all nodes manually.
-// voxel hits still use the DDA voxel raycast.
-
 import { CastRayStatus, createAllCastRayCollector, createDefaultCastRaySettings, castRay as queryCastRay } from 'crashcat';
 import type { Vec3 } from 'math';
 import type { Physics } from '../core/physics/physics';
@@ -16,8 +7,6 @@ import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-ra
 import type { Voxels } from '../core/voxels/voxels';
 import type { NodeBodies } from './node-bodies';
 import { nodeIdForBody } from './node-bodies';
-
-// ── hit types ───────────────────────────────────────────────────────
 
 export type VoxelHit = {
     kind: 'voxel';
@@ -46,22 +35,13 @@ export type NodeHit = {
 
 export type SelectorHit = VoxelHit | NodeHit;
 
-// ── scratch allocations ─────────────────────────────────────────────
-
 const _voxelResult = createVoxelRaycastResult();
 const _origin: Vec3 = [0, 0, 0];
 const _direction: Vec3 = [0, 0, 0];
 const _rayCollector = createAllCastRayCollector();
 const _raySettings = createDefaultCastRaySettings();
 
-// ── castRay ──────────────────────────────────────────────────────────
-
-/**
- * cast a ray through the scene and return all hits sorted nearest-first.
- * node hits come from the crashcat broadphase (editor node bodies layer).
- * voxel hits come from the DDA voxel raycast.
- * callers are responsible for any further filtering (player exclusion etc).
- */
+/** returns all hits sorted nearest-first; callers are responsible for any further filtering (player exclusion etc). */
 export function castRay(
     physics: Physics,
     nodeBodies: NodeBodies,
@@ -77,7 +57,6 @@ export function castRay(
 ): SelectorHit[] {
     const hits: SelectorHit[] = [];
 
-    // ── voxel raycast ────────────────────────────────────────────────
     const vr = _voxelResult;
     raycastVoxels(vr, voxels, voxels.registry, ox, oy, oz, dx, dy, dz, maxDist, 0);
     if (vr.hit && vr.distance <= maxDist) {
@@ -98,7 +77,6 @@ export function castRay(
         });
     }
 
-    // ── node raycast via crashcat broadphase ─────────────────────────
     _origin[0] = ox;
     _origin[1] = oy;
     _origin[2] = oz;

@@ -1,20 +1,3 @@
-// api/storage.ts, script-facing persistent KV.
-//
-// Two scopes (matching the service tables `project_storage` /
-// `project_user_storage`):
-//   - `projectStorage.*`, project-scoped, shared across all rooms/players.
-//     Use for leaderboards, world state, season buckets.
-//   - `userStorage.*`, (project, user)-scoped, private to one player.
-//     Use for inventory, progression, settings.
-//
-// Server-only. Calling from a client context throws. Backed by the
-// `ServerDriver.storage` handle wired at engine init: HTTP in deployed
-// rooms, in-memory in bongle-dev / editor.
-//
-// Both surfaces are CAS-safe: pass `opts.ifVersion` on set/delete to
-// guard against concurrent overwrites. The version is returned by
-// every get/set call; treat it as opaque.
-
 import type {
     JsonValue,
     StorageDeleteResult,

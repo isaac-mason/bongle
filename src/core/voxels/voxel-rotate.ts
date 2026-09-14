@@ -1,19 +1,3 @@
-// voxel-rotate.ts, rotate a Voxels instance by an arbitrary quaternion,
-// snapping to the nearest 90-degree orientation.
-//
-// pipeline (runtime, per call):
-//   1. project the three basis vectors through q → integer 3×3 matrix R
-//      (R describes the snapped cube rotation: identity, or one of 23 others)
-//   2. look up R in CUBE_ROTATIONS → a sequence of single-axis 90° turns
-//      (e.g. ['y', 'x']) that composes to R
-//   3. walk all non-air voxels: remap position via R, rotate each block's
-//      state by replaying the sequence through rotateBlockKey
-//   4. shift so min-corner = (0,0,0), return a fresh Voxels
-//
-// the table is built once at module load, see CUBE_ROTATIONS below.
-//
-// no client imports, safe to use in core/ and server/ contexts.
-
 import type { Quat, Vec3 } from 'math';
 import { vec3 } from 'math';
 import type { RotAxis } from './block-orient';
@@ -25,19 +9,12 @@ import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock } from './vox
 // scratch vec3 for basis projection, avoids allocations in the hot path
 const _scratch: Vec3 = [0, 0, 0];
 
-// ── public api ────────────────────────────────────────────────────
-
 /**
- * rotate voxels by the given quaternion, snapping to the nearest 90-degree
- * orientation. returns a fresh Voxels instance; the original is not mutated.
- * the returned voxels are shifted so the min-corner of the AABB sits at (0,0,0).
- *
- * per-block state (stair facing, fence connections, etc.) rotates by replaying
- * the snapped rotation as a sequence of 90° single-axis turns through each
- * block's `rotate` hook (or the prop-name convention fallback).
+ * Rotates voxels by the given quaternion, snapped to the nearest 90-degree orientation. Returns a fresh Voxels shifted so the AABB min-corner sits at (0,0,0); the original is untouched.
+ * Per-block state rotates by replaying the snapped rotation as single-axis 90-degree turns through each block's `rotate` hook (or the prop-name convention fallback).
  */
 export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: Blocks): Voxels {
-    // basis projection → integer rotation matrix columns
+    // basis projection, produces an integer rotation matrix's columns
     _scratch[0] = 1;
     _scratch[1] = 0;
     _scratch[2] = 0;
@@ -118,19 +95,9 @@ export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: Blocks): V
     return out;
 }
 
-// ── cube-rotation lookup table ────────────────────────────────────
-//
-// CUBE_ROTATIONS maps each of the 24 proper cube rotations to a sequence
-// of 90°-CW single-axis turns that produces it. built once at module load.
-//
-// runtime cost is one Map.get per rotateVoxelsByQuat call.
-//
-// the table is generated, not hand-written: at module load we enumerate
-// 4×4×4 combinations of (Y-turns, X-turns, Y-turns) and store the first
-// one that yields each unique matrix. YXY covers all 24 cube rotations
-// (a known property of the cube's rotation group). first match wins;
-// later combinations producing the same matrix are skipped.
-
+// CUBE_ROTATIONS maps each of the 24 proper cube rotations to the sequence of 90-degree single-axis turns that
+// produces it, generated once at module load by enumerating YXY combinations (covers all 24 rotations) and
+// keeping the first match per unique matrix.
 function matKey(
     a00: number,
     a10: number,
@@ -145,10 +112,9 @@ function matKey(
     return `${a00},${a10},${a20},${a01},${a11},${a21},${a02},${a12},${a22}`;
 }
 
-// 90°-CW (looking down +axis) rotation matrices, columns = rotated basis vectors.
-// derived to match the existing block-collider / blueprint convention:
-//   R_Y_CW:  +X → -Z, +Y → +Y, +Z → +X
-//   R_X_CW:  +X → +X, +Y → -Z, +Z → +Y
+// 90-degree CW (looking down +axis) rotation matrices, columns = rotated basis vectors; matches the block-collider/blueprint convention.
+// R_Y_CW: +X -> -Z, +Y -> +Y, +Z -> +X
+// R_X_CW: +X -> +X, +Y -> -Z, +Z -> +Y
 const R_Y_CW = [
     [0, 0, 1],
     [0, 1, 0],

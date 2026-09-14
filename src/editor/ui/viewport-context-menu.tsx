@@ -1,13 +1,3 @@
-// viewport-context-menu.tsx, right-click menu over the 3D viewport.
-//
-// the inspect tool tick decides when to open the menu (raycast + select on
-// empty space, gate out drags/place/grab) and writes screen-pixel coords into
-// store.viewportContextMenu. this component renders a 1×1 anchor at those
-// coords inside the viewport container; a controlled DropdownMenu anchors its
-// content to that point. (radix ContextMenu positions from native contextmenu
-// events, so it can't be opened programmatically with a known coordinate,
-// hence DropdownMenu, which anchors to its trigger's bounding box.)
-
 import { useCallback, useMemo } from 'react';
 import * as Icons from '../../../icons';
 import {
@@ -59,8 +49,7 @@ export function ViewportContextMenu() {
         if (!next) close();
     };
 
-    // single-node selection unlocks node-specific ops (duplicate, bake).
-    // for multi-select, only `node` is null and the shared entries hide them.
+    // for multi-select, node is null and the shared entries hide single-node ops (duplicate, bake).
     const singleNodeId = nodeCount === 1 ? (selectedNodeIds.values().next().value as number) : null;
     const singleNode = singleNodeId !== null && sceneGraph ? (sceneGraph.idToNode.get(singleNodeId) ?? null) : null;
 

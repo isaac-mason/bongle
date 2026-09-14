@@ -1,23 +1,12 @@
-// ── mesh tasks packet (v2: delta-synced worker chunk cache) ─────────
-//
-// One transferable buffer (packcat) shipped to a mesh worker each dispatch. The
-// worker keeps a persistent, versioned mirror of the chunks it meshes; main
-// streams deltas to keep it current:
-//   - set:    create/update mirror entries (a chunk the worker lacks at the
-//             current `version`). carries the full chunk data (blocks + light +
-//             palette).
-//   - delete: evict mirror entries (chunk unloaded, or — later — LRU pressure).
-//   - tasks:  chunks to mesh; their neighbourhood is guaranteed present in the
-//             worker mirror after `set`/`delete` apply.
-//
-// Unchanged chunks are never re-sent. Coherency: the worker is a passive store,
-// main is authoritative and tracks a per-worker mirror; a worker crash (or an
-// active-room swap, via `clearCache`) clears that mirror. See
-// llm/plan-mesh-worker-chunk-cache.md.
-
 import { build, int32, list, object, uint16Array, uint32 } from 'packcat';
 import { CHUNK_VOLUME } from './voxels';
 
+/**
+ * One transferable packet shipped to a mesh worker each dispatch. `set` creates/updates mirror entries the
+ * worker's chunk cache lacks at the current version (full chunk data); `delete` evicts entries; `tasks` are
+ * chunks to mesh, whose neighbourhood is guaranteed present in the mirror after `set`/`delete` apply.
+ * Unchanged chunks are never re-sent; main is authoritative over the per-worker mirror.
+ */
 export const meshTasksSchema = object({
     set: list(
         object({
@@ -38,13 +27,11 @@ const { packInto, unpack } = build(meshTasksSchema);
 
 export { packInto as packMeshTasks, unpack as unpackMeshTasks };
 
-/** decoded packet (packcat unpack — set data/light are freshly-allocated
- *  Uint16Arrays that become the worker's cache entries; palette a number[]). */
+/** decoded packet; set data/light are freshly-allocated Uint16Arrays that become the worker's cache entries, palette a number[]. */
 export type MeshTasks = ReturnType<typeof unpack>;
 /** one `set` entry (a full chunk snapshot). */
 export type MeshTaskSet = MeshTasks['set'][number];
 
-/** scratch size for one packet. worst case is a cold neighbourhood (27 full
- *  chunks × ~16 KB); warm deltas are tiny. packInto returns ok:false on
- *  overflow and the caller leaves the chunk dirty to retry. */
+/** scratch size for one packet. worst case is a cold neighbourhood (27 full chunks at ~16 KB each); warm deltas
+ *  are tiny. packInto returns ok:false on overflow and the caller leaves the chunk dirty to retry. */
 export const MESH_TASKS_SCRATCH_BYTES = 640 * 1024;

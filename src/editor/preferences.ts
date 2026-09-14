@@ -1,23 +1,8 @@
-/**
- * editor preferences, anything we want to persist across editor sessions
- * (hotbar slots, inspector rotation mode, etc.).
- *
- * each project's editor runs on its own dev-server origin, so per-origin
- * localStorage already isolates per-project preferences, no extra
- * namespacing needed here.
- *
- * add a new pref by putting its key + load/save pair in this file.
- */
-
 import type { EulerOrder } from 'math';
 import { emptyHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
 
-// ── low-level helpers ────────────────────────────────────────────────
-
-// Sandboxed iframes (the deployed game-client) expose `localStorage`
-// as a property but throw SecurityError on actual access, so a
-// `typeof` guard alone isn't enough; the read/write itself has to be
-// wrapped. Same envelope handles disabled-storage / quota-exceeded.
+// sandboxed iframes (the deployed game-client) expose localStorage as a property but throw
+// SecurityError on actual access, so the read/write itself has to be wrapped, not just typeof-guarded.
 function readString(key: string): string | null {
     try {
         if (typeof localStorage === 'undefined') return null;
@@ -54,8 +39,6 @@ function writeJson(key: string, value: unknown): void {
     }
 }
 
-// ── hotbar slots ─────────────────────────────────────────────────────
-
 const HOTBAR_KEY = 'blocks-editor-hotbar';
 
 /** whether a hotbar has ever been persisted, distinguishes a first-run editor
@@ -83,8 +66,6 @@ export function loadHotbar(): HotbarSlot[] {
 export function saveHotbar(slots: HotbarSlot[]): void {
     writeJson(HOTBAR_KEY, slots);
 }
-
-// ── inspector rotation mode ─────────────────────────────────────────
 
 export type InspectorRotationMode = 'quat' | EulerOrder;
 

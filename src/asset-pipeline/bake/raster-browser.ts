@@ -1,7 +1,3 @@
-// the browser Raster impl (OffscreenCanvas / createImageBitmap / convertToBlob),
-// the image analogue of decode-audio-browser.ts. Runs in a worker — no DOM
-// canvas. The node impl (@napi-rs/canvas) is a sibling the pipeline CLI injects.
-
 import type { Raster, RasterCanvas, RasterContext2D } from './raster';
 
 export function createBrowserRaster(): Raster {

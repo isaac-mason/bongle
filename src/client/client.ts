@@ -53,27 +53,14 @@ import * as VoxelNet from './voxel-net';
 
 export type InitOptions = {
     mode: 'edit' | 'play';
-    /**
-     * Transport for actions a script triggers on the client that need to
-     * exit the engine, currently just `client.matchmake` (re-enter matchmaking
-     * with new options/joinData). bongle dev wraps a `play` message send;
-     * deployed (game-client/poki) wraps the iframe-parent bridge so the
-     * parent disposes + re-enqueues. Always
-     * supplied: assemblers construct one at boot.
-     */
+    /** Transport for client actions that need to exit the engine, currently just
+     *  `client.matchmake`. bongle dev wraps a `play` message send; deployed shells
+     *  wrap the iframe-parent bridge so the parent disposes + re-enqueues. */
     driver: ClientDriver;
-    /**
-     * The environment's resource-loading bag, byte loading (model bins, atlas
-     * PNGs, ...) plus the optional image decoder. Browser boot templates pass
-     * `browserResourceLoader`; the asset pipeline passes a disk + sharp loader.
-     * Required so engine-client owns no environment-specific I/O.
-     */
+    /** The environment's resource-loading bag (byte loading, optional image decoder),
+     *  so engine-client owns no environment-specific I/O. */
     resourceLoader: ResourceLoader;
-    /**
-     * The element the engine mounts its UI root into. Full-page boot templates
-     * pass `document.body`; a library consumer embedding the engine into a page
-     * it doesn't own passes its own container so nothing lands on the page body.
-     */
+    /** The element the engine mounts its UI root into. */
     domElement: HTMLElement;
 };
 
@@ -110,8 +97,7 @@ export function init(opts: InitOptions) {
     const transfer = Transfer.init();
     const profiler = Debug.createProfiler(useClient.getState().debugOpen);
 
-    // resolved during load(): the GPU renderer, the decoded audio atlas, the
-    // server's inbound decode table, and the performance tier + budgets.
+    // resolved during load(): renderer, decoded audio atlas, inbound decode table, perf tier
     const renderer: Renderer = null!;
     const audioResources: Audio.AudioResources = null!;
     const inbound: InboundProtocol = null!;
@@ -199,42 +185,33 @@ function mountDisplayCanvas(state: EngineClient): void {
 }
 
 export async function load(state: EngineClient) {
-    // Kick the boot downloads off before the backend import + device handshake,
-    // which they'd otherwise queue behind: nothing below needs them until
-    // `loadResources`, and `loadBytes` picks up whatever is already in flight.
-    // The manifests are fetched on every boot regardless, so prefetching them
-    // adds no request. The payloads are gated on the registry declaring
-    // content (populated at module eval, before this runs), so a game with no
-    // blocks or no sprites doesn't 404 on an atlas the pipeline never emitted.
+    // fire these before the backend import + device handshake, which they'd otherwise
+    // queue behind; the payloads are gated on the registry declaring content, so a game
+    // with no blocks or sprites doesn't 404 an atlas the pipeline never emitted
     const { loader } = state.resources;
     loader.prefetch?.('voxels-atlas.json');
     loader.prefetch?.('sprites-atlas.json');
     loader.prefetch?.('audio-manifest.json');
     if (registry.tiles.byId.size > 0) {
         loader.prefetch?.('voxels-atlas.png');
-        // the baked mip chain: fixed names, so the fetches can start before
-        // the manifest that counts them resolves.
         for (let level = 1; level <= 4; level++) loader.prefetch?.(`voxels-atlas.${level}.png`);
     }
     if (registry.sprites.byId.size > 0) loader.prefetch?.('sprites-atlas.png');
 
-    // load-split the backend + run the device handshake (falls back WebGPU->WebGL2)
-    // before anything touches the renderer.
+    // load-split the backend + run the device handshake (falls back WebGPU->WebGL2) before
+    // anything touches the renderer
     const { renderer, caps } = await loadRenderBackend();
     state.renderer = renderer;
     useClient.getState().setRenderer(renderer);
 
-    // Tell the host which backend we actually landed on. It chose one (by probing
-    // the device) and handed it in; this is the only way it learns that we had to
-    // fall back, so the next boot can start where this one ended up.
+    // tell the host which backend we landed on, since it only probed and doesn't
+    // otherwise learn that we had to fall back
     state.driver.graphics?.started(renderer.kind);
 
-    // a lost GPU device invalidates every resource; recreation isn't wired, so
-    // halt the frame loop and tell the user to reload.
+    // a lost GPU device invalidates every resource; recreation isn't wired, so halt
+    // the frame loop and tell the user to reload
     renderer.onDeviceLost = (info) => {
         state.deviceLost = true;
-        // Report before the user reloads, so the reload doesn't land on the backend
-        // that just died.
         state.driver.graphics?.deviceLost(renderer.kind);
         console.error(
             `[engine] render device lost (${info.api})${info.reason ? `: ${info.reason}` : ''}. ` +
@@ -242,31 +219,27 @@ export async function load(state: EngineClient) {
         );
     };
 
-    // user modules registered before this; build the derived index fields once.
     reindexRegistry(registry);
 
-    // safe default until the server's first wire_table lands (which arrives before
-    // any packed payload, so this is overwritten before join_room decodes).
+    // safe default until the server's first wire_table lands, which arrives before any
+    // packed payload so this is overwritten before join_room decodes
     state.inbound = localInbound(registry);
 
     seedModels(state);
 
-    // populate any scene handle whose authored payload was stamped at module-eval.
     for (const [sceneId, handle] of registry.scenes.byId) {
         if (handle._payload) applyScenePayload(state, sceneId, handle._payload);
     }
 
-    // device is live; resolve the tier + budgets that every subsystem below derives
-    // from. everything past here may call into gpucat.
+    // device is live; resolve the tier + budgets every subsystem below derives from
     state.perf = Performance.resolve(caps);
     Performance.log(state.perf);
 
     state.renderer.initResources({ blockRegistry: registry.blockRegistry, voxelBudget: state.perf.voxelBudget });
 
-    // sprite atlas metadata must be resident before the backend's atlas load reads it.
+    // sprite atlas metadata must be resident before the backend's atlas load reads it
     state.resources.spriteAtlas = await loadAtlasMetadata(state.resources.loader);
 
-    // async pass: backend pre-warms pipelines + fetches atlases; audio races alongside.
     const [audioResources] = await Promise.all([
         Audio.loadResources(state.resources.loader),
         state.renderer.loadResources({
@@ -276,7 +249,7 @@ export async function load(state: EngineClient) {
         }),
     ]);
     state.audioResources = audioResources!;
-    // the AudioContext boots suspended; wake it on the first user gesture.
+    // the AudioContext boots suspended; wake it on the first user gesture
     Audio.installGestureUnlock(state.audioResources);
 
     mountDisplayCanvas(state);
@@ -286,8 +259,7 @@ export async function load(state: EngineClient) {
     useClient.getState().setClientProfiler(state.profiler);
     useClient.getState().setInputManager(state.inputManager);
 
-    // drop the `added` events from initial declarations so the first HMR flush
-    // logs only real deltas. (UI mounting is the boot template's job.)
+    // drop the `added` events from initial declarations so the first HMR flush logs only real deltas
     Registry.clearPendingChanges([
         registry.tiles,
         registry.blocks,
@@ -314,8 +286,7 @@ function processInbox(state: EngineClient): void {
     for (let channel = 0; channel < state.net.inbox.length; channel++) {
         const frames = state.net.inbox[channel];
         for (const frame of frames) {
-            // decode the frame back into a message batch; fragments of a big batch
-            // may span ticks, so the reassembler persists in net state.
+            // fragments of a big batch may span ticks, so the reassembler persists in net state
             let messages: Uint8Array[] | null;
             try {
                 messages = acceptFrame(state.net.reassemblers[channel], frame);
@@ -339,9 +310,7 @@ function processInbox(state: EngineClient): void {
                     (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength,
                 );
 
-                // one malformed/unexpected message must never take down the whole
-                // tick loop (mirrors the framing-layer guard above). log it, skip
-                // that message, keep draining — rendering/input/net stay alive.
+                // one malformed/unexpected message must never take down the whole tick loop
                 try {
                     dispatchInboundMessage(state, message);
                 } catch (err) {
@@ -358,16 +327,14 @@ function processInbox(state: EngineClient): void {
 function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMessage): void {
     switch (message.type) {
         case 'join_room':
-            // (re)joined: force a manifest resend + re-subscribe (server dropped
-            // both on disconnect) now that our ClientState exists again over there.
+            // (re)joined: force a manifest resend + re-subscribe, since the server dropped both on disconnect
             Manifest.reset(state.manifest);
             Telemetry.resetSubscriptions(state.telemetry);
             Rooms.applyJoinRoom(state, message);
             break;
 
         case 'server_clock':
-            // fold the push into each room's clock against `wall` (the same
-            // render-behind base syncServer reads, advanced up front this frame).
+            // fold against `wall`, the same render-behind base syncServer reads
             for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
                 Clock.observeSample(room.clock, message.serverClock, room.clock.wall);
             }
@@ -399,9 +366,8 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
             break;
 
         case 'voxel_chunk_full': {
-            // PROMOTION channel: an already-known chunk re-sent in full. fixed-rate,
-            // not adaptive (see discovery.ts), so unlike voxel_region_full below this
-            // isn't timed for pacing.
+            // promotion channel, an already-known chunk re-sent in full at a fixed rate
+            // (see discovery.ts), so unlike voxel_region_full below this isn't timed for pacing
             const room = state.rooms.rooms.get(message.playerId);
             if (room) VoxelNet.applyChunkFull(state.voxelNet, room.voxels, message);
             break;
@@ -410,9 +376,8 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
         case 'voxel_region_full': {
             const room = state.rooms.rooms.get(message.playerId);
             if (room) {
-                // timed for adaptive pacing: this player's ack (flushed at the end of
-                // processInbox) reports the resulting smoothed decode rate so the
-                // server can size dispatchRegionFull's per-tick budget accordingly.
+                // timed for adaptive pacing: the ack (flushed at end of processInbox) reports
+                // the smoothed decode rate so the server can size its per-tick budget
                 const decodeStart = performance.now();
                 VoxelNet.applyRegionFull(state.voxelNet, room.voxels, message);
                 VoxelNet.recordRegionDecodeTime(state.voxelNet, message.playerId, performance.now() - decodeStart);
@@ -457,8 +422,7 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
             break;
 
         case 'register_model':
-            // server-authoritative runtime model; serverUrl is unused on the client
-            // but required by the shape, so mirror clientUrl into it.
+            // serverUrl is unused on the client but required by the shape, so mirror clientUrl into it
             Resources.setModel(state.resources, message.id, {
                 clientUrl: message.clientUrl,
                 serverUrl: message.clientUrl,
@@ -481,13 +445,9 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
     }
 }
 
-/**
- * apply an authored scene payload to its handle and re-populate scene state.
- * called from `load()` (cold-load drain of `module.scenes`) and from the dev
- * boot template's `bongle:scene-update` HMR listener. mirror of the server
- * function in `server/engine-server.ts`, the client variant has no
- * ContentManager / disk seed (server-only concern).
- */
+/** Apply an authored scene payload to its handle and re-populate scene state. Called from
+ *  `load()` and the dev boot template's `bongle:scene-update` HMR listener; mirrors the
+ *  server function in `server/engine-server.ts` minus the disk-seed concern. */
 export function applyScenePayload(state: EngineClient, id: string, payload: Content.ScenePayload): void {
     const previous = registry.scenes.byId.get(id);
     if (!previous) return;
@@ -495,10 +455,8 @@ export function applyScenePayload(state: EngineClient, id: string, payload: Cont
     Registry.setScenePayload(id, payload);
 }
 
-/**
- * clear an authored scene from its handle. called from the dev boot
- * template's `bongle:scene-clear` HMR listener.
- */
+/** clear an authored scene from its handle; called from the dev boot template's
+ *  `bongle:scene-clear` HMR listener. */
 export function clearScene(state: EngineClient, id: string): void {
     const previous = registry.scenes.byId.get(id);
     Content.clearScene(state.content, id, 'client');
@@ -517,35 +475,34 @@ const MAX_DELTA_S = 0.2;
 const VOXEL_ARRIVAL_GRACE_S = 1.5;
 
 export function update(state: EngineClient, delta: number) {
-    // a lost GPU device leaves nothing presentable; freeze on the last frame.
+    // a lost GPU device leaves nothing presentable; freeze on the last frame
     if (state.deviceLost) return;
 
-    // clamped delta drives integrators; raw wallDelta drives the render/server clock.
+    // clamped delta drives integrators; raw wallDelta drives the render/server clock
     const wallDelta = delta;
     if (delta > MAX_DELTA_S) delta = MAX_DELTA_S;
     Debug.frameStart(state.profiler);
 
-    // advance each render clock up front so inbox receipt + the reads below share one `now`.
+    // advance each render clock up front so inbox receipt + the reads below share one `now`
     for (const room of state.rooms.rooms.values()) Clock.advanceWall(room.clock, wallDelta);
 
     processInbox(state);
 
     Manifest.sync(state.manifest, state.net);
 
-    // silence the game while a platform ad shows; no-ops unless the value changed.
+    // silence the game while a platform ad shows; no-ops unless the value changed
     if (state.audioResources) Audio.setOutputMuted(state.audioResources, state.ads.active);
 
     const activeRoom = Rooms.getActiveRoom(state.rooms);
 
-    // input pre-processing before onUpdate so controllers see zeroed deltas; only
-    // the active room receives input (its canvas is the only one displayed).
+    // only the active room receives input, so its controllers see zeroed deltas here
     if (activeRoom) {
         Debug.begin(state.profiler, 'on-input');
         SceneTree.runOnInput(activeRoom.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'on-input');
     }
 
-    // per-frame pass for every room (inactive ones keep advancing scripts/animation).
+    // inactive rooms keep advancing scripts/animation too
     for (const room of state.rooms.rooms.values()) {
         Clock.syncServer(room.clock, room.clock.wall, delta);
 
@@ -553,13 +510,12 @@ export function update(state: EngineClient, delta: number) {
         SceneTree.runOnUpdate(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'on-update');
 
-        // particles run per-frame (visual fx, framerate-dependent motion is fine).
         Debug.begin(state.profiler, 'particles-tick');
         Particles.update(room.particles, delta, performance.now() / 1000, room.voxels);
         Debug.end(state.profiler, 'particles-tick');
     }
 
-    // fixed update: one global accumulator drives lockstep across rooms.
+    // one global accumulator drives lockstep across rooms
     state.accumulator += delta;
     const timestep = 1 / 60;
 
@@ -590,59 +546,49 @@ export function update(state: EngineClient, delta: number) {
     const alpha = state.accumulator / timestep;
     const settings = state.perf.settings;
 
-    // per-room visual pass. every room advances (inactive viewports are display:none
-    // but stay live for fast tab swaps); only the active room later meshes voxels.
+    // every room advances (inactive viewports are display:none but stay live for fast tab
+    // swaps); only the active room later meshes voxels
     for (const room of state.rooms.rooms.values()) {
-        // interpolate first so rig roots sit at their visual pose before visibility.
-        // remote transforms chase the latest received pose (no render-behind buffer),
-        // so a bad link can't freeze a peer on a stale keyframe.
+        // interpolate first so rig roots sit at their visual pose before visibility; remote
+        // transforms chase the latest received pose, so a bad link can't freeze a stale keyframe
         Debug.begin(state.profiler, 'interpolate');
         Interpolation.interpolate(room.scene, room.playerId, alpha, delta);
         Debug.end(state.profiler, 'interpolate');
 
-        // frame scripts run on settled visual transforms.
         Debug.begin(state.profiler, 'on-frame');
         SceneTree.runOnFrame(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'on-frame');
 
-        // settle light here: after the frame's last writer (onFrame, and the tick loop
-        // above it), before its first reader (modelLighting, then the mesher). a block
-        // write marks the chunk dirty immediately but only QUEUES the light, so reading
-        // it first bakes a black hole where the player dug. above the `continue` below,
-        // so a room with no camera drains too instead of growing its queue forever.
+        // after the frame's last writer, before its first reader (modelLighting, then the
+        // mesher): a block write marks the chunk dirty but only queues the light, so reading
+        // it first would bake a black hole where the player dug
         Debug.begin(state.profiler, 'lighting');
         Light.flushPendingLight(room.voxels);
         Debug.end(state.profiler, 'lighting');
 
         Chat.tick(room.chat, state.net, room.roomId);
 
-        // resolve the POV camera AFTER frame scripts write its pose/fov, BEFORE any reader.
+        // resolve the POV camera after frame scripts write its pose/fov, before any reader
         const povCamera = Rooms.resolveRoomCamera(state.renderer.camera, room);
         if (!povCamera) continue;
 
-        // sample animations at render rate; gated per-rig on `cull.visible`, which still
-        // holds last frame's result here because `Visibility.update` clears and rewrites
-        // it below. One frame of latency on the gate, on a hysteresis-fattened AABB, and
-        // the animator forces a sample on its own false->true edge so a rig entering view
-        // never renders a stale pose.
+        // gated per-rig on `cull.visible`, which still holds last frame's result here since
+        // Visibility.update rewrites it below; the animator forces a sample on its own
+        // false->true edge so a rig entering view never renders a stale pose
         Debug.begin(state.profiler, 'animation');
         Animation.tick(room.animations, state.resources, delta);
         Debug.end(state.profiler, 'animation');
 
-        // procedural overrides (head-look, springs) after sampling, before matrix reads.
         Debug.begin(state.profiler, 'on-post-animate');
         SceneTree.runOnPostAnimate(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'on-post-animate');
 
-        // last writer of a bone local has now had its turn, so concatenate each interp
-        // root's subtree once. Everything below this line should read visual transforms;
-        // nothing below it writes a local.
+        // everything below this line reads visual transforms; nothing below writes a local
         Debug.begin(state.profiler, 'concatenate');
         Interpolation.concatenate(room.scene);
         Debug.end(state.profiler, 'concatenate');
 
-        // frustum cull writes cull.visible, read by the renderers and by next frame's
-        // animation gate. same view radius as the chunk mesher so rigs fade with chunks.
+        // same view radius as the chunk mesher, so rigs fade with chunks
         Debug.begin(state.profiler, 'visibility');
         Visibility.update(room.visibility, povCamera, settings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
         Debug.end(state.profiler, 'visibility');
@@ -655,14 +601,12 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(state.profiler, 'audio');
     }
 
-    // the per-room loop left the camera on whichever room it visited last; resolve
-    // the active room's POV back for the render tick + draw.
+    // the per-room loop left the camera on whichever room it visited last; resolve the
+    // active room's POV back for the render tick + draw
     const activeCamera = activeRoom ? Rooms.resolveRoomCamera(state.renderer.camera, activeRoom) : null;
 
     // one render tick after the loop, so every room's animation is settled and a
-    // backgrounded room can never be meshed. null activeRoom tears the slot down.
-    // the renderer's own phases (mesh, model, sprite, shadow…) open inside this
-    // scope, so they read as one band on the frame stack and break down under it.
+    // backgrounded room can never be meshed; null activeRoom tears the slot down
     Debug.begin(state.profiler, 'visuals');
     state.renderer.updateFrame(activeRoom, {
         viewport: state.viewport,
@@ -673,7 +617,7 @@ export function update(state: EngineClient, delta: number) {
     });
     Debug.end(state.profiler, 'visuals');
 
-    // only the active room renders to the GPU.
+    // only the active room renders to the GPU
     if (activeRoom) {
         Debug.begin(state.profiler, 'render');
         state.renderer.render(settings.voxelViewChunkRadius);
@@ -684,19 +628,13 @@ export function update(state: EngineClient, delta: number) {
 
         Telemetry.reconcileSubscriptions(state);
 
-        // The host is holding a loading screen over all of this; tell it the game
-        // is up. Here and not earlier: the join has been applied (there IS an
-        // active room), the world has geometry the renderer can draw, and the
-        // frame that drew it went out on the line above — so the canvas the host
-        // uncovers has the game on it rather than black. Once per room; a room
-        // switch builds a new one with the flag clear.
+        // tell the host the game is up only once the frame with real geometry has gone
+        // out, so the canvas it uncovers has the game on it rather than black; once per
+        // room, a room switch builds a new one with the flag clear
         if (!activeRoom.readyReported) {
             activeRoom.renderedTimeS += wallDelta;
-            // An empty world reads as drawable (nothing to mesh, nothing to wait
-            // for), and for a game with no voxels that is the truth. A streaming
-            // world looks exactly the same for its first frames, until the server's
-            // regions arrive — hence the grace: report a world that stayed empty,
-            // not one that hasn't been sent yet.
+            // an empty world reads as drawable, and a streaming world looks the same for
+            // its first frames until regions arrive; the grace distinguishes the two
             const streaming = activeRoom.voxels.chunks.size === 0 && activeRoom.renderedTimeS < VOXEL_ARRIVAL_GRACE_S;
             if (!streaming && state.renderer.voxelWorldDrawable()) {
                 activeRoom.readyReported = true;
@@ -709,19 +647,18 @@ export function update(state: EngineClient, delta: number) {
         Debug.record(state.profiler, 'net/ping', state.net.pingMs, 'ms');
     }
 
-    // reset per-room input (no-op for inactive rooms, which saw no events).
+    // no-op for inactive rooms, which saw no events
     for (const room of state.rooms.rooms.values()) Input.resetInput(room.input);
 
-    // release pointer-lock here every frame; acquire only fires from user gestures.
+    // release pointer-lock here every frame; acquire only fires from user gestures
     Input.reconcilePointerLock(state.inputManager);
 
-    // one-way mirror of the input modality into the React store (React can't reach
-    // the React-free input layer).
+    // one-way mirror since React can't reach the React-free input layer
     if (useClient.getState().inputMode !== state.inputManager.inputMode) {
         useClient.getState().setInputMode(state.inputManager.inputMode);
     }
 
-    // echo the latest server ping-stamp so the server measures our RTT (Quake-style).
+    // echo the latest server ping-stamp so the server measures our RTT
     Net.send(state.net, { type: 'net_ping_ack', serverStampAck: state.net.lastServerStamp });
 
     Net.flush(state.net, state.driver.send);
@@ -738,8 +675,7 @@ export function dispose(state: EngineClient): void {
     useClient.setState({ rooms: new Map(), activePlayerId: null, inputManager: null });
 
     if (state.inputManager) Input.disposeInputManager(state.inputManager);
-    // renderer is null until load() runs; guard early dispose (disposeResources
-    // self-guards when resources were never built).
+    // renderer is null until load() runs; guard early dispose
     if (state.renderer) {
         state.renderer.canvas.remove();
         state.renderer.disposeResources();
@@ -748,20 +684,17 @@ export function dispose(state: EngineClient): void {
     state.domElement?.remove();
 }
 
-/** The play client as a `ClientApp`: what a bundle default-exports and a host (the
- *  play page, `bongle start`) drives. Play-mode boot in one place: init with the
- *  host's driver, mount the play shell, load, and boot a standalone build's local
- *  room. Edit hosts mount the editor instead and call these functions themselves. */
+/** The play client as a `ClientApp`: what a bundle default-exports and a host (the play
+ *  page, `bongle start`) drives. Edit hosts mount the editor instead and call these
+ *  functions themselves. */
 export function app(opts: Omit<InitOptions, 'mode' | 'driver'>): ClientApp<EngineClient> {
     return {
         init: (driver) => init({ ...opts, mode: 'play', driver }),
         load: async (state) => {
-            // the Viewport owns the canvas, so it mounts BEFORE load: load's resize
-            // needs the viewport element to size the renderer.
+            // the Viewport owns the canvas, so it mounts before load: load's resize
+            // needs the viewport element to size the renderer
             mountPlayUI(state.domElement);
             await load(state);
-            // a standalone (client-only) build self-boots its local room; a multiplayer
-            // build boots from the server's join_room instead.
             if (isStandaloneBuild()) startStandaloneRoom(state);
         },
         update,
@@ -770,10 +703,8 @@ export function app(opts: Omit<InitOptions, 'mode' | 'driver'>): ClientApp<Engin
     };
 }
 
-/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare),
- *  plus an initial apply; returns an unregister for teardown. Call AFTER `load` so
- *  the first apply sees the render tier. Dev only: a deployed client applies the
- *  registry once in `load()` and never calls this. */
+/** Re-apply registry changes to `state` on every settled flush (HMR / re-declare), plus an
+ *  initial apply. Call after `load` so the first apply sees the render tier. Dev only. */
 export function watchRegistry(state: EngineClient): () => void {
     const unregister = registerFlushHandler(() => applyRegistryChanges(state));
     requestFlush();

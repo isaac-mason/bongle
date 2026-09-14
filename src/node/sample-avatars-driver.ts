@@ -1,18 +1,3 @@
-// avatars-fallback.ts, the dev/edit/offline `ServerDriver.avatars` impl.
-//
-// `ServerDriver.avatars` is required, like `storage`: a deployed host sources
-// real avatars from its backend (the HTTP driver, published avatars on R2),
-// and bongle dev / editor / offline supply this fallback. It mirrors how the
-// platform sources them: each is a `runtime` avatar served as a plain `.glb`
-// the engine fetches and parses via `gltfUnpack`, NOT a bundled `model()`.
-// That keeps dev on the exact same runtime-avatar path as prod and needs no
-// per-game codegen/baking of the engine's example avatars.
-//
-// The bytes live in the engine's `lib/avatars/<name>/<name>.glb`. The client
-// fetches them from the dev host at `SAMPLE_AVATAR_ROUTE_PREFIX` (the dev host's
-// Vite middleware in edit, the node static server in `bongle start`); the
-// server reads the same files straight off disk via its absolute `serverUrl`.
-
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,22 +19,15 @@ const SAMPLE_AVATARS: SampleAvatar[] = [
     { modelId: 'avatar:pigeon', slug: 'pigeon', file: 'pigeon/pigeon.glb' },
 ];
 
-// Server-only: resolved at runtime against the module's on-disk location so we
-// can read the engine's example `.glb`s off disk. It's a directory, not a file,
-// so there's no build-time asset to emit — and it's joined via `path` rather
-// than `new URL(<literal>, import.meta.url)` because that exact shape is what
-// Vite's URL-asset plugin matches and rewrites, turning the base into the page
-// origin under a browser-ish transform (`@vite-ignore` only covers dynamic
-// import, not this plugin). Going through `fileURLToPath` alone leaves nothing
-// for it to match.
+// joined via `path` rather than `new URL(<literal>, import.meta.url)`: that exact shape is what
+// Vite's URL-asset plugin matches and rewrites to a page origin, which a directory (not a
+// build-time asset) can't survive.
 const avatarsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'avatars');
 const filePathFor = (a: SampleAvatar): string => path.join(avatarsDir, a.file);
 
 export function createFallbackAvatarsDriver(): ServerDriver['avatars'] {
-    // Only advertise avatars whose bytes are actually on disk, present in the
-    // source tree during dev, absent from a prod build (where the platform's own
-    // HTTP driver replaces this anyway). So we never hand the engine a URL that
-    // resolves to nothing, and the driver degrades to an empty batch cleanly.
+    // only advertise avatars whose bytes are actually on disk, so we never hand the engine a
+    // URL that resolves to nothing; degrades to an empty batch cleanly in a prod build.
     const batch: ResolvedAvatar[] = SAMPLE_AVATARS.filter((a) => existsSync(filePathFor(a))).map((a) => ({
         source: 'runtime' as const,
         modelId: a.modelId,

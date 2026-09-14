@@ -1,14 +1,6 @@
-// pivot-point.ts, small sphere rendered at the transform tool gizmo pivot point.
-//
-// always rendered on top (depthTest:false) so it's visible through geometry.
-// shown whenever the transform tool is active and a selection exists.
-// hidden when no selection / not in transform mode.
-
 import { createSphereGeometry, Material, Mesh, positionClip, type Scene, vec4f } from 'gpucat';
 import type { Vec3 } from 'math';
 import { PIVOT_DOT } from './editor-colors';
-
-// ── material (shared, created once) ─────────────────────────────────
 
 let _material: Material | null = null;
 
@@ -24,8 +16,6 @@ function getMaterial(): Material {
     }
     return _material;
 }
-
-// ── state ─────────────────────────────────────────────────────────────
 
 export type State = {
     scene: Scene;
@@ -49,21 +39,14 @@ export function dispose(state: State): void {
     state.scene.remove(state.mesh);
 }
 
-/** show / hide the point, for callers that gate the whole editor view. keeps
- *  `state.visible` in step with the mesh so the next update() isn't skipped. */
+/** show / hide the point, for callers that gate the whole editor view. */
 export function setVisible(state: State, visible: boolean): void {
     if (visible === state.visible) return;
     state.mesh.visible = visible;
     state.visible = visible;
 }
 
-/**
- * update the pivot point position and visibility each frame.
- *
- * @param state    pivot point state
- * @param position world-space position to show the point (the gizmo pivot)
- * @param show     whether to show the point at all
- */
+/** update the pivot point position and visibility each frame. */
 export function update(state: State, position: Vec3, show: boolean): void {
     setVisible(state, show);
     if (show) {

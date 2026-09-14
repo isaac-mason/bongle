@@ -47,20 +47,8 @@ export function createVoxelRaycastResult(): VoxelRaycastResult {
     };
 }
 
-// ── face index from DDA step ────────────────────────────────────────
-//
-// convention: 0=east(+x), 1=west(-x), 2=up(+y), 3=down(-y), 4=south(+z), 5=north(-z)
-//
-// when we step +x, we entered through the west (-x) face of the new voxel → face 1
-// when we step -x, we entered through the east (+x) face → face 0
-// etc.
-
+// face convention: 0=east(+x) 1=west(-x) 2=up(+y) 3=down(-y) 4=south(+z) 5=north(-z); a positive step enters through the negative (odd-index) face.
 function faceIndexFromStep(axis: number, step: number): number {
-    // axis: 0=x, 1=y, 2=z
-    // step: +1 or -1
-    // face pairs: x→(0,1), y→(2,3), z→(4,5)
-    // positive step enters through the negative face (odd index)
-    // negative step enters through the positive face (even index)
     return axis * 2 + (step > 0 ? 1 : 0);
 }
 
@@ -74,19 +62,8 @@ const _rayCollector = createClosestCastRayCollector();
 const _raySettings = createDefaultCastRaySettings();
 
 /**
- * cast a ray through the voxel world using DDA.
- *
- * skips empty/missing chunks via nonAirCount. for cube blocks
- * (colliderId=0), the DDA step itself is the intersection test. for
- * custom collider shapes, tests against the prebuilt crashcat shape.
- *
- * @param out - result object (reused across calls, no allocation)
- * @param voxels - the voxel world
- * @param registry - block registry
- * @param ox, oy, oz - ray origin in world space
- * @param dx, dy, dz - normalized ray direction
- * @param maxDistance - maximum trace distance
- * @param requiredFlags - bitmask of block flags required for a hit. blocks missing any of these flags are skipped. 0 = no filtering.
+ * Casts a ray through the voxel world using DDA. Skips empty/missing chunks via nonAirCount; cube blocks (colliderId=0) resolve from the DDA step itself, others test against the prebuilt crashcat shape.
+ * `requiredFlags` is a bitmask of block flags required for a hit (0 = no filtering).
  */
 export function raycastVoxels(
     out: VoxelRaycastResult,
@@ -103,12 +80,10 @@ export function raycastVoxels(
 ): VoxelRaycastResult {
     out.hit = false;
 
-    // current voxel position (integer)
     let x = Math.floor(ox);
     let y = Math.floor(oy);
     let z = Math.floor(oz);
 
-    // step direction per axis
     const stepX = dx >= 0 ? 1 : -1;
     const stepY = dy >= 0 ? 1 : -1;
     const stepZ = dz >= 0 ? 1 : -1;
@@ -151,7 +126,6 @@ export function raycastVoxels(
     const { colliderId: colliderIdTable, colliderShapes } = registry;
 
     while (distance < maxDistance) {
-        // chunk lookup
         const cx = x >> CHUNK_BITS;
         const cy = y >> CHUNK_BITS;
         const cz = z >> CHUNK_BITS;
@@ -200,10 +174,7 @@ export function raycastVoxels(
                 return out;
             }
 
-            // record the axis we crossed leaving the chunk so the next voxel's
-            // face index is correct. without this, a ray that skips an empty
-            // chunk and lands on a solid voxel reports a stale face from before
-            // the skip (or the default 0/+1 if no prior step).
+            // records the axis crossed leaving the chunk, so a ray that skips an empty chunk and lands on a solid voxel doesn't report a stale face.
             if (tExitX <= tExitY && tExitX <= tExitZ) {
                 lastStepAxis = 0;
                 lastStepDir = stepX;
@@ -215,7 +186,6 @@ export function raycastVoxels(
                 lastStepDir = stepZ;
             }
 
-            // jump to chunk boundary
             const epsilon = 0.0001;
             const exitX = ox + dx * (tExit + epsilon);
             const exitY = oy + dy * (tExit + epsilon);
@@ -225,7 +195,6 @@ export function raycastVoxels(
             y = Math.floor(exitY);
             z = Math.floor(exitZ);
 
-            // recalculate tMax for new position
             if (dx !== 0) {
                 tMaxX = dx >= 0 ? (x + 1 - ox) / dx : (ox - x) / -dx;
             }
@@ -240,7 +209,6 @@ export function raycastVoxels(
             continue;
         }
 
-        // read block state from chunk
         const lx = x - (cx << CHUNK_BITS);
         const ly = y - (cy << CHUNK_BITS);
         const lz = z - (cz << CHUNK_BITS);
@@ -251,7 +219,7 @@ export function raycastVoxels(
             const cid = colliderIdTable[stateId]!;
 
             if (cid === 0) {
-                // cube fast path, DDA already gives us the hit
+                // cube: the DDA step itself is the intersection test
                 const faceIdx = distance === 0 ? faceFromRayDirection(dx, dy, dz) : faceIndexFromStep(lastStepAxis, lastStepDir);
 
                 out.hit = true;
@@ -269,15 +237,11 @@ export function raycastVoxels(
                 out.hitIndex = faceIdx;
                 return out;
             } else {
-                // custom collider shape, use crashcat castRayVsShape
+                // custom collider shape via crashcat
                 const shape = colliderShapes[cid]!;
 
-                // ray segment within this voxel cell. A ray crossing a voxel edge ties
-                // two tMax values; the DDA steps one axis and leaves the other's tMax
-                // equal to `distance`, so the next cell's segment is zero-length.
-                // Skipping the shape test then has to fall THROUGH to the step at the
-                // bottom of the loop — a `continue` re-tests the same cell at the same
-                // distance forever, an unbreakable main-thread spin with no throw.
+                // a zero-length segment (from a voxel-edge tie in tMax) must still fall through to the step at the
+                // bottom of the loop; a `continue` here would re-test the same cell forever.
                 const tVoxelExit = Math.min(tMaxX, tMaxY, tMaxZ);
                 const segStart = Math.max(0, distance);
                 const segEnd = Math.min(tVoxelExit, maxDistance);
@@ -325,8 +289,7 @@ export function raycastVoxels(
                         out.px = ox + dx * hitT;
                         out.py = oy + dy * hitT;
                         out.pz = oz + dz * hitT;
-                        // crashcat castRayVsShape doesn't give us the normal directly,
-                        // so we approximate from the DDA step (same as cube path)
+                        // crashcat doesn't give the normal directly, so approximate from the DDA step
                         const faceIdx =
                             hitT === 0 ? faceFromRayDirection(dx, dy, dz) : faceIndexFromStep(lastStepAxis, lastStepDir);
                         out.nx = FACE_NX[faceIdx]!;
@@ -345,7 +308,6 @@ export function raycastVoxels(
             }
         }
 
-        // step to next voxel boundary
         if (tMaxX < tMaxY && tMaxX < tMaxZ) {
             x += stepX;
             distance = tMaxX;
@@ -377,10 +339,7 @@ function faceFromRayDirection(dx: number, dy: number, dz: number): number {
     const az = Math.abs(dz);
 
     if (ax >= ay && ax >= az) {
-        // dominant x axis: ray going +x means we'd exit through east face,
-        // so the "entry" face is west (1) for +x, east (0) for -x.
-        // but for inside-block hits, we report the face the ray is pointing at:
-        // +x → east (0), -x → west (1)
+        // dominant axis: reports the face the ray points toward (+x -> east(0), -x -> west(1))
         return dx > 0 ? 0 : 1;
     }
     if (ay >= az) {

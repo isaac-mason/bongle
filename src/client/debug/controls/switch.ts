@@ -2,22 +2,18 @@ import { base, type Control } from '../control';
 import { el, on } from '../dom';
 
 export type SwitchOptions = {
-    /** short label per editor, shown on the flip toggle (defaults to 1, 2, 3…). */
+    /** Short label per editor, shown on the flip toggle. Defaults to 1, 2, 3. */
     views?: string[];
     label?: string;
 };
 
-/**
- * flip one prop through several editors. each child control binds the same prop;
- * only the active one shows, and a small toggle cycles them. a switch is itself a
- * `Control<T>`, so custom editors compose in with no special-casing.
- */
+/** Flips one prop through several editors; each child control binds the same prop, only the active one shows, and a small toggle cycles them. */
 export function switchControl<T>(controls: Control<T>[], opts: SwitchOptions = {}): Control<T> {
     return (ctx, prop) => {
         const b = base<T>(ctx, prop, opts.label);
         const children = controls.map((control) => control(ctx, prop));
-        for (const child of children) child.name(''); // switch owns the label
-        // if the editors stack (vec / rotation), the switch stacks too so they get full width
+        for (const child of children) child.name(''); // Switch owns the label.
+        // If the editors stack (vec/rotation), the switch stacks too so they get full width.
         if (children.some((c) => c.row.classList.contains('dc-row--stacked'))) {
             b.row.classList.add('dc-row--stacked');
         }

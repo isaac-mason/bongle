@@ -1,60 +1,9 @@
-// per-room SoA pool + tick stepper for the particle system.
-//
-// Lives in client/ because the pool is a client-only runtime concern,
-// it never ticks on the server and never enters replication. The
-// declaration primitive (`particle()`) and the pure-data type surface
-// (`ParticleHandle`, `ParticlePool`, `UpdateFn`, etc.) live in
-// `core/particles/particles.ts` so module-scope authoring (incl.
-// auto-derived block-dust from `block()`) can call `particle(...)`
-// without core taking a runtime dep on client.
-//
-// ── pool ──
-//
-// per-room SoA, fixed capacity, free-list via swap-with-last compaction.
-// spawned slots are appended to the alive prefix `[0, count)`; dead
-// slots (`expiresAt[i] <= now`) are detected at tick time and compacted
-// in the postlude.
-//
-// no per-particle JS allocations during tick (UpdateFn args are direct
-// pool + index + dt + voxels, no per-call object construction).
-// renderer reads `subarray(0, count)` for GPU writeback (see
-// `particle-visuals.ts`).
-//
-// engine prelude is empty: no per-frame age increment, no per-frame
-// lifetime decrement. spawn writes `spawnTime[i] = now` and (if a
-// `lifetime` opt is supplied) `expiresAt[i] = now + lifetime` exactly
-// once; the per-particle update fn does the rest. universal per-tick
-// cost is the compaction scan (one read + at-most-one swap per slot) and
-// GPU writeback.
-//
-// slot defaults match the plan §"Pool design" table, unset slots aren't
-// traps:
-//   pos*       = spawn pos
-//   prev*      = pos at spawn (writes-through for render interpolation)
-//   vel*       = [0, 0, 0]
-//   spawnTime  = now
-//   expiresAt  = Infinity                (motion fns kill via `= 0`)
-//   size       = 1
-//   seed       = random u32
-//
-// per-particle dispatch (one indirect call per alive slot per tick) is
-// the v1 choice, closest to MC's model and trivially within budget at
-// 8k particles × 60Hz (≈ 0.1ms/frame indirect-call overhead). swappable
-// to sort-by-fn or per-bucket sub-pools later without touching update
-// fns (signature is `(pool, i, dt, voxels)`, pool identity is invariant).
-//
-// `voxels` is threaded into the per-particle update fn (rather than
-// stamped on the pool) so collision primitives can query the world
-// without the pool carrying a back-ref. pure-motion fns ignore the arg.
-
 import type { ParticleHandle, ParticlePool, ParticleUpdateFn } from '../../core/particles/particles';
 import type { Voxels } from '../../core/voxels/voxels';
 
 export type { ParticlePool } from '../../core/particles/particles';
 
-/** per-room pool size. fixed at room creation; spawn returns `-1` when
- *  full (caller decides whether to silently drop or warn). 8k is well
- *  above MC's per-frame budget and ≈ 0.5 MiB of TypedArrays. */
+/** Per-room pool size, fixed at room creation. Spawn returns `-1` when full. */
 const POOL_CAPACITY = 8192;
 
 /** create a fresh pool with all slots zeroed and `count = 0`. */
@@ -86,9 +35,7 @@ export function init(): ParticlePool {
     };
 }
 
-/** spawn-time opt overrides. universal fields the engine exposes for
- *  per-spawn customization. matches the plan §"Spawning" surface. unset
- *  → engine default. */
+/** Spawn-time opt overrides. Unset fields fall back to the engine default. */
 export type SpawnOpts = {
     velX?: number;
     velY?: number;
@@ -108,14 +55,9 @@ export type SpawnOpts = {
     tint?: [r: number, g: number, b: number, a: number];
 };
 
-/**
- * allocate a slot, default-init universal fields, and apply any spawn
- * opts. returns the slot index or `-1` if the pool is full.
- *
- * the script-facing `spawnParticle(ctx, type, pos, opts)` (api/) is a
- * thin wrapper: it grabs the per-room pool off `ctx.client.room`, splats
- * `pos` into x/y/z, samples the current clock, and forwards here.
- */
+/** Allocates a slot, default-inits fields, and applies any spawn opts. Returns the slot
+ *  index or `-1` if the pool is full. The script-facing `spawnParticle(ctx, type, pos, opts)`
+ *  is a thin wrapper over this. */
 export function allocateSlot(
     pool: ParticlePool,
     handle: ParticleHandle,
@@ -156,27 +98,17 @@ export function allocateSlot(
 }
 
 /**
- * step the pool: per-particle dispatch for alive slots, then swap-with-
- * last compaction for slots whose `expiresAt <= now`.
- *
- * dispatch & compact are two separate scans:
- *   1. dispatch in forward order so motion fns see a stable snapshot.
- *      a slot killed by its own update fn (writes `expiresAt = 0`)
- *      doesn't re-process, its `expiresAt <= now` check at compact time
- *      reaps it.
- *   2. compact scans backwards so swap-with-last from `count-1` into the
- *      hole doesn't re-test the swapped-in slot's old position. the
- *      backward scan also means a chain of expired slots at the tail
- *      drops the count without any swaps (`count--` per dead tail slot).
+ * Steps the pool: per-particle dispatch for alive slots, then swap-with-last compaction for
+ * slots whose `expiresAt <= now`. Dispatch runs forward so a slot killed by its own update
+ * fn is reaped by the next pass rather than reprocessed. Compaction scans backward so
+ * swap-with-last from `count-1` never re-tests the slot it just swapped in.
  */
 export function update(pool: ParticlePool, dt: number, now: number, voxels: Voxels): void {
-    // dispatch
     for (let i = 0; i < pool.count; i++) {
         if (pool.expiresAt[i]! <= now) continue;
         pool.updateFn[i]!(pool, i, dt, voxels);
     }
 
-    // compact, backward scan, swap-with-last on death.
     for (let i = pool.count - 1; i >= 0; i--) {
         if (pool.expiresAt[i]! > now) continue;
         const last = pool.count - 1;
@@ -185,9 +117,7 @@ export function update(pool: ParticlePool, dt: number, now: number, voxels: Voxe
     }
 }
 
-/** in-place slot copy. overwrites slot `a` with slot `b`'s data. used
- *  by `update`'s compaction pass to move the alive tail into a dead
- *  slot before decrementing `count`. */
+/** Overwrites slot `a` with slot `b`'s data, used by `update`'s compaction pass. */
 function swapSlot(pool: ParticlePool, a: number, b: number): void {
     pool.handle[a] = pool.handle[b]!;
     pool.updateFn[a] = pool.updateFn[b]!;

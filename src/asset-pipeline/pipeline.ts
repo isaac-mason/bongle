@@ -1,15 +1,3 @@
-/**
- * editor/asset-pipeline/pipeline.ts — AssetPipeline, the one asset pipeline.
- *
- * A pure data baker: reads the engine registries and bakes atlas / sprites /
- * models / scenes barrels / audio into the project Filesystem. It does NOT
- * render icons anymore — the editor client renders block/scene/prefab
- * thumbnails itself, so the pipeline carries no GPU / render-engine / Dawn.
- *
- * Surface, the house pattern: `init(ctx) -> State`, `run(state) -> RunResult`,
- * `dispose(state)`. One `run` is the whole job: one revision-gated bake pass.
- */
-
 import type { Filesystem } from '../../os/interface';
 import type { Config } from '../core/config';
 import type { ResourceLoader } from '../core/resource-loader';
@@ -37,9 +25,9 @@ export type InitCtx = {
      *  written into it. host-provided (browser: OPFS or memory). */
     fs: Filesystem;
     /** bake-input byte loader: registry `src` refs (URLs / project-relative
-     *  paths) → bytes. host-provided. */
+     *  paths) to bytes. host-provided. */
     loader: ResourceLoader;
-    /** audio decode for the audio bake (bytes → per-channel s16 PCM).
+    /** audio decode for the audio bake (bytes to per-channel s16 PCM).
      *  host-provided (browser: OfflineAudioContext). See bake/decode-audio.ts. */
     decodeAudio: DecodeAudio;
     /** 2d raster for the atlas bakes (decode/scale/composite/encode images).
@@ -53,13 +41,13 @@ export type RunResult = {
     timings: PipelinePassTimings;
     /** latest launch config (the build manifest reads this). */
     config: Config | null;
-    /** atlas bytes moved this pass → caller tells the live client to refresh.
+    /** atlas bytes moved this pass, caller tells the live client to refresh.
      *  `*Hash` is the post-pass sidecar hash the caller forwards on the wire. */
     atlasChanged: boolean;
     atlasHash: string | null;
     spriteAtlasChanged: boolean;
     spriteAtlasHash: string | null;
-    /** audio manifest (atlas + standalone) moved this pass → caller tells the
+    /** audio manifest (atlas + standalone) moved this pass, caller tells the
      *  live client to re-fetch the manifest + atlas. hash is the manifest's
      *  combined `hash` field, read the same way as the atlas sidecars. */
     audioAtlasChanged: boolean;

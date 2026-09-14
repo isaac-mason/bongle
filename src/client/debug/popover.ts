@@ -1,7 +1,7 @@
 import { el } from './dom';
 
 export type PopoverOptions = {
-    /** where to mount — the `.dashcat` host (scoped styles, escapes overflow). */
+    /** where to mount: the `.dashcat` host (scoped styles, escapes overflow). */
     layer: HTMLElement;
     onClose?: () => void;
 };

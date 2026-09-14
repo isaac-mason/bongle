@@ -1,11 +1,5 @@
-/**
- * centralizes editor keyboard shortcuts and control modes.
- * makes it easy to view and change keybindings in one place.
- */
-
 import type { ControlMode } from './edit-room-store';
 
-// Re-export control mode type for convenience
 export type EditorControlMode = ControlMode;
 
 export const TRANSFORM_GIZMO_KEYS = {
@@ -16,8 +10,6 @@ export const TRANSFORM_GIZMO_KEYS = {
     grab: 'KeyI',
 } as const;
 
-// ── Transform Tool: Other Keys ───────────────────────────────────
-
 export const TRANSFORM_OTHER_KEYS = {
     togglePivot: 'KeyP',
     toggleSpace: 'KeyX',
@@ -26,8 +18,6 @@ export const TRANSFORM_OTHER_KEYS = {
     returnToInspect: 'Escape',
 } as const;
 
-// ── Selection Tools: Action Keys ────────────────────────────────
-
 export const SELECTION_KEYS = {
     fill: 'KeyF',
     replace: 'Shift+KeyF',
@@ -35,8 +25,6 @@ export const SELECTION_KEYS = {
     pick: 'KeyP',
     clearAll: 'KeyR',
 } as const;
-
-// ── Selection: Nudge Keys ──────────────────────────────────────
 
 export const NUDGE_KEYS = {
     forward: 'ArrowUp',
@@ -47,24 +35,17 @@ export const NUDGE_KEYS = {
     down: 'BracketLeft', // [
 } as const;
 
-// ── Inspector: Transform Mode Shortcuts ────────────────────────
-
 export const INSPECT_KEYS = {
     toTranslate: 'KeyT',
     toRotate: 'KeyR',
     toScale: 'KeyY',
 } as const;
 
-// ── Library + Hotbar ─────────────────────────────────────────
-
 export const LIBRARY_KEYS = {
     toggleLibrary: 'KeyE',
 } as const;
 
-// ── Tool Categories ────────────────────────────────────────────
-// Hold a category key + tap digit 1..9 to jump to a slot in that
-// category. Tap-alone cycles through tools in the category.
-
+// hold a category key + tap digit 1..9 to jump to a slot in that category; tap-alone cycles through tools.
 export const TOOL_CATEGORY_KEYS = {
     inspect: 'KeyV',
     transform: 'KeyG',
@@ -74,7 +55,7 @@ export const TOOL_CATEGORY_KEYS = {
 
 export type ToolCategoryId = keyof typeof TOOL_CATEGORY_KEYS;
 
-// digit codes 1..9 → hotbar slot indices 0..8
+// digit codes 1..9 map to hotbar slot indices 0..8
 export const HOTBAR_NUMBER_KEYS = [
     'Digit1',
     'Digit2',
@@ -87,10 +68,7 @@ export const HOTBAR_NUMBER_KEYS = [
     'Digit9',
 ] as const;
 
-// ── Helper: Format key code for display ────────────────────────
-
 export function formatKeyLabel(code: string): string {
-    // chord prefix: "Shift+KeyF" → "⇧F", "Alt+KeyT" → "⌥T"
     if (code.startsWith('Shift+')) return `⇧${formatKeyLabel(code.slice(6))}`;
     if (code.startsWith('Alt+')) return `⌥${formatKeyLabel(code.slice(4))}`;
     if (code.startsWith('Mod+')) return `⌘${formatKeyLabel(code.slice(4))}`;
@@ -122,8 +100,6 @@ export function formatKeyLabel(code: string): string {
     };
     return labels[code] ?? code.replace('Key', '');
 }
-
-// ── UI Data: All keybinds for help display ───────────────────────
 
 export type KeybindGroup = {
     key: string;

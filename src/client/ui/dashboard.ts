@@ -1,18 +1,3 @@
-// ── debug dashboard ─────────────────────────────────────────────────
-//
-// the client's debug surface: one `Dashboard` from the widget toolkit in
-// client/debug, opened by
-// backtick. replaces the old React + <canvas> panel. engine panels (perf
-// graphs, logs) live here; games dock their own panels alongside via
-// `ctx.client.debug.dashboard` or the scoped `debug.panel(ctx, …)` helper.
-//
-// a single module-level instance backs every room's `ctx.client.debug`
-// (there is one client per page). it is created lazily on first access —
-// backtick opening it, or a game calling `debug.panel(ctx)` — so nothing
-// is built until debug is actually used. reconcile of the dynamic perf
-// metric set runs on an interval only while the dashboard is open;
-// the toolkit's own ticker samples the monitors.
-
 import { type Vec3, vec3 } from 'math';
 import { CharacterControllerTrait } from '../../builtins/character-controller';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
@@ -27,8 +12,6 @@ import type { ClientRoom } from '../rooms';
 import { addAtlasTab } from './dashboard-atlas';
 import { useClient } from './stores/client-store';
 import { UILayer } from './util/ui-layers';
-
-// ── live reads off the client store (same source the old PerfCanvas used) ──
 
 function activeRoom(): ClientRoom | null {
     const s = useClient.getState();
@@ -54,7 +37,7 @@ function latest(profiler: Debug.Profiler | null, key: string): number {
     return profiler ? Debug.counter(profiler, key) : 0;
 }
 
-/** short trailing average of a recorded scalar, keeps headline stats from flickering. */
+/** trailing average of a recorded scalar, keeps headline stats from flickering. */
 function trailingAvg(profiler: Debug.Profiler | null, key: string, count: number): number {
     if (!profiler) return 0;
     const frames = Math.min(count, Debug.frameCount(profiler));
@@ -64,7 +47,6 @@ function trailingAvg(profiler: Debug.Profiler | null, key: string, count: number
     return sum / frames;
 }
 
-/** short trailing average of a scope's inclusive time. */
 function avgIncl(profiler: Debug.Profiler | null, key: string, count: number): number {
     if (!profiler) return 0;
     const frames = Math.min(count, Debug.frameCount(profiler));
@@ -74,7 +56,6 @@ function avgIncl(profiler: Debug.Profiler | null, key: string, count: number): n
     return sum / frames;
 }
 
-/** short trailing average of whole-frame duration. */
 function avgFrameMs(profiler: Debug.Profiler | null, count: number): number {
     if (!profiler) return 0;
     const frames = Math.min(count, Debug.frameCount(profiler));
@@ -88,11 +69,8 @@ const SMOOTH_TICK = 30; // ~500ms at 60Hz
 const SMOOTH_SERVER = 5; // server frames arrive at 5Hz, so this is a ~1s window
 const SMOOTH_NET = 60; // ~1s at 60Hz
 
-// ── position readouts ────────────────────────────────────────────────
-//
-// the character transform is a foot-pivot, so the subject's world position IS
-// the foot position; the camera sits eye-height above it. 'foot block' is the
-// integer voxel coord the foot occupies.
+// the character transform is a foot-pivot: the subject's world position is
+// the foot position, and the camera sits eye-height above it.
 
 function nodeWorldPos(node: SceneTree.Node | null | undefined): Vec3 | null {
     if (!node) return null;
@@ -145,11 +123,7 @@ function footControlled(): CharacterControllerTrait | null {
 function standingOn(): string {
     const room = activeRoom();
     const cc = footControlled();
-    // Guard the RESULT, not the inputs. `stateToBlock` can miss for more reasons
-    // than an unbuilt registry (a state id left over from before an editor hot
-    // reload no longer addresses a handle), and one throwing monitor kills the
-    // whole poll loop for the rest of the session, not just this readout. A
-    // diagnostic panel must never be the thing that breaks.
+    // guards the result, not the inputs: a throwing monitor would kill the whole poll loop.
     if (!room || !cc) return '—';
     return stateToBlock(room.context.blocks, cc.state.groundBlockState)?.def?.name ?? '—';
 }
@@ -184,20 +158,12 @@ function fmtTimeOfDay(day: number): string {
     return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 }
 
-/** byte counts at readable magnitude. kB/MB over the decimal thousand, matching how the
- *  upload budget is reasoned about (a 4096-slot instance buffer at 144 B/slot is "590 kB",
- *  not "576 KiB"). */
+/** byte counts at readable magnitude, decimal kB/MB (not KiB/MiB). */
 function fmtBytes(bytes: number): string {
     if (bytes < 1000) return `${bytes.toFixed(0)} B`;
     if (bytes < 1000 * 1000) return `${(bytes / 1000).toFixed(1)} kB`;
     return `${(bytes / (1000 * 1000)).toFixed(2)} MB`;
 }
-
-// ── log adapter: Debug.LogEntry → toolkit LogEntry, gated on `pushed` ──
-//
-// the log monitor polls the source getter every frame; re-mapping
-// the whole buffer each poll would allocate thousands of objects a second.
-// cache the mapped array and rebuild only when the buffer changes.
 
 function toDashLog(entry: Debug.LogEntry): LogEntry {
     const tag = entry.source ? `[${entry.source.traitId}#${entry.source.nodeId}]` : '[engine]';
@@ -205,6 +171,7 @@ function toDashLog(entry: Debug.LogEntry): LogEntry {
     return { text: `${tag} ${entry.msg}`, level, time: entry.ts };
 }
 
+// polled every frame; caches the mapped array and only rebuilds when the buffer changes.
 function logSource(get: () => Debug.Logs | null): () => LogEntry[] {
     let cache: LogEntry[] = [];
     let seenLogs: Debug.Logs | null = null;
@@ -228,25 +195,17 @@ function logSource(get: () => Debug.Logs | null): () => LogEntry[] {
     };
 }
 
-// ── reading the rings ────────────────────────────────────────────────
-//
-// every chart here is a read of a profiler ring: the last N frames' reductions
-// (self/inclusive per scope) or the last N frames' recorded scalars, assembled
-// into aligned per-series arrays for `series`. no widget keeps its own history,
-// so the x-axis is real frames and a frozen ring holds every chart still at once.
-//
-// the phase lists are DISCOVERED from the tree (`childNames`) rather than
-// hardcoded, so a stack follows the loop that produced it instead of going stale
-// beside it. children of a scope are siblings by construction, so their inclusive
-// times stack to their parent.
+// charts read a profiler ring directly (no widget keeps its own history), so a
+// frozen ring holds every chart still at once. phase lists are discovered from
+// the tree (`childNames`) rather than hardcoded, so a stack follows the loop
+// that produced it; children of a scope are siblings and stack to their parent.
 
 // physics phases inside the server room scope: trait sync, solver step, writeback.
 const PHYSICS_PHASES = ['physics/pre', 'physics', 'physics/post'] as const;
 
-const FRAME_BUDGET_MS = 1000 / 60; // 16.67ms — the 60fps line drawn on the frame stack
+const FRAME_BUDGET_MS = 1000 / 60; // 16.67ms, the 60fps line drawn on the frame stack
 
-/** frames plotted per chart. bounded by the ring (see core/debug's RING_FRAMES);
- *  120 frames is the whole client ring, ~2s at 60Hz. */
+/** frames plotted per chart: the whole client ring, ~2s at 60Hz. */
 const CHART_HISTORY = 120;
 
 /** newest sample at the right; frames the ring doesn't hold read 0. */
@@ -277,12 +236,11 @@ function phaseSeries(profiler: Debug.Profiler | null, parent: string | null, len
     return fillSeries(profiler, Debug.childNames(profiler, parent), readIncl, length);
 }
 
-/** inclusive-time history for a fixed set of scopes. */
 function scopeSeries(profiler: Debug.Profiler | null, keys: readonly string[], length: number): Record<string, number[]> {
     return fillSeries(profiler, keys, readIncl, length);
 }
 
-/** recorded-scalar history, `display name → counter key`. */
+/** recorded-scalar history, keyed `display name -> counter key`. */
 function counterSeries(profiler: Debug.Profiler | null, keys: Record<string, string>, length: number): Record<string, number[]> {
     const out: Record<string, number[]> = {};
     const names = Object.keys(keys);
@@ -291,9 +249,8 @@ function counterSeries(profiler: Debug.Profiler | null, keys: Record<string, str
     return out;
 }
 
-/** recorded-scalar history for every counter under `prefix`, keyed bare. the set
- *  is dynamic (message types appear at runtime), so it is read off the newest
- *  frame. `<prefix>total` is skipped so the stack sums to the true total. */
+/** recorded-scalar history for every counter under `prefix`, keyed bare. the key
+ *  set is dynamic; `<prefix>total` is skipped so the stack sums to the true total. */
 function prefixCounterSeries(profiler: Debug.Profiler | null, prefix: string, length: number): Record<string, number[]> {
     if (!profiler) return {};
     const keys = Debug.counterNames(profiler).filter((key) => key.startsWith(prefix) && key !== `${prefix}total`);
@@ -303,7 +260,6 @@ function prefixCounterSeries(profiler: Debug.Profiler | null, prefix: string, le
     return out;
 }
 
-/** exponential smoothing over a history, for per-frame rates too spiky to read raw. */
 function smooth(values: number[], alpha: number): number[] {
     let acc = values[0] ?? 0;
     const out = new Array<number>(values.length);
@@ -316,10 +272,7 @@ function smooth(values: number[], alpha: number): number[] {
 
 const SMOOTH_NET_ALPHA = 0.2;
 
-// ── shared chart builders (reused across tabs) ───────────────────────
-
-/** the hero chart: client frame time as a stacked band per top-level phase,
- *  with the 60fps budget as a dashed baseline. */
+/** client frame time as a stacked band per top-level phase, 60fps budget as a dashed baseline. */
 function addClientFrameStack(c: Container, height: number): void {
     c.series(() => phaseSeries(clientProfiler(), null, CHART_HISTORY), {
         label: 'client frame (ms)',
@@ -333,9 +286,7 @@ function addClientFrameStack(c: Container, height: number): void {
     });
 }
 
-/** overlaid in/out throughput (not stacked — distinct flows). `side` picks the
- *  scope: 'client'/'server' show that side's in+out; omitted shows all four
- *  (the compact glance on the perf tab). */
+/** overlaid in/out throughput. `side` picks 'client'/'server'; omitted shows all four. */
 function addThroughput(c: Container, height: number, side?: 'client' | 'server'): void {
     c.series(
         (): Record<string, number[]> => {
@@ -352,8 +303,6 @@ function addThroughput(c: Container, height: number, side?: 'client' | 'server')
     );
 }
 
-// ── the instance ─────────────────────────────────────────────────────
-
 type DebugDashboard = {
     dash: Dashboard;
     tabs: TabGroup;
@@ -362,8 +311,8 @@ type DebugDashboard = {
 
 let instance: DebugDashboard | null = null;
 
-/** a tab a host adds to the debug panel (the editor's options tab). Registered
- *  before the dashboard is built it lands in order; after, it appends. */
+/** a tab a host adds to the debug panel. registered before the dashboard is
+ *  built it lands in order; after, it appends. */
 type DashboardExtension = (tabs: TabGroup) => void;
 const extensions: DashboardExtension[] = [];
 
@@ -380,9 +329,7 @@ function flameProfiler(): Debug.Profiler | null {
     return flameSide === 'client' ? clientProfiler() : serverProfiler();
 }
 
-/** one pause for the whole panel: freeze every ring the dashboard reads. the
- *  charts, the flame and the readouts are all reads of those rings, so they hold
- *  still together and can be hovered and scrubbed in peace while the game runs on. */
+/** one pause for the whole panel: freezes every ring the dashboard reads. */
 let paused = false;
 
 function setPaused(next: boolean): void {
@@ -393,37 +340,22 @@ function setPaused(next: boolean): void {
 }
 
 function build(): DebugDashboard {
-    // dashboard() manages floating panels on a full-cover layer that passes
-    // pointer events through except over its panels. we open one non-closable
-    // "perf" panel and tab it (overview / cpu / net / logs) via the composable
-    // tabs() primitive; backtick shows/hides the whole layer.
+    // dashboard() manages floating panels on a full-cover layer that passes pointer
+    // events through except over its panels; backtick shows/hides the whole layer.
     const dash = dashboard();
     dash.root.style.zIndex = String(UILayer.debug);
-    dash.root.style.display = 'none'; // hidden until opened
+    dash.root.style.display = 'none';
 
-    // ── debug panel: overview / perf / cpu / gpu / physics / net (/ host tabs / logs) ──
-    //
-    // overview is position/info readouts; the rest is perf. frames go on stacked
-    // areas (a band per phase, summing to frame time) with the 60fps budget as a
-    // dashed baseline — read where the ms go at a glance, hover to freeze per-band
-    // values. all widgets read live getters, so they follow the active room
-    // without any reconcile; the toolkit samples them.
-    // start offset a little further from the top-left corner so it clears the
-    // editor's top/left toolbars (the toolkit default is a tight 16px).
+    // offset from the top-left so it clears the editor's toolbars (default is 16px).
     const panel = dash.panel({ title: 'debug', closable: false, position: [64, 64], resizable: true });
-    // widen past the toolkit default 320px (charts + label/value rows read better),
-    // keeping its small-viewport clamp. inline so we don't fork the vendored css;
-    // `resizable` lets the user drag from here.
+    // widen past the toolkit default 320px; inline so we don't fork the vendored css.
     panel.root.style.width = 'min(460px, calc(100vw - 24px))';
-    // one pause for the whole panel, on the chrome rather than inside a tab: it
-    // freezes what every tab is reading.
     panel.add({ get: () => paused, set: setPaused }, { label: 'pause capture', listen: true });
     const tabs = panel.tabs();
 
-    // overview: F3-style "where am i" readouts, grouped into folders.
     const overview = tabs.tab('overview');
-    const str = { format: (v: string) => v }; // string monitors need an explicit (non-numeric) format
-    const strCopy = { format: (v: string) => v, copy: true }; // + click-to-copy (coords, keys)
+    const str = { format: (v: string) => v };
+    const strCopy = { format: (v: string) => v, copy: true };
     const int = { format: (v: number) => String(v) };
 
     const position = overview.folder('position');
@@ -454,15 +386,13 @@ function build(): DebugDashboard {
     world.monitor(() => activeRoom()?.clock.time ?? 0, { label: 'clock', format: (v) => `${v.toFixed(1)} s` });
     world.monitor(() => fmtTimeOfDay(activeRoom()?.environment.time ?? 0), { label: 'time of day', ...str });
 
-    // perf: at-a-glance headline + hero frame stack + compact throughput.
     const perf = tabs.tab('perf');
     perf.monitor(() => 1000 / Math.max(avgFrameMs(clientProfiler(), SMOOTH_TICK), 0.001), {
         label: 'fps',
         format: (v) => v.toFixed(0),
     });
     perf.monitor(() => avgFrameMs(clientProfiler(), SMOOTH_TICK), { label: 'client frame', unit: 'ms' });
-    // server frames arrive on the server's 5Hz push, so a few of them is already
-    // a second of wall time — a 30-frame window here would lag badly.
+    // server frames arrive on the server's 5Hz push, so a 30-frame window would lag badly.
     perf.monitor(() => avgFrameMs(serverProfiler(), SMOOTH_SERVER), { label: 'server frame', unit: 'ms' });
     perf.monitor(() => trailingAvg(clientProfiler(), 'net/ping', SMOOTH_NET), {
         label: 'ping',
@@ -471,12 +401,10 @@ function build(): DebugDashboard {
     addClientFrameStack(perf, 190);
     addThroughput(perf, 80);
 
-    // cpu: one client chart + one server chart, each the frame time stacked per
-    // top-level phase (siblings summing to ~frame time).
     const cpu = tabs.tab('cpu');
     addClientFrameStack(cpu, 210);
-    // the server tick's top level: the room's whole scope alongside the process-wide
-    // stages (inbox, discovery, netflush) it shares with every other room.
+    // server tick's top level: the room's scope alongside process-wide stages
+    // (inbox, discovery, netflush) shared with every other room.
     cpu.series(() => phaseSeries(serverProfiler(), null, CHART_HISTORY), {
         label: 'server tick (ms)',
         color: (key) => hashColor(key),
@@ -486,7 +414,7 @@ function build(): DebugDashboard {
         min: 0,
         hover: true,
     });
-    // and inside this room's scope: scripts, animation, physics, lighting, chat.
+    // inside this room's scope: scripts, animation, physics, lighting, chat.
     cpu.series(() => phaseSeries(serverProfiler(), serverRoomKey(), CHART_HISTORY), {
         label: 'server room (ms)',
         color: (key) => hashColor(key),
@@ -497,19 +425,15 @@ function build(): DebugDashboard {
         hover: true,
     });
 
-    // the host process behind this room. one server process per game-room container
-    // in prod, so these are that room's utilization rather than a shared machine's.
-    // sampled at ~1Hz server-side, so they move slowly by design.
+    // one server process per game-room container in prod; sampled at ~1Hz server-side.
     const proc = cpu.folder('server process');
     proc.monitor(() => latest(serverProfiler(), 'proc/cpu'), { label: 'cpu', format: (v) => `${v.toFixed(0)}%` });
     proc.monitor(() => latest(serverProfiler(), 'proc/rss'), { label: 'rss', unit: 'mb' });
     proc.monitor(() => latest(serverProfiler(), 'proc/heap'), { label: 'heap', unit: 'mb' });
 
-    // gpu: what the renderer pushes and what it holds. the upload rows are the ones that
-    // move day to day — a batch re-uploading its whole capacity when one slot moved shows as
-    // a bytes spike with flat call count, while a caller queueing many tiny ranges shows as
-    // the reverse. WebGPU-only for now: the WebGL backend records no upload counters, so
-    // those rows read 0 there.
+    // upload bytes spike with flat call count when a batch re-uploads its whole
+    // capacity for one moved slot; the reverse means many tiny queued ranges.
+    // WebGPU-only: the WebGL backend records no upload counters, so those rows read 0.
     const gpu = tabs.tab('gpu');
     gpu.monitor(() => trailingAvg(clientProfiler(), 'gpu/upload/bytes', SMOOTH_TICK), {
         label: 'upload / frame',
@@ -521,8 +445,8 @@ function build(): DebugDashboard {
     });
     gpu.monitor(() => avgIncl(clientProfiler(), 'render', SMOOTH_TICK), { label: 'render', unit: 'ms' });
     gpu.monitor(() => latest(clientProfiler(), 'gpu/draws'), { label: 'draw calls', ...int });
-    // floor, not a total: indirect draws keep their counts GPU-side, so they add a draw call here
-    // but no triangles. the voxel terrain draws indirect, so expect this to undercount badly.
+    // floor, not a total: indirect draws (voxel terrain) count GPU-side, so they
+    // add a draw call here but no triangles.
     gpu.monitor(() => latest(clientProfiler(), 'gpu/triangles'), {
         label: 'triangles (direct only)',
         format: (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)),
@@ -534,7 +458,7 @@ function build(): DebugDashboard {
         min: 0,
         hover: true,
     });
-    // the CPU half: time spent packing this frame's GPU data, per visual system.
+    // CPU half: time spent packing this frame's GPU data, per visual system.
     gpu.series(() => phaseSeries(clientProfiler(), 'visuals', CHART_HISTORY), {
         label: 'visual update (ms)',
         color: (key) => hashColor(key),
@@ -544,9 +468,8 @@ function build(): DebugDashboard {
         min: 0,
         hover: true,
     });
-    // mesh instance batch: how tight the partial upload actually is. `dirty` is the honest
-    // change count; `span` is what the one min..max range uploads. span >> dirty is the signal
-    // that scattered slots are inflating the write — 144 B per slot in the gap.
+    // `dirty` is the honest change count; `span` is what the min..max range uploads.
+    // span >> dirty means scattered slots are inflating the write.
     const meshInstances = gpu.folder('mesh instances');
     meshInstances.monitor(() => latest(clientProfiler(), 'mesh/instances/alive'), {
         label: 'alive',
@@ -565,8 +488,7 @@ function build(): DebugDashboard {
         { label: 'dirty vs uploaded span', height: 80, min: 0, hover: true },
     );
 
-    // resident objects: what the renderer is holding, not what it pushed. these should sit
-    // flat once a room settles — a count that climbs frame over frame is a leak.
+    // what the renderer holds, not what it pushed; should sit flat once a room settles.
     const resident = gpu.folder('resident');
     resident.monitor(() => latest(clientProfiler(), 'gpu/buffers'), { label: 'buffers', ...int });
     resident.monitor(() => latest(clientProfiler(), 'gpu/buffers/raw'), {
@@ -585,9 +507,8 @@ function build(): DebugDashboard {
         label: 'bind group layouts',
         ...int,
     });
-    // voxel quad arena occupancy. recorded every frame by both backends; the largest-free
-    // figure is the one that matters — a full arena with a fragmented free list stalls
-    // chunk uploads even while usedPct looks healthy.
+    // largest-free is the figure that matters: a full arena with a fragmented free
+    // list stalls chunk uploads even while usedPct looks healthy.
     const arena = gpu.folder('voxel quad arena');
     arena.monitor(() => latest(clientProfiler(), 'voxels/arena/quad/usedPct'), {
         label: 'used',
@@ -611,10 +532,8 @@ function build(): DebugDashboard {
         { label: 'quad arena (%)', height: 80, unit: '%', min: 0, hover: true },
     );
 
-    // voxel light volume. `queued` is the diagnostic one: the drain spends a
-    // fixed per-frame budget, so its cost alone only says the queue is non-empty.
-    // A queue that stays deep during ordinary play means something is re-marking
-    // chunks, which is a different problem from the per-tile cost.
+    // the drain spends a fixed per-frame budget, so a queue that stays deep during
+    // ordinary play means something is re-marking chunks, not a per-tile cost problem.
     const lightVol = gpu.folder('voxel light volume');
     lightVol.monitor(() => latest(clientProfiler(), 'voxels/light/queued'), {
         label: 'queued',
@@ -637,17 +556,15 @@ function build(): DebugDashboard {
         { label: 'light queue', height: 80, min: 0, hover: true },
     );
 
-    // physics: isolated server physics-tick cost + live body/contact counts.
-    // physics is server-authoritative (the client runs interpolation, not the
-    // solver), so every reading comes off the server's mirrored frames.
-    // atlas: what the shader can see. reads the renderer's atlases live, so a
-    // swapped atlas (HMR, room change) shows without any wiring.
+    // reads the renderer's atlases live, so a swapped atlas (HMR, room change) shows without wiring.
     addAtlasTab(
         tabs,
         () => useClient.getState().renderer?.atlases() ?? { voxel: null, sprite: null },
         () => registry.blockRegistry.textures,
     );
 
+    // physics is server-authoritative (the client runs interpolation, not the
+    // solver), so every reading comes off the server's mirrored frames.
     const physics = tabs.tab('physics');
     physics.monitor(() => avgIncl(serverProfiler(), 'physics', SMOOTH_SERVER), { label: 'physics tick', unit: 'ms' });
     // pre (trait sync) + step (solver) + post (writeback), stacked = total cost.
@@ -665,7 +582,6 @@ function build(): DebugDashboard {
         label: 'active',
         ...int,
     });
-    // static / kinematic / dynamic split as live category bars (no history).
     bodies.bars(
         () => ({
             static: latest(serverProfiler(), 'physics/bodies/static'),
@@ -684,9 +600,8 @@ function build(): DebugDashboard {
         ...int,
     });
 
-    // net: ping + client/server throughput (all four flows overlaid) + client-side
-    // per-message-type ingress/egress breakdowns (net/in/*, net/out/* are recorded
-    // client-side only; the server records only its totals).
+    // net/in/*, net/out/* per-message-type breakdowns are recorded client-side only;
+    // the server records only its totals.
     const net = tabs.tab('net');
     net.monitor(() => trailingAvg(clientProfiler(), 'net/ping', SMOOTH_NET), {
         label: 'ping',
@@ -708,7 +623,6 @@ function build(): DebugDashboard {
         label: 'server out',
         unit: 'kb/s',
     });
-    // ping over time — single series so spikes read at a glance (hover to freeze).
     net.series(() => counterSeries(clientProfiler(), { ping: 'net/ping' }, CHART_HISTORY), {
         label: 'ping (ms)',
         height: 130,
@@ -717,7 +631,6 @@ function build(): DebugDashboard {
         hover: true,
     });
     addThroughput(net, 130);
-    // where the bytes go: one stacked band per message type, summing to the total.
     net.series(() => prefixCounterSeries(clientProfiler(), 'net/in/', CHART_HISTORY), {
         label: 'ingress by type (kb/s)',
         stacked: true,
@@ -735,12 +648,7 @@ function build(): DebugDashboard {
         hover: true,
     });
 
-    // ── frames: the captured span tree of one frame, as a flame graph ──
-    //
-    // pause (the panel button) freezes both rings; the offset here scrubs the
-    // frames they hold. `client` reads the page's own loop, `server` the ticks
-    // mirrored off `room_frames` for this room (the server's whole tick, minus
-    // other rooms).
+    // pause freezes both rings; the offset here scrubs the frames they hold.
     const frames = tabs.tab('frames');
     frames.monitor(
         () => {
@@ -780,11 +688,8 @@ function build(): DebugDashboard {
         },
     );
 
-    // host extensions: the editor's options tab lands here, before logs and
-    // before the active-tab reset below.
     for (const extend of extensions) extend(tabs);
 
-    // ── logs tab: client + server tail views (editor-only, matches the old tab) ──
     if (env.editor) {
         const logs = tabs.tab('logs');
         logs.log(
@@ -797,39 +702,32 @@ function build(): DebugDashboard {
         );
     }
 
-    tabs.active('overview'); // start on overview, not the last tab added
+    tabs.active('overview');
 
     return {
         dash,
         tabs,
         setOpen(open) {
             dash.root.style.display = open ? '' : 'none';
-            // a hidden dashboard samples nothing: the shared ticker holds, so no
-            // widget reads a ring or repaints until it is shown again.
             dash.pause(!open);
         },
     };
 }
 
-/** create-or-get the singleton debug dashboard. */
 export function ensureDebugDashboard(): DebugDashboard {
     if (!instance) {
         instance = build();
-        // seed open state so a dashboard built while already open (e.g. a game
-        // touched ctx.client.debug before first backtick) shows immediately.
         instance.setOpen(useClient.getState().debugOpen);
     }
     return instance;
 }
 
-/** drive open/close from the store's `debugOpen`. no-op if never built. */
 export function setDebugDashboardOpen(open: boolean): void {
     if (instance) instance.setOpen(open);
 }
 
-// the shared ClientDebugState referenced by every room's `ctx.client.debug`.
-// `dashboard` is a lazy getter so the dashboard surface is built only on first
-// access. one object for all rooms — there is a single client per page.
+// shared across every room's `ctx.client.debug`; `dashboard` is a lazy getter
+// so the surface is built only on first access.
 export const clientDebug = {
     get dashboard(): Dashboard {
         return ensureDebugDashboard().dash;

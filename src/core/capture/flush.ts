@@ -1,30 +1,3 @@
-/**
- * core/capture/flush.ts, debounced cross-module flush request.
- *
- * The bongle() plugin's transform injects `requestFlush()` into every
- * user module's `hot.accept` callback. A single HMR cascade can fire dozens
- * of accepts in quick succession; each calls `requestFlush()`. We coalesce
- * them onto one microtask, so every registered handler runs at most once
- * per cycle.
- *
- * Multiple handlers can coexist, every registration site adds its own
- * handler, and a single `requestFlush()` fans out to all of them. In the
- * server env that means BOTH the engine's `applyRegistryChanges`
- * (registered by the boot template) AND the asset pipeline pass
- * (registered by the bongle:pipeline plugin) fire on each cascade. On the
- * client env only the engine handler is registered. The pipeline env has
- * no separate boot, it piggybacks on server.
- *
- * `registerFlushHandler` returns an unregister fn. Boot entries that
- * might re-evaluate under HMR should use `import.meta.hot.dispose(unregister)`
- * to avoid accumulating duplicates; in practice the boot entries are
- * static during dev so this isn't currently load-bearing.
- *
- * Errors from a handler are caught and logged; a thrown handler must
- * not block siblings or leave the scheduler stuck (subsequent flushes
- * would silently no-op because `pending` stayed `true`).
- */
-
 import { resetOwnerStack } from './module-scope';
 
 type FlushHandler = () => void | Promise<void>;
@@ -33,7 +6,9 @@ const handlers = new Set<FlushHandler>();
 let pending = false;
 
 /**
- * Register a flush handler. Returns an unregister fn for explicit cleanup
+ * Registers a flush handler; a single `requestFlush()` fans out to every registered handler. In the server env
+ * both the engine's `applyRegistryChanges` and the asset pipeline pass are registered and both fire on each
+ * cascade; the client env only registers the engine handler. Returns an unregister fn for explicit cleanup
  * (e.g. `import.meta.hot.dispose`).
  */
 export function registerFlushHandler(fn: FlushHandler): () => void {
@@ -53,10 +28,8 @@ export function requestFlush(): void {
     pending = true;
     queueMicrotask(() => {
         pending = false;
-        // Flush handlers are engine-level reconciliation (applyRegistryChanges,
-        // the asset pipeline pass) — they must run at __prod__ scope. Drop any
-        // module id a thrown module body left on the owning-module stack so
-        // reindex-derived upserts aren't misattributed to it. See resetOwnerStack.
+        // flush handlers are engine-level reconciliation and must run at __prod__ scope; drop any module id a
+        // thrown module body left on the owning-module stack so reindex-derived upserts aren't misattributed to it.
         resetOwnerStack();
         for (const fn of handlers) {
             try {

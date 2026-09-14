@@ -1,9 +1,3 @@
-// node-aabb.ts, shared helpers for computing a node's mesh-or-voxel AABB,
-// both in local space (for bind-pose envelopes, e.g. animator gating) and in
-// world space (for broadphase shape sizing, grab tool, etc.).
-//
-// callers handle their own fallback when the subtree contributes no AABB.
-
 import { type Mat4, mat4 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
@@ -18,11 +12,7 @@ import { getTrait } from './scene-tree';
 const _scratchLocal: Box3 = box3.create();
 const _scratchWorld: Box3 = box3.create();
 
-/**
- * write `node`'s own local-space mesh-or-voxel AABB into `out`. returns true
- * if the node carries a recognized aabb-producing trait (MeshTrait with a
- * resolvable handle entry, or VoxelMeshTrait with a populated VoxelModel).
- */
+/** Writes `node`'s own local-space mesh-or-voxel AABB into `out`. Returns true if the node carries a recognized aabb-producing trait. */
 function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     const meshTrait = getTrait(node, MeshTrait);
     const meshId = meshTrait?.meshId;
@@ -35,17 +25,11 @@ function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     return voxelMeshLocalAabb(node, out);
 }
 
-/**
- * write `node`'s own local-space VoxelMeshTrait AABB into `out`. returns false
- * when the node has no trait or its model is empty. voxel models carry their
- * own geometry, so unlike the MeshTrait path this needs no handle lookup.
- */
+/** Writes `node`'s own local-space VoxelMeshTrait AABB into `out`. Returns false when the node has no trait or its model is empty. */
 function voxelMeshLocalAabb(node: Node, out: Box3): boolean {
     const model = getTrait(node, VoxelMeshTrait)?.model;
     if (!model || model.voxelCount === 0) return false;
-    // mesh vertices are baked at boundsMin..boundsMax minus origin (see
-    // VoxelMeshVisuals.meshAllChunks), so the local-space AABB is the
-    // model's bounds shifted by -origin.
+    // Mesh vertices are baked at boundsMin..boundsMax minus origin, so the local-space AABB is the model's bounds shifted by -origin.
     const ox = model.origin[0];
     const oy = model.origin[1];
     const oz = model.origin[2];
@@ -55,12 +39,7 @@ function voxelMeshLocalAabb(node: Node, out: Box3): boolean {
     return true;
 }
 
-/**
- * walk `node` and its descendants, unioning each subtree node's mesh AABB
- * (transformed into world space by the node's interpolated world matrix)
- * into `out`. `out` must start empty (e.g. `box3.create()` then set to
- * +/-Infinity). returns true if at least one aabb was unioned.
- */
+/** Walks `node` and its descendants, unioning each subtree node's mesh AABB (transformed into world space) into `out`. `out` must start empty. Returns true if at least one AABB was unioned. */
 export function unionSubtreeWorldAabb(node: Node, resources: Resources, out: Box3): boolean {
     let found = false;
     const transform = getTrait(node, TransformTrait);
@@ -76,11 +55,10 @@ export function unionSubtreeWorldAabb(node: Node, resources: Resources, out: Box
 }
 
 /**
- * write `node`'s own local-space AABB into `out`, resolving MeshTrait boxes
- * from the codegen'd model registry instead of `Resources`. mesh AABBs are
- * baked at codegen, so this reads them off a detached tree with no runtime
- * and no loaded payload. models registered at runtime (uploaded avatars)
- * aren't in the registry, those resolve nothing here.
+ * Writes `node`'s own local-space AABB into `out`, resolving MeshTrait boxes from the
+ * codegen'd model registry instead of `Resources`, so it works on a detached tree with no
+ * runtime and no loaded payload. Models registered at runtime (uploaded avatars) aren't in
+ * the registry and resolve nothing here.
  */
 function nodeLocalAabbFromRegistry(node: Node, out: Box3): boolean {
     const meshId = getTrait(node, MeshTrait)?.meshId;
@@ -92,8 +70,7 @@ function nodeLocalAabbFromRegistry(node: Node, out: Box3): boolean {
     return voxelMeshLocalAabb(node, out);
 }
 
-/** per-depth accumulated matrices for `unionSubtreeLocalAabb`, grown on
- *  demand so a recursive walk allocates nothing after the first deep tree. */
+/** Per-depth accumulated matrices for `unionSubtreeLocalAabb`, grown on demand so a recursive walk allocates nothing after the first deep tree. */
 const _accumPool: Mat4[] = [];
 const _childTrs: Mat4 = mat4.create();
 const _scratchChild: Box3 = box3.create();
@@ -108,15 +85,11 @@ function accumMatrix(depth: number): Mat4 {
 }
 
 /**
- * union `root`'s subtree mesh AABBs into `out`, expressed in `root`-local
- * space: each descendant's box is transformed by its TRS chain up to (but
- * excluding) `root`, so the result is independent of where `root` sits in
- * the world. `out` must start empty. returns true if at least one box was
- * unioned.
- *
- * Pairs with `unionSubtreeWorldAabb` (same walk, world space, `Resources`-
- * backed). This one is for detached trees, e.g. sizing a freshly cloned
- * model before it's attached.
+ * Unions `root`'s subtree mesh AABBs into `out`, expressed in `root`-local space: each
+ * descendant's box is transformed by its TRS chain up to (but excluding) `root`, so the
+ * result is independent of where `root` sits in the world. `out` must start empty. Pairs
+ * with `unionSubtreeWorldAabb` (same walk, world space); this one is for detached trees,
+ * e.g. sizing a freshly cloned model before it's attached.
  */
 export function unionSubtreeLocalAabb(root: Node, out: Box3): boolean {
     mat4.identity(accumMatrix(0));

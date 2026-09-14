@@ -1,21 +1,3 @@
-/**
- * player controller, mouse/keyboard input + camera + per-player UX.
- *
- * pairs with `CharacterControllerTrait` (the sim). this trait *writes* the
- * CC's input fields (facing/move/jump/sprint/crouch/noclip) from real input
- * and *reads* its output (velocity/grounded/_stepSmoothOffset) for camera +
- * debug viz. an NPC system would use CC directly without this trait.
- *
- * camera supports three perspectives, cycled with 'C':
- *   - first, at the head, looking forward
- *   - third-back, behind the head, looking forward
- *   - third-front, in front of the head, looking back at the face
- *
- * third-person collision is a raycast from the head along the offset
- * direction; the camera distance is clamped to the nearest hit (against
- * voxels + bodies, excluding the character's own kinematic inner body).
- */
-
 import { CastRayStatus, castRay, createClosestCastRayCollector, createDefaultCastRaySettings } from 'crashcat';
 import {
     createSphereGeometry,
@@ -71,37 +53,27 @@ import { CameraTrait } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
 
-// ── perspective ───────────────────────────────────────────────────────
-
 export type Perspective = 'first' | 'third-back' | 'third-front';
 const PERSPECTIVE_ORDER: Perspective[] = ['first', 'third-back', 'third-front'];
 
-/**
- * Input + HUD wiring for the player controller. One master switch plus
- * grouped sub-knobs for desktop and touch behaviours. Fields are mutated
- * live, flip `enabled` for pause menus, dialog modals, cutscenes; flip
- * individual sub-flags for settings UIs.
- */
+/** input + HUD wiring for the player controller: one master switch plus grouped sub-knobs for desktop and touch behaviours.
+ *  Fields are mutated live: flip `enabled` for pause menus/cutscenes, individual sub-flags for settings UIs. */
 export type ControlsConfig = {
-    /** master switch. false → trait wires no input and mounts no HUD. */
+    /** master switch. false = trait wires no input and mounts no HUD. */
     enabled: boolean;
 
     desktop: {
         /** double-tap W activates sprint until W releases. off for games
          *  where sprint is RMB-held or always-on. */
         doubleTapSprint: boolean;
-        /** double-tap Space toggles noclip (free-fly). off by default; the
-         *  editor flips it on for its character mode, and games that want a
-         *  fly cheat can enable it too. the noclip movement itself lives on
-         *  the CC and is independent of this gesture. */
+        /** double-tap Space toggles noclip (free-fly), off by default; the noclip movement itself lives on the CC.
+         *  the editor flips this on for its character mode. */
         doubleTapNoclip: boolean;
     };
 
     touch: {
-        /** auto-mount the default 'move' joystick on mobile. the joystick
-         *  id is read into cc.move regardless, set false to suppress only
-         *  the default mount (e.g. you're mounting your own at a custom
-         *  position). */
+        /** auto-mount the default 'move' joystick on mobile; the joystick id is read into cc.move regardless.
+         *  set false to suppress only the default mount, e.g. to mount your own at a custom position. */
         joystick: boolean;
         /** auto-mount default 'jump' button on mobile. */
         jumpButton: boolean;
@@ -110,27 +82,17 @@ export type ControlsConfig = {
         sprintButton: boolean;
         /** auto-mount 'crouch' button on mobile (off by default). */
         crouchButton: boolean;
-        /** while noclip (free-fly) is active, mount a vertical up/down joystick
-         *  in place of the jump button so the flyer can ascend AND descend with
-         *  analog control. on by default. */
+        /** while noclip is active, mount a vertical up/down joystick in place of the jump button. on by default. */
         noclipVerticalJoystick: boolean;
-        /** mount a fly/walk toggle button that flips noclip on tap. off by
-         *  default; opt in where free-fly is allowed (the editor turns it on,
-         *  same as `desktop.doubleTapNoclip`). the touch counterpart to the
-         *  double-tap-Space toggle, which a finger can't do. */
+        /** mount a fly/walk toggle button that flips noclip on tap, off by default; the touch counterpart to `doubleTapNoclip`.
+         *  opt in where free-fly is allowed, same as the editor. */
         flyToggleButton: boolean;
-        /** right-half canvas drag → cc.look on touch devices. */
+        /** right-half canvas drag maps to cc.look on touch devices. */
         canvasLook: boolean;
     };
 };
 
-/**
- * Touch control ids that PlayerControllerTrait reads from `TouchInput`
- * when `controls.enabled` is true. Register a joystick / button at these
- * ids and the controller picks them up automatically. Unregistered ids
- * no-op (the touch input layer returns zero stubs), so reads are free
- * when nothing's mounted.
- */
+/** touch control ids that PlayerControllerTrait reads from `TouchInput` when `controls.enabled` is true. */
 export const PlayerControllerTouchIds = {
     moveJoystick: 'move',
     jumpButton: 'jump',
@@ -142,29 +104,17 @@ export const PlayerControllerTouchIds = {
     flyToggle: 'fly-toggle',
 } as const;
 
-// ── trait ─────────────────────────────────────────────────────────────
-
-// look direction lives on CharacterControllerTrait (`cc.input.look`) so it
-// can be synced + driven by NPCs too. PC just integrates mouse delta into
-// cc.input.look and reads it for camera composition. PC therefore has no
-// `input` bucket of its own, only `config` (tuning + editor toggles) and
-// `state` (per-frame runtime). The two well-named bundles (`crosshair`,
-// `controls`) stay top-level for discoverability.
+// look direction lives on CharacterControllerTrait (`cc.input.look`); PC has no `input` bucket of its own, only config/state.
 
 type PlayerControllerConfig = {
     perspective: Perspective;
     thirdPersonDistance: number;
     cameraCollisionMargin: number;
-    /** ease rate (1/s) for the sprint FOV transition. (eye height now lives on
-     *  CharacterControllerTrait, `config.eyeHeight`/`crouchEyeHeight`, eased into
-     *  `state.eyeHeight`, so the camera reads it from there.) */
+    /** ease rate (1/s) for the sprint FOV transition. */
     fovLerpSpeed: number;
     fov: number;
     fovSprint: number;
-    /** game-set multiplier on the target FOV (folded in before the ease),
-     *  < 1 zooms in, > 1 widens. lets game code drive transient FOV effects
-     *  (aim-down-sights, a bow-draw zoom, a speed-line widen) without fighting
-     *  the controller's own sprint-FOV easing. reset to 1 to clear. */
+    /** game-set multiplier on the target FOV, folded in before the ease; < 1 zooms in, > 1 widens. reset to 1 to clear. */
     fovScale: number;
     debugContacts: boolean;
     debugVelocity: boolean;
@@ -180,8 +130,7 @@ type PlayerControllerState = {
     sprintActive: boolean;
     wantsCrouch: boolean;
     lastTeleportId: number;
-    /** analog vertical fly input while noclip: +1 = ascend, -1 = descend.
-     *  fed by Space/Shift on desktop and the vertical joystick on touch. */
+    /** analog vertical fly input while noclip: +1 = ascend, -1 = descend. */
     noclipVertical: number;
 };
 
@@ -213,9 +162,7 @@ export const PlayerControllerTrait = trait(
             noclipVertical: 0,
         }),
 
-        // four ticks (top/bottom/left/right). game code can mutate these at
-        // runtime (recoil-bloom, hit-marker pulses, focus tightening) and the
-        // boxes will smoothly animate to the new geometry via `lerpSpeed`.
+        // four ticks (top/bottom/left/right); game code can mutate these at runtime and they animate via `lerpSpeed`.
         crosshair: (): CrosshairConfig => defaultCrosshairConfig(),
 
         // controls (live; flip for pause menus / settings)
@@ -240,8 +187,6 @@ export const PlayerControllerTrait = trait(
 );
 
 export type PlayerControllerTrait = TraitType<typeof PlayerControllerTrait>;
-
-/* ── controls ── */
 
 control(PlayerControllerTrait, 'debugContacts', {
     label: 'Debug: Contacts',
@@ -270,8 +215,6 @@ control(PlayerControllerTrait, 'debugPanel', {
     },
 });
 
-// ── input / camera constants ──────────────────────────────────────────
-
 const AXIS_UP: Vec3 = [0, 1, 0];
 const LOOK_SENSITIVITY = 0.002;
 const TOUCH_LOOK_SENSITIVITY = 0.005;
@@ -292,8 +235,6 @@ const _raySettings = createDefaultCastRaySettings();
 const _rayOrigin: Vec3 = [0, 0, 0];
 const _rayDir: Vec3 = [0, 0, 0];
 
-// ── input poll ────────────────────────────────────────────────────────
-
 function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, input: Input, viewportWidth: number): void {
     if (!pc.controls.enabled) return;
     const mk = input.mouseKeyboard;
@@ -304,8 +245,7 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
         cc.input.look[2] -= mk._dy * LOOK_SENSITIVITY;
     }
     if (pc.controls.touch.canvasLook && viewportWidth > 0) {
-        // right-half canvas drag = look. left half is reserved for the
-        // joystick area so accidental tracking doesn't compete with it.
+        // right-half canvas drag = look; left half is reserved for the joystick area.
         const halfW = viewportWidth / 2;
         for (const touch of getCanvasTouches(t).values()) {
             if (touch.startX <= halfW) continue;
@@ -313,9 +253,7 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
             cc.input.look[2] -= touch.dy * TOUCH_LOOK_SENSITIVITY;
         }
     }
-    // `look:true` touch buttons (e.g. a fire button you aim with) feed the same
-    // look channel, position-independent, so unlike canvasLook there's no
-    // half-screen gate. additive with the above, clamped together below.
+    // `look:true` touch buttons feed the same look channel, position-independent; additive with the above.
     const buttonLook = consumeTouchButtonLookDrag(t);
     cc.input.look[1] -= buttonLook.dx * TOUCH_LOOK_SENSITIVITY;
     cc.input.look[2] -= buttonLook.dy * TOUCH_LOOK_SENSITIVITY;
@@ -337,9 +275,7 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
     cc.input.jump = isKeyDown(mk, 'Space') || isTouchButtonDown(t, PlayerControllerTouchIds.jumpButton);
 
     if (cc.input.noclip) {
-        // vertical fly is analog: Space/Shift on desktop, the y-locked vertical
-        // joystick on touch. the stick's y is positive-down, so negate it (push
-        // up = ascend). tickPlayerNoclip reads pc.state.noclipVertical.
+        // vertical fly is analog; the stick's y is positive-down, so negate it (push up = ascend).
         const vstick = getJoystick(t, PlayerControllerTouchIds.verticalJoystick);
         const keyUp = isKeyDown(mk, 'Space') ? 1 : 0;
         const keyDown = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') ? 1 : 0;
@@ -376,8 +312,6 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
     cc.input.crouch = pc.state.wantsCrouch;
 }
 
-// ── noclip tick (player-driven; uses camera pitch for fly direction) ─
-
 function tickPlayerNoclip(
     playerController: PlayerControllerTrait,
     characterController: CharacterControllerTrait,
@@ -400,8 +334,6 @@ function tickPlayerNoclip(
 
     const strafe = characterController.input.move[0];
     const fwd = characterController.input.move[1];
-    // analog vertical: +1 ascend / -1 descend, from Space/Shift or the vertical
-    // fly joystick (see the noclip branch of the input gather).
     const vertical = playerController.state.noclipVertical;
 
     _noclipMove[0] = (fwdX * fwd + rgtX * strafe) * NOCLIP_SPEED;
@@ -411,13 +343,7 @@ function tickPlayerNoclip(
     applyNoclipDisplacement(characterController, transform, physics, _noclipMove, dt);
 }
 
-// ── camera collision ──────────────────────────────────────────────────
-//
-// raycast from `headPos` along `dir` for `maxDist`. returns the nearest
-// hit fraction (in [0, 1]) considering both voxels and rigid bodies.
-// the body query uses the CC's own `bodyFilter` so we skip the character's
-// kinematic inner body (and voxels, which we DDA separately).
-
+// raycast from `headPos` along `dir` for `maxDist`, returning the nearest hit distance considering both voxels and rigid bodies.
 function castCameraRay(
     cc: CharacterControllerTrait,
     physics: Physics,
@@ -465,8 +391,6 @@ function castCameraRay(
     return hitDist;
 }
 
-// ── camera update ─────────────────────────────────────────────────────
-
 const _camPosScratch: Vec3 = [0, 0, 0];
 const _camQuatScratch: Quat = [0, 0, 0, 1];
 const _eyeScratch: Vec3 = [0, 0, 0];
@@ -482,8 +406,7 @@ function updateCamera(
     cameraTrait: CameraTrait,
     dt: number,
 ): void {
-    // decay step-smooth offset toward zero, camera rises smoothly to match
-    // physics position after a stair step-up. exp(-23*dt) mirrors Minetest.
+    // decay step-smooth offset toward zero, camera rises smoothly to match physics position after a stair step-up.
     if (transform.teleport !== playerController.state.lastTeleportId) {
         playerController.state.lastTeleportId = transform.teleport;
         characterController.state.stepSmoothOffset = 0;
@@ -493,9 +416,7 @@ function updateCamera(
     }
 
     const pos = getVisualWorldPosition(transform);
-    // when step-smoothing, base camera Y on the authoritative position (not
-    // interpolated) so the offset doesn't fight the prevPosition→position lerp
-    // which would cause a one-frame dip before the smooth rise.
+    // when step-smoothing, base camera Y on the authoritative position so the offset doesn't fight the interpolated lerp.
     const baseY = characterController.state.stepSmoothOffset !== 0 ? transform.position[1] : pos[1];
     const headX = pos[0];
     const headY = baseY + characterController.state.eyeHeight + characterController.state.stepSmoothOffset;
@@ -504,10 +425,7 @@ function updateCamera(
     const theta = characterController.input.look[1];
     const phi = characterController.input.look[2];
 
-    // Forward (world-space look direction) from spherical.
-    // Engine convention: theta=0, phi=π/2 → fwd = -Z (matches glTF /
-    // three.js / orbit-controller). theta increases turning the look
-    // CCW around +Y; phi is measured from -Y (phi=0 down, phi=π up).
+    // world-space look direction from spherical; theta=0, phi=pi/2 gives fwd=-Z, matching glTF.
     const sinTheta = Math.sin(theta);
     const cosTheta = Math.cos(theta);
     const sinPhi = Math.sin(phi);
@@ -516,12 +434,7 @@ function updateCamera(
     const fwdY = -cosPhi;
     const fwdZ = -cosTheta * sinPhi;
 
-    // Pick eye + target by perspective. mat4.targetTo(eye, target, up)
-    // produces a transform whose local -Z points from eye toward target,
-    // matching the renderer's camera convention. Set both, then derive
-    // the camera quaternion from the resulting matrix, same math the
-    // orbit-controller uses and a clean replacement for manual yaw*pitch
-    // composition.
+    // pick eye + target by perspective, then derive the camera quaternion via mat4.targetTo, same as the orbit-controller.
     let eyeX = headX;
     let eyeY = headY;
     let eyeZ = headZ;
@@ -573,9 +486,7 @@ function updateCamera(
     } else {
         playerController.state.currentCameraDistance = 0;
 
-        // First-person camera bob: shift eye and target by the same
-        // offset so the look direction is preserved. Third-person skips
-        // this, bobbing an orbit anchor produces visible jitter.
+        // first-person camera bob: shift eye and target by the same offset so the look direction is preserved.
         if (characterController.state.bobOffsetX !== 0 || characterController.state.bobOffsetY !== 0) {
             const rightX = cosTheta;
             const rightZ = -sinTheta;
@@ -608,8 +519,6 @@ function updateCamera(
 
     cameraTrait.fov = playerController.state.currentFov;
 }
-
-// ── debug viz ─────────────────────────────────────────────────────────
 
 const COLOR_CONTACT_MARKER: [number, number, number, number] = [0, 1, 0, 1];
 const COLOR_CONTACT_NORMAL: [number, number, number, number] = [0, 1, 1, 1];
@@ -748,8 +657,6 @@ function formatVccState(cc: CharacterControllerTrait): string {
     return lines.join('\n');
 }
 
-// ── script ────────────────────────────────────────────────────────────
-
 script(
     PlayerControllerTrait,
     'controller',
@@ -788,18 +695,10 @@ script(
             }
         };
 
-        // ── crosshair (DOM overlay) ──
-        // config lives on the trait (`pc.crosshair`); the DOM + lerp mechanism
-        // is the engine crosshair widget, created lazily on the first
-        // subject-held frame (onFrame is client-only, so the server-null
-        // factory never actually fires here).
+        // config lives on the trait (`pc.crosshair`); the DOM widget is created lazily on the first subject-held frame.
         let crosshair: Crosshair | null = null;
 
-        /* ── mobile HUD (reactive) ── */
-        // Each piece reconciles per-tick against (controls.enabled && isTouchPrimary(ctx)
-        // && controls.touch.<flag>). flipping any of those mounts or disposes
-        // the corresponding DOM helper on the next sync, so pause menus and
-        // settings UIs that toggle controls.* "just work".
+        // each HUD piece reconciles per-tick against controls.enabled && isTouchPrimary(ctx) && controls.touch.<flag>.
         type HudHandle = { dispose(): void } | null;
         const hud: {
             joystick: HudHandle;
@@ -816,8 +715,7 @@ script(
             verticalJoystick: null,
             flyToggle: null,
         };
-        // which glyph the fly toggle currently shows (true = boot/flying), so we
-        // remount it only when the mode actually flips.
+        // which glyph the fly toggle currently shows, so it remounts only when the mode actually flips.
         let flyToggleShowsBoot: boolean | null = null;
 
         function reconcileHud(key: keyof typeof hud, want: boolean, make: () => HudHandle): void {
@@ -838,23 +736,17 @@ script(
 
         const syncHud = (pc: PlayerControllerTrait): void => {
             const on = pc.controls.enabled;
-            // pointer lock is no longer released here: it's derived each frame from
-            // the room's intent + UI releases (see api/pointer-lock). A pause menu
-            // frees the cursor via `releasePointer`, independent of controls.enabled.
+            // pointer lock is derived each frame from the room's intent + UI releases, not released here.
 
-            // touch controls show whenever touch is the primary input, viewport size
-            // independent, so tablets and landscape phones get them too (a width gate
-            // would wrongly drop them).
+            // touch controls show whenever touch is the primary input, independent of viewport size.
             const wantHud = on && isTouchPrimary(ctx);
-            // noclip (free-fly) swaps the jump button for a vertical up/down
-            // joystick so the flyer can descend too, not just ascend.
+            // noclip swaps the jump button for a vertical up/down joystick so the flyer can descend too.
             const noclip = !!getTrait(ctx.node, CharacterControllerTrait)?.input.noclip;
 
             reconcileHud('joystick', wantHud && pc.controls.touch.joystick, () =>
                 createTouchJoystick(ctx, {
                     id: PlayerControllerTouchIds.moveJoystick,
-                    // dynamic: appears where you touch in the lower-left; a dimmed hint sits
-                    // at this anchor until the first touch, then it only shows while held.
+                    // dynamic: appears where you touch in the lower-left; a dimmed hint sits at this anchor until first touch.
                     dynamic: true,
                     left: 24,
                     bottom: 24,
@@ -883,9 +775,7 @@ script(
                     axis: 'y',
                 }),
             );
-            // fly/walk toggle: the glyph reflects the destination, so it has to
-            // remount when the mode flips (a touch button's svg is fixed at
-            // creation). reconcileHud only tracks presence, so drive it directly.
+            // fly/walk toggle: the glyph reflects the destination, so it remounts when the mode flips; driven directly.
             const wantFlyToggle = wantHud && pc.controls.touch.flyToggleButton;
             if (!wantFlyToggle) {
                 if (hud.flyToggle) {
@@ -903,8 +793,7 @@ script(
                     bottom: 132,
                     width: 52,
                     height: 52,
-                    // glyph shows the destination: footprints while flying (tap
-                    // to walk), a drone while walking (tap to fly).
+                    // glyph shows the destination: footprints while flying, a drone while walking.
                     icon: noclip ? walkIcon : flyIcon,
                 });
             }
@@ -942,11 +831,7 @@ script(
                 return;
             }
 
-            // this controller wants desktop mouse-look while it's mounted. cleared
-            // symmetrically in onDispose; a takeover camera (death-cam) re-asserts
-            // across the respawn gap. because the lock is reconciled once at
-            // end-of-frame, an onDispose(false)→takeover(true) swap in the same
-            // frame nets out to `true` and never releases.
+            // cleared symmetrically in onDispose; the lock is reconciled once at end-of-frame.
             setPointerLock(ctx, true);
         });
 
@@ -960,12 +845,7 @@ script(
         });
 
         onUpdate(ctx, ({ delta }) => {
-            // input + camera writes gate on control: when the POV has been
-            // swapped to a different node (e.g. editor freecam), this player
-            // stops reading mouse/keyboard and its CameraTrait stops being
-            // touched. owner-only state (perspective, fov lerp) is implied,
-            // control => owner, since only owners can hold control of their
-            // own player node.
+            // input + camera writes gate on control: when the POV swaps to a different node, this player stops reading input.
             if (getSubject(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc) return;
@@ -978,9 +858,7 @@ script(
                 const viewportWidth = ctx.client?.state?.viewport.width ?? 0;
                 pollInput(pc, cc, input, viewportWidth);
 
-                // double-tap Space toggles noclip when enabled (editor character
-                // mode; opt-in fly cheat in games). pure gesture, the noclip
-                // movement itself lives on the CC.
+                // double-tap Space toggles noclip when enabled; pure gesture, the noclip movement itself lives on the CC.
                 if (pc.controls.desktop.doubleTapNoclip && isKeyJustDown(input.mouseKeyboard, 'Space')) {
                     if (pc.state.lastJumpDownTime >= 0 && pc.state.elapsed - pc.state.lastJumpDownTime < DOUBLE_TAP_WINDOW) {
                         cc.input.noclip = !cc.input.noclip;
@@ -992,33 +870,26 @@ script(
                     }
                 }
 
-                // touch fly/walk toggle button (stand-in for double-tap Space,
-                // which a finger can't do). same effect: flip noclip, kill
-                // momentum on entry so you don't rocket off with prior velocity.
+                // touch fly/walk toggle button: flips noclip and kills momentum on entry so you don't rocket off.
                 if (pc.controls.touch.flyToggleButton && isTouchButtonJustDown(input.touch, PlayerControllerTouchIds.flyToggle)) {
                     cc.input.noclip = !cc.input.noclip;
                     if (cc.input.noclip) vec3.set(cc.state.velocity, 0, 0, 0);
                     cc.input.jump = false;
                 }
 
-                // 'C' cycles perspective (play mode only, keep the edit-mode
-                // camera predictable while building).
+                // 'C' cycles perspective, play mode only, to keep the edit-mode camera predictable while building.
                 if (ctx.mode !== 'edit' && isKeyJustDown(input.mouseKeyboard, 'KeyC')) {
                     const idx = PERSPECTIVE_ORDER.indexOf(pc.config.perspective);
                     pc.config.perspective = PERSPECTIVE_ORDER[(idx + 1) % PERSPECTIVE_ORDER.length]!;
                 }
             }
 
-            // eye-height (incl. the crouch drop) is eased on CharacterControllerTrait
-            // now, `state.eyeHeight`, which the camera reads above.
             const targetFov = (cc.input.sprint ? pc.config.fovSprint : pc.config.fov) * pc.config.fovScale;
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });
 
         onTick(ctx, ({ delta }) => {
-            // noclip drives the player's transform from input (cc.move/jump).
-            // gated on control so a non-control player can't keep flying
-            // around after the POV moves elsewhere.
+            // noclip drives the player's transform from input; gated on control so a non-control player can't keep flying.
             if (getSubject(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc?.input.noclip) return;
@@ -1033,15 +904,9 @@ script(
             if (!cc || !transform) return;
 
             const pc = ctx.trait;
-            // camera + crosshair are control-gated: only the POV node writes
-            // to its CameraTrait or paints the HUD overlay. when POV swaps
-            // away, the crosshair is torn down so a stale tickmark doesn't
-            // linger over whatever lens is now active.
+            // camera + crosshair are control-gated: only the POV node writes to its CameraTrait or paints the HUD overlay.
             if (getSubject(ctx) === ctx.node) {
-                // resolve the active camera each frame: when this node is the
-                // subject, client.camera is the camera it drives (no init-time
-                // caching, so it stays correct across editor lens swaps). onFrame
-                // is client-only and a camera is always wired, so no null dance.
+                // resolve the active camera each frame so it stays correct across editor lens swaps.
                 const cameraNode = getCamera(ctx)!;
                 const cameraTransform = getTrait(cameraNode, TransformTrait)!;
                 const cameraTrait = getTrait(cameraNode, CameraTrait)!;

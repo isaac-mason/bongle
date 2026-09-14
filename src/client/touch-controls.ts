@@ -1,16 +1,6 @@
-/**
- * On-screen joystick + button, DOM helpers mounted under the per-room
- * `touchOverlay`. They own pointer-event listeners on their own root
- * `<div>` (siblings of the canvas, not children) and write directly
- * into the room's `TouchInput` state by id. Scripts read state via the
- * `getJoystick` / `isTouchButtonDown` predicates by the same id.
- */
-
 import { warn } from '../api/debug';
 import type { ScriptContext } from '../api/scripts';
 import type { JoystickState, TouchButtonState, TouchInput } from './input';
-
-/* ── shared helpers ──────────────────────────────────────────────── */
 
 function getOverlay(ctx: ScriptContext): { overlay: HTMLDivElement; touch: TouchInput } | null {
     const client = ctx.client;
@@ -28,8 +18,6 @@ function applyEdges(el: HTMLDivElement, opts: { left?: number; right?: number; t
     if (opts.bottom !== undefined) el.style.bottom = `${opts.bottom}px`;
 }
 
-/* ── joystick ────────────────────────────────────────────────────── */
-
 export type CreateTouchJoystickOpts = {
     id: string;
     left?: number;
@@ -40,18 +28,12 @@ export type CreateTouchJoystickOpts = {
     size: number;
     /** 0..1 inner dead-zone applied to the normalised stick magnitude. */
     deadzone?: number;
-    /** constrain the stick to a single axis. 'both' (default) is the free
-     *  2-axis nipple; 'y' locks it to vertical (up/down, e.g. noclip fly
-     *  ascend/descend); 'x' locks it to horizontal. the thumb and the reported
-     *  value both stay on the allowed axis. */
+    /** constrain the stick to a single axis; 'both' (default) is the free 2-axis nipple. */
     axis?: 'both' | 'x' | 'y';
-    /** appear-where-you-touch: the ring spawns centred on the touch point inside `zone` and
-     *  hides on release. before the FIRST touch it shows a one-time hint at the left/right/
-     *  top/bottom anchor, so players see where the stick lives. */
+    /** ring spawns centred on the touch point inside `zone` and hides on release,
+     *  showing a one-time hint at the anchor before the first touch. */
     dynamic?: boolean;
-    /** dynamic capture area, CSS values (e.g. '50%'). default: lower-left `{ left:'0',
-     *  bottom:'0', width:'50%', height:'68%' }` — clear of a top HUD strip + the right-half
-     *  aim/look surface. */
+    /** dynamic capture area, CSS values (e.g. '50%'); default is the lower-left quadrant. */
     zone?: { left?: string; right?: string; top?: string; bottom?: string; width?: string; height?: string };
 };
 
@@ -73,9 +55,8 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     const dynamic = !!opts.dynamic;
     const axis = opts.axis ?? 'both';
 
-    // the visible ring (+ thumb). fixed mode: the ring itself captures pointers, pinned at
-    // its anchor. dynamic mode: a transparent `zone` captures and the ring floats to the
-    // touch point (hidden on release; a dimmed one-time hint sits at the anchor until first use).
+    // fixed mode: the ring itself captures pointers, pinned at its anchor. dynamic
+    // mode: a transparent `zone` captures and the ring floats to the touch point.
     const ring = document.createElement('div');
     ring.style.position = 'absolute';
     ring.style.width = `${size}px`;
@@ -109,8 +90,7 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     if (dynamic) ring.style.opacity = '0.5'; // the pre-use "the stick is here" hint
 
     const setStick = (nx: number, ny: number): void => {
-        // drop the locked-out axis so a constrained stick reports (and draws)
-        // only along its allowed direction.
+        // drop the locked-out axis so a constrained stick reports only its allowed direction.
         if (axis === 'y') nx = 0;
         else if (axis === 'x') ny = 0;
         const mag = Math.sqrt(nx * nx + ny * ny);
@@ -120,7 +100,7 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
             thumb.style.transform = 'translate(0px, 0px)';
             return;
         }
-        // remap [deadzone, 1] → [0, 1] then clamp.
+        // remap [deadzone, 1] to [0, 1], then clamp.
         const remapped = Math.min(1, (mag - deadzone) / (1 - deadzone));
         const sx = (nx / mag) * remapped;
         const sy = (ny / mag) * remapped;
@@ -134,7 +114,6 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
         activePointerId = e.pointerId;
         state.active = true;
         if (dynamic) {
-            // spawn the ring centred on the touch point (relative to the overlay).
             hasUsed = true;
             const orect = overlay.getBoundingClientRect();
             ring.style.left = `${e.clientX - orect.left - radius}px`;
@@ -174,7 +153,6 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
         if (dynamic && hasUsed) ring.style.opacity = '0'; // hide until the next touch
     };
 
-    // capture target: dynamic → a transparent full-zone div; fixed → the ring itself.
     if (dynamic) {
         zone = document.createElement('div');
         zone.style.position = 'absolute';
@@ -212,8 +190,6 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     };
 }
 
-/* ── button ──────────────────────────────────────────────────────── */
-
 export type CreateTouchButtonOpts = {
     id: string;
     left?: number;
@@ -223,13 +199,11 @@ export type CreateTouchButtonOpts = {
     width: number;
     height: number;
     label?: string;
-    /** an icon's inner SVG markup (its `<path>`s), rendered as a crisp
-     *  currentColor-filled glyph — device-stable, unlike a unicode/emoji `label`.
-     *  takes precedence over `label`. */
+    /** an icon's inner SVG markup (its `<path>`s), a device-stable alternative to a
+     *  unicode/emoji `label`; takes precedence over `label`. */
     icon?: string;
-    /** also rotate the camera while held, slide the finger to aim. the button
-     *  captures its pointer, so the drag is forwarded into the look pipeline via
-     *  `consumeTouchButtonLookDrag` (PlayerController reads it). default false. */
+    /** also rotate the camera while held, dragging the finger to aim; consumed via
+     *  `consumeTouchButtonLookDrag`. default false. */
     look?: boolean;
 };
 
@@ -238,9 +212,7 @@ function iconSvg(inner: string, px: number): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="currentColor" shape-rendering="crispEdges" style="display:block">${inner}</svg>`;
 }
 
-/** the glyphs are 24x24 pixel art, so they only land on whole pixels when the box
- *  is a multiple of 24 css px. Size the button's icon off that ladder rather than
- *  off a raw fraction of the button, which lands mid-pixel and renders uneven. */
+/** glyphs are 24x24 pixel art, so size off multiples of 24 css px or they land mid-pixel. */
 function iconPxForButton(width: number, height: number): number {
     return Math.max(24, Math.round((Math.min(width, height) * 0.34) / 24) * 24);
 }
@@ -274,8 +246,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     applyEdges(root, opts);
 
     let activePointerId: number | null = null;
-    // last pointer position while held, `look` buttons accumulate the per-move
-    // delta into state so PlayerController can aim from it (drag-to-look).
+    // last pointer position while held; `look` buttons accumulate the per-move delta.
     let lastX = 0;
     let lastY = 0;
 
@@ -328,9 +299,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
 
     return {
         dispose(): void {
-            // if a finger is still down when the button is torn down (e.g. dying
-            // while holding to charge), release the capture explicitly so the
-            // pointer isn't left implicitly bound to a detached node.
+            // release the capture explicitly so a still-down finger isn't left bound to a detached node.
             if (activePointerId !== null) {
                 try {
                     root.releasePointerCapture(activePointerId);

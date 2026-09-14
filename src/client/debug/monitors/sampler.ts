@@ -1,8 +1,4 @@
-/**
- * a fixed-size ring buffer for realtime watching. push() overwrites the oldest
- * sample once full, so the memory is bounded and the window is always the last
- * `size` values. shared by every time-series widget (graph, lines, histogram).
- */
+/** fixed-size ring buffer for realtime watching; push() overwrites the oldest sample once full. */
 export type Sampler = {
     readonly size: number;
     /** number of valid samples (grows to `size`, then stays). */
@@ -62,11 +58,7 @@ export function sampler(size: number): Sampler {
     };
 }
 
-/**
- * an exponential moving average. `smooth` is the weight kept from history: 0 passes
- * values through untouched, higher values calm jitter (0.2 is subtle, 0.8 heavy).
- * returns a stateful function to feed raw values through before sampling.
- */
+/** exponential moving average; `smooth` is the weight kept from history (0 = passthrough, 0.8 = heavy). Returns a stateful function. */
 export function smoother(smooth = 0): (v: number) => number {
     const k = Math.max(0, Math.min(0.98, smooth));
     if (k === 0) return (v) => v;
@@ -77,11 +69,7 @@ export function smoother(smooth = 0): (v: number) => number {
     };
 }
 
-/**
- * resolve an autoscaled [lo, hi] range for a set of samplers, honoring fixed
- * `min`/`max` overrides. a little headroom keeps lines off the top edge, and a
- * zero-height range is nudged so drawing math never divides by zero.
- */
+/** autoscaled [lo, hi] range for a set of samplers, honoring fixed `min`/`max` overrides. A zero-height range is nudged so drawing math never divides by zero. */
 export function autorange(samplers: Sampler[], min?: number, max?: number): [number, number] {
     let lo = min ?? Infinity;
     let hi = max ?? -Infinity;

@@ -1,19 +1,3 @@
-/**
- * Material-keyed bundles of starter sound handles for block sound slots.
- *
- * `block({ sounds: blockSoundPresets.grass })` wires up the four sound
- * categories (`footstep`, `dig`, `break`, `place`) for a typical grass
- * block in one go.
- *
- * Each preset is a plain object; spread + override to customize:
- *
- *   block({ sounds: { ...blockSoundPresets.grass, footstep: [mySound] } })
- *
- * Each preset is exported as its own `const` so the package index can
- * re-export them as `export * as blockSoundPresets`. Tree-shaking can
- * drop presets you don't reference.
- */
-
 import type { BlockSoundConfig } from 'bongle';
 import * as s from './sounds';
 

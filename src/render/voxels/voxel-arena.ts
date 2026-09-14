@@ -1,18 +1,3 @@
-// voxel-arena.ts — SHARED voxel arena TOOLS (backend-neutral leaf primitives).
-//
-// The backend-neutral pieces both voxel producers build on: the GPU structs
-// (ChunkInfo / VisibleQuad / ChunkCullRecord / VisibleChunk + strides), the
-// `SegmentArena` + `QuadArena` suballocator, the shared cull-view math
-// (`buildCullView`), the arena residency SHAPES (`PassAlloc` / `ChunkAlloc` /
-// `SectionEntryFields`), the `hasNoVisibleSurface` predicate, and the arena
-// budgets. Each backend builds its own section table + residency/eviction packer +
-// consume over these (voxel-resources-cpu / voxel-resources-gpu); those are
-// intentionally not shared, so neither backend carries the other's buffers.
-//
-// Value-imported by BOTH producers + voxel-visuals + the offline paths. This file
-// must never value-import a backend producer — the WebGPU compute chain lives in
-// voxel-resources-gpu, imported only by render/webgpu/*.
-
 import { BufferLifecycle, type Camera, DrawIndirect, d, frustum, GpuBuffer, layoutStrideOf, struct } from 'gpucat';
 import { type Box3, plane3 } from 'math/shapes';
 import { QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
@@ -22,17 +7,9 @@ import type { VoxelPass } from './voxel-material';
 
 export const PASSES: readonly VoxelPass[] = ['opaque', 'transparent', 'translucent'];
 
-/** a fully-opaque chunk whose 6 face-neighbors are all fully opaque has no
- *  visible surface: every boundary face is culled against a solid neighbor
- *  and the interior self-culls. Such a chunk can skip meshing entirely and
- *  have its arena entry evicted, exactly like an all-air chunk.
- *
- *  A missing neighbor (unloaded, or the world edge) counts as non-occluding,
- *  so the exposed face still meshes. This is safe because any state change
- *  that could reveal a face already re-dirties this chunk: a boundary block
- *  edit in a neighbor (applyVoxelChunkOps) and a neighbor chunk load/update
- *  (dirtyAllNeighborChunks) both mark it dirty for face-cull reasons, so the
- *  occlusion test is re-evaluated before the newly-exposed face could show. */
+/** a fully-opaque chunk whose 6 face-neighbors are all fully opaque has no visible surface
+ *  and can skip meshing entirely, exactly like an all-air chunk. A missing neighbor counts
+ *  as non-occluding; any change that could reveal a face already re-dirties this chunk. */
 export function hasNoVisibleSurface(chunk: Chunk): boolean {
     if (chunk.solidCount !== CHUNK_VOLUME) return false;
     for (let dir = 0; dir < 6; dir++) {
@@ -42,49 +19,24 @@ export function hasNoVisibleSurface(chunk: Chunk): boolean {
     return true;
 }
 
-// ── ChunkInfo ───────────────────────────────────────────────────────
-//
-// per-section GPU side-table. one entry per occupied SectionTable slot;
-// the VS reads chunkInfo[slot] to recover the chunk's worldspace origin
-// and arena base. tightly packed (16B) so a workgroup-coherent read of
-// adjacent slots stays in cache.
-//
-// arenaBase = the section's dataStart in the shared quadArena. combined
-// with VisibleQuad.localIdx in the VS to produce the absolute realQuadId
-// for quads / light lookups.
-
+// per-section GPU side-table: one entry per occupied SectionTable slot. The VS reads
+// chunkInfo[slot] to recover the chunk's worldspace origin and arena base, combining
+// arenaBase with VisibleQuad.localIdx to produce the absolute realQuadId.
 export const ChunkInfo = /* @__PURE__ */ struct('VoxelChunkInfo', {
     origin: d.vec3f,
     arenaBase: d.u32,
 });
 
-// ── VisibleQuad ─────────────────────────────────────────────────────
-//
-// per-frame GPU-built table: one entry per visible quad. VS reads
-// visibleQuads[instanceIndex] → (slot, localIdx), derefs chunkInfo[slot]
-// for arenaBase + origin, and computes realQuadId = arenaBase + localIdx
-// to index quads / light.
-
+// per-frame GPU-built table: one entry per visible quad. VS reads visibleQuads[instanceIndex]
+// to get (slot, localIdx), derefs chunkInfo[slot], and computes realQuadId = arenaBase + localIdx.
 export const VisibleQuad = /* @__PURE__ */ struct('VoxelVisibleQuad', {
     slot: d.u32,
     localIdx: d.u32,
 });
 
-// ── ChunkCullRecord ─────────────────────────────────────────────────
-//
-// GPU cull input, one entry per resident chunk, mirroring `packer.chunks`
-// 1:1 (same array index). Consumed by the cull compute (frustum, once per
-// chunk) and — for survivors — the emit compute (per-facing back-face cull
-// + quad write).
-//
-// Chunk coords are INTEGERS: the cull/emit reconstruct the section center
-// camera-relative (`(cx - camCx) * CHUNK_SIZE …`), keeping the frustum math
-// in a small, f32-exact domain even at Minecraft world scale (absolute f32
-// world coords lose precision past ~2^24).
-//
-// Per-pass section slots index that pass's SectionTable / metaBuffer /
-// visibleQuads; -1 means the chunk has no geometry in that pass.
-
+// GPU cull input, one entry per resident chunk, mirroring packer.chunks 1:1. Chunk coords
+// are integers so cull/emit can reconstruct the section center camera-relative, keeping
+// the frustum math f32-exact at world scale. Per-pass slots of -1 mean no geometry there.
 export const ChunkCullRecord = /* @__PURE__ */ struct('VoxelChunkCullRecord', {
     cx: d.i32,
     cy: d.i32,
@@ -94,14 +46,9 @@ export const ChunkCullRecord = /* @__PURE__ */ struct('VoxelChunkCullRecord', {
     translucentSlot: d.i32,
 });
 
-// ── VisibleChunk ────────────────────────────────────────────────────
-//
-// Cull output: one entry per *surviving* chunk (compacted). Carries the
-// per-pass section slots, the camera-relative section center (so the emit /
-// count passes can run the per-facing back-face cone-cull without re-reading
-// camera state), and the distance bucket for Level-A ordering. `relCenter.w`
-// is unused padding.
-
+// Cull output: one entry per surviving chunk (compacted), carrying the per-pass section
+// slots, the camera-relative section center, and the distance bucket for ordering.
+// relCenter.w is unused padding.
 export const VisibleChunk = /* @__PURE__ */ struct('VoxelVisibleChunk', {
     opaqueSlot: d.i32,
     transparentSlot: d.i32,
@@ -113,41 +60,24 @@ export const VisibleChunk = /* @__PURE__ */ struct('VoxelVisibleChunk', {
 
 // Coarse distance buckets for section ordering. Chunks are bucketed by distance
 // (even in distance, via sqrt), then instance ranges are assigned bucket-by-
-// bucket: ascending → front-to-back (opaque/transparent, early-Z), descending →
-// back-to-front (translucent inter-section).
+// bucket: ascending gives front-to-back (opaque/transparent, early-Z), descending
+// gives back-to-front (translucent inter-section).
 export const BUCKET_COUNT = 256;
 
 export const VISIBLE_QUAD_STRIDE = /* @__PURE__ */ layoutStrideOf(VisibleQuad);
 export const DRAW_INDIRECT_STRIDE = /* @__PURE__ */ layoutStrideOf(DrawIndirect);
 
-// ── cull view (shared frustum math) ─────────────────────────────────
-//
-// The per-frame camera state the frustum + distance cull reads, packed as
-// Float32 the same way for both backends (the WebGPU `CullView` struct in
-// gpu-frame.ts mirrors this layout element-for-element):
-//   [0..19]  plane0..4      5 frustum planes (far dropped; the view-radius test
-//                           bounds it), camera-relative with the section half-
-//                           extent folded into .w so the test is
-//                           `dot(plane.xyz, rel) + plane.w >= 0`.
-//   [20..22] camMeta.xyz    camera chunk coords (integers, f32-exact past MC range)
-//   [23]     camMeta.w      live record count — NOT written here; the caller sets
-//                           it (WebGPU: cull dispatch bound; the CPU producer
-//                           walks the packer directly and ignores it).
-//   [24..26] camFrac.xyz    camera offset within its chunk [0, CHUNK_SIZE)
-//   [27]     camFrac.w      squared view-radius cutoff (camera-relative distance²)
-//
-// Everything is camera-relative + integer chunk coords so the frustum test stays
-// in a small f32-exact domain even at Minecraft world scale.
+// per-frame camera state read by the frustum + distance cull, packed as Float32 the same
+// way for both backends (mirrors gpu-frame.ts's CullView struct element-for-element):
+// [0..19] 5 frustum planes, camera-relative, half-extent folded into .w; [20..22] camera
+// chunk coords; [23] live record count, written by the caller; [24..26] camera's sub-chunk
+// offset; [27] view-radius^2 cutoff.
 export const CULL_VIEW_FLOATS = 28;
 
 const _cullViewFrustum = /* @__PURE__ */ frustum.create();
 
-/** Write the shared cull view (5 pre-shifted camera-relative frustum planes +
- *  camMeta chunk coords + camFrac sub-chunk offset + view-radius²) into `out`.
- *  Backend-neutral: `gpu-frame.updateCull` writes it into its GPU-buffer-backed
- *  Float32Array, `cpu-frame.cullEmit` into a plain CPU scratch. Does NOT write
- *  the live record count (`out[23]`); the caller owns that. `viewChunkRadius` is
- *  read live so a tier flip applies next frame. */
+/** Writes the shared cull view into out. Does not write the live record count (out[23]);
+ *  the caller owns that. viewChunkRadius is read live so a tier flip applies next frame. */
 export function buildCullView(out: Float32Array, camera: Camera, viewChunkRadius: number): void {
     // clip-space convention matters: the near plane extracts differently for WebGPU
     // (z=0) vs WebGL (z=-1); the default would mis-place it mid-frustum on WebGL.
@@ -164,16 +94,15 @@ export function buildCullView(out: Float32Array, camera: Camera, viewChunkRadius
     const camCy = Math.floor(cy / CHUNK_SIZE);
     const camCz = Math.floor(cz / CHUNK_SIZE);
 
-    // 5 planes (drop the far plane, index 5 — the view-radius test bounds it),
-    // camera-relative with the section half-extent folded into `.w`:
-    //   dot(plane.xyz, relCenter) + plane.w >= 0  keeps the section.
+    // 5 planes (far plane dropped; the view-radius test bounds it), camera-relative
+    // with the section half-extent folded into .w: dot(plane.xyz, relCenter) + plane.w >= 0.
     const half = CHUNK_SIZE * 0.5;
     for (let i = 0; i < 5; i++) {
         const p = _cullViewFrustum[i]!;
         const nx = p.normal[0];
         const ny = p.normal[1];
         const nz = p.normal[2];
-        // (n·cam + constant), folded with the box support along n; all in f64.
+        // (n dot cam + constant), folded with the box support along n; all in f64.
         const w = plane3.distanceToPoint(p, camera.position) + half * (Math.abs(nx) + Math.abs(ny) + Math.abs(nz));
         const base = i * 4;
         out[base + 0] = nx;
@@ -181,7 +110,7 @@ export function buildCullView(out: Float32Array, camera: Camera, viewChunkRadius
         out[base + 2] = nz;
         out[base + 3] = w;
     }
-    // camMeta = (camChunk.xyz, recordCount [caller-owned]); camFrac = (fracXYZ, viewDist²).
+    // camMeta = (camChunk.xyz, recordCount [caller-owned]); camFrac = (fracXYZ, viewDist squared).
     const viewDist = viewChunkRadius * CHUNK_SIZE;
     out[20] = camCx;
     out[21] = camCy;
@@ -193,18 +122,9 @@ export function buildCullView(out: Float32Array, camera: Camera, viewChunkRadius
     out[27] = viewDist * viewDist;
 }
 
-// ── SegmentArena ────────────────────────────────────────────────────
-//
-// fixed-count, slot-indexed allocator over N lock-stepped GpuBuffer
-// streams. each stream has its own `perSlot` element count but slot
-// indices are shared, allocating slot range [s, s+k) gives you the
-// same range in every stream.
-//
-// suballocator is OffsetAllocator (TLSF-style, 256 bins, 3-bit
-// mantissa). constant-time alloc/free, ≤12.5% per-allocation internal
-// fragmentation. handles are stored in `slotToNode` so callers keep
-// using the slot index as the alloc identity (no API ripple).
-
+// fixed-count, slot-indexed allocator over N lock-stepped GpuBuffer streams: each stream
+// has its own perSlot element count but slot indices are shared across streams.
+// Suballocator is OffsetAllocator (TLSF-style, constant-time alloc/free, <=12.5% fragmentation).
 export type StreamSpec = {
     schema: d.Any;
     perSlot: number;
@@ -217,7 +137,7 @@ export type SegmentArena<S extends Record<string, StreamSpec>> = {
     streams: S;
     buffers: { [K in keyof S]: GpuBuffer };
     allocator: OffsetAllocator;
-    /** slot offset → OffsetAllocator node index, so arenaFree(start) can
+    /** slot offset to OffsetAllocator node index, so arenaFree(start) can
      *  rebuild the handle without callers tracking it. */
     slotToNode: Map<number, number>;
 };
@@ -332,11 +252,8 @@ export function arenaDispose<S extends Record<string, StreamSpec>>(a: SegmentAre
     for (const key in a.buffers) a.buffers[key].dispose();
 }
 
-// ── arena factories ─────────────────────────────────────────────────
-
-// 40 B, geometry only. Per-corner light USED to be interleaved here; it lives in
-// the light-volume texture now, so this is the whole quad. The number matters: it
-// is the divisor sizing the arena, and the tier budgets were measured against it.
+// 40 B, geometry only; light lives in the light-volume texture. Sizes the arena
+// and the tier budgets are measured against it.
 const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4;
 
 export type QuadArenaStreams = {
@@ -356,14 +273,8 @@ export function createQuadArena(byteBudget: number, maxAllocs?: number): QuadAre
     });
 }
 
-// ── SectionTable ────────────────────────────────────────────────────
-
-// GPU-resident per-slot cull metadata, the device mirror of
-// `cpuFaceOffsets` + `cpuFaceCounts`:
-//   [faceOffsets[0..6], faceCounts[0..6]].
-// Read by the GPU cull/emit/expand computes to size + back-face-cull each of the
-// 7 facing slices (and, for translucent, to total the section's quads). Unused by
-// the VS (which reads ChunkInfo for origin + arenaBase instead).
+// GPU-resident per-slot cull metadata, the device mirror of cpuFaceOffsets + cpuFaceCounts:
+// [faceOffsets[0..6], faceCounts[0..6]]. Read by the GPU cull/emit/expand computes.
 export const SECTION_META_U32S = 14;
 
 export type SectionEntryFields = {
@@ -377,12 +288,8 @@ export type SectionEntryFields = {
     flags: number;
 };
 
-// ── arena residency shapes ──────────────────────────────────────────
-//
-// The shared per-chunk / per-pass allocation records. Each backend's producer
-// (`voxel-resources-cpu` / `voxel-resources-gpu`) owns its own packer over these;
-// the shapes stay here because both build the same `ChunkAlloc[]` residency list.
-
+// shared per-chunk / per-pass allocation records; each backend's producer owns its own
+// packer over these, but both build the same ChunkAlloc[] residency list.
 export type PassAlloc = {
     sectionSlot: number;
     dataStart: number;
@@ -404,22 +311,17 @@ export type ChunkAlloc = {
     chunkIndex: number;
 };
 
-// ── arena tier sizing ───────────────────────────────────────────────
-
 export type VoxelArenaBudget = {
     /** bytes for the shared quadArena (all 3 passes). */
     quadArenaBytes: number;
-    /** max chunk×pass slots per SectionTable (one table per pass). */
+    /** max chunk x pass slots per SectionTable (one table per pass). */
     maxSections: number;
     /** OffsetAllocator node-pool size for the quad arena. */
     maxAllocs: number;
-    /** light-volume tile slots. Sized off `maxSections` because a tile is needed
-     *  for roughly the 1-CHUNK DILATION of the geometry, not the geometry: a
-     *  chunk adjacent to a surface is non-uniform even when it holds nothing
-     *  itself, since the bake's padded region reaches across the boundary.
-     *  Uniform chunks consume no slot, so this can sit below the resident count. */
+    /** light-volume tile slots. Sized off maxSections since a tile is needed for the
+     *  1-chunk dilation of the geometry, not the geometry itself; uniform chunks need none. */
     maxLightTiles: number;
-    /** chunk radius the light-volume residency grid must cover. The STREAM
+    /** chunk radius the light-volume residency grid must cover. The stream
      *  radius, not the draw radius: chunks are resident (and so lit) slightly
      *  beyond what is drawn, and a grid that does not cover a sampled chunk
      *  aliases onto another one. */

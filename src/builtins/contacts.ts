@@ -3,21 +3,14 @@ import { type TraitType } from '../core/scene/traits';
 import { trait } from '../core/registry';
 
 /**
- * per-step contact lifecycle for a node.
+ * per-step contact lifecycle for a node, populated by the physics fan-out phase after the world
+ * step. Normals point away from this node.
  *
- * populated by the physics fan-out phase (after the world step, before
- * `runOnPostPhysicsStep`). normals point AWAY from this node. owner-local,
- * whichever side runs the physics step populates locally; events from a
- * predicted body show up on the predicting client.
+ * Contact references are valid until the start of the next physics step; the underlying Contact
+ * instance is released to the pool afterward, so copy any fields a script needs to retain.
  *
- * lifetime contract: Contact references in these arrays are valid until
- * the start of the next physics step. fields are *not* preserved across
- * steps, the underlying Contact instance is released to the pool. if a
- * script needs to retain data across steps, copy the fields it cares about.
- *
- * a Contact appearing in `added` last step appears in `persisted` this step
- * with *different* object identity but identical-meaning fields. don't hash
- * by reference; key by `nodeId`+`subShapeId` or `(voxelX, voxelY, voxelZ)`.
+ * A Contact in `added` last step appears in `persisted` this step with different object identity
+ * but identical-meaning fields. Key by `nodeId`+`subShapeId` or `(voxelX, voxelY, voxelZ)`, not by reference.
  */
 export const ContactsTrait = trait(
     'contacts',
@@ -28,7 +21,7 @@ export const ContactsTrait = trait(
         added: () => [] as Contact[],
         /** present last step AND this step. */
         persisted: () => [] as Contact[],
-        /** present last step, gone this step. fields are last-known (one step stale). */
+        /** present last step, gone this step. Fields are last-known (one step stale). */
         removed: () => [] as Contact[],
     },
     { persist: false },

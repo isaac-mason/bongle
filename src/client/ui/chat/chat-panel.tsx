@@ -1,25 +1,3 @@
-/**
- * chat panel, minecraft-style bottom-of-viewport overlay.
- *
- *   closed: desktop floats the last few lines bottom-left, fading after
- *           RECENT_LIFETIME_MS. play-mode touch shows only the single newest line
- *           beside a mid-left chat button (no stacked log under the joystick).
- *   open:   history pane above the input, scrolled to the bottom. clicking outside
- *           or Esc closes. opens with '/' (slash) or 't' on desktop; on play-mode
- *           touch, the chat button opens a bottom-sheet docked above the soft keyboard,
- *           over a dim backdrop that closes on tap and keeps touches off the controls.
- *
- * input handling: Enter sends verbatim; Tab accepts the highlighted
- * completion; ArrowUp/Down cycles the suggestion list (or recalls prior
- * submissions when there are no suggestions). Suggestions only show when
- * the input starts with '/'.
- *
- * data flow: subscribes to the active room's ChatClient for the line buffer
- * + command list. Submit goes through `ClientChat.submit`, which echoes
- * locally, dispatches local listeners, and queues unhandled lines onto the
- * outbox for the next tick to forward to the server.
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { MessageSquare } from '../../../../icons';
@@ -29,15 +7,12 @@ import type { ChatClient, ChatLine } from '../../chat';
 import * as ClientChat from '../../chat';
 import { useClient, useRoom } from '../stores/client-store';
 
-/** touch-primary (phone/tablet) — drives the on-screen chat opener + bottom-sheet, since
- *  the `/`,`t` key openers don't exist there. Reactive: reads the live input modality off
- *  the client store, so a hybrid user switching touch<->mouse gains/loses the opener. */
+// drives the on-screen chat opener since the '/','t' key openers don't exist on touch.
 function useIsTouch(): boolean {
     return useClient((s) => s.inputMode === 'touch');
 }
 
-/** px the soft keyboard covers at the bottom, tracked via visualViewport, so the open
- *  sheet can dock just above it. 0 when inactive or unsupported. */
+// px covered by the soft keyboard, tracked via visualViewport; 0 when inactive or unsupported.
 function useKeyboardInset(active: boolean): number {
     const [inset, setInset] = useState(0);
     useEffect(() => {
@@ -60,19 +35,15 @@ function useKeyboardInset(active: boolean): number {
 
 const HISTORY_LIMIT = 50;
 const OPEN_HISTORY_LINES = 100;
-/** max lines shown in the closed-mode floating overlay. */
 const CLOSED_RECENT_LINES = 5;
-/** how long a fresh line stays visible while the panel is closed. */
 const RECENT_LIFETIME_MS = 10_000;
-/** trailing fade window, opacity ramps from 1→0 over this slice at the end. */
+// opacity ramps from 1 to 0 over this trailing slice.
 const RECENT_FADE_MS = 1_000;
-/** touch: the single latest line beside the chat button lingers only briefly (a glance
- *  nudge), fading over the trailing slice. */
+// touch: the latest line beside the chat button fades out over this trailing slice.
 const TOUCH_LATEST_MS = 4_500;
 const TOUCH_LATEST_FADE_MS = 800;
 
-/** panel-local open + seed state. shared across the (one) on-screen panel
- *  instance, the active room's `ChatClient` owns the line buffer. */
+// panel-local open + seed state; the active room's ChatClient owns the line buffer.
 export type ChatPanelStore = {
     isOpen: boolean;
     /** consumed and cleared by the panel on mount. */
@@ -103,9 +74,7 @@ function useChatLines(chat: ChatClient | null): ChatLine[] {
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** whether chat is enabled for the active room (`chat.setEnabled(ctx, …)`).
- *  `ClientChat.setEnabled` notifies the same subscribers the line buffer uses,
- *  so this re-renders on toggle. Shared by `ChatPanel` and the play-ui openers. */
+// re-renders on toggle: setEnabled notifies the same subscribers the line buffer uses.
 export function useChatEnabled(): boolean {
     const chat = useRoom((r) => r.chat);
     const subscribe = useCallback((cb: () => void) => (chat ? ClientChat.subscribe(chat, cb) : () => {}), [chat]);
@@ -125,15 +94,7 @@ function formatLine(l: ChatLine): string {
     return l.from ? `${l.from}: ${l.text}` : l.text;
 }
 
-// Inline formatting tags, square-bracket delimited so messages still read as
-// plain text where they aren't understood: `[#rrggbb]` sets a 24-bit colour,
-// `[b]`/`[i]`/`[u]`/`[s]` turn bold/italic/underline/strike ON, and `[/]`
-// resets everything. State is cumulative, a colour tag changes only the
-// colour and leaves any active styles intact (only `[/]` clears them), so
-// colours and styles layer freely. Any bracketed run that isn't a known tag
-// (`[lol]`, `[1]`, an emote) renders verbatim, so ordinary chat that happens
-// to use brackets is never eaten. Tags ride inside a normal chat string, no
-// protocol change, so any script can style a line via `chat.message(ctx, …)`.
+// chat format tags: [#rrggbb] sets color, [b]/[i]/[u]/[s] toggle styles on, [/] resets all; unknown bracketed runs render verbatim.
 const HEX_TAG_RE = /^#[0-9a-f]{6}$/i;
 
 type Segment = { text: string; color?: string; bold: boolean; italic: boolean; underline: boolean; strike: boolean };
@@ -158,7 +119,7 @@ function parseFormatCodes(text: string): Segment[] {
                 const tag = text.slice(i + 1, end).toLowerCase();
                 const isTag = tag === '/' || tag === 'b' || tag === 'i' || tag === 'u' || tag === 's' || HEX_TAG_RE.test(tag);
                 if (isTag) {
-                    // emit the run so far under the OLD style, then mutate.
+                    // flush the run under the current style before mutating it.
                     flush();
                     if (tag === '/') {
                         color = undefined;
@@ -167,7 +128,7 @@ function parseFormatCodes(text: string): Segment[] {
                     else if (tag === 'i') italic = true;
                     else if (tag === 'u') underline = true;
                     else if (tag === 's') strike = true;
-                    else color = tag; // `#rrggbb`, a colour change leaves styles intact
+                    else color = tag;
                     i = end; // skip past the tag; the loop's i++ lands after ']'
                     continue;
                 }
@@ -179,7 +140,6 @@ function parseFormatCodes(text: string): Segment[] {
     return segments;
 }
 
-/** render a chat string with `[…]` colour/style tags applied. */
 function FormattedText({ text }: { text: string }) {
     if (!text.includes('[')) return <>{text}</>;
     const segments = parseFormatCodes(text);
@@ -210,8 +170,7 @@ function FormattedText({ text }: { text: string }) {
     );
 }
 
-/** module-scoped command history, survives ChatPanel mount/unmount
- *  (e.g. editor toggled off/on) so prior submissions stay recallable. */
+// module-scoped so history survives ChatPanel mount/unmount (e.g. editor toggled off/on).
 const submitHistory: string[] = [];
 
 export function ChatPanel() {
@@ -219,9 +178,7 @@ export function ChatPanel() {
     const close = useChatPanel((s) => s.close);
     const chat = useRoom((r) => r.chat);
     const lines = useChatLines(chat);
-    // the touch chat UX (edge button + bottom-sheet + single latest line) is gated on the
-    // active room being in PLAY mode (not the UI shell — the editor renders this panel too,
-    // and play-from-here flips playerMode to 'play'). editing keeps plain keyboard chat.
+    // touch chat UX is gated on active PLAY mode, not the UI shell (the editor renders this panel too).
     const playMode = useRoom((r) => r.playerMode) === 'play';
     const touchUi = useIsTouch() && playMode;
     const keyboardInset = useKeyboardInset(touchUi && isOpen);
@@ -235,10 +192,7 @@ export function ChatPanel() {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [historyCursor, setHistoryCursor] = useState(-1);
 
-    // ticking "now" for closed-mode fade. only runs while there's at least
-    // one line still within the lifetime window, pauses when chat is open
-    // (history pane renders in full, no fade math needed) and when no recent
-    // line exists.
+    // "now" ticks only while a recent line is still fading; paused when chat is open or nothing recent.
     const [now, setNow] = useState(() => Date.now());
     const newestTs = lines.length > 0 ? lines[lines.length - 1]!.ts : 0;
     const hasActiveRecent = !isOpen && newestTs > 0 && Date.now() - newestTs < RECENT_LIFETIME_MS;
@@ -256,9 +210,7 @@ export function ChatPanel() {
         setCursor(seed.length);
         setSelectedIndex(0);
         setHistoryCursor(-1);
-        // desktop: focus the input so you can type immediately. touch: DON'T — auto-focus
-        // pops the soft keyboard over the history; let the user read first and tap the input
-        // (or start with a seed, e.g. an editor '/' command) to summon the keyboard.
+        // touch: skip auto-focus, it would pop the soft keyboard over the history before the user reads it.
         if (touchUi && !seed) return;
         const id = requestAnimationFrame(() => {
             const el = inputRef.current;
@@ -269,7 +221,6 @@ export function ChatPanel() {
         return () => cancelAnimationFrame(id);
     }, [isOpen, touchUi]);
 
-    // pin history to bottom when open + whenever a new line arrives.
     // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length is a re-pin trigger, not read in the body
     useEffect(() => {
         if (!isOpen) return;
@@ -280,10 +231,8 @@ export function ChatPanel() {
     const commands = chat?.commands ?? null;
     const parsed: ParseState = useMemo(() => ChatCommands.parseLine(commands, input, cursor), [commands, input, cursor]);
     const rawSuggestions: Suggestion[] = useMemo(() => ChatCommands.suggestAt(commands, parsed), [commands, parsed]);
-    // hide completions when the user is typing plain chat (no leading '/').
     const suggestions = input.startsWith('/') ? rawSuggestions : EMPTY_SUGGESTIONS;
-    // arrow keys walk chat history (not suggestions) while the input is empty
-    // or just the bare '/' opener — no meaningful command has been typed yet.
+    // arrow keys recall chat history instead of walking suggestions while no command is typed yet.
     const arrowsRecallHistory = input === '' || input === '/';
 
     useEffect(() => {
@@ -306,9 +255,7 @@ export function ChatPanel() {
 
     function acceptSuggestion(sug: Suggestion): void {
         const isCmdToken = parsed.activeArgIndex === -1 && !parsed.cursorTokenIsFlag && !parsed.cursorIsSubcommand;
-        // command-token replacement spans the chat-opener `/` too, since the
-        // suggestion text already needs `/` prepended (and WE-style names carry
-        // a second `/`). every other slot replaces just the cursor token.
+        // command-token replacement spans the leading '/' too, since the suggestion text already includes it.
         const insertStart = isCmdToken ? 0 : parsed.cursorTokenStart;
         const before = input.slice(0, insertStart);
         const after = input.slice(parsed.cursorTokenEnd);
@@ -353,15 +300,8 @@ export function ChatPanel() {
     }
 
     function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
-        // Stop chat-input keys from reaching the global open-chat listener
-        // (play-ui / edit-ui document-keydown). Enter would otherwise
-        // commit+close then immediately re-open from the same native event:
-        // close()'s setState flushes before bubbling reaches document, so
-        // the input has unmounted, focus moved to body, isInputFocused()
-        // returns false, and the global handler hits its `!isOpen` branch.
-        // Escape closes via the same path. The other keys (Tab/Arrow) are
-        // already handled locally; stop them too so the host doesn't see
-        // chat keystrokes as game input.
+        // stop propagation so the global open-chat listener doesn't see this event: close()'s
+        // setState flushes before bubbling reaches document, so it would read isOpen as false and reopen.
         e.stopPropagation();
         if (e.key === 'Escape') {
             e.preventDefault();
@@ -419,8 +359,7 @@ export function ChatPanel() {
 
     const openHistory = isOpen ? lines.slice(-OPEN_HISTORY_LINES) : EMPTY_LINES;
 
-    // touch closed-state shows ONLY the single newest line beside the button (no stacked
-    // log), and only briefly — a nudge to glance, not a persistent readout.
+    // touch closed-state shows only the single newest line beside the button, briefly.
     const latestLine = !isOpen && lines.length > 0 ? lines[lines.length - 1]! : null;
     const latestAge = latestLine ? now - latestLine.ts : Number.POSITIVE_INFINITY;
     const latestVisible = latestAge < TOUCH_LATEST_MS;
@@ -429,10 +368,8 @@ export function ChatPanel() {
             ? 1
             : Math.max(0, 1 - (latestAge - (TOUCH_LATEST_MS - TOUCH_LATEST_FADE_MS)) / TOUCH_LATEST_FADE_MS);
 
-    // desktop: the classic bottom-left overlay. touch: no `/`,`t` keys and the bottom-left
-    // sits under the joystick, so — open → a bottom-sheet docked above the soft keyboard
-    // (above the touch-controls layer so it captures their touches); closed → the panel is
-    // empty (the newest line rides beside the edge chat button instead).
+    // touch: bottom-left sits under the joystick, so open uses a bottom-sheet above the
+    // soft keyboard instead (above the touch-controls layer so it captures their touches).
     const panelBase = 'pointer-events-none flex flex-col items-stretch gap-1';
     const panelClass = touchUi ? panelBase : `absolute bottom-24 left-3 right-3 z-50 ${panelBase}`;
     const panelStyle: React.CSSProperties = !touchUi
@@ -441,13 +378,11 @@ export function ChatPanel() {
           ? { position: 'fixed', left: 0, right: 0, bottom: keyboardInset, padding: '0 8px 8px', zIndex: 450 }
           : {};
 
-    // chat disabled for this room — render nothing (no log, no touch button).
     if (!enabled) return null;
 
     return (
         <>
-            {/* touch open: a dim backdrop above the touch-controls layer — captures stray
-                touches (so the joystick/buttons under it are inert while typing) + taps to close. */}
+            {/* backdrop sits above the touch-controls layer so the joystick/buttons stay inert while typing. */}
             {touchUi && isOpen && (
                 <div
                     className="fixed inset-0 bg-black/40"
@@ -459,14 +394,10 @@ export function ChatPanel() {
                     }}
                 />
             )}
-            {/* touch closed: the opener — a chat bubble on the left edge, a little past centre
-                (below any top-notch/HUD, above the lower-left move zone). the single newest
-                line briefly flashes to its RIGHT so it stays on-screen. */}
             {touchUi && !isOpen && (
                 <div
                     className="fixed left-3 top-[56%] -translate-y-1/2 flex items-center gap-2 pointer-events-none"
-                    // above the touch-controls layer (z-400): the button sits inside the
-                    // lower-left dynamic-joystick zone, so it must capture its own taps.
+                    // above the touch-controls layer (z-400) so the button captures its own taps.
                     style={{ zIndex: 410 }}
                 >
                     <button
@@ -589,8 +520,7 @@ export function ChatPanel() {
     );
 }
 
-/** signature line: `/set <block>` with the active arg bolded; or the parse
- *  error / command description underneath. */
+// shows "/cmd <arg>" with the active arg bolded, plus any parse errors.
 function Signature({ parsed }: { parsed: ParseState }) {
     if (!parsed.cmd) return null;
     const argLabels = parsed.cmd.args.map((a) => `<${a.name}>`);

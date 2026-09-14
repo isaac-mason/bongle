@@ -1,12 +1,3 @@
-// browser fs-backed loaders for the pipeline (the node/disk loader is gone —
-// browser-native only).
-//
-// Both resolve a `src` to bytes: absolute URLs (starter / engine / content-pack
-// assets, re-rooted to CDN by import.meta.url) are fetched; everything else is a
-// path read from the project Filesystem. They differ only in the root:
-// `createBakeLoader` reads bake INPUTS at the project root; `createClientResourceLoader`
-// reads baked client assets back out of `resources/client/`.
-
 import type { Filesystem } from '../../os/interface';
 import type { ResourceLoader } from '../core/resource-loader';
 
@@ -39,18 +30,16 @@ function createFsLoader(fs: Filesystem, base = ''): ResourceLoader {
     };
 }
 
-/** Reads bake INPUTS by their project-relative `src` (registry refs point at
- *  paths relative to the project root). */
+/** Reads bake inputs by their project-relative `src` (registry refs point at paths relative to the project root). */
 export function createBakeLoader(fs: Filesystem): ResourceLoader {
     return createFsLoader(fs);
 }
 
 /**
- * Reads BAKED client assets back out of the project fs — the pipeline worker's
- * in-worker icon renderer uses this to fetch the atlas/model bins the bake just
- * wrote. The engine requests these by bare name (`voxels-atlas.png`); the live
- * client resolves that to the origin root, which the dev middleware maps onto
- * `resources/client/`. Here we read that dir off the fs directly.
+ * Reads baked client assets back out of the project fs, the pipeline worker's in-worker icon
+ * renderer uses this to fetch the atlas/model bins the bake just wrote. The engine requests these
+ * by bare name (`voxels-atlas.png`); the live client resolves that to the origin root, which the
+ * dev middleware maps onto `resources/client/`.
  */
 export function createClientResourceLoader(fs: Filesystem): ResourceLoader {
     return createFsLoader(fs, CLIENT_RESOURCES_DIR);

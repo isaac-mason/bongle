@@ -1,7 +1,3 @@
-// editor/session.ts, the editor's room-session verbs: join, leave, switch and stop
-// rooms on the engine client. Plain functions over `state`; the UI reaches it through
-// EngineClientContext (ui/engine-client-context.ts).
-
 import type { EngineClient } from '../client/client';
 import * as Net from '../client/net';
 import { LOCAL_ROOM_PREFIX, setActivePlayer, stopLocalRoom } from '../client/rooms';
@@ -27,10 +23,8 @@ export function leaveRoom(state: EngineClient, roomId: string, mode: PlayerMode)
 
 export function stopRoom(state: EngineClient, roomId: string): void {
     if (roomId.startsWith(LOCAL_ROOM_PREFIX)) {
-        // standalone play preview: a client-only local room (no server). Tear it
-        // down locally and reactivate the edit room ourselves: stopLocalRoom
-        // leaves no active player, and there's no server `room_left` to bring the
-        // edit room back the way the server play path does.
+        // standalone play preview has no server, so stopLocalRoom leaves no active player and
+        // there's no server room_left to bring the edit room back; reactivate it ourselves.
         const editRoom = [...state.rooms.rooms.values()].find((r) => r.roomMode === 'edit');
         stopLocalRoom(state, roomId);
         if (editRoom) setActivePlayer(state.rooms, state.net, editRoom.playerId);

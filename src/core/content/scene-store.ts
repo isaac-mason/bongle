@@ -1,18 +1,3 @@
-// core/content/scene-store.ts, runtime mutation of declared scene handles.
-//
-// scenes are authored content. authored payloads ride on each
-// `SceneHandle._payload` field, stamped at `scene()` declaration by the
-// codegen barrel's `_registerScenePayload` calls (one map keyed by id holds
-// barrel writes that land before the matching `scene()` call drains them).
-// engine `load()` walks `module.scenes` and calls `populateScene` for any
-// handle whose `_payload` is set. live updates (dev) flow through engine
-// entries `applyScenePayload` / `clearScene` from HMR listeners in the
-// realm boot entries, which both update `_payload` and re-`populateScene`.
-//
-// scene declarations live on `module.scenes` (captured by `scene()` in user
-// code). this module does not keep a parallel registry, the project module
-// is the source of truth.
-
 import { registry } from '../registry';
 import { addChild, deserializeNode, type Node, refreshTraitIssues, type SerializedSceneTree } from '../scene/scene-tree';
 import { buildTraitInstance } from '../scene/traits';
@@ -22,34 +7,17 @@ import { loadVoxels, type SavedVoxels } from '../voxels/voxel-savefile';
 import { createVoxels } from '../voxels/voxels';
 import type { Content } from './index';
 
-/**
- * raw, on-the-wire scene data, what the codegen barrel imports at module
- * eval and what the plugin's HMR events carry (already parsed). fed into
- * `populateScene`, which both caches it on `content.payloads`
- * (authored-form-of-record) and deserializes it into the registered
- * `SceneHandle`.
- */
+/** Raw, on-the-wire scene data; fed into `populateScene`, which caches it on `content.payloads` and deserializes it into the registered `SceneHandle`. */
 export type ScenePayload = {
     nodes: SerializedSceneTree;
     voxels: SavedVoxels | null;
 };
 
 /**
- * apply a scene payload: cache the parsed payload on `content.payloads`
- * (so server discovery can re-push without disk reads) and, if this side
- * declared the scene as relevant, mutate the declared `SceneHandle` so
- * prefabs depending on it rebuild.
- *
- * the cache always records the payload, even when the handle isn't
- * relevant on this side, so the server can push `server: false` scenes
- * to clients without keeping a populated handle for them server-side.
- *
- * `side` selects which handle flag gates handle mutation:
- *   - `'server'` → mutates only when `handle.def.server`
- *   - `'client'` → mutates only when `handle.def.client`
- *
- * the handle's `node` reference itself is preserved (closures over
- * `handle.node` stay valid); only its children change.
+ * Caches the parsed payload on `content.payloads` regardless of relevance (so the server can
+ * push `server: false` scenes to clients without a populated handle server-side), then, if
+ * `side` matches the handle's `server`/`client` flag, mutates the declared `SceneHandle` in
+ * place so prefabs depending on it rebuild. The `node` reference itself is preserved.
  */
 export function populateScene(
     content: Content,
@@ -65,22 +33,16 @@ export function populateScene(
     if (side === 'server' && !handle.def.server) return;
     if (side === 'client' && !handle.def.client) return;
 
-    // detach current children, the handle's node is free-floating (no
-    // scene tree runtime), so no unregister is needed; just clear the list and
-    // null parent pointers.
+    // handle.node is free-floating (no scene tree runtime), so no unregister is needed.
     for (const child of handle.node.children) {
         detachOrphan(child);
     }
     handle.node.children.length = 0;
 
-    // clear current root traits before re-applying.
     handle.node.traits.length = 0;
     handle.node.bitset = bitset.init();
     handle.node.unresolved = null;
 
-    // apply root-level traits. handle.node is free-floating (no sceneTree, no
-    // runtime), so no reindex / script instantiation, closures over
-    // `handle.node` see the full authored shape including root traits.
     if (raw.nodes.root.traits) {
         for (const st of raw.nodes.root.traits) {
             const traitHandle = registry.traits.handles.get(st.id);
@@ -99,13 +61,10 @@ export function populateScene(
         }
     }
 
-    // populate fresh children. persist:true is preserved from the source,
-    // these aren't prefab outputs, they're authored scene content.
     for (const childData of raw.nodes.root.children) {
         addChild(handle.node, deserializeNode(childData));
     }
 
-    // voxels: replace with a fresh canvas (or null if the scene has none).
     if (raw.voxels) {
         const voxels = createVoxels(blockRegistry);
         loadVoxels(voxels, raw.voxels, blockRegistry);
@@ -117,13 +76,7 @@ export function populateScene(
     handle.version++;
 }
 
-/**
- * drop a scene from the cache and empty its declared handle (used when a
- * scene declaration is removed, or a `bongle:scene-clear` HMR event fires
- * after an authored file is deleted on disk). gates handle mutation on the
- * side flag, mirroring `populateScene`.
- * the handle reference itself stays valid, module-scope closures still resolve.
- */
+/** Drops a scene from the cache and empties its declared handle. Gates handle mutation on the side flag, mirroring `populateScene`. */
 export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
     content.payloads.delete(id);
 
@@ -140,11 +93,7 @@ export function clearScene(content: Content, id: string, side: 'server' | 'clien
     handle.version++;
 }
 
-/**
- * detach a free-floating subtree's root from its parent. the handle's
- * children are not registered in any scene tree runtime, so we just clear
- * the parent pointer, descendants are unreachable and get GC'd.
- */
+/** Detaches a free-floating subtree's root; unregistered descendants become unreachable and get GC'd. */
 function detachOrphan(child: Node): void {
     child.parent = null;
 }

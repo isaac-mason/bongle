@@ -1,17 +1,3 @@
-// Render backend selection + the `Renderer` contract.
-//
-// The engine has two render backends, `render/webgpu` and `render/webgl`, each a
-// self-contained module exporting `create(): Renderer`. `engine-client` picks one
-// at `load()` time and pulls it in with a dynamic `import()` (see `render/load`)
-// so a session only ever fetches/parses the backend it runs (code-split).
-//
-// `Renderer` is ONE stateful object: the backend's `create()` mints its internal
-// state and returns this handle, whose methods carry no state parameter — the
-// client drives rendering entirely through it and never reads backend internals.
-// The former reach-throughs (perf detect, chunk removal, model-resource tick,
-// camera resolution, env flush) are methods here. The contract is explicit and
-// references neither backend implementation.
-
 import type { Camera, DeviceLostInfo, PerspectiveCamera } from 'gpucat';
 import type * as Performance from '../client/performance';
 import type { ClientRoom } from '../client/rooms';
@@ -24,28 +10,18 @@ import type { TimeResources } from './time';
 import type { VoxelArenaBudget } from './voxels/voxel-arena';
 import type { VoxelTextures } from './voxels/voxel-textures';
 
-/** `none` draws nothing and is never auto-selected — see `render/none`. It
- *  exists for headless load generation, where a faithful client on the network
- *  with no pixels is the point. */
+/** `none` draws nothing and is never auto-selected; it exists for headless load generation. */
 export type RendererBackendKind = 'webgpu' | 'webgl' | 'none';
 
-// ── contract parameter types (owned by the contract, not a backend) ──────────
-
-/** Per-frame drive context passed to `updateFrame`: the engine-global per-frame
- *  inputs the active room's visuals read, including the client-resolved POV camera. */
+/** Per-frame drive context passed to `updateFrame`. */
 export type FrameContext = {
-    /** engine-global viewport dims (for the DOM overlay layout). */
     viewport: Viewport;
-    /** engine-global model/animation resources (visuals read them). */
     resources: Resources;
-    /** seconds, `performance.now() / 1000`, sampled once for the frame. */
+    /** Seconds, `performance.now() / 1000`, sampled once for the frame. */
     now: number;
-    /** the client's frame profiler. the renderer's phases are spans inside the
-     *  frame the client loop opened, so they land under it in the flame graph. */
+    /** The renderer's phases are spans inside the frame the client loop opened. */
     profiler: Debug.Profiler;
-    /** the active room's POV camera, resolved by the client into `Renderer.camera`
-     *  (via `render/common/camera`); null when the active room has no POV. Drives
-     *  the mesher/dom-ui/sprite/shadow visuals. */
+    /** The active room's POV camera, resolved by the client into `Renderer.camera`; null when the active room has no POV. */
     povCamera: Camera | null;
 };
 
@@ -63,8 +39,7 @@ export type RefreshBlockResourcesOpts = {
 /** Options for `refreshSpriteResources` (HMR sprite-atlas change). */
 export type RefreshSpriteResourcesOpts = { resources: Resources };
 
-/** Backend-neutral GPU device capabilities, read once the device is acquired.
- *  The client's Performance.detect builds the tier Profile from these. */
+/** Backend-neutral GPU device capabilities, read once the device is acquired. */
 export type RenderDeviceCaps = {
     maxStorageBufferBindingSize: number;
     maxBufferSize: number;
@@ -72,128 +47,59 @@ export type RenderDeviceCaps = {
     adapterInfo: { vendor: string; architecture: string; description: string };
 };
 
-/**
- * The render backend as one stateful handle. `create()` builds the internal state
- * and returns this; every method operates on that closed-over state, so the client
- * holds a single `Renderer` and never sees backend internals.
- */
 export type RendererAtlases = {
-    /** the packed block atlas + per-texture entries. */
     voxel: VoxelTextures | null;
-    /** the sprite atlas + its sidecar. */
     sprite: SpriteResources | null;
 };
 
+/** One stateful handle: `create()` builds the internal state, and every method operates on that closed-over state. */
 export type Renderer = {
-    /** which graphics backend this drives. */
     readonly kind: RendererBackendKind;
 
-    // ── lifecycle ────────────────────────────────────────────────────────────
-    /** async device handshake; GPU objects defer their real work until here.
-     *  Returns the acquired device's capabilities (the client derives its perf
-     *  tier from them via `Performance.detect`). */
+    /** Async device handshake; GPU objects defer their real work until here. */
     load(): Promise<RenderDeviceCaps>;
     dispose(): void;
-    /** Set by the client to observe a lost GPU device/context (driver reset, GPU-process
-     *  crash, too many live contexts). Forwarded to the underlying backend renderer; the
-     *  device can't be recovered in place, so the client halts and surfaces a reload. */
+    /** Set by the client to observe a lost GPU device/context; the device can't be recovered in place. */
     onDeviceLost: ((info: DeviceLostInfo) => void) | null;
-    /** resize the single display canvas. `pixelRatio` is the tier-capped device
-     *  pixel ratio (the client caps it), applied to the drawing buffer. */
     resize(width: number, height: number, pixelRatio: number): void;
     setInspectorVisible(visible: boolean): void;
-    /** the engine-global shared render clock. in-scene editor materials
-     *  (selection/inspect rainbow) bind its `elapsedTime` node by identity, the
-     *  same shared clock the voxel/cloud materials use. */
     readonly time: TimeResources;
-    /** the backend's render camera (a stable gpucat PerspectiveCamera the pass
-     *  binds). The client resolves it per-frame into the active room's POV via
-     *  `render/common/camera` — for its own cull + to hand back through `FrameContext`
-     *  — and the editor reads it. Backend-neutral math; not a device resource. */
     readonly camera: PerspectiveCamera;
-    /** the single display canvas the backend renders into. Only one room renders at
-     *  a time (see below), so there is one shared surface: the client mounts this into
-     *  the viewport and every room draws through it. On WebGL the GL context is bound
-     *  to this canvas; on WebGPU it is the renderer's configured canvas. */
+    /** The single display canvas the backend renders into; only one room renders at a time. */
     readonly canvas: HTMLCanvasElement;
 
-    // ── client-global resources ────────────────────────────────────────────
     initResources(opts: InitResourcesOpts): void;
     loadResources(opts: LoadResourcesOpts): Promise<void>;
     disposeResources(): void;
-    /** the two texture atlases as the client holds them (the debug panel's
-     *  atlas tab draws them); null for either before `initResources`, and on a
-     *  backend that has none. */
     atlases(): RendererAtlases;
 
-    // ── active-room visuals ──────────────────────────────────────────────────
-    // Only ONE room renders at a time. The client owns which room is active; the
-    // renderer reconciles its visual bundle to match inside `updateFrame` (build on
-    // entry, teardown on exit) — no explicit activate/deactivate. Simulation runs
-    // for every room the client holds; visuals + render are active-room only.
-    /** the per-frame render tick. Reconciles the active-room visual slot to
-     *  `activeRoom` (null → tear down + render nothing): builds visuals + mounts the
-     *  world + flushes env on entry, tears them down on exit. Then, if a room is
-     *  active, polls the client-global model pools + drives its visuals (mesher,
-     *  models, sprites, dom-ui, ...), resolving the camera internally. */
+    /** Reconciles the active-room visual slot to `activeRoom` (null tears down and renders nothing), then drives visuals for a frame. */
     updateFrame(activeRoom: ClientRoom | null, ctx: FrameContext): void;
 
-    // ── render ────────────────────────────────────────────────────────────────
-    /** render the active room, drawing with `camera` (resolved by the client before
-     *  this call). No-op when there is no active room. */
+    /** Draws the active room with `camera`. No-op when there is no active room. */
     render(voxelViewChunkRadius: number): void;
 
-    // ── readiness ─────────────────────────────────────────────────────────────
-    /** Whether the mounted room's world is worth looking at: some chunk mesh is
-     *  resident (drawable) and nothing is still queued or in flight for the mesher.
-     *  True for a room with no voxel content at all, and on a backend with no
-     *  mesher (`none`, the asset pipeline) — neither has anything to wait for.
-     *
-     *  The client asks this to decide when to tell its host the game is up (see
-     *  `ClientDriver.ready`). A voxel world is black for the first frames after a
-     *  join no matter how fast the socket was: the chunks are in the worker. */
+    /** Whether the mounted room's world has a resident mesh and nothing queued or in flight for the mesher. True for a backend with no mesher. */
     voxelWorldDrawable(): boolean;
 
-    // ── HMR / registry-dispatch driven resource + visual rebuilds ────────────
-    /** returns whether the block/voxel resources actually swapped. rebuilds the
-     *  active room's voxel visuals + remounts its world when they do. */
+    /** Returns whether the block/voxel resources actually swapped, rebuilding the active room's voxel visuals when they do. */
     refreshBlockResources(opts: RefreshBlockResourcesOpts): Promise<boolean>;
-    /** returns whether the sprite atlas actually changed. */
     refreshSpriteResources(opts: RefreshSpriteResourcesOpts): Promise<boolean>;
 };
 
-/** `?renderer=webgl` / `?renderer=webgpu` / `?renderer=none` names the backend to
- *  use. Normally set by the host, which probes the device once and stamps its answer
- *  onto every realm it spawns; also typed by hand for QA, and set to `none` by the
- *  load-generation rig. Returns null when unset or in a non-DOM context, which is the
- *  hostless case `webgpuAvailable` then covers.
- *
- *  An older bundle simply doesn't recognise `none` here and falls through to the
- *  probe, so pointing the rig at one degrades to a drawing backend rather than
- *  breaking. */
+/** `?renderer=webgl|webgpu|none` override, normally set by the host. Returns null when unset or in a non-DOM context. */
 export function readRendererOverride(): RendererBackendKind | null {
     if (typeof location === 'undefined' || !location.search) return null;
     const v = new URLSearchParams(location.search).get('renderer');
     return v === 'webgl' || v === 'webgpu' || v === 'none' ? v : null;
 }
 
-/**
- * The fallback backend check, for a realm with no host to tell it which to use: the
- * node bake, a client booted straight off disk, tests. Everything embedded by the
- * platform is handed a backend instead (see `readRendererOverride`).
- *
- * It answers a narrow question — did an adapter materialize? — and that is as far as
- * it goes. `navigator.gpu` alone is worse still (a device that exposes the API and
- * yields no adapter is a WebGL2 device), so this is the floor rather than the goal.
- * An adapter can still be a software rasterizer, produce a device that fails, or
- * compile nothing; proving those needs a real render, which is why the platform
- * probes properly and shares one answer rather than every realm asking here.
- */
+/** Fallback backend check for a realm with no host: whether a WebGPU adapter materializes. Not proof the device works; a real render is needed for that. */
 export async function webgpuAvailable(): Promise<boolean> {
     if (typeof navigator === 'undefined' || !navigator.gpu) return false;
     try {
         return (await navigator.gpu.requestAdapter()) !== null;
     } catch {
-        return false; // requestAdapter itself can throw in locked-down embeddings
+        return false;
     }
 }

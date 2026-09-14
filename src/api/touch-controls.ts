@@ -1,13 +1,3 @@
-/**
- * On-screen mobile controls, joystick + button helpers that mount a
- * DOM widget on the room's `touchOverlay` and write into the room's
- * `TouchInput` state. Pair with `getJoystick(t, id)` /
- * `isTouchButtonDown(t, id)` for read-side polling.
- *
- * Both factories early-return `null` on the server so call sites can
- * write `createTouchJoystick(ctx, ...)` unconditionally.
- */
-
 import {
     type CreateTouchButtonOpts,
     type CreateTouchJoystickOpts,

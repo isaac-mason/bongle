@@ -2,8 +2,6 @@ import { CLIENT_TO_SERVER } from '../core/rpc';
 import { command } from '../core/registry';
 import { pack } from '../core/scene/pack';
 
-/* ── scene mutation commands ── */
-
 export const DestroyNodeCommand = command('editor.destroy_node', CLIENT_TO_SERVER, pack.object({ id: pack.int32() }));
 
 export const SetNameCommand = command(
@@ -65,8 +63,6 @@ export const CreateNodeCommand = command(
     }),
 );
 
-/* ── prefab commands ── */
-
 export const SetPrefabCommand = command(
     'editor.set_prefab',
     CLIENT_TO_SERVER,
@@ -79,12 +75,8 @@ export const SetNodePersistCommand = command(
     pack.object({ id: pack.int32(), persist: pack.boolean() }),
 );
 
-/* ── blueprint commands ── */
-
-// save the current selection as a blueprint scene under
-// `content/scenes/blueprints/<name>.scene.json`. when `name` is empty/absent
-// the server allocates a fresh `blueprint-NNN`. `payload` is a JSON-stringified
-// ScenePayload built client-side via Blueprint.selectionToScenePayload.
+// when `name` is empty/absent the server allocates a fresh `blueprint-NNN`. `payload` is a
+// JSON-stringified ScenePayload built client-side via Blueprint.selectionToScenePayload.
 export const SaveBlueprintCommand = command(
     'editor.save_blueprint',
     CLIENT_TO_SERVER,
@@ -93,8 +85,6 @@ export const SaveBlueprintCommand = command(
         payload: pack.string(),
     }),
 );
-
-/* ── voxel edit command ── */
 
 export const VoxelEditCommand = command(
     'editor.voxel_edit',
@@ -111,8 +101,6 @@ export const VoxelEditCommand = command(
     }),
 );
 
-/* ── scenes ── */
-
 /** open (find or create) the edit room for `sceneId` and join the sender to it. */
 export const OpenSceneCommand = command('editor.open_scene', CLIENT_TO_SERVER, pack.object({ sceneId: pack.string() }));
 
@@ -124,8 +112,6 @@ export const RenameSceneCommand = command(
 
 /** delete the scene file and stop every room on it. */
 export const DeleteSceneCommand = command('editor.delete_scene', CLIENT_TO_SERVER, pack.object({ sceneId: pack.string() }));
-
-/* ── persistence ── */
 
 /** explicit save of every open edit room on `sceneId` (Ctrl+S, the tab menu). the
  *  interval auto-flush needs no message. */

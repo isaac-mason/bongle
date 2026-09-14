@@ -29,21 +29,13 @@ const TOOL_LABELS: Record<EditorTool, string> = {
     elevation: 'elevation',
 };
 
-/** returns the collapsible pane title for the tool section, e.g. "tool, build" */
 export function useToolPaneTitle(): string {
     const activeTool = useEditRoom((s) => s.activeTool);
     return `tool — ${TOOL_LABELS[activeTool]}`;
 }
 
-/**
- * content slot for the "tool space" pane, renders the active tool's options/inspector.
- * inspect → inspector panel (select node, edit traits/scripts)
- * voxel tools → their respective option panels
- *
- * todo: inspect tool cannot yet raycast into the scene to pick nodes from the 3d viewport.
- * node selection is done via the hierarchy panel only. full viewport picking is deferred
- * until a scene-level raycast is implemented.
- */
+// TODO: the inspect tool can't raycast into the scene yet, so node selection from the 3d
+// viewport is unavailable; it's done via the hierarchy panel only until a scene-level raycast lands.
 export function ToolSpacePane() {
     const activeTool = useEditRoom((s) => s.activeTool);
 

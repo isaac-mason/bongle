@@ -1,6 +1,3 @@
-// tiny dom helpers. dashcat is vanilla — no framework, no vdom — so these
-// keep element construction terse without pulling in a dependency.
-
 /** create an element with a class, optional props, and optional children. */
 export function el<K extends keyof HTMLElementTagNameMap>(
     tag: K,

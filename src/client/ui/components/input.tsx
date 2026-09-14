@@ -1,7 +1,5 @@
 import { type ComponentProps, forwardRef } from 'react';
 
-/* ── Text input ─────────────────────────────────────────────────── */
-
 export const Input = forwardRef<HTMLInputElement, ComponentProps<'input'>>(({ className, ...props }, ref) => (
     <input
         ref={ref}
@@ -11,8 +9,6 @@ export const Input = forwardRef<HTMLInputElement, ComponentProps<'input'>>(({ cl
 ));
 
 Input.displayName = 'Input';
-
-/* ── Select ─────────────────────────────────────────────────────── */
 
 export const Select = forwardRef<HTMLSelectElement, ComponentProps<'select'>>(({ className, ...props }, ref) => (
     <select

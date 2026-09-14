@@ -1,29 +1,6 @@
-// contact bookkeeping, types, pools, and the per-step global stream.
-//
-// two layers:
-//   1. `ContactPair`, un-normalized record of a touching pair (A→B). lives
-//      in `physics.contacts`, populated during the physics listener step
-//      (rigid bodies, voxels) and the AABB physics step (aabb bodies, voxels).
-//      one entry per canonical pair regardless of perspective.
-//   2. `RigidBodyContact` / `AabbBodyContact` / `VoxelContact`, observer-
-//      normalized contact (normal points away from self). lives in per-node
-//      `ContactsTrait` lists, populated by the post-step fan-out from
-//      `physics.contacts`.
-//
-// the diff lifecycle (added/persisted/removed, one-step grace for removed)
-// is owned at the pair level. per-trait lists are throwaway each step,
-// fan-out clears and refills.
-//
-// pools: separate per concrete type. `RigidBodyContactPool`, `AabbBodyContactPool`
-// and `VoxelContactPool` for per-trait Contacts; `ContactPairPool` for the
-// global stream. all live on `Physics`.
-
 import type { BodyId } from 'crashcat';
 import { type Vec3, vec3 } from 'math';
 
-// ── per-observer contact (what scripts read via ContactsTrait) ────────
-
-/** common fields across all observer-normalized contacts. */
 type ContactBase = {
     /** contact point in world space. */
     point: Vec3;
@@ -33,16 +10,12 @@ type ContactBase = {
     penetrationDepth: number;
 };
 
-/** observer-normalized contact with another node-backed rigid body. */
 export type RigidBodyContact = ContactBase & {
     type: 'rigidBody';
-    /** the other node. */
     nodeId: number;
-    /** the other body's crashcat id (mainly useful for editor/debug). */
     bodyId: BodyId;
     /** sub-shape within the other body's compound, 0 for non-compound. */
     subShapeId: number;
-    /** the other body is a sensor, this contact is informational. */
     isSensor: boolean;
     /** other body's linear velocity at contact, in observer frame: bLin - selfLin. */
     relativeVelocity: Vec3;
@@ -51,11 +24,9 @@ export type RigidBodyContact = ContactBase & {
 /** observer-normalized contact with an AabbBody (from the AabbPhysics.World). */
 export type AabbBodyContact = ContactBase & {
     type: 'aabbBody';
-    /** id of the other AabbBody. */
     aabbBodyId: number;
     /** the trait-bound node owning the other AabbBody, or null when the other side is an imperative body. */
     nodeId: number | null;
-    /** the other body is a sensor, this contact is informational. */
     isSensor: boolean;
     /** other body's linear velocity at contact, in observer frame: bLin - selfLin. */
     relativeVelocity: Vec3;
@@ -64,33 +35,23 @@ export type AabbBodyContact = ContactBase & {
 /** observer-normalized contact with the voxel terrain. */
 export type VoxelContact = ContactBase & {
     type: 'voxel';
-    /** cell coordinates of the touched voxel. */
     voxelX: number;
     voxelY: number;
     voxelZ: number;
-    /** voxel state id (block kind). */
     stateId: number;
     /** sub-aabb index for multi-aabb voxels; -1 for cube voxels. */
     subAabbIndex: number;
-    /** true when the character collided with a solid block; false when it is
-     *  merely inside a passable/liquid cell (no solver response). the voxel
-     *  analogue of a body contact's `isSensor`. */
+    /** true when colliding with a solid voxel; false for a passable/liquid overlap. */
     solid: boolean;
 };
 
 export type Contact = RigidBodyContact | AabbBodyContact | VoxelContact;
 
-// ── pair (global, un-normalized) ─────────────────────────────────────
-//
-// flat field layout (rather than nested side objects) so pair instances
-// can be pooled cleanly across runs of different side-kind combinations
-// (rigidBody-rigidBody, rigidBody-voxel, aabbBody-aabbBody, ...) without
-// re-allocating side sub-objects.
+// flat field layout, not nested side objects, so pairs pool without re-allocating side sub-objects.
 
 export type ContactPairSideKind = 'rigidBody' | 'aabbBody' | 'voxel';
 
 export type ContactPair = {
-    // ── side A ──
     aKind: ContactPairSideKind;
     // rigidBody-only fields (valid when aKind === 'rigidBody')
     aNodeId: number;
@@ -108,10 +69,8 @@ export type ContactPair = {
     aSubAabbIndex: number;
     /** voxel-only: true = solid collision, false = passable/liquid overlap. */
     aVoxelSolid: boolean;
-    // shared on body sides (rigidBody, aabbBody)
     aIsSensor: boolean;
 
-    // ── side B ──
     bKind: ContactPairSideKind;
     bNodeId: number;
     bBodyId: BodyId;
@@ -127,23 +86,16 @@ export type ContactPair = {
     bVoxelSolid: boolean;
     bIsSensor: boolean;
 
-    // ── manifold ──
-    /** contact point in world space. */
     point: Vec3;
     /** unit normal pointing from A toward B. */
     normal: Vec3;
-    /** positive when penetrating. */
     penetrationDepth: number;
     /** bLin - aLin at contact, world space. */
     relativeVelocity: Vec3;
 
-    /** canonical pair key, set by `recordContactPair`. cached so the frame-begin
-     *  eviction sweep can drop the pair from `_byKey` without rebuilding the key
-     *  from its side fields (which would duplicate the key-construction logic). */
+    /** canonical pair key, set by `recordContactPair`; cached to avoid rebuilding it during eviction. */
     _key: string;
 };
-
-// ── pools ────────────────────────────────────────────────────────────
 
 export type RigidBodyContactPool = { free: RigidBodyContact[] };
 export type AabbBodyContactPool = { free: AabbBodyContact[] };
@@ -262,7 +214,6 @@ export function acquireContactPair(pool: ContactPairPool): ContactPair {
     return pool.free.pop() ?? createContactPair();
 }
 
-/** release a Contact back to the appropriate per-type pool. */
 export function releaseContact(
     rigidBodyPool: RigidBodyContactPool,
     aabbBodyPool: AabbBodyContactPool,
@@ -278,13 +229,7 @@ export function releaseContactPair(pool: ContactPairPool, p: ContactPair): void 
     pool.free.push(p);
 }
 
-// ── keying ───────────────────────────────────────────────────────────
-//
-// strings, simplest correct option. voxel coords can be arbitrarily large
-// (any reasonable world overflows 53-bit packing once you factor in
-// sub-shape + sub-aabb dimensions), so don't pretend a numeric scheme works.
-// Map<string, ContactPair> is well-optimized in modern engines; revisit
-// only if profiling shows it hot.
+// string keys: voxel coords can overflow 53-bit numeric packing once sub-shape and sub-aabb dims factor in.
 
 /** canonical key fragment for a rigid-body side. */
 export function rigidBodySideKey(nodeId: number, subShapeId: number): string {
@@ -301,44 +246,23 @@ export function voxelSideKey(voxelX: number, voxelY: number, voxelZ: number, sub
     return `v${voxelX},${voxelY},${voxelZ}.${subAabbIndex}`;
 }
 
-/**
- * combine two side keys into a canonical pair key. order-independent:
- * `pairKey(a, b) === pairKey(b, a)`.
- */
+/** combine two side keys into a canonical, order-independent pair key. */
 export function pairKey(sideA: string, sideB: string): string {
     return sideA < sideB ? `${sideA}|${sideB}` : `${sideB}|${sideA}`;
 }
 
-// ── global per-step stream ───────────────────────────────────────────
-
-/**
- * physics-wide contact stream for one step. owns the diff state across
- * steps via `_byKey`. lifecycle:
- *
- *   step N end:    _byKey ⊇ (active this step) ∪ (removed this step)
- *   step N+1 begin:
- *     - last step's `removed` evicted from _byKey, returned to pool.
- *     - _byKey now = last step's `active`. that's what we diff against.
- *   ...recordContactPair calls fill added/persisted, populate _seen...
- *   step N+1 end:  _byKey entries not in _seen → moved to `removed`,
- *                  retained in _byKey one more step so consumers see
- *                  last-known fields.
- */
+/** physics-wide contact stream for one step; owns the diff state across steps via `_byKey`. */
 export type PhysicsContacts = {
     /** all contacts active this step, `added` ++ `persisted`. */
     active: ContactPair[];
-    /** first seen this step. */
     added: ContactPair[];
-    /** present last step AND this step. */
     persisted: ContactPair[];
     /** present last step, gone this step. fields are last-known. */
     removed: ContactPair[];
 
     /** persistent index: every pair currently retained, keyed canonically. */
     _byKey: Map<string, ContactPair>;
-    /** keys recorded so far this step. */
     _seen: Set<string>;
-    /** true between begin and end of a frame. */
     _frameOpen: boolean;
 };
 
@@ -354,12 +278,7 @@ export function createPhysicsContacts(): PhysicsContacts {
     };
 }
 
-/**
- * start a new contact frame. evicts the previous step's `removed` entries
- * (their one-step grace period for last-known reads is now over) and
- * clears the per-step lists. `_byKey` carries forward as the prev-step
- * active set, used to classify pairs into added vs persisted.
- */
+/** start a new contact frame; evicts the previous step's `removed` entries and clears the per-step lists. */
 export function beginPhysicsContactsFrame(pc: PhysicsContacts, pairPool: ContactPairPool): void {
     if (pc._frameOpen) {
         throw new Error('contacts: beginPhysicsContactsFrame called without prior end');
@@ -378,16 +297,7 @@ export function beginPhysicsContactsFrame(pc: PhysicsContacts, pairPool: Contact
     pc._seen.clear();
 }
 
-/**
- * acquire-or-find a `ContactPair` for the given canonical key. caller is
- * responsible for filling all side + manifold fields after this returns.
- *
- * called twice with the same key in one frame: returns the same instance
- * (the second caller can short-circuit if it doesn't need to overwrite).
- * caller can detect duplicates via the boolean `wasNew` channel if it
- * cares, we don't expose one for now, since the common case is "fill
- * unconditionally, it's cheap."
- */
+/** acquire or find a `ContactPair` for the given canonical key; repeat calls this frame return the same instance. */
 export function recordContactPair(pc: PhysicsContacts, pairPool: ContactPairPool, key: string): ContactPair {
     if (pc._seen.has(key)) {
         return pc._byKey.get(key)!;
@@ -409,11 +319,7 @@ export function recordContactPair(pc: PhysicsContacts, pairPool: ContactPairPool
     return fresh;
 }
 
-/**
- * close a contact frame. classifies any retained pair whose key wasn't
- * touched this step as `removed`, keeping it in `_byKey` (and out of the
- * pool) for one more step so consumers see last-known fields.
- */
+/** close a contact frame; classifies any retained pair not touched this step as `removed`, kept one more step. */
 export function endPhysicsContactsFrame(pc: PhysicsContacts): void {
     if (!pc._frameOpen) {
         throw new Error('contacts: endPhysicsContactsFrame called without prior begin');

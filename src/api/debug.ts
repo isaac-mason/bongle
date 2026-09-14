@@ -41,8 +41,7 @@ function emit(ctx: ScriptContext, level: Debug.LogLevel, args: unknown[]): void 
         Debug.pushLog(ctx.client.room.clientLogs, entry);
     }
 
-    // mirror to console for dev visibility, devtools / stdout stay useful
-    // until the debug panel is fully wired up.
+    // mirror to console for dev visibility
     const prefix = `[${source.traitId}#${source.nodeId}]`;
     if (level === 'error') console.error(prefix, ...args);
     else if (level === 'warn') console.warn(prefix, ...args);
@@ -65,15 +64,9 @@ export function error(ctx: ScriptContext, ...args: unknown[]): void {
 }
 
 /**
- * open a floating debug panel on the shared dashboard, scoped to this script: it
- * is closed automatically when the script instance disposes (room teardown, node
- * removal, hot-reload), so game debug UI can't leak. the returned `Panel`
- * takes the full control surface — `add` (options), `monitor`, `graph`, `log`,
- * `stat`, `tabs`, etc. — alongside the engine's panels.
- *
- * client-only: returns `null` on the server. `title` defaults to the script's
- * trait/node tag, mirroring how `log` tags its source. for full control (or
- * manual lifecycle) reach `ctx.client.debug.dashboard` directly.
+ * open a floating debug panel on the shared dashboard, scoped to this script.
+ * closed automatically when the script instance disposes. client-only,
+ * returns `null` on the server. `title` defaults to the script's trait/node tag.
  */
 export function panel(ctx: ScriptContext, opts: PanelOptions = {}): Panel | null {
     if (!ctx.client) return null;

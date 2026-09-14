@@ -1,67 +1,26 @@
-// ── voxel light volume ──────────────────────────────────────────────
-//
-// GPU-resident per-chunk light, the storage half of `llm/plan-voxel-light-volume.md`.
-// MECHANISM ONLY: this owns the arena, the slot pool and the residency grid, and
-// knows nothing about who is resident. Policy lives in the backends' `consume`
-// (voxel-resources-gpu.ts / voxel-resources-cpu.ts), exactly as `voxel-arena.ts`
-// is driven from there.
-//
-// One `usage: 'storage'` buffer, sub-allocated in FIXED-SIZE tiles. Fixed size,
-// so a plain slot allocator beats `OffsetAllocator`: zero fragmentation by
-// construction, O(1) both ways, and `base = slot * TILE_U32S` is derivable so
-// nothing stores an offset.
-//
-// gpucat lowers storage buffers to a buffer-texture on WebGL2
-// (`webgl/textures.ts` storage read-lowering + `uploadStorageSpan`), so ONE
-// buffer serves both backends. A tile is ~2457 u32 against a mirror width of
-// `min(totalTexels, MAX_TEXTURE_SIZE)` (>= 2048), so a tile upload is one or two
-// CONTIGUOUS horizontal runs, which is the shape drivers handle well. No
-// alignment or padding needed; see the plan's "Upload shape".
-
 import { BufferLifecycle, d, GpuBuffer } from 'gpucat';
 import type { Vec3 } from 'math';
 import { TILE_LIGHT_U32S, TILE_SOLID_U32S, writeChunkLightTile } from '../../core/voxels/light-lattice';
 import { CHUNK_SIZE, type Chunk, NEIGHBOR_COUNT, type Voxels } from '../../core/voxels/voxels';
 
-/** a tile is the padded cell region twice over: packed u16 light, two cells per
- *  u32, followed by one solidity BIT per cell. The consumer needs both, because
- *  a blend that cannot tell "solid" from "open but dark" leaks. */
-/** light as two u16 per u32, then solidity as one bit per cell. 8704 B, exactly
- *  the chunk's own 16^3: no borrowed neighbour shell. */
+/** a tile is the cell region twice over: packed u16 light, two cells per u32, followed
+ *  by one solidity bit per cell, so a blend can tell "solid" from "open but dark". */
 export const TILE_U32S = TILE_LIGHT_U32S + TILE_SOLID_U32S; // 2176
 export { TILE_LIGHT_U32S };
 
-// ── residency grid ──────────────────────────────────────────────────
-//
-// Dense WRAPPING grid over absolute chunk coords. Wrapping (rather than a
-// centred window) means the grid NEVER needs re-centring: a chunk's cell is
-// fixed by its absolute coord, so chunks entering the window simply overwrite
-// the cells of chunks that left.
-//
-// The dimension is a POWER OF TWO so the index is three ANDs, two shifts and two
-// ORs, with no modulo or division, and `&` is correct for negative coords in
-// two's complement where `%` is not.
-//
-// ALIASING: the map is many-to-one globally (chunk 0 and chunk `dim` share a
-// cell), so a lookup for a chunk OUTSIDE the window reads whatever chunk owns
-// that cell. That is plausible-looking WRONG light, not a miss. Every entry
-// therefore carries its chunk coord and the lookup verifies before trusting it.
+// residency grid: dense, wrapping over absolute chunk coords, so a chunk's cell is fixed
+// by its coord and the grid never needs re-centring. Dimension is a power of two so the
+// index is bitwise, with no modulo or division. The map is many-to-one globally, so a
+// lookup outside the window reads whatever chunk aliases onto that cell; every entry
+// carries its chunk coord and the lookup verifies before trusting it.
 
 /**
- * ONE i32 per entry, not an ivec4 of {cx, cy, cz, payload}.
+ * One i32 per entry, not an ivec4 of {cx, cy, cz, payload}: a lookup is the hottest read
+ * in the engine, and packing the slot with a coord check into a single int cuts it from
+ * four storage reads to one and shrinks the grid 4x.
  *
- * A lookup is the hottest read in the engine - every terrain and entity vertex
- * does several - and storing the coords verbatim made each one FOUR storage
- * reads. Packing the slot and a coord CHECK into a single int makes it one, and
- * shrinks the grid 4x.
- *
- * Layout: 0 = absent. Otherwise bits 0..11 are `slot + 1`, bits 12..29 are six
- * bits per axis of `floor(c / dim)`.
- *
- * Six bits is enough because the check only has to separate ALIASES. Two chunks
- * share a grid cell exactly when their coords differ by a multiple of `dim`, so
- * `floor(c / dim)` differs between them; the check disambiguates a window 32
- * dims wide, far beyond any plausible eviction lag.
+ * Layout: 0 = absent. Otherwise bits 0..11 are slot + 1, bits 12..29 are six bits per
+ * axis of floor(c / dim), enough to disambiguate a window 32 dims wide.
  */
 const ENTRY_INTS = 1;
 const ENTRY_SLOT_BITS = 12;
@@ -99,10 +58,8 @@ export type LightVolume = {
     /** power-of-two grid edge. The shader reads `mask` / `dim` / `dim*dim`
      *  through the `LightVolumeConfig` uniform (voxel-light-sample). */
     dim: number;
-    /** chunk radius the grid can represent. A chunk outside it ALIASES onto a
-     *  cell a nearer chunk owns: the coord check turns the lookup into a clean
-     *  miss, but the two keep clobbering each other's entry, so admission has to
-     *  be bounded by this and not merely by the tile pool. */
+    /** chunk radius the grid can represent; admission must be bounded by this, not
+     *  merely by the tile pool, or an out-of-range chunk clobbers a nearer one's entry. */
     radius: number;
     mask: number;
     shift: number;
@@ -115,20 +72,15 @@ function nextPow2(n: number): number {
     return p;
 }
 
-/**
- * `viewChunkRadius` sizes the residency grid (it must cover everything sampled);
- * `maxTiles` is a HARD bound on resident tiles: admitting a chunk into a full
- * pool evicts the furthest, so the pool never refuses and the chunks nearest the
- * action always hold light.
- */
+/** viewChunkRadius sizes the residency grid; maxTiles is a hard bound on resident tiles,
+ *  admitting a chunk into a full pool evicts the furthest so the pool never refuses. */
 export function createLightVolume(viewChunkRadius: number, maxTiles: number): LightVolume {
     if (maxTiles >= ENTRY_SLOT_MASK)
         throw new Error(`light volume: ${maxTiles} tiles exceeds the ${ENTRY_SLOT_BITS}-bit slot field`);
     const dim = nextPow2(viewChunkRadius * 2 + 1);
     const data = new Uint32Array(maxTiles * TILE_U32S);
-    // gpucat's `count:` path picks Float32Array for `d.array(d.u32)`, which
-    // silently rounds u32 writes to f32. pass an explicit Uint32Array via
-    // `data:` so writes are bit-exact. (Same trap as voxel-arena.ts.)
+    // gpucat's count: path picks Float32Array for d.array(d.u32); pass an explicit
+    // Uint32Array via data: so writes are bit-exact (same trap as voxel-arena.ts).
     const buffer = new GpuBuffer(d.array(d.u32), {
         data: data as d.TypedArrayFor<d.Any>,
         usage: 'storage',
@@ -164,19 +116,8 @@ function gridIndex(v: LightVolume, cx: number, cy: number, cz: number): number {
     return (((cx & m) | ((cy & m) << b) | ((cz & m) << (2 * b))) * ENTRY_INTS) | 0;
 }
 
-// ── slot pool ───────────────────────────────────────────────────────
-
-/**
- * A slot for the chunk at `(cx, cy, cz)`. The pool is a HARD BOUND that gives up
- * its furthest chunk rather than refusing a nearer one, so this never fails.
- *
- * Refusing was the bug it replaces. `allocateTile` used to return -1 on a full
- * pool, which made the pool first-come-first-served: whichever chunks happened
- * to arrive first held their slots forever and everything after them, including
- * the chunk under the camera, never got light at all. Because light gates
- * meshing, those chunks also never left `dirty.blocks`, so the AOI re-sorted a
- * permanently growing set every frame.
- */
+/** A slot for the chunk at (cx, cy, cz). Never fails: on a full pool it evicts the
+ *  furthest occupant rather than refusing a nearer chunk. */
 export function allocateTile(v: LightVolume, cx: number, cy: number, cz: number): number {
     if (v.freeList.length > 0) return v.freeList.pop()!;
     if (v.head < v.capacity) return v.head++;
@@ -203,8 +144,6 @@ export function allocateTile(v: LightVolume, cx: number, cy: number, cz: number)
 export function freeTile(v: LightVolume, slot: number): void {
     if (slot >= 0) v.freeList.push(slot);
 }
-
-// ── residency ───────────────────────────────────────────────────────
 
 /** queue one entry's four ints. Entries are touched a handful of times per frame
  *  (a drained chunk, an eviction), so per-entry ranges keep the grid upload
@@ -254,8 +193,6 @@ export function payloadSlot(payload: number): number {
     return payload - 1;
 }
 
-// ── upload ──────────────────────────────────────────────────────────
-
 /** where a slot's light cells start, as a u16 index. */
 export function tileLightBase(slot: number): number {
     return slot * TILE_U32S * 2;
@@ -276,43 +213,9 @@ export function readCellSolid(v: LightVolume, slot: number, cellIdx: number): nu
     return (v.data[tileSolidBase(slot) + (cellIdx >>> 5)]! >>> (cellIdx & 31)) & 1;
 }
 
-// ── drain ───────────────────────────────────────────────────────────
-//
-// The "what is in the slot" half of the ownership split (see the plan). This
-// rewrites slots that already exist and publishes residency; it NEVER decides
-// who is resident. Allocation on admission and release on eviction belong to
-// each backend's `consume`.
-//
-// Budgeted per frame, and the budget is the ONLY bound: there is no probe and no
-// priority pass, so per-frame cost is `bakeBudget` bakes and nothing else.
-
-/**
- * Rebake and upload light tiles from `voxels.dirty.lightVolume` until
- * `budgetMs` is spent. Returns the number baked.
- *
- * A TIME budget rather than a tile count. One bake measured ~0.29 ms on this
- * machine, but that is one machine: the same fixed count is a comfortable
- * fraction of a frame on a desktop and a stall on the Chromebook this engine
- * targets. Time self-calibrates. A fixed count is the same idea pre-divided by
- * an assumed cost.
- *
- * Always bakes at least one, so the queue cannot livelock on a frame that has
- * already overspent elsewhere.
- *
- * Iterates the dirty Set and deletes as it goes, so the cost is O(baked), not
- * O(queue). An earlier version built and SORTED a nearest-first array over the
- * whole queue every frame, on top of an unbounded uniform probe: with a backlog
- * of N that is O(N log N) of sorting plus O(N) probes per frame while only a
- * handful of chunks left the queue, which is what stalled large maps.
- *
- * Insertion order rather than distance order. Priority only
- * mattered while the queue was hopeless; a queue that drains does not need it.
- */
-/** frames a chunk waits for its full 26-neighbourhood before baking anyway.
- *  Mirrors the AOI's `NEIGHBOURHOOD_GRACE_FRAMES`: the view frontier never
- *  completes (its outer neighbours are past the stream radius), so a pure
- *  completeness gate would leave that ring permanently unlit, and light gates
- *  meshing. */
+/** frames a chunk waits for its full 26-neighbourhood before baking anyway. Mirrors the
+ *  AOI's NEIGHBOURHOOD_GRACE_FRAMES: the view frontier's outer neighbours never arrive,
+ *  so a pure completeness gate would leave that ring permanently unlit. */
 const NEIGHBOURHOOD_GRACE_FRAMES = 4;
 
 /** nearest-first shortlist, reused across drains. Fixed size, so selecting the
@@ -342,22 +245,14 @@ function shortlistOffer(chunk: Chunk, score: number): void {
 }
 
 /**
- * Rebake and upload light tiles until `budgetMs` is spent. Returns the number
- * baked.
+ * Rebakes and uploads light tiles until budgetMs is spent. Returns the number baked.
  *
- * TWO QUEUES, because a long queue and a latency-critical edit cannot share an
- * order. `lightVolumeUrgent` holds chunks whose OWN light changed - a block the
- * player just placed - and drains first and entirely. The bulk queue is
- * apron work (a neighbour arrived) and drains NEAREST FIRST.
+ * Two queues: lightVolumeUrgent holds chunks whose own light changed (a block the player
+ * just placed) and drains first and entirely; the bulk queue is apron work (a neighbour
+ * arrived) and drains nearest-first, since on world join it can be thousands deep.
  *
- * Insertion order was tried, on the reasoning that a queue which drains does
- * not need priority. That is false on world join, where
- * the queue is thousands deep and an edit lands at the back of it.
- *
- * A TIME budget rather than a tile count: the same fixed count is a comfortable
- * fraction of a frame on a desktop and a stall on the Chromebook this engine
- * targets. Always bakes at least one, so the queue cannot livelock on a frame
- * that has already overspent elsewhere.
+ * A time budget rather than a tile count, since bake cost varies by machine. Always
+ * bakes at least one, so the queue cannot livelock on a frame that has already overspent.
  */
 export function drainLightVolume(v: LightVolume, voxels: Voxels, cameraPos: Vec3, budgetMs: number, frame: number): number {
     const urgent = voxels.dirty.lightVolumeUrgent;
@@ -410,18 +305,13 @@ function bakeOne(v: LightVolume, voxels: Voxels, chunk: Chunk, frame: number): n
     const { cx, cy, cz } = chunk;
     const prev = lookupPayload(v, cx, cy, cz);
 
-    // ADMISSION is the AOI's alone. A chunk with no tile that the AOI has not
-    // asked for is not rendered, so giving it a slot only takes one from a chunk
-    // that is - which is how a full pool starts evicting chunks it immediately
-    // needs back.
+    // admission is the AOI's alone: giving a slot to a chunk it hasn't asked for
+    // takes one from a chunk that is, which is how a full pool starts thrashing.
     if (prev === 0 && !chunk.lightWanted) return -1;
 
-    // DEFER a RE-bake while the 26-neighbourhood is still filling in. The apron
-    // re-dirties a chunk on every neighbour arrival, so a streaming chunk would
-    // bake up to 27 times before settling; waiting collapses that to two. The
-    // FIRST bake is never deferred, because light gates meshing and a chunk with
-    // no tile at all would be invisible. Nor is an urgent one: a deferred edit is
-    // a visible delay on the block the player just broke.
+    // defer a re-bake while the 26-neighbourhood is still filling in, since the apron
+    // re-dirties a chunk on every neighbour arrival; the first bake and urgent edits
+    // are never deferred, since light gates meshing and a deferred edit is visible.
     if (!chunk.lightUrgent && prev > 0 && chunk.knownNeighbourCount < NEIGHBOR_COUNT) {
         if (chunk.lightWaitSince < 0) chunk.lightWaitSince = frame;
         if (frame - chunk.lightWaitSince <= NEIGHBOURHOOD_GRACE_FRAMES) return 0;

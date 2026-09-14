@@ -1,30 +1,9 @@
-// selection, sparse chunk bitset for voxels + set of node ids.
-//
-// voxel part mirrors the VoxelsState chunk map structure so the representation is
-// familiar and the coordinate maths are identical.
-//
-// each chunk is a 16×16×16 bit grid packed into a Uint32Array of 128 words
-// (4096 bits). chunk keys use the same "cx,cy,cz" string format as voxels.ts.
-//
-// design:
-//   - unlimited coordinate range (chunk coords are plain js numbers)
-//   - O(1) set / get / has via chunk map + bit index
-//   - iteration is tile-by-tile, then bit-scan within each tile
-//   - nudge allocates a new Selection (unavoidable O(filled chunks))
-//   - merge is O(filled chunks of source), just OR the bit words
-//   - no per-voxel object allocation anywhere
-//
-// node part is a simple Set<number> of scene graph node ids.
-//
-// usage: import * as Selection from './selection'
-
 import { CHUNK_BITS, CHUNK_SIZE, chunkKey, toChunkCoord, toLocalCoord, voxelIndex } from '../voxels/voxels';
 
-// 4096 bits / 32 bits per word = 128 words per chunk
 const WORDS_PER_CHUNK = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) >> 5; // 128
 
 export type Chunk = {
-    // bit[voxelIndex(lx, ly, lz)] = 1 → selected
+    // bit[voxelIndex(lx, ly, lz)] = 1 means selected.
     bits: Uint32Array; // length 128
 };
 
@@ -32,8 +11,6 @@ export type Selection = {
     chunks: Map<string, Chunk>;
     nodes: Set<number>;
 };
-
-// ── construction ───────────────────────────────────────────────────
 
 export function create(): Selection {
     return { chunks: new Map(), nodes: new Set() };
@@ -46,8 +23,6 @@ export function clone(src: Selection): Selection {
     }
     return dst;
 }
-
-// ── chunk helpers ──────────────────────────────────────────────────
 
 function ensureChunk(sel: Selection, cx: number, cy: number, cz: number): Chunk {
     const key = chunkKey(cx, cy, cz);
@@ -62,8 +37,6 @@ function ensureChunk(sel: Selection, cx: number, cy: number, cz: number): Chunk 
 function getChunk(sel: Selection, cx: number, cy: number, cz: number): Chunk | undefined {
     return sel.chunks.get(chunkKey(cx, cy, cz));
 }
-
-// ── single-voxel ops ───────────────────────────────────────────────
 
 export function set(sel: Selection, wx: number, wy: number, wz: number): void {
     const cx = toChunkCoord(wx);
@@ -88,8 +61,6 @@ export function has(sel: Selection, wx: number, wy: number, wz: number): boolean
     return (chunk.bits[bit >> 5]! & (1 << (bit & 31))) !== 0;
 }
 
-// ── node ops ───────────────────────────────────────────────────────
-
 export function addNode(sel: Selection, nodeId: number): void {
     sel.nodes.add(nodeId);
 }
@@ -106,8 +77,6 @@ export function clearNodes(sel: Selection): void {
     sel.nodes.clear();
 }
 
-// ── combined isEmpty ───────────────────────────────────────────────
-
 export function isEmpty(sel: Selection): boolean {
     if (sel.nodes.size > 0) return false;
     for (const chunk of sel.chunks.values()) {
@@ -118,12 +87,7 @@ export function isEmpty(sel: Selection): boolean {
     return true;
 }
 
-// ── fill an AABB ───────────────────────────────────────────────────
-//
-// core primitive used by box-select. works chunk-by-chunk so that the
-// x-run within each row is filled with word-level OR masks rather than
-// per-voxel calls.
-
+// Core primitive used by box-select. Works chunk-by-chunk so the x-run within each row is filled with word-level OR masks rather than per-voxel calls.
 export function setAABB(
     sel: Selection,
     minX: number,
@@ -157,8 +121,7 @@ export function setAABB(
 
                 for (let ly = lyMin; ly <= lyMax; ly++) {
                     for (let lz = lzMin; lz <= lzMax; lz++) {
-                        // voxelIndex = ly*(16*16) + lz*16 + lx, so the x-run
-                        // [lxMin..lxMax] is a contiguous bit range.
+                        // voxelIndex = ly*(16*16) + lz*16 + lx, so the x-run [lxMin..lxMax] is a contiguous bit range.
                         const bitStart = voxelIndex(lxMin, ly, lz);
                         const bitEnd = voxelIndex(lxMax, ly, lz);
                         const wStart = bitStart >> 5;
@@ -183,10 +146,7 @@ export function setAABB(
     }
 }
 
-// ── merge ──────────────────────────────────────────────────────────
-//
-// OR all bits from src into dst. O(filled chunks of src).
-
+/** ORs all bits from src into dst. O(filled chunks of src). */
 export function merge(dst: Selection, src: Selection): void {
     for (const [key, srcChunk] of src.chunks) {
         let dstChunk = dst.chunks.get(key);
@@ -203,11 +163,7 @@ export function merge(dst: Selection, src: Selection): void {
     }
 }
 
-// ── subtract ───────────────────────────────────────────────────────
-//
-// dst ←  dst ∖ src. AND-NOT each shared chunk; remove shared nodes;
-// prune fully-empty chunks from dst.
-
+/** dst = dst minus src: AND-NOT each shared chunk, remove shared nodes, prune fully-empty chunks from dst. */
 export function subtract(dst: Selection, src: Selection): void {
     for (const [key, srcChunk] of src.chunks) {
         const dstChunk = dst.chunks.get(key);
@@ -225,11 +181,7 @@ export function subtract(dst: Selection, src: Selection): void {
     }
 }
 
-// ── intersect ──────────────────────────────────────────────────────
-//
-// dst ← dst ∩ src. AND each shared chunk; drop dst chunks that src
-// doesn't have; intersect node sets.
-
+/** dst = dst intersect src: AND each shared chunk, drop dst chunks src doesn't have, intersect node sets. */
 export function intersect(dst: Selection, src: Selection): void {
     for (const key of [...dst.chunks.keys()]) {
         const srcChunk = src.chunks.get(key);
@@ -251,12 +203,7 @@ export function intersect(dst: Selection, src: Selection): void {
     }
 }
 
-// ── nudge ──────────────────────────────────────────────────────────
-//
-// translate all selected voxels by (dx, dy, dz) into `out` (which is
-// cleared first). for each set bit, decode world coords, re-set with
-// delta applied. O(set voxels), unavoidable for arbitrary deltas.
-
+/** Translates all selected voxels by (dx, dy, dz) into `out` (cleared first). O(set voxels), unavoidable for arbitrary deltas. */
 export function nudge(out: Selection, src: Selection, dx: number, dy: number, dz: number): void {
     out.chunks.clear();
     out.nodes.clear();
@@ -290,8 +237,6 @@ export function nudge(out: Selection, src: Selection, dx: number, dy: number, dz
     }
 }
 
-// ── count ──────────────────────────────────────────────────────────
-
 export function countVoxels(sel: Selection): number {
     let n = 0;
     for (const chunk of sel.chunks.values()) {
@@ -309,10 +254,7 @@ export function count(sel: Selection): number {
     return countVoxels(sel) + sel.nodes.size;
 }
 
-// ── bounds ─────────────────────────────────────────────────────────
-// computes the tight axis-aligned bounding box of all set voxels.
-// returns null if the selection has no voxels.
-
+/** Tight axis-aligned bounding box of all set voxels; null if the selection has no voxels. */
 export type Bounds = {
     min: [number, number, number];
     max: [number, number, number];
@@ -372,10 +314,7 @@ export function bounds(sel: Selection): Bounds | null {
     };
 }
 
-// ── forEach ────────────────────────────────────────────────────────
-//
-// calls cb(wx, wy, wz) for each set voxel. no allocation.
-
+/** Calls cb(wx, wy, wz) for each set voxel. No allocation. */
 export function forEach(sel: Selection, cb: (wx: number, wy: number, wz: number) => void): void {
     for (const [key, chunk] of sel.chunks) {
         const parts = key.split(',');

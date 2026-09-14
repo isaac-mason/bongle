@@ -1,17 +1,3 @@
-// rainbow.ts, brand-matched flowing rainbow color nodes for editor selection
-// visuals.
-//
-// mirrors the website header gradient (see apps/website/src/app.css
-// `.rainbow-*`): a 5-stop palette pink -> yellow -> blue -> purple -> pink that
-// slides over time. here the slide runs along a world-space axis, so the bands
-// read as anchored to the geometry (not the screen) as the camera orbits.
-//
-// one shared time uniform feeds every rainbow material; advance it once per
-// frame with tickRainbow() so all outlines and fills stay phase-locked. line
-// materials and fill materials each get a color node from the same palette,
-// differing only in how they recover the fragment's world position (segment
-// endpoints for expanded lines, the position attribute for solid fills).
-
 import {
     attribute,
     d,
@@ -32,13 +18,9 @@ import {
 } from 'gpucat';
 
 // palette stops match the website wordmark gradient, sRGB components / 255:
-//   #ff3ea5  #ffd23f  #3fa7ff  #8a2be2  (wraps back to #ff3ea5)
-// authored in sRGB to match the eyeballed editor-colors constants (which are
-// dropped into the fragment output the same way, no linearization).
-//
+// #ff3ea5, #ffd23f, #3fa7ff, #8a2be2 (wraps back to #ff3ea5).
 // `t` wraps to a 4-segment ramp; segment i picks stops (a, b) and interpolates
-// by the fractional part. select chains pick the stops branchlessly (the WGSL
-// backend lowers these to `select(false, true, cond)`).
+// by the fractional part, branchlessly via select chains.
 function rainbowPalette(t: Node<d.f32>): Node<d.vec3f> {
     const x = mul(fract(t), f32(4));
     const i = floor(x);
@@ -56,22 +38,16 @@ function rainbowPalette(t: Node<d.f32>): Node<d.vec3f> {
     return mix(a, b, f);
 }
 
-// world units per full palette cycle. small enough that a multi-voxel
-// selection shows several bands, large enough that a single voxel reads as a
-// near-solid colour that still animates through the palette over time.
+// world units per full palette cycle.
 const PERIOD = 6;
-// palette cycles per second along the flow (the time term).
+// palette cycles per second along the flow.
 const FLOW_SPEED = 0.15;
-// world-space flow axis, a (1,1,1) diagonal keeps the bands moving across any
-// face the camera looks at. pre-normalized components (1/sqrt(3)).
+// world-space flow axis, a (1,1,1) diagonal, pre-normalized (1/sqrt(3)).
 const AXIS_X = 0.5774;
 const AXIS_Y = 0.5774;
 const AXIS_Z = 0.5774;
 
 // phase(worldPos) = dot(worldPos, axis) / PERIOD - time * FLOW_SPEED
-// `elapsedTime` is the shared render clock's uniform node (TimeResources),
-// threaded in by identity so every rainbow material stays phase-locked with the
-// rest of the engine's time-driven animation.
 function rainbowPhase(worldPos: Node<d.vec3f>, elapsedTime: Node<d.f32>): Node<d.f32> {
     const along = mul(dot(worldPos, vec3f(AXIS_X, AXIS_Y, AXIS_Z)), f32(1 / PERIOD));
     return sub(along, mul(elapsedTime, f32(FLOW_SPEED)));
@@ -81,14 +57,7 @@ function rainbowColor(worldPos: Node<d.vec3f>, elapsedTime: Node<d.f32>, alpha: 
     return vec4f(rainbowPalette(rainbowPhase(worldPos, elapsedTime)), f32(alpha)) as unknown as Node<d.vec4f>;
 }
 
-/**
- * Rainbow color node for `LineMaterial` outlines (screen-expanded segments).
- *
- * Recovers the fragment's world position from the segment endpoints the line
- * geometry carries per vertex (`instanceStart` / `instanceEnd`), selected by
- * `uv.x` (0 at start, 1 at end). Mixing by `uv.x` and interpolating the result
- * as a varying yields the smooth along-edge world position.
- */
+/** Rainbow color node for `LineMaterial` outlines; recovers world position from the segment endpoints (`instanceStart`/`instanceEnd`) mixed by `uv.x`. */
 export function rainbowLineColor(elapsedTime: Node<d.f32>, alpha = 1): Node<d.vec4f> {
     const start = attribute('instanceStart', d.vec3f);
     const end = attribute('instanceEnd', d.vec3f);

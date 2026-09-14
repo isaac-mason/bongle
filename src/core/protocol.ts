@@ -4,57 +4,36 @@ import { REGION_VOLUME } from './voxels/voxels';
 /** room kind, edit rooms have a live scene editor, play rooms are snapshots */
 export type RoomMode = 'edit' | 'play';
 
-/**
- * how a Player engages with a room. Distinct from RoomMode (the room's
- * intrinsic character): a play-mode room can host edit-mode Players (a
- * developer tweaking while observing) and vice versa. Shares values with
- * RoomMode today but is free to grow independently (e.g. 'spectator').
- */
+/** how a Player engages with a room, distinct from RoomMode: a play-mode room can host edit-mode Players and vice versa. */
 export type PlayerMode = 'edit' | 'play';
 
-/** room metadata sent in room_list messages */
 export type RoomInfo = {
     id: string;
     sceneId: string;
     roomMode: RoomMode;
     clientCount: number;
     sourceRoomId: string | null;
-    /** namespace this room belongs to ('main' / 'editor' / 'play-<uuid>'). */
     namespace: string;
 };
 
-/* ── binary trait data for scene sync ── */
-
 /** a single field entry in per-field wire format: stable field index + packcat-encoded data */
 export const BinaryField = pack.object({
-    /** stable field index (alphabetical among replicable fields) */
     index: pack.varuint(),
-    /** packcat-encoded field value */
     data: pack.uint8Array(),
 });
 
 export type BinaryField = pack.SchemaType<typeof BinaryField>;
 
-/**
- * a trait's full state packed for transfer. trait ref uses the wire-index
- * channel, `netIndex` (varuint) for resolved traits, `id` (string) as the
- * fallback for unresolved traits (scene file mentions an id with no local
- * def). exactly one is set on the sender; receiver tries netIndex first.
- */
+/** a trait's full state packed for transfer; exactly one of netIndex/id is set on the sender, receiver tries netIndex first. */
 export const BinaryTrait = pack.object({
     netIndex: pack.optional(pack.varuint()),
     id: pack.optional(pack.string()),
-    /** per-control binary entries. each entry is (controlIndex, data). */
     fields: pack.list(BinaryField),
-    /** per-sync binary entries. each entry is (syncIndex, data). seeds initial replicated state. */
     syncs: pack.list(BinaryField),
 });
 
 export type BinaryTrait = pack.SchemaType<typeof BinaryTrait>;
 
-/* ── scene sync update schemas (fully binary via packcat union) ── */
-
-/** a node was created (or is newly visible to a client). full state. */
 export const NodeCreatedUpdate = pack.object({
     type: pack.literal('node_created'),
     id: pack.varuint(),
@@ -64,16 +43,11 @@ export const NodeCreatedUpdate = pack.object({
     persist: pack.optional(pack.boolean()),
     owner: pack.optional(pack.varint()),
     traits: pack.list(BinaryTrait),
-    /**
-     * json-encoded PrefabConfig. only present in edit-mode replication,
-     * play mode instantiates children server-side and replicates them as
-     * normal nodes, so the client never needs the raw config.
-     */
+    /** json-encoded PrefabConfig, only present in edit-mode replication. */
     prefab: pack.optional(pack.string()),
 });
 export type NodeCreatedUpdate = pack.SchemaType<typeof NodeCreatedUpdate>;
 
-/** node structural change: parent and/or child index changed. */
 export const NodeStructureUpdate = pack.object({
     type: pack.literal('node_structure'),
     id: pack.varuint(),
@@ -82,7 +56,6 @@ export const NodeStructureUpdate = pack.object({
 });
 export type NodeStructureUpdate = pack.SchemaType<typeof NodeStructureUpdate>;
 
-/** node name changed. */
 export const NodeNameUpdate = pack.object({
     type: pack.literal('node_name'),
     id: pack.varuint(),
@@ -90,7 +63,6 @@ export const NodeNameUpdate = pack.object({
 });
 export type NodeNameUpdate = pack.SchemaType<typeof NodeNameUpdate>;
 
-/** node owner changed. */
 export const NodeOwnerUpdate = pack.object({
     type: pack.literal('node_owner'),
     id: pack.varuint(),
@@ -98,36 +70,25 @@ export const NodeOwnerUpdate = pack.object({
 });
 export type NodeOwnerUpdate = pack.SchemaType<typeof NodeOwnerUpdate>;
 
-/**
- * per-field trait update. only changed fields are included. trait ref
- * is the wire-index only, `node_trait_fields` only fires for traits
- * with a live instance, which by definition have a registry entry and a
- * wire-index slot. unresolved traits (no live instance) cannot reach
- * this path.
- */
+/** per-field trait update, only changed fields; trait ref is wire-index only since this only fires for traits with a live instance. */
 export const NodeTraitFieldsUpdate = pack.object({
     type: pack.literal('node_trait_fields'),
     id: pack.varuint(),
     traitNetIndex: pack.varuint(),
-    /** per-field binary entries. each entry is (fieldIndex, data). */
     fields: pack.list(BinaryField),
 });
 export type NodeTraitFieldsUpdate = pack.SchemaType<typeof NodeTraitFieldsUpdate>;
 
-/** a trait was added to a node. full state, controls + syncs. */
 export const NodeTraitAddedUpdate = pack.object({
     type: pack.literal('node_trait_added'),
     id: pack.varuint(),
     traitNetIndex: pack.optional(pack.varuint()),
     traitId: pack.optional(pack.string()),
-    /** per-control binary entries (controlIndex, data). */
     fields: pack.list(BinaryField),
-    /** per-sync binary entries (syncIndex, data), seeds initial replicated state. */
     syncs: pack.list(BinaryField),
 });
 export type NodeTraitAddedUpdate = pack.SchemaType<typeof NodeTraitAddedUpdate>;
 
-/** a trait was removed from a node. */
 export const NodeTraitRemovedUpdate = pack.object({
     type: pack.literal('node_trait_removed'),
     id: pack.varuint(),
@@ -136,18 +97,16 @@ export const NodeTraitRemovedUpdate = pack.object({
 });
 export type NodeTraitRemovedUpdate = pack.SchemaType<typeof NodeTraitRemovedUpdate>;
 
-/** a node was destroyed (or is no longer visible to a client). */
 export const NodeDestroyedUpdate = pack.object({
     type: pack.literal('node_destroyed'),
     id: pack.varuint(),
 });
 export type NodeDestroyedUpdate = pack.SchemaType<typeof NodeDestroyedUpdate>;
 
-/** node prefab config changed (edit mode only). */
 export const NodePrefabUpdate = pack.object({
     type: pack.literal('node_prefab'),
     id: pack.varuint(),
-    /** json-encoded PrefabConfig. absent = prefab removed. */
+    /** json-encoded PrefabConfig; absent = prefab removed. */
     prefab: pack.optional(pack.string()),
 });
 export type NodePrefabUpdate = pack.SchemaType<typeof NodePrefabUpdate>;
@@ -166,13 +125,7 @@ export const SceneSyncUpdateSchema = pack.union('type', [
 
 export type SceneSyncUpdate = pack.SchemaType<typeof SceneSyncUpdateSchema>;
 
-/* ── packed scene graph (binary, for network transfer) ── */
-
-/**
- * a single node in a packed scene graph. same shape as NodeCreatedUpdate
- * but without the union discriminant. nodes are stored parent-first so
- * the receiver can reconstruct the tree in one pass.
- */
+/** a single node in a packed scene graph, same shape as NodeCreatedUpdate minus the union discriminant; stored parent-first. */
 export const PackedNode = pack.object({
     id: pack.varuint(),
     name: pack.optional(pack.string()),
@@ -181,23 +134,13 @@ export const PackedNode = pack.object({
     persist: pack.optional(pack.boolean()),
     owner: pack.optional(pack.varint()),
     traits: pack.list(BinaryTrait),
-    /**
-     * json-encoded PrefabConfig. only present in edit-mode replication,
-     * play mode instantiates children server-side, clients just see normal nodes.
-     */
+    /** json-encoded PrefabConfig, only present in edit-mode replication. */
     prefab: pack.optional(pack.string()),
 });
 
 export type PackedNode = pack.SchemaType<typeof PackedNode>;
 
-/**
- * full binary scene tree for network transfer (join_room, play snapshot).
- * includes ALL nodes regardless of persist flag. trait field data is
- * packcat-encoded via getControlSerDes.
- *
- * root is the first node in the list with parentId: 0.
- * remaining nodes are flat parent-first.
- */
+/** full binary scene tree for network transfer, all nodes regardless of persist flag; root is the first node, parentId: 0. */
 export const PackedSceneTree = pack.object({
     nodes: pack.list(PackedNode),
 });
@@ -219,35 +162,23 @@ export function unpackPackedSceneTree(data: Uint8Array): PackedSceneTree {
     }
 }
 
-/* ── Client → Server ────────────────────────────────────────────── */
-
 export const Ping = pack.object({
     type: pack.literal('ping'),
 });
 
-/** Client → server: echoes the latest `NetPing.serverStamp` seen, so the server can measure
- *  this client's RTT in its own clock (Quake `SV_CalcPings`-style). rides the per-tick packet
- *  — no dedicated ping/pong exchange. 0 = none seen yet. */
+/** echoes the latest `NetPing.serverStamp` seen so the server can measure this client's RTT in its own clock; 0 = none seen yet. */
 export const NetPingAck = pack.object({
     type: pack.literal('net_ping_ack'),
     serverStampAck: pack.uint32(),
 });
 export type NetPingAck = pack.SchemaType<typeof NetPingAck>;
 
-/** Client tells the server which Player is their active focus. */
 export const SetActiveRoom = pack.object({
     type: pack.literal('set_active_room'),
     playerId: pack.varuint(),
 });
 
-/**
- * Client toggles server-side frame profiling. when enabled, the server records
- * its tick and pushes `room_frames` (server-side throttled) for every room the
- * client holds a Player in. flat per-client bit, mirrors `debug_subscribe`.
- * Sent on the debug-panel open/close edge; unsubscribing on close (plus the
- * server's disconnect cleanup) means a closed panel streams nothing — and, with
- * no subscriber left, the server stops recording at all.
- */
+/** client toggles server-side frame profiling; when enabled, pushes `room_frames` for every room the client holds a Player in. */
 export const MetricsSubscribe = pack.object({
     type: pack.literal('metrics_subscribe'),
     enabled: pack.boolean(),
@@ -255,11 +186,6 @@ export const MetricsSubscribe = pack.object({
 
 export type MetricsSubscribe = pack.SchemaType<typeof MetricsSubscribe>;
 
-/**
- * Client toggles server-side debug streaming (logs + future debug feeds).
- * when enabled, the server pushes `debug_logs` deltas for every room the
- * client holds a Player in. flat per-client bit, no per-room granularity.
- */
 export const DebugSubscribe = pack.object({
     type: pack.literal('debug_subscribe'),
     enabled: pack.boolean(),
@@ -267,38 +193,16 @@ export const DebugSubscribe = pack.object({
 
 export type DebugSubscribe = pack.SchemaType<typeof DebugSubscribe>;
 
-/**
- * Client sends sync updates for authority:'owner' fields on owned nodes.
- * Play mode only. each field is packcat-encoded using its per-field serdes.
- */
+/** client sends sync updates for authority:'owner' fields on owned nodes, play mode only. */
 export const SyncUpdate = pack.object({
     type: pack.literal('sync_update'),
-    /** which room this update targets */
     roomId: pack.string(),
-    /** runtime node id */
     nodeId: pack.varuint(),
-    /**
-     * trait wire-index. owner-authority sync only fires for traits with
-     * a live instance, unresolved traits cannot reach this path, so no
-     * string fallback is needed.
-     */
     traitNetIndex: pack.varuint(),
-    /** per-field binary entries. only changed owner-authority fields. */
     fields: pack.list(BinaryField),
 });
 
-/**
- * User-defined network command between client and server. always scoped to
- * a room, room-less editor lifecycle ops live as first-class messages
- * (play / stop_room / leave_room / join_room_as) rather than going through this
- * channel; the editor's scene verbs are editor RPC commands.
- *
- * `commandIndex` is a position into the wire-index table both sides
- * compute locally from `commandsRegistry`, see
- * `ProjectModule.commandWireIndex`. Ordering is sort-by-id; the
- * no-asymmetric-imports convention guarantees both sides see the same id
- * set and therefore the same indices.
- */
+/** user-defined network command between client and server, always scoped to a room; `commandIndex` is sort-by-id. */
 export const NetMessage = pack.object({
     type: pack.literal('net_message'),
     direction: pack.enumeration(['to_server', 'to_client'] as const),
@@ -309,12 +213,7 @@ export const NetMessage = pack.object({
 
 export type NetMessage = pack.SchemaType<typeof NetMessage>;
 
-/**
- * Client submits a single chat input line for a room. The server parses it
- * against the room's chat: if a server-side listener consumes it, it stops
- * here; otherwise the server broadcasts a ChatBroadcast to every client in
- * the room. Plain chat messages (no leading '/') follow the same path.
- */
+/** client submits a single chat input line for a room; a server-side listener that consumes it stops it, otherwise it broadcasts. */
 export const ChatInput = pack.object({
     type: pack.literal('chat_input'),
     roomId: pack.string(),
@@ -323,23 +222,9 @@ export const ChatInput = pack.object({
 
 export type ChatInput = pack.SchemaType<typeof ChatInput>;
 
-/* ── editor lifecycle (client → server) ─────────────────────────────
- *
- * Room-CRUD ops that target the server's room registry rather than any
- * single room. First-class messages, no room context on the wire, no
- * Rpc.listen indirection. Dispatched directly from `processInbox`. The
- * `play` message is dual-purpose: editor "Play" button + game-runtime
- * `client.matchmake` (works in non-editor builds too).
- */
+// room-CRUD ops targeting the server's room registry, no room context on the wire, dispatched directly from `processInbox`.
 
-/**
- * Dual-purpose. Editor "Play" button passes `sceneId` + `sourceRoomId`
- * and mints a fresh `play-<uuid>` namespace. Game runtime
- * `client.matchmake` passes `options` + `joinData` and
- * find-or-creates a room keyed on `canonicalJson(options)`.
- * `sceneId`/`sourceRoomId` are optional so the game-runtime caller can
- * omit them (falls back to default scene).
- */
+/** dual-purpose: editor Play passes `sceneId`+`sourceRoomId` and mints a fresh namespace; matchmake passes `options`+`joinData`. */
 export const Play = pack.object({
     type: pack.literal('play'),
     sceneId: pack.optional(pack.string()),
@@ -364,11 +249,6 @@ export const LeaveRoom = pack.object({
 });
 export type LeaveRoom = pack.SchemaType<typeof LeaveRoom>;
 
-/**
- * Join an existing room in a specific mode. Used by the tab UI's
- * right-click "Join in edit / Join in play mode" actions to add a
- * (client, room, mode) membership without creating a new room.
- */
 export const JoinRoomAs = pack.object({
     type: pack.literal('join_room_as'),
     roomId: pack.string(),
@@ -376,67 +256,30 @@ export const JoinRoomAs = pack.object({
 });
 export type JoinRoomAs = pack.SchemaType<typeof JoinRoomAs>;
 
-/**
- * Sent by either peer after an HMR flush that may have changed its
- * outbound wire-index tables. Carries the full sorted id lists for traits
- * and commands; the receiver rebuilds its INBOUND wire-index tables from
- * them and adopts them for every subsequent decode.
- *
- * Ordered in-band with regular traffic: WS preserves message order, so
- * messages before the table refresh decode against the old inbound table
- * and messages after decode against the new one. No connection-time
- * handshake, no per-message version stamp, the message itself is the
- * boundary.
- */
+/** sent by either peer after an HMR flush that may have changed its outbound wire-index tables, ordered in-band with regular traffic. */
 export const WireTable = pack.object({
     type: pack.literal('wire_table'),
     /** trait ids in sort-by-id order (same order the sender encodes against). */
     traits: pack.list(pack.string()),
-    /** command ids in sort-by-id order. */
     commands: pack.list(pack.string()),
-    /**
-     * per-trait sync ids in the sender's own slot order, parallel to `traits`
-     * (`syncs[i]` describes `traits[i]`). the sender packs sync slices keyed by
-     * its LOCAL slot; the receiver uses this to map each slot back to its sync
-     * id and thence to its own local slot, so a differing sync subset/order
-     * between the two bundles can't misalign fields. `controls` likewise.
-     */
+    /** per-trait sync ids in the sender's own slot order, parallel to `traits`; lets the receiver remap by id. */
     syncs: pack.list(pack.list(pack.string())),
     controls: pack.list(pack.list(pack.string())),
 });
 
 export type WireTable = pack.SchemaType<typeof WireTable>;
 
-/**
- * Server announces a runtime-source model entry to a client. Carries only
- * the client-facing fetch URL, the server keeps its own URL locally and
- * never needs the receiver to learn it. Refcount lives server-side; the
- * client treats each register as a one-shot setModel and pairs it with a
- * single unregister_model on release.
- *
- * Ordering: emitted before any scene_sync / join_room that references the
- * modelId, so the client's `ensureModel` finds a URL entry when the trait
- * field carrying the modelId lands.
- */
+/** server announces a runtime-source model entry to a client, before any scene_sync/join_room referencing the modelId. */
 export const RegisterModel = pack.object({
     type: pack.literal('register_model'),
-    /** user-chosen model id (e.g. `avatar:<uuid>`). */
     id: pack.string(),
-    /** client-side fetch URL for the payload bytes. */
     clientUrl: pack.string(),
-    /** content hash for cache busting; optional, informational. */
     hash: pack.optional(pack.string()),
-    /** payload size in bytes; optional, informational. */
     size: pack.optional(pack.varuint()),
 });
 
 export type RegisterModel = pack.SchemaType<typeof RegisterModel>;
 
-/**
- * Server tells a client the runtime-source model entry is no longer needed.
- * Client drops the URL entry + releases any loaded payload. Pairs 1:1 with
- * a prior `register_model` for the same id.
- */
 export const UnregisterModel = pack.object({
     type: pack.literal('unregister_model'),
     id: pack.string(),
@@ -444,12 +287,6 @@ export const UnregisterModel = pack.object({
 
 export type UnregisterModel = pack.SchemaType<typeof UnregisterModel>;
 
-/**
- * Server broadcasts a chat line to every client in a room. Emitted either
- * from a plain chat message (no slash-command consumer) or from a script
- * that called `chat.message(ctx, text)` on the server side. Clients append
- * the line to their per-room Chat and fan out to message listeners.
- */
 export const ChatBroadcast = pack.object({
     type: pack.literal('chat_broadcast'),
     roomId: pack.string(),
@@ -460,20 +297,11 @@ export const ChatBroadcast = pack.object({
 
 export type ChatBroadcast = pack.SchemaType<typeof ChatBroadcast>;
 
-/**
- * Client acknowledges chunks/regions it has decoded + applied this frame,
- * freeing the server's per-player in-flight slots (voxel backpressure). Keyed
- * by playerId because one client can hold multiple players, each with its own
- * in-flight windows. Pure pacing, TCP guarantees delivery; the ack throttles
- * the server to the client's decode rate.
- */
+/** client acknowledges chunks/regions decoded and applied this frame, freeing the server's per-player in-flight slots. */
 export const VoxelAck = pack.object({
     type: pack.literal('voxel_ack'),
     playerId: pack.varuint(),
-    /** individual chunk coords decoded + applied since the last ack — the
-     *  PROMOTION channel only (an already-known chunk re-sent as
-     *  voxel_chunk_full after too many block-ops). frees dispatchFull's
-     *  in-flight slots for these. */
+    /** promotion channel only: an already-known chunk re-sent as voxel_chunk_full. */
     full: pack.list(
         pack.object({
             cx: pack.int32(),
@@ -481,9 +309,7 @@ export const VoxelAck = pack.object({
             cz: pack.int32(),
         }),
     ),
-    /** region coords decoded + applied (as voxel_region_full) since the last
-     *  ack — the DISCOVERY channel. frees dispatchRegionFull's in-flight
-     *  slots for these. */
+    /** discovery channel: regions decoded as voxel_region_full since the last ack. */
     regions: pack.list(
         pack.object({
             rx: pack.int32(),
@@ -491,16 +317,7 @@ export const VoxelAck = pack.object({
             rz: pack.int32(),
         }),
     ),
-    /**
-     * this client's current estimate of how many voxel_region_full regions it
-     * can decode per server tick, derived from a smoothed measurement of its
-     * own decode wall-clock (see client/voxel-pacing.ts — mirrors Minecraft's
-     * ChunkBatchSizeCalculator, whose "chunk" is actually a whole column: our
-     * region is the equivalent unit). dispatchRegionFull uses this instead of
-     * a fixed per-client constant, so a slow client gets throttled down and a
-     * fast one isn't held back by a conservative default. server clamps
-     * defensively.
-     */
+    /** smoothed estimate of decodable voxel_region_full regions per server tick; server clamps defensively. */
     desiredRegionsPerTick: pack.float32(),
 });
 
@@ -527,11 +344,6 @@ export type ClientMessage = pack.SchemaType<typeof ClientMessage>;
 
 const ClientMessageSerDes = pack.build(ClientMessage);
 
-/**
- * pack a single ClientMessage to its on-wire bytes. used by Net.send to
- * pre-encode messages at queue time so per-message size + category are
- * known without re-encoding at flush.
- */
 export function packClientMessage(message: ClientMessage): Uint8Array {
     return ClientMessageSerDes.pack(message);
 }
@@ -545,30 +357,21 @@ export function unpackClientMessage(data: Uint8Array): ClientMessage | null {
     }
 }
 
-/* ── Server → Client ────────────────────────────────────────────── */
-
 export const Pong = pack.object({
     type: pack.literal('pong'),
 });
 
-/** Server → client clock-sync push. The server stamps a room's authoritative
- *  `server` clock and batches this into the per-tick packet it already sends, so
- *  every arrival is a fresh sample the client slews its own `server` onto (one-way
- *  latency behind, see core/clock ClockSync). Per-room: a server hosts many rooms,
- *  each with its own clock, so the sample carries the `roomId` it belongs to. */
+/** server clock-sync push, batched into the per-tick packet; each arrival is a fresh sample the client slews its clock onto. */
 export const ServerClock = pack.object({
     type: pack.literal('server_clock'),
-    /** the room this `server` clock value belongs to. */
     roomId: pack.string(),
-    /** the room's authoritative `server` clock (seconds) at send. */
+    /** the room's authoritative `server` clock, in seconds. */
     serverClock: pack.float64(),
 });
 
 export type ServerClock = pack.SchemaType<typeof ServerClock>;
 
-/** Server → client: `serverStamp` (server monotonic ms at send) for the client to echo back
- *  via `NetPingAck`; `pingMs` is the server's smoothed RTT measurement, sent down for the
- *  client's net HUD. rides the per-tick packet. both 0 until known. */
+/** `serverStamp` for the client to echo back via `NetPingAck`; `pingMs` is the server's smoothed RTT for the client's net HUD. */
 export const NetPing = pack.object({
     type: pack.literal('net_ping'),
     serverStamp: pack.uint32(),
@@ -576,44 +379,26 @@ export const NetPing = pack.object({
 });
 export type NetPing = pack.SchemaType<typeof NetPing>;
 
-/**
- * Server instructs client to join a room. Sent on initial join, scene
- * switch, play start, and play stop. The client tears down current state
- * and rebuilds from the provided scene graph payload.
- */
+/** server instructs client to join a room, on initial join, scene switch, play start, and play stop. */
 export const JoinRoom = pack.object({
     type: pack.literal('join_room'),
-    /** Server-allocated Player id for this (client, room, mode). The client
-     *  keys its ClientRoom map by this id. */
     playerId: pack.varuint(),
-    /** The Player's mode in the room. */
     playerMode: pack.enumeration(['edit', 'play'] as const),
-    /** The room's native mode. May differ from the Player's mode (e.g. an
-     *  edit Player attached to a play room). */
+    /** the room's native mode, may differ from the Player's mode. */
     roomMode: pack.enumeration(['edit', 'play'] as const),
-    /** Runtime room ID. */
     roomId: pack.string(),
-    /** Scene file path (e.g. "scenes/main.scene.json"). */
     sceneId: pack.string(),
     /** packcat-encoded PackedNodes. */
     packedNodes: pack.uint8Array(),
-    /** our client id for this room */
     clientId: pack.varuint(),
-    /** Namespace this room belongs to (e.g. 'editor', 'main', 'play-<uuid>'). */
     namespace: pack.string(),
-    /** The server room clock (seconds) at send time. The client seeds its own
-     *  clock from this so the two sides share a time base (modulo join latency).
-     *  See `Clock.init`. */
+    /** the server room clock in seconds at send time; the client seeds its own clock from this. */
     serverClockTime: pack.float64(),
 });
 
 export type JoinRoom = pack.SchemaType<typeof JoinRoom>;
 
-/**
- * Server instructs the client to activate a Player it already observes.
- * Always emitted after the corresponding JoinRoom over the same per-client
- * outbox to preserve ordering.
- */
+/** server instructs the client to activate a Player it already observes, always after the corresponding JoinRoom. */
 export const ActivateRoom = pack.object({
     type: pack.literal('activate_room'),
     playerId: pack.varuint(),
@@ -621,11 +406,6 @@ export const ActivateRoom = pack.object({
 
 export type ActivateRoom = pack.SchemaType<typeof ActivateRoom>;
 
-/**
- * Server sends the list of active rooms.
- * Sent on client join and whenever rooms change (created, destroyed, client joins/leaves).
- * rooms is a JSON-encoded RoomInfo[].
- */
 export const RoomList = pack.object({
     type: pack.literal('room_list'),
     /** JSON-encoded RoomInfo[] */
@@ -634,30 +414,15 @@ export const RoomList = pack.object({
 
 export type RoomList = pack.SchemaType<typeof RoomList>;
 
-/**
- * Server sends incremental scene updates to a client.
- * Each update describes a change to a single node (created, destroyed,
- * structural change, trait change, etc.). fully binary via packcat.
- */
 export const SceneSync = pack.object({
     type: pack.literal('scene_sync'),
-    /**
-     * which Player these updates target. The client routes the message to
-     * the matching ClientRoom by playerId, content is mode-aware (an
-     * edit-Player and a play-Player in the same room receive different
-     * snapshot subsets), so per-Player addressing is required.
-     */
+    /** an edit-Player and a play-Player in the same room receive different snapshot subsets, so this is per-Player. */
     playerId: pack.varuint(),
-    /** packcat-encoded list of SceneSyncUpdate */
     updates: pack.list(SceneSyncUpdateSchema),
 });
 
 export type SceneSync = pack.SchemaType<typeof SceneSync>;
 
-/**
- * Server tells a client a Player has been removed.
- * The client drops the corresponding ClientRoom.
- */
 export const RoomLeft = pack.object({
     type: pack.literal('room_left'),
     playerId: pack.varuint(),
@@ -665,30 +430,17 @@ export const RoomLeft = pack.object({
 
 export type RoomLeft = pack.SchemaType<typeof RoomLeft>;
 
-/** one occupied chunk's payload, shared shape between VoxelChunkFull (an
- *  individual promotion re-send) and VoxelRegionFull's dense chunk list (a
- *  region-discovery bundle, no per-chunk coordinates needed there — see
- *  VoxelRegionFull). */
+/** one occupied chunk's payload, shared shape between VoxelChunkFull and VoxelRegionFull's dense chunk list. */
 const VoxelChunkPayload = pack.object({
-    /**
-     * per-slot global state ids (the shared registry identity, not per-chunk
-     * strings). `compressed` stores local slot indices into this list; the
-     * client maps each id back to a key via `registry.stateToKey` and interns
-     * its own local slot. keeping ids on the wire (vs `stateToKey` strings)
-     * is the egress win — a fence variant is one varuint, not a 40-char key.
-     */
+    /** per-slot global state ids; `compressed` stores local slot indices into this list, so a fence variant is one varuint. */
     palette: pack.list(pack.varuint()),
     /** fflate-compressed RLE of interleaved data+light (uint16) */
     compressed: pack.uint8Array(),
 });
 
-/** server re-sends one already-known chunk in full — the PROMOTION channel
- *  only (too many block-ops landed in it this tick, see discovery.ts). a
- *  newly-DISCOVERED region ships via VoxelRegionFull instead, bundled with
- *  its sibling chunks under one region coordinate. */
+/** server re-sends one already-known chunk in full, the promotion channel only; a newly-discovered region ships via VoxelRegionFull. */
 export const VoxelChunkFull = pack.object({
     type: pack.literal('voxel_chunk_full'),
-    /** Player this chunk targets, keyed per-Player for isolation. */
     playerId: pack.varuint(),
     cx: pack.int32(),
     cy: pack.int32(),
@@ -698,26 +450,9 @@ export const VoxelChunkFull = pack.object({
 
 export type VoxelChunkFull = pack.SchemaType<typeof VoxelChunkFull>;
 
-/**
- * server bundles a newly-discovered region's worth of chunks into ONE
- * message: a presence bitmask over the region's REGION_VOLUME local chunk
- * slots (in the shared, fixed REGION_LOCAL_CHUNK_OFFSETS raster order — see
- * voxels.ts) plus a dense list of only the occupied slots' payloads, in that
- * same order. no per-chunk coordinates anywhere: a slot's position is
- * implicit from where its bit falls in `occupied` and where its (if present)
- * payload falls in `chunks`. mirrors how Minecraft's light-update packet marks
- * empty vs present sections with a bitset instead of naming positions, and
- * how its block-data packet bundles a whole column's sections into one
- * packet with no per-section coordinates at all.
- *
- * `occupied`'s REGION_VOLUME boolean fields are auto-bit-packed by packcat
- * (any `boolean()` fields inside an `object`/`tuple` collapse to
- * ceil(count/8) bytes) — a fully-air region costs ~8 bytes of presence data
- * instead of REGION_VOLUME individual chunk coordinates (~12 bytes each).
- */
+/** server bundles a newly-discovered region into one message: a presence bitmask plus a dense list of only the occupied payloads. */
 export const VoxelRegionFull = pack.object({
     type: pack.literal('voxel_region_full'),
-    /** Player this region targets, keyed per-Player for isolation. */
     playerId: pack.varuint(),
     rx: pack.int32(),
     ry: pack.int32(),
@@ -728,32 +463,19 @@ export const VoxelRegionFull = pack.object({
 
 export type VoxelRegionFull = pack.SchemaType<typeof VoxelRegionFull>;
 
-/** server sends incremental block state changes (no light). */
 export const VoxelChunkOps = pack.object({
     type: pack.literal('voxel_chunk_ops'),
-    /** Player this update targets. */
     playerId: pack.varuint(),
     chunks: pack.list(
         pack.object({
             cx: pack.int32(),
             cy: pack.int32(),
             cz: pack.int32(),
-            /**
-             * incremental block changes reference the shared registry's global
-             * state id directly — no palette rides along. this is the MC
-             * `SectionBlocksUpdate` model: the id is lineage-independent, so a
-             * client whose local palette diverged (e.g. an optimistic hook-free
-             * paste vs the server's hook-run result) reconciles cleanly by
-             * re-interning each id into its own slot space. the old design
-             * shipped the server's whole growing palette by reference and had
-             * the client adopt its slot indices — which crashed the moment the
-             * two palettes were different lineages.
-             */
+            /** references the shared registry's global state id directly (no palette), so a diverged client re-interns cleanly. */
             changes: pack.list(
                 pack.object({
                     /** flat voxel index (0..4095) */
                     index: pack.uint16(),
-                    /** new global state id (registry-wide, shared by both peers) */
                     stateId: pack.varuint(),
                 }),
             ),
@@ -763,14 +485,9 @@ export const VoxelChunkOps = pack.object({
 
 export type VoxelChunkOps = pack.SchemaType<typeof VoxelChunkOps>;
 
-/** server sends full light arrays for dirty chunks (no block data). */
 export const VoxelChunkLight = pack.object({
     type: pack.literal('voxel_chunk_light'),
-    /** Player these light updates target. */
     playerId: pack.varuint(),
-    /** one chunk per message, the transport coalesces a tick's messages into
-     *  one frame, so per-chunk costs only a few bytes of framing while keeping
-     *  the dispatch/in-flight unit uniform with voxel_chunk_full. */
     cx: pack.int32(),
     cy: pack.int32(),
     cz: pack.int32(),
@@ -782,16 +499,10 @@ export const VoxelChunkLight = pack.object({
 
 export type VoxelChunkLight = pack.SchemaType<typeof VoxelChunkLight>;
 
-/**
- * server sends per-voxel light changes for chunks with bounded dirty count.
- * mirrors voxel_chunk_ops, but for light. used when lightDirtyCount is below
- * the whole-chunk fallback threshold, otherwise voxel_chunk_light is sent.
- */
+/** server sends per-voxel light changes for chunks with bounded dirty count; above the fallback threshold voxel_chunk_light is sent instead. */
 export const VoxelChunkLightDelta = pack.object({
     type: pack.literal('voxel_chunk_light_delta'),
-    /** Player these light updates target. */
     playerId: pack.varuint(),
-    /** one chunk per message (see VoxelChunkLight). */
     cx: pack.int32(),
     cy: pack.int32(),
     cz: pack.int32(),
@@ -807,15 +518,9 @@ export const VoxelChunkLightDelta = pack.object({
 
 export type VoxelChunkLightDelta = pack.SchemaType<typeof VoxelChunkLightDelta>;
 
-/**
- * server tells the client to remove an entire region's worth of chunks — the
- * eviction counterpart to VoxelRegionFull, same bundling rationale: the
- * client already knows exactly which chunks it holds in this region, so no
- * per-chunk coordinate list is needed at all, just the region coordinate.
- */
+/** server tells the client to remove an entire region's worth of chunks, the eviction counterpart to VoxelRegionFull. */
 export const VoxelRegionDel = pack.object({
     type: pack.literal('voxel_region_del'),
-    /** Player whose voxel view this removal applies to. */
     playerId: pack.varuint(),
     rx: pack.int32(),
     ry: pack.int32(),
@@ -824,17 +529,7 @@ export const VoxelRegionDel = pack.object({
 
 export type VoxelRegionDel = pack.SchemaType<typeof VoxelRegionDel>;
 
-/**
- * server pushes one profiled tick for a room to subscribers (see
- * `metrics_subscribe`), on the server's own throttle: the worst frame since the
- * last push, sliced to this room (other rooms' subtrees dropped) and stripped of
- * sub-millisecond noise. see server/telemetry's `pushRoomFrames`.
- *
- * spans are flattened in enter (preorder) order, one entry per column, so a
- * span's subtree is the run of following entries with a greater depth. scope
- * names are interned: `keys`/`units` carry only the names minted since this
- * client's last packet, appended in id order.
- */
+/** server pushes one profiled tick for a room to subscribers, on its own throttle: the worst frame since the last push. */
 export const RoomFrames = pack.object({
     type: pack.literal('room_frames'),
     roomId: pack.string(),
@@ -844,22 +539,19 @@ export const RoomFrames = pack.object({
     units: pack.list(pack.string()),
     /** wall duration of the whole server tick (ms). */
     duration: pack.float32(),
-    /** span columns: interned key id, nesting depth, start/end in ms from tick start. */
+    /** span columns: interned key id, nesting depth, start/end in ms from tick start; flattened preorder, so a subtree is the run of greater-depth entries. */
     spanKey: pack.uint16Array(),
     spanDepth: pack.uint8Array(),
     spanStart: pack.float32Array(),
     spanEnd: pack.float32Array(),
-    /** scalars recorded during the tick: interned key id → value. */
+    /** scalars recorded during the tick: interned key id to value. */
     counterKey: pack.uint16Array(),
     counterValue: pack.float32Array(),
 });
 
 export type RoomFrames = pack.SchemaType<typeof RoomFrames>;
 
-/**
- * source attribution for a single log entry. mirrors core/debug.LogSource.
- * absent for engine-internal logs captured without a script context.
- */
+/** source attribution for a single log entry; absent for engine-internal logs captured without a script context. */
 export const DebugLogSource = pack.object({
     traitId: pack.string(),
     nodeId: pack.varuint(),
@@ -871,7 +563,7 @@ export const DebugLogSource = pack.object({
 export type DebugLogSource = pack.SchemaType<typeof DebugLogSource>;
 
 export const DebugLogEntry = pack.object({
-    /** unix-ms timestamp; float64 because Date.now() exceeds varuint range comfortably. */
+    /** unix-ms timestamp; float64 because Date.now() exceeds varuint range. */
     ts: pack.float64(),
     level: pack.enumeration(['log', 'warn', 'error'] as const),
     msg: pack.string(),
@@ -880,11 +572,7 @@ export const DebugLogEntry = pack.object({
 
 export type DebugLogEntry = pack.SchemaType<typeof DebugLogEntry>;
 
-/**
- * server pushes a delta of room logs since the last cursor. only sent for
- * rooms the client has subscribed to (via `debug_subscribe`) and only when
- * the delta is non-empty.
- */
+/** server pushes a delta of room logs since the last cursor, only for subscribed rooms and only when non-empty. */
 export const DebugLogs = pack.object({
     type: pack.literal('debug_logs'),
     roomId: pack.string(),
@@ -895,17 +583,12 @@ export const DebugLogs = pack.object({
 
 export type DebugLogs = pack.SchemaType<typeof DebugLogs>;
 
-/**
- * message types whose bytes are billed to the "debug" bucket. used to keep
- * the headline ingress/egress numbers honest, opening the debug panel
- * itself shouldn't inflate the metric it shows. anything not in this set
- * is treated as "game" traffic.
- */
+/** message types billed to the "debug" bucket, so opening the debug panel doesn't inflate the metric it shows. */
 export const DEBUG_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>([
-    // client → server
+    // client to server
     'metrics_subscribe',
     'debug_subscribe',
-    // server → client
+    // server to client
     'room_frames',
     'debug_logs',
 ]);

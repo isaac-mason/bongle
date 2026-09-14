@@ -1,20 +1,3 @@
-// selection mesh for the voxel editor.
-//
-// renders a translucent highlight over the current voxel selection and
-// the active brush. each is a separate gpucat Mesh.
-//
-// meshing: shared binary greedy mesher (`core/voxels/greedy-mesh.ts`).
-// derives a tight AABB from the Selection.T chunk map + a per-voxel scan,
-// then calls `meshOccupancy` with `Selection.has` as the occupancy probe.
-// normals omitted, the flat-colour material doesn't need them.
-//
-// materials are created once and shared. all use the flowing brand rainbow
-// (see visuals/rainbow.ts), depthTest:false so they overlay everything.
-//   selection: rainbow fill + outline + surface edges of the committed selection.
-//   brush:     rainbow by default (hovered block idle, wip box-select, brush shapes),
-//              blends to a solid red/amber tint for elevation lower/flatten.
-//   hover outline: rainbow aabb around the single hovered block (separate from brush mesh).
-
 import {
     createIndexBuffer,
     createVertexBuffer,
@@ -46,8 +29,6 @@ import {
 } from './editor-colors';
 import { rainbowFillColor, rainbowLineColor } from './rainbow';
 
-// ── materials ──────────────────────────────────────────────────────
-
 let _selectionMaterial: Material | null = null;
 let _brushMaterial: Material | null = null;
 let _brushFillUniform: Uniform<d.vec4f> | null = null;
@@ -57,9 +38,8 @@ let _brushEdgesMaterial: LineMaterial | null = null;
 let _brushEdgesUniform: Uniform<d.vec4f> | null = null;
 let _hoverOutlineMaterial: LineMaterial | null = null;
 
-// brush tint blend: 0 = flowing rainbow (default), 1 = solid semantic tint.
-// shared by the brush fill + edges materials; elevation lower/flatten push it
-// to 1 with a red/amber tint, every other brush use leaves it at 0 (rainbow).
+// brush tint blend: 0 = flowing rainbow, 1 = solid semantic tint. shared by
+// the brush fill + edges materials.
 const _brushTintStrength = new Uniform(d.f32, 0);
 
 function getSelectionMaterial(elapsedTime: Node<d.f32>): Material {
@@ -67,8 +47,6 @@ function getSelectionMaterial(elapsedTime: Node<d.f32>): Material {
         _selectionMaterial = new Material({
             name: 'editor-selection-fill',
             vertex: positionClip,
-            // flowing brand rainbow, keyed to world position; alpha keeps the
-            // committed-selection fill as translucent as the old blue tint.
             fragment: rainbowFillColor(elapsedTime, SELECTION_FILL[3]),
             transparent: true,
             cullMode: 'none',
@@ -81,10 +59,6 @@ function getSelectionMaterial(elapsedTime: Node<d.f32>): Material {
 
 function getBrushMaterial(elapsedTime: Node<d.f32>): Material {
     if (!_brushMaterial) {
-        // flowing rainbow by default, blended toward a solid semantic tint by
-        // _brushTintStrength (elevation lower/flatten push it to 1 + a red/amber
-        // rgba here). alpha tracks the default brush-fill translucency. animated
-        // tints (pulse) just write _brushFillUniform a fresh tuple per frame.
         _brushFillUniform = new Uniform(d.vec4f, BRUSH_FILL_DEFAULT);
         _brushMaterial = new Material({
             name: 'editor-brush-fill',
@@ -160,20 +134,12 @@ function getHoverOutlineMaterial(elapsedTime: Node<d.f32>): LineMaterial {
     return _hoverOutlineMaterial;
 }
 
-// ── dense selection buffer ─────────────────────────────────────────
-//
-// bitmask-native scratch: copy each chunk's 128-word bit grid into a
-// dense X-bit-packed Uint32Array spanning the chunk-aligned AABB. one
-// row = wpr words covering SX bits along X; reads outside the populated
-// chunk set are zero by construction.
-//
-// padding: one zero row on each side of Y and Z so reads at (y=-1),
-// (y=SY), (z=-1), (z=SZ) all hit zero rows without a bounds check,
-// critical for the edge-segment classifier which probes ±1 on two axes.
-//
-// chunk layout: bit `(ly << 8) | (lz << 4) | lx`. one u32 word holds
-// two z-rows of 16 lx-bits each (low 16 = lz even, high 16 = lz odd).
-// chunks land on either bit 0 or bit 16 of a dense word, never split.
+// dense selection buffer: copies each chunk's 128-word bit grid into a
+// dense X-bit-packed Uint32Array spanning the chunk-aligned AABB, one zero
+// row padding each side of Y and Z so the edge classifier can probe +/-1 on
+// two axes without a bounds check. chunk layout: bit `(ly << 8) | (lz << 4)
+// | lx`; one u32 word holds two z-rows of 16 lx-bits (low 16 = lz even, high
+// 16 = lz odd), so chunks land on bit 0 or bit 16 of a dense word, never split.
 
 const WORDS_PER_CHUNK = CHUNK_VOLUME >> 5; // 128
 
@@ -220,9 +186,8 @@ function buildDenseSelection(sel: Selection.Selection): DenseSelection | null {
     const SY = (cyMax - cyMin + 1) << CHUNK_BITS;
     const SZ = (czMax - czMin + 1) << CHUNK_BITS;
     const wpr = (SX + 31) >> 5;
-    // +1 phantom zero word per row so edge-pass reads at wi=wpr (the word
-    // containing e_x = lxMax+1, needed for +X boundary Y/Z-edges when the
-    // selection is chunk-aligned) safely return 0.
+    // +1 phantom zero word per row so edge-pass reads at wi=wpr (the +X
+    // boundary Y/Z-edge word) safely return 0.
     const rowStride = wpr + 1;
     const slabStride = (SZ + 2) * rowStride;
     const occ = new Uint32Array((SY + 2) * slabStride);
@@ -271,22 +236,18 @@ function buildDenseSelection(sel: Selection.Selection): DenseSelection | null {
     };
 }
 
-// ── selection geometry ─────────────────────────────────────────────
-
 export function buildSelectionGeometry(sel: Selection.Selection): Geometry | null {
     const dense = buildDenseSelection(sel);
     if (!dense || dense.empty) return null;
 
     // tight bit-level bounds, keeps meshOccupancy from scanning empty
-    // space in partially-filled chunks (huge win on single voxels / thin slabs).
+    // space in partially-filled chunks.
     const tight = Selection.bounds(sel);
     if (!tight) return null;
 
     const { occ, rowStride, slabStride, minX, minY, minZ, SX, SY, SZ } = dense;
 
-    // dense lookup probe, closed over the populated buffer. ~5 ns per
-    // call vs ~440 ns for Selection.has; greedy mesher calls this 12×
-    // bounds-volume times per pass.
+    // ~5 ns per call vs ~440 ns for Selection.has.
     const denseHas = (wx: number, wy: number, wz: number): boolean => {
         const dx = wx - minX;
         const dy = wy - minY;
@@ -305,68 +266,26 @@ export function buildSelectionGeometry(sel: Selection.Selection): Geometry | nul
     return meshToGeometry(mesh);
 }
 
-// ── mesh edge segments ─────────────────────────────────────────────
-//
 // emits surface boundary + crease edges of the voxel selection, computed
-// directly from voxel occupancy (no dependency on greedy-mesh
-// decomposition). this avoids T-junction artifacts where a long merged
-// quad's edge would otherwise be drawn on top of several shorter
+// directly from voxel occupancy rather than greedy-mesh decomposition, so a
+// long merged quad's edge never draws on top of several shorter
 // perpendicular-quad sub-edges.
 //
-// algorithm:
-//   1. for each axis-aligned unit edge incident to a selected voxel,
-//      classify by looking at the 4 cells around the edge (in the plane
-//      perpendicular to the edge axis):
-//        - 0 exposed faces                → skip (edge isn't on the surface)
-//        - 2 exposed faces, same (axis,sign) normal → skip (flat-surface seam)
-//        - everything else (boundary, crease, step, saddle, corner) → keep
-//   2. bucket kept unit edges by the line they lie on (axis + the 2
-//      perpendicular coords), then merge consecutive integer positions into
-//      single long segments.
-//
-// invariant: output depends only on Selection.has(...). running greedy
-// meshing with different sweep orders, chunk sizes, etc. cannot change the
-// edges drawn here.
-
-// bitmask-native edge classifier.
-//
 // for each axis-aligned unit edge, look at the 4 cells around it in the
-// perpendicular plane (s00, s10, s01, s11, indexed by (db, dc)). the
-// reference logic counts exposed faces and skips when:
-//   - 0 exposed faces                          → edge isn't on a surface
-//   - 2 exposed faces, both of the same kind   → flat-surface seam
+// perpendicular plane (s00, s10, s01, s11, indexed by (db, dc)) and skip
+// when 0 faces are exposed (not on a surface) or when 2 exposed faces share
+// the same (axis, sign) normal (flat-surface seam); keep otherwise
+// (boundary, crease, step, saddle, corner). Exposed-face slots are XORs of
+// adjacent cells: e1 = s00^s10, e2 = s01^s11, e3 = s00^s01, e4 = s10^s11.
+// The four formulas run on 32 candidate edges at once via bitwise ops on
+// packed words. X-edges read s00..s11 directly (no shift) and walk per-bit
+// within/across words; Y- and Z-edges need a +1 X-shift to reach the
+// neighbor column (`(word << 1) | (prevWord >>> 31)`) and track runs via
+// `starts = kept & ~prev`, `ends = prev & ~kept` across slabs, closed by a
+// phantom all-zero row past the tight max.
 //
-// the four exposed-face slots (each a XOR of two cells):
-//   e1 = s00 ^ s10   F1: B-perp face at dc=-1
-//   e2 = s01 ^ s11   F2: B-perp face at dc=0
-//   e3 = s00 ^ s01   F3: C-perp face at db=-1
-//   e4 = s10 ^ s11   F4: C-perp face at db=0
-//
-// "2 same B-faces" ⟺ e1=e2=1, e3=e4=0 (F3 absent implies c00==c01, which
-// forces F1 and F2 to share orientation). "2 same C-faces" mirrors it.
-// kept = (any exposed) AND NOT (either skip pattern).
-//
-// the four formulas operate on 32 candidate edges in parallel as bitwise
-// ops on packed words, replacing per-cell Selection.has + Map<string,
-// Set<number>> string-key bookkeeping with raw word arithmetic.
-//
-// per pass:
-//   X-edges: 4 cells all at the same X, so s00..s11 are direct row
-//            reads (no shift); runs along the bit direction → walked
-//            per-bit within / across words.
-//   Y-edges: 4 cells share Y; s00 and s10 need a +1 X-shift to reach
-//            the (x=c-1) column. runs along Y → outer e_z, inner e_y,
-//            state-machine via prevKept + runStartY[xpos].
-//   Z-edges: 4 cells share Z; s00 and s01 need the +1 X-shift. runs
-//            along Z → outer e_y, inner e_z, mirror state machine.
-//
-// shift +1 in X (extract bit at position p-1 of original word):
-//   shifted = (word << 1) | (prevWord >>> 31)
-//
-// run state machine (Y/Z passes): per word,
-//   starts = kept & ~prev    bits where a Y/Z-run begins at this slab
-//   ends   = prev & ~kept    bits where the prior slab ended a run
-// a phantom row (kept = 0 past the tight max) closes any active runs.
+// output depends only on Selection.has(...), independent of greedy-mesh
+// sweep order or chunk size.
 
 export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null {
     const dense = buildDenseSelection(sel);
@@ -384,19 +303,16 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
     const lzMin = tight.min[2] - minZ;
     const lzMax = tight.max[2] - minZ;
 
-    // X-word range covering both [lxMin..lxMax] (X-edges) and [lxMin..lxMax+1]
-    // (Y/Z edges, which extend one bit past the voxel range on the +X face).
-    // wMax can hit the phantom zero word at wi=wpr, that's the row's padding
-    // word from buildDenseSelection, so reads remain in-bounds.
+    // covers [lxMin..lxMax] (X-edges) and [lxMin..lxMax+1] (Y/Z edges, which
+    // extend one bit past the voxel range on the +X face); wMax can hit the
+    // phantom zero padding word from buildDenseSelection, so reads stay in-bounds.
     const wMin = lxMin >> 5;
     const wMax = (lxMax + 1) >> 5;
     const wRange = wMax - wMin + 1;
 
     const pts: number[] = [];
 
-    // ── X-edge pass ─────────────────────────────────────────────────
-    // axis=0, runs along X. for each (ey, ez), kept[bit] tells us whether
-    // an X-edge at e_x=bit should be drawn; per-bit walk merges runs.
+    // X-edge pass, axis=0, runs along X.
     for (let ey = lyMin; ey <= lyMax + 1; ey++) {
         const rowY1 = (ey - 1 + 1) * slabStride;
         const rowY = (ey + 1) * slabStride;
@@ -439,19 +355,15 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
                     }
                 }
             }
-            // no explicit closer needed: the bit at e_x = lxMax+1 lives in
-            // word wMax (kept = 0 there since voxels stop at lxMax), so the
-            // run always closes during the per-bit walk above.
+            // the bit at e_x = lxMax+1 lives in word wMax where kept = 0
+            // (voxels stop at lxMax), so the run always closes above.
         }
     }
 
-    // shared state for Y- and Z-edge passes, per-X-position kept word
-    // and run-start tracking. allocated once, reset on each outer slab.
     const prevKept = new Uint32Array(wRange);
     const runStart = new Int32Array(wRange << 5);
 
-    // ── Y-edge pass ─────────────────────────────────────────────────
-    // axis=1, B=Z, C=X. outer ez, inner ey; runs along Y.
+    // Y-edge pass, axis=1, B=Z, C=X. outer ez, inner ey; runs along Y.
     // s00=(x=ex-1, z=ez-1), s10=(x=ex-1, z=ez), s01=(x=ex, z=ez-1), s11=(x=ex, z=ez)
     for (let ez = lzMin; ez <= lzMax + 1; ez++) {
         prevKept.fill(0);
@@ -517,8 +429,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
         }
     }
 
-    // ── Z-edge pass ─────────────────────────────────────────────────
-    // axis=2, B=X, C=Y. outer ey, inner ez; runs along Z.
+    // Z-edge pass, axis=2, B=X, C=Y. outer ey, inner ez; runs along Z.
     // s00=(x=ex-1, y=ey-1), s10=(x=ex, y=ey-1), s01=(x=ex-1, y=ey), s11=(x=ex, y=ey)
     for (let ey = lyMin; ey <= lyMax + 1; ey++) {
         prevKept.fill(0);
@@ -585,14 +496,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
     return pts.length > 0 ? pts : null;
 }
 
-// ── bounding-box outline segments ──────────────────────────────────
-//
-// emits the 12 edges of an AABB as a flat [x,y,z, x,y,z, ...] segment
-// pair array for LineSegmentsGeometry. callers pass either Selection
-// bounds (committed selection / brush outline) or a precomputed world
-// AABB (hover collider outline). OUTLINE_EXPAND keeps the outline just
-// outside the fill mesh to avoid z-fighting.
-
+// keeps the outline just outside the fill mesh to avoid z-fighting.
 const OUTLINE_EXPAND = 0.005;
 
 export function buildOutlineSegments(sel: Selection.Selection): number[] | null {
@@ -621,11 +525,7 @@ export function buildOutlineSegments(sel: Selection.Selection): number[] | null 
     return aabbOutlineSegments(minX - e, minY - e, minZ - e, maxX + 1 + e, maxY + 1 + e, maxZ + 1 + e);
 }
 
-/**
- * 12 edges of the AABB [x0,y0,z0]..[x1,y1,z1] as a flat segment-pair array
- * for LineSegmentsGeometry. coords are passed through verbatim, callers
- * apply any expansion they need before calling.
- */
+/** 12 edges of the AABB [x0,y0,z0]..[x1,y1,z1] as a flat segment-pair array for LineSegmentsGeometry. */
 export function aabbOutlineSegments(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number[] {
     return [
         // bottom face
@@ -706,13 +606,7 @@ export function aabbOutlineSegments(x0: number, y0: number, z0: number, x1: numb
     ];
 }
 
-/**
- * 12 triangles forming a closed box for the AABB [x0,y0,z0]..[x1,y1,z1].
- * used for the cyan brush mesh when hovering a sub-unit collider, the
- * cell-based Selection greedy mesher can't represent <1m shapes, so we
- * synthesize the box directly. brush material has cullMode:'none', so
- * winding doesn't matter.
- */
+/** 12 triangles forming a closed box for the AABB [x0,y0,z0]..[x1,y1,z1], for sub-unit collider shapes the cell-based Selection mesher can't represent. */
 export function buildAabbBoxGeometry(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): Geometry {
     const positions = new Float32Array([
         x0,
@@ -785,31 +679,23 @@ export function buildAabbBoxGeometry(x0: number, y0: number, z0: number, x1: num
     return geo;
 }
 
-// ── SelectionMeshState ─────────────────────────────────────────────
-
 export type SelectionMeshState = {
     selectionMesh: Mesh | null;
     selectionOutline: Mesh | null;
     selectionEdges: Mesh | null;
-    // brush: any-shape selection (hovered block idle, wip box-select region,
-    // future arbitrary brush shapes). rainbow by default, red/amber when tinted.
+    // any-shape selection (hovered block idle, box-select region, brush shapes).
     brushMesh: Mesh | null;
     brushEdges: Mesh | null;
-    // single-block aabb outline around the exact hovered voxel, tight box.
+    // tight aabb outline around the exact hovered voxel.
     hoverOutline: Mesh | null;
     scene: Scene;
-    // editor-view gate, set by the caller. setMesh / setOutlineMesh reuse their
-    // Mesh across geometry swaps, so this is re-applied every frame: a
-    // `visible = false` written straight onto a mesh survives every rebuild
-    // short of a full destroy, which the brush only hits when the ray misses.
+    // editor-view gate; re-applied every frame since setMesh/setOutlineMesh reuse their Mesh across geometry swaps.
     visible: boolean;
-    // second gate, stacked on `visible` for the hover outline alone.
+    // second gate, stacked on `visible`, for the hover outline alone.
     hoverOutlineWanted: boolean;
-    // track last updated data to avoid redundant rebuilds
     _lastSelection: Selection.Selection | null;
-    // brush signature: a Selection ref when the brush is cell-based, or a
-    // string key `aabb:x0,y0,…,z1` when the brush is a synthesized sub-unit
-    // collider box. covers both rebuild triggers via one identity check.
+    // a Selection ref when the brush is cell-based, or a string key
+    // `aabb:x0,y0,...,z1` when it's a synthesized sub-unit collider box.
     _lastBrushSig: string | Selection.Selection | null;
     _lastHoverKey: string; // serialised "x,y,z" or ""
 };
@@ -864,8 +750,6 @@ export function disposeSelectionMeshState(state: SelectionMeshState): void {
     }
 }
 
-// ── per-frame update ───────────────────────────────────────────────
-
 function setMesh(
     state: SelectionMeshState,
     which: 'selectionMesh' | 'brushMesh',
@@ -913,7 +797,6 @@ function setOutlineMesh(
     }
 
     if (current) {
-        // reuse the existing mesh, just swap geometry
         current.geometry.dispose();
         current.geometry = new LineSegmentsGeometry(pts);
     } else {
@@ -925,8 +808,7 @@ function setOutlineMesh(
     }
 }
 
-// push both gates onto the meshes. `visible` is the editor-view gate and
-// covers all six; the hover outline carries a second gate on top of it.
+// `visible` gates all six meshes; the hover outline carries a second gate on top of it.
 function applyVisibility(state: SelectionMeshState): void {
     const show = state.visible;
     if (state.selectionMesh) state.selectionMesh.visible = show;
@@ -937,8 +819,7 @@ function applyVisibility(state: SelectionMeshState): void {
     if (state.hoverOutline) state.hoverOutline.visible = show && state.hoverOutlineWanted;
 }
 
-/** show / hide every selection + brush overlay, for callers that gate the
- *  whole editor view (play mode, a lens peek into a play room). */
+/** show / hide every selection + brush overlay, for callers that gate the whole editor view. */
 export function setSelectionMeshesVisible(state: SelectionMeshState, visible: boolean): void {
     state.visible = visible;
     applyVisibility(state);
@@ -946,7 +827,6 @@ export function setSelectionMeshesVisible(state: SelectionMeshState, visible: bo
 
 export function updateSelectionMeshes(meshState: SelectionMeshState, state: EditRoomState, time: TimeResources): void {
     const elapsedTime = time.elapsedTime;
-    // update committed selection mesh + outline when the object reference changes
     if (state.selection !== meshState._lastSelection) {
         meshState._lastSelection = state.selection;
         setMesh(
@@ -969,15 +849,8 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         );
     }
 
-    // brush mesh: cell-based Selection most of the time, but for hovers on
-    // sub-unit colliders (torches, fences, …) we synthesize a single-box
-    // geometry at the collider AABB so the cyan visualization matches the
-    // actual shape. brush is set by editor/client.ts each frame from
-    // hoverVoxel (idle) or boxSelect.previewB (wip).
-    //
-    // signature folds brush ref + aabb-shape mode + aabb key so the brush
-    // rebuilds when the mode flips OR the AABB moves between cells, even if
-    // the underlying hoverVoxel Selection ref change wouldn't have triggered it.
+    // brushSig folds brush ref + aabb-shape mode + aabb key so the brush
+    // rebuilds when the mode flips or the AABB moves between cells.
     const hoverAabb = state.hoverAabb;
     const hasBrush = state.brush !== null;
     const brushBig = hasBrush && Selection.count(state.brush!) > 1;
@@ -1030,19 +903,14 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         }
     }
 
-    // brush tint: a null `brushFill` / `brushEdges` means the default flowing
-    // rainbow (strength 0); a set rgba (elevation lower/flatten) means a solid
-    // semantic tint (strength 1) blended in by the brush materials. the tint
-    // uniforms only matter when strength is 1; writes are cheap, so set the
-    // active tint each frame (covers static presets and per-frame pulse alike).
+    // null brushFill/brushEdges means the default flowing rainbow (strength 0);
+    // a set rgba means a solid semantic tint (strength 1) blended in by the brush materials.
     const fill = state.brushFill;
     const edges = state.brushEdges;
     _brushTintStrength.value = fill ? 1 : 0;
     if (fill && _brushFillUniform) _brushFillUniform.value = fill;
     if (edges && _brushEdgesUniform) _brushEdgesUniform.value = edges;
 
-    // hover outline geometry, tight white box around the hovered block's
-    // collider AABB. visibility is decided below.
     const hoverKey = hoverAabb
         ? `${hoverAabb[0]},${hoverAabb[1]},${hoverAabb[2]},${hoverAabb[3]},${hoverAabb[4]},${hoverAabb[5]}`
         : '';
@@ -1063,11 +931,8 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterial(elapsedTime));
     }
 
-    // the hover outline pins down the focal cell within a multi-cell brush
-    // region. for single-cell brushes the brush mesh+edges already show the
-    // cell bounds (or the sub-unit AABB in the useAabbBrush path), so the
-    // outline would be redundant. tools without a brush (inspect, transform)
-    // render no hover affordance at all.
+    // only shown for multi-cell brushes; single-cell brushes already show
+    // bounds via the brush mesh+edges.
     meshState.hoverOutlineWanted = hasBrush && brushBig;
     applyVisibility(meshState);
 }

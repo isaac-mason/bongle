@@ -1,10 +1,3 @@
-// node-aabb.ts, shared helpers for computing a node's world-space AABB
-// from its (and its subtree's) MeshTrait / VoxelMeshTrait geometry.
-//
-// used by node-bodies (broadphase shape sizing) and the grab tool (transient
-// dynamic body shape sizing). callers handle their own fallback when the
-// subtree contributes no AABB.
-
 import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../api/transforms';
 import { MeshTrait } from '../builtins/mesh';
@@ -17,11 +10,8 @@ import { getTrait } from '../core/scene/scene-tree';
 const _scratchLocal: Box3 = box3.create();
 const _scratchWorld: Box3 = box3.create();
 
-/**
- * write `node`'s own local-space mesh-or-voxel AABB into `out`. returns true
- * if the node carries a recognized aabb-producing trait (MeshTrait with a
- * resolvable handle entry, or VoxelMeshTrait with a populated VoxelModel).
- */
+/** returns true if the node carries a recognized aabb-producing trait (MeshTrait with a
+ *  resolvable handle entry, or VoxelMeshTrait with a populated VoxelModel). */
 function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     const meshTrait = getTrait(node, MeshTrait);
     const meshId = meshTrait?.meshId;
@@ -34,9 +24,7 @@ function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     const voxelMeshTrait = getTrait(node, VoxelMeshTrait);
     const model = voxelMeshTrait?.model;
     if (model && model.voxelCount > 0) {
-        // mesh vertices are baked at boundsMin..boundsMax minus origin (see
-        // VoxelMeshVisuals.meshAllChunks), so the local-space AABB is the
-        // model's bounds shifted by -origin.
+        // mesh vertices are baked at boundsMin..boundsMax minus origin (VoxelMeshVisuals.meshAllChunks).
         const ox = model.origin[0];
         const oy = model.origin[1];
         const oz = model.origin[2];
@@ -48,12 +36,7 @@ function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
     return false;
 }
 
-/**
- * walk `node` and its descendants, unioning each subtree node's mesh AABB
- * (transformed into world space by the node's interpolated world matrix)
- * into `out`. `out` must start empty (e.g. `box3.create()` then set to
- * +/-Infinity). returns true if at least one aabb was unioned.
- */
+/** `out` must start empty (`box3.create()` then set to +/-Infinity). returns true if at least one aabb was unioned. */
 export function unionSubtreeWorldAabb(node: Node, resources: Resources, out: Box3): boolean {
     let found = false;
     const transform = getTrait(node, TransformTrait);

@@ -1,10 +1,3 @@
-// MP3 encode via lamejs (pure-JS libmp3lame port, ~45KB gz). Used only for the
-// standalone `long:true` clips: they're played from offset 0, so MP3's encoder
-// delay is a non-issue, and they need real lossy compression (a several-minute
-// track as lossless FLAC would be MBs). The short-SFX atlas does NOT use this —
-// it needs sample-exact gapless offsets, which lamejs can't emit (its
-// Mp3Encoder writes no LAME gapless header), so the atlas is FLAC instead.
-
 import { Mp3Encoder } from '@breezystack/lamejs';
 
 const MP3_BLOCK = 1152; // one MPEG-1 Layer III frame

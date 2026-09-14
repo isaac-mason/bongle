@@ -1,25 +1,3 @@
-// box select tool update function.
-//
-// called each frame from EditorScript onFrame (client only).
-// reads & writes the per-room store (selection + transient boxSelect + cursor).
-//
-// mouse flow:
-//   click 1: hovered voxel → sets store.boxSelect = { cornerA, previewB: null }
-//   each subsequent frame: update previewB to current hover
-//   click 2: compute AABB between cornerA and previewB, write to store.selection,
-//            clear store.boxSelect so UI rerenders.
-//
-// keyboard flow:
-//   arrow keys move a keyboard cursor (store.cursor).
-//   enter places corner A at the cursor, then enter again commits corner B.
-//   keyboard-driven box-select sets `locked: true` so cursor raycast is ignored.
-//
-// in 'replace' mode the new AABB replaces the current selection.
-// in 'add' mode the new AABB is merged into the current selection.
-//
-// when selectTarget is 'nodes' or 'all', the committed AABB is used to query the
-// crashcat broadphase for editor node bodies.
-
 import type { Input } from '../../client/input';
 import { isKeyDown, isMouseJustDown } from '../../client/input';
 import type { Physics } from '../../core/physics/physics';
@@ -30,8 +8,8 @@ import type { NodeBodies } from '../node-bodies';
 import { rebuildNodeSelection } from '../scene/node-selection';
 import { playAnchored, playSelected } from '../sounds';
 
-// scratch region used to host the box's voxel rasterisation when querying
-// nodes via origin-in-selection (kept across commits to skip the alloc).
+// scratch region hosting the box's voxel rasterisation for the origin-in-selection node query,
+// kept across commits to skip the alloc
 const _queryRegion: Selection.Selection = Selection.create();
 
 /** clear in-progress box-select state. */
@@ -39,30 +17,23 @@ export function clearBoxSelect(store: EditRoomStoreApi): void {
     store.setState({ boxSelect: undefined, cursor: null });
 }
 
-// ── per-frame update ───────────────────────────────────────────────
-
-/**
- * per-frame box-select update. handles both mouse clicks and keyboard cursor.
- *
- * @param nudgeDelta - camera-relative nudge from arrow keys, or null if no nudge this frame
- * @param enterPressed - true if Enter was just pressed this frame
- */
+/** Per-frame box-select update, handling both mouse clicks and keyboard cursor. */
 export function updateBoxSelect(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     input: Input,
     physics: Physics | null,
     nodeBodies: NodeBodies | null,
+    /** camera-relative nudge from arrow keys, or null if no nudge this frame */
     nudgeDelta: [number, number, number] | null,
+    /** true if Enter was just pressed this frame */
     enterPressed: boolean,
 ): void {
     const s = store.getState();
     const hv = s.hoverVoxel;
     const hasSelection = !Selection.isEmpty(s.selection);
 
-    // ── keyboard cursor ────────────────────────────────────────────
-    // only activates when there's no committed selection (or a cursor-driven
-    // box-select is already in progress).
+    // only activates when there's no committed selection, or a cursor-driven box-select is in progress
     const cursorAllowed = !hasSelection || !!s.cursor;
 
     if (cursorAllowed && nudgeDelta) {
@@ -81,10 +52,9 @@ export function updateBoxSelect(
         }
     }
 
-    // re-read after possible nudge
     const after = store.getState();
 
-    // enter → place corner A or commit corner B via keyboard cursor
+    // enter places corner A, or commits corner B via keyboard cursor
     if (cursorAllowed && after.cursor && enterPressed) {
         if (!after.boxSelect) {
             store.setState({
@@ -101,7 +71,6 @@ export function updateBoxSelect(
         return;
     }
 
-    // ── mouse-driven flow ──────────────────────────────────────────
     const justDown = isMouseJustDown(input.mouseKeyboard, 'left');
 
     if (!justDown) {
@@ -127,8 +96,7 @@ export function updateBoxSelect(
         });
         playAnchored(ctx);
     } else {
-        // second click, commit selection.
-        // when locked (keyboard-driven), use the nudged previewB; otherwise use hover voxel.
+        // second click commits; when locked (keyboard-driven), use the nudged previewB
         const cornerB = after.boxSelect.locked && after.boxSelect.previewB ? after.boxSelect.previewB : hv;
         if (!cornerB) return;
         const mk = input.mouseKeyboard;
@@ -138,11 +106,7 @@ export function updateBoxSelect(
     }
 }
 
-/**
- * commit the in-progress box-select using the given corner B.
- * clears store.boxSelect and updates store.selection.
- * no-op if no box-select is in progress.
- */
+/** Commits the in-progress box-select using the given corner B; no-op if none is in progress. */
 export function commitBoxSelect(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
@@ -166,13 +130,11 @@ export function commitBoxSelect(
 
     const next = selectionBehavior === 'add' ? Selection.clone(s.selection) : Selection.create();
 
-    // voxels
     if (selectTarget !== 'nodes') {
         Selection.setAABB(next, minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    // nodes, origin-in-box: rasterise the box into a scratch region and
-    // let the helper pick nodes whose origins fall inside.
+    // origin-in-box: rasterises the box into a scratch region and picks nodes whose origins fall inside
     if (selectTarget !== 'voxels') {
         _queryRegion.chunks.clear();
         _queryRegion.nodes.clear();

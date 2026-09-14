@@ -1,17 +1,7 @@
-// key-level rotate/flip, the bridge between blueprint/voxel-rotate
-// (which work on string keys) and the block-def hooks (which work on
-// stateIds).
-//
-// each call dispatches to the block's `rotate` / `flip` hook. presets
-// in block-presets.ts implement these hooks for every directional shape
-// (stairs, slab, trapdoor, ladder, column, fence, pane, wall, torch).
-// stateless blocks and blocks that lack a hook are returned unchanged.
-//
-// returns the original key when the hook returns an unregistered stateId.
-
 import type { RotAxis } from './block-orient';
 import { type Blocks, parseKey } from './block-registry';
 
+/** Dispatches to the block's `rotate` hook, bridging string keys (blueprint/voxel-rotate) and stateIds (block-def hooks). Returns `key` unchanged for stateless blocks, blocks with no `rotate` hook, or an unregistered result stateId. */
 export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry: Blocks): string {
     const parsed = parseKey(key);
     if (!parsed) return key;
@@ -23,6 +13,7 @@ export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry
     return registry.stateToKey[rotatedId] ?? key;
 }
 
+/** Dispatches to the block's `flip` hook; same fallback rules as `rotateBlockKey`. */
 export function flipBlockKey(key: string, axis: RotAxis, registry: Blocks): string {
     const parsed = parseKey(key);
     if (!parsed) return key;

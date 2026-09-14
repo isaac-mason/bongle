@@ -1,43 +1,4 @@
-/**
- * core/capture/module-scope.ts, owning-module stack + per-module reload diff.
- *
- * the bongle() vite plugin injects `__pushModule(import.meta.url)` at the
- * top of every user file and `__popModule(prev)` at the bottom. while a
- * module's body evaluates, `owningModule()` returns its url, so `upsert`
- * calls in registry.ts can stamp each handle with its owning module.
- *
- * the stack handles nested module evaluation under esm, child modules
- * evaluate fully (push + body + pop) before the parent's body resumes.
- *
- * per-module snapshots: every declarative api (block, tile, texture, model,
- * sound, sprite, particle, prefab, scene, command, config, trait, script) records
- * into the current module's snapshot during evaluation. on a second
- * evaluation, the previous snapshot is diffed against the new one to decide
- * patch vs invalidate.
- *
- * the snapshot tracks two things:
- *   • presence, id sets for every declarative api. recorded for visibility
- *     and future introspection (debug panels, what-did-this-file-declare
- *     queries). not consulted by the diff today; wholesale consumer
- *     rebuilds via registry flush already propagate any content change.
- *   • shape, for traits, the body hash; for scripts, the set of declared
- *     keys (`${traitId}.${scriptId}`). a change here requires importer
- *     cascade: a trait body delta can change the field shape scripts
- *     destructure, and adding/removing/renaming a script key changes the
- *     binding identity that the instance map and registry are keyed on.
- *
- * `__decideReload(id, newModule)` is called by the plugin's injected
- * hot.accept callback after the module re-evaluates, with the fresh module
- * namespace. it returns 'initial' on first evaluation, 'patch' only when the
- * module's exports are all hot-swappable handles AND the trait/script shape is
- * stable, 'invalidate' otherwise (a non-handle export, or a shape change). on
- * 'invalidate' the plugin calls `import.meta.hot.invalidate()` and vite
- * cascades to importers, each of whom self-decides locally.
- */
-
 import type { DepHandle, DepKey } from './dep-graph';
-
-/* ── module-scope stack ─────────────────────────────────────────── */
 
 const stack: string[] = [];
 
@@ -57,6 +18,9 @@ function normalizeModuleId(id: string): string {
     return end === id.length ? id : id.slice(0, end);
 }
 
+// the bongle() vite plugin injects `__pushModule(import.meta.url)` at the top of every user file and
+// `__popModule(prev)` at the bottom; the stack handles nested module evaluation under esm since child modules
+// evaluate fully (push + body + pop) before the parent's body resumes.
 export function __pushModule(id: string): string | null {
     const norm = normalizeModuleId(id);
     const prev = stack.length ? stack[stack.length - 1] : null;
@@ -78,32 +42,18 @@ export function owningModule(): string {
 }
 
 /**
- * Clear the owning-module stack back to the engine (`__prod__`) scope.
- *
- * Called at the top of each flush microtask. By the time a flush runs, the
- * HMR batch's module bodies have all finished, so the stack SHOULD be empty
- * and `owningModule()` SHOULD be `__prod__`. But `__popModule` (injected as
- * the POSTLUDE) is NOT exception-safe: if a module body throws between
- * `__pushModule` (PRELUDE) and the pop, its id leaks on the stack forever.
- * Every later flush would then stamp engine-derived registrations (e.g. the
- * block-dust sprites `reindexRegistry` derives) with that stale module as
- * owner, tripping the registry's redeclaration guard against the `__prod__`
- * entry created at boot. Resetting here makes flush self-healing and keeps
- * engine reconciliation at its true `__prod__` scope. Snapshots are left
+ * Clears the owning-module stack back to `__prod__`, called at the top of each flush microtask.
+ * `__popModule` (the injected postlude) isn't exception-safe: a module body that throws leaves its id on the
+ * stack forever, which would stamp later engine-derived registrations with a stale owner. Snapshots are left
  * intact so the reload decision still sees each module's history.
  */
 export function resetOwnerStack(): void {
     stack.length = 0;
 }
 
-/* ── lifecycle hooks ────────────────────────────────────────────── */
-
-/**
- * registries hook in here at construction time so they can clear their
- * per-module pending set on push and fire `removed` for vanished ids on
- * pop. kept as a hook array rather than a direct registry.ts import to
- * avoid a circular dep (registry.ts imports owningModule from here).
- */
+// registries hook in here at construction time so they can clear their per-module pending set on push and
+// fire `removed` for vanished ids on pop; kept as a hook array (not a direct registry.ts import) to avoid a
+// circular dep, since registry.ts imports owningModule from here.
 const pushHooks: Array<(moduleId: string) => void> = [];
 const popHooks: Array<(moduleId: string) => void> = [];
 
@@ -115,20 +65,12 @@ export function onModulePop(fn: (moduleId: string) => void): void {
     popHooks.push(fn);
 }
 
-/* ── per-module declaration signatures ──────────────────────────── */
-
 /**
- * What each module declared, for the kinds the module boundary cares about:
- * `moduleId → kind → id → signature`. This is the structure the reload decision
- * diffs — the same job the old per-kind `ModuleSnapshot` did, minus the ten
- * buckets nothing read.
- *
- * Written by `registry-store`'s `commit`, from the one place a declaration
- * lands, so no call site has an extra step to remember and no kind can end up
- * half-tracked. It lives HERE rather than beside `commit` so the dependency
- * stays one-way — `registry-store` imports this module for the owning-module
- * stack, and the hook arrays above exist precisely to keep it from having to
- * import back.
+ * What each module declared, for the kinds the module boundary cares about: moduleId maps to kind maps to id
+ * maps to signature. This is the structure the reload decision diffs, written by `registry-store`'s `commit`
+ * from the one place a declaration lands. Lives here rather than beside `commit` so the dependency stays
+ * one-way: `registry-store` imports this module for the owning-module stack, and the hook arrays above exist
+ * precisely to keep it from having to import back.
  */
 type ModuleSignatures = Map<string, Map<string, string>>;
 
@@ -153,14 +95,9 @@ function runFor(moduleId: string): RunRecord {
 }
 
 /**
- * Start a run: the previous run's signatures become the baseline, but ONLY if
- * that run actually finished.
- *
- * `__popModule` is the POSTLUDE and does not run when a module body throws, so
- * a failed run leaves `current` holding a half-recorded set. Adopting that as
- * the baseline would mean the developer's fix-up run gets compared against the
- * broken one — a body change made in the broken edit and kept in the fix would
- * read as "unchanged" and patch, leaving importers on stale closures.
+ * Start a run: the previous run's signatures become the baseline, but only if that run actually finished.
+ * `__popModule` doesn't run when a module body throws, so a failed run leaves `current` half-recorded; adopting
+ * that as the baseline would compare a fix-up run against the broken one and read a real change as "unchanged".
  */
 function beginRun(moduleId: string): void {
     const record = runFor(moduleId);
@@ -218,31 +155,15 @@ export function _reset(): void {
     runs.clear();
 }
 
-/* ── reload decision ────────────────────────────────────────────── */
-
 export type ReloadDecision = 'initial' | 'patch' | 'invalidate';
 
 /**
- * decide patch vs invalidate for a re-evaluated user module. `newModule` is
- * the freshly-evaluated module namespace (passed by the injected hot.accept
- * callback); we inspect its exports to decide whether the change can be
- * self-accepted or must cascade to importers.
- *
- * This mirrors React Fast Refresh's boundary rule: a module may self-accept
- * (patch its registered handles in place) only if EVERY one of its exports is
- * a hot-swappable engine handle. Handles are patched by-reference — importers
- * hold the same handle object and see new state through it — so they stay
- * current across a patch. A plain export (a helper fn, a constant, a
- * re-exported value) is captured by-VALUE at import time; patching in place
- * would leave importers bound to the stale binding until a full reload. So the
- * moment a module exports anything that isn't a handle, we invalidate and let
- * Vite cascade to importers (each re-reads the fresh module and self-decides).
- *
- * This subsumes the pure-helper case: `games/big-hill/src/course.ts` exports a
- * `generateCourse` function and no handles, so its export is non-handle →
- * invalidate → `world.ts` re-imports the fresh generator. A module with no
- * exports at all (pure side-effect: registers systems/scripts, exports
- * nothing) is vacuously all-handle and stays surgically patchable.
+ * Decides patch vs invalidate for a re-evaluated user module, mirroring React Fast Refresh's boundary rule: a
+ * module may self-accept (patch its registered handles in place) only if every one of its exports is a
+ * hot-swappable engine handle. Handles are patched by-reference so importers see new state through them; a
+ * plain export (a helper fn, a constant) is captured by-value at import time, so any non-handle export forces
+ * `invalidate` and Vite cascades to importers, each of which re-reads the fresh module and self-decides.
+ * `newModule` is the freshly-evaluated module namespace, passed by the injected hot.accept callback.
  */
 export function __decideReload(id: string, newModule?: Record<string, unknown>): ReloadDecision {
     const moduleId = normalizeModuleId(id);
@@ -252,11 +173,8 @@ export function __decideReload(id: string, newModule?: Record<string, unknown>):
 }
 
 /**
- * true if the module namespace has any export that isn't an engine handle.
- * Every declarative handle (trait, block, tile, texture, model, scene, prefab,
- * sound, sprite, particle, command, script) carries a DepGraph
- * `dependency: { registry, id }` stamp — that stamp is the shared brand we
- * test for. Anything without it (functions, constants, plain objects) is
+ * True if the module namespace has any export that isn't an engine handle. Every declarative handle carries a
+ * DepGraph `dependency: { registry, id }` stamp, the shared brand tested for here; anything without it is
  * captured by-value by importers and forces an importer cascade.
  */
 function hasNonHandleExport(mod: Record<string, unknown>): boolean {

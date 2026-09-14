@@ -1,15 +1,3 @@
-/**
- * per-room server chat. composes core/chat-commands. data-driven: inbound
- * `chat_input` protocol messages are pushed onto `inbox`; system or
- * pass-through broadcasts are pushed onto `outbox`. both are drained by
- * `tick` each frame, inbox entries are parsed (consumed by local handlers
- * or promoted into the outbox as plain messages), outbox entries are
- * fanned to every client in the room via `Net.broadcastToRoom`.
- *
- * server has no line buffer, no subscribers, no message-listener set: it
- * never displays chat and never re-broadcasts to itself.
- */
-
 import type { Client } from 'bongle/interface';
 import type { CommandInvocation } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
@@ -25,9 +13,7 @@ export type ChatBroadcastMsg = {
     from: string;
     text: string;
     kind: ChatBroadcastKind;
-    /** when set, deliver this entry to that one client only instead of
-     *  fanning to the whole room. used by the shadow profanity filter: a
-     *  flagged line is echoed back to its sender alone. */
+    /** when set, deliver only to this client instead of fanning to the room. */
     to?: Client;
 };
 
@@ -59,7 +45,6 @@ export function init(): ChatServer {
     };
 }
 
-/** enable or disable chat for this room. */
 export function setEnabled(chat: ChatServer, enabled: boolean): void {
     chat.enabled = enabled;
 }
@@ -69,24 +54,15 @@ export function enqueueInput(chat: ChatServer, entry: ChatInputEntry): void {
     chat.inbox.push(entry);
 }
 
-/** queue a chat line for broadcast to every client in the room. used by
- *  `chat.message(ctx, text)` on the server side and as the promotion path
- *  for unconsumed inbox entries. */
+/** queue a chat line for broadcast to every client in the room. */
 export function broadcast(chat: ChatServer, msg: ChatBroadcastMsg): void {
     chat.outbox.push(msg);
 }
 
-/**
- * drain inbox and outbox. inbox entries are parsed: locally listened
- * commands run inline; everything else (plain messages, unhandled slash)
- * is promoted into the outbox as a plain message. outbox entries are
- * fanned to every client as `chat_broadcast`.
- *
- * called once per server frame per room from the room tick loop.
- */
+/** drains inbox and outbox once per server frame. inbox entries with a local listener
+ *  run inline; everything else is promoted into the outbox as a plain message and
+ *  fanned to every client as `chat_broadcast`. */
 export function tick(chat: ChatServer, net: ServerNet, rooms: Rooms, room: Room, clients: Clients): void {
-    // silenced room: discard both queues unprocessed, so nothing broadcasts
-    // and neither grows without bound.
     if (!chat.enabled) {
         chat.inbox.length = 0;
         chat.outbox.length = 0;
@@ -143,9 +119,8 @@ function processInputEntry(chat: ChatServer, entry: ChatInputEntry, clients: Cli
         text: trimmed,
         kind: 'message',
     };
-    // shadow profanity filter: a flagged line is echoed back to its sender
-    // alone (their UI renders it as normal) and never fanned to the room, so
-    // there's no feedback signal to probe the filter against.
+    // shadow profanity filter: echo flagged lines back to the sender alone, giving
+    // no feedback signal to probe the filter with.
     if (Profanity.containsProfanity(trimmed)) msg.to = fromClient;
     broadcast(chat, msg);
 }

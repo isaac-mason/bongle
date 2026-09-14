@@ -22,8 +22,6 @@ import { NumberInput } from './components/number-input';
 import { Range } from './components/range';
 import { ExprInput } from './expr-input';
 
-// ── shared helpers ─────────────────────────────────────────────────
-
 function ToggleBtn({
     active,
     onClick,
@@ -62,8 +60,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     );
 }
 
-// ── select target row ──────────────────────────────────────────────
-
 function SelectTargetRow() {
     const selectTarget = useEditRoom((s) => s.selectTarget);
     const setSelectTarget = useEditRoom((s) => s.setSelectTarget);
@@ -84,8 +80,6 @@ function SelectTargetRow() {
         </Row>
     );
 }
-
-// ── selector mode row ──────────────────────────────────────────────
 
 function SelectorModeRow() {
     const selectorMode = useEditRoom((s) => s.selectorMode);
@@ -115,11 +109,6 @@ function SelectorModeRow() {
         </>
     );
 }
-
-// ── selection summary ──────────────────────────────────────────────
-// shows in-progress selection info (corners, dimensions, count),
-// committed selection info (bounds, dimensions, count), or an idle hint.
-// used by all selection-related tool panels.
 
 function SelectionSummary({ idle }: { idle?: string } = {}) {
     const selection = useEditRoom((s) => s.selection);
@@ -194,8 +183,6 @@ function SelectionSummary({ idle }: { idle?: string } = {}) {
     return null;
 }
 
-// ── box select ─────────────────────────────────────────────────────
-
 export function BoxSelectOptions() {
     const selectionBehavior = useEditRoom((s) => s.selectionBehavior);
     const setSelectionBehavior = useEditRoom((s) => s.setSelectionBehavior);
@@ -220,8 +207,6 @@ export function BoxSelectOptions() {
         </div>
     );
 }
-
-// ── magic select ───────────────────────────────────────────────────
 
 export function MagicSelectOptions() {
     const selectionBehavior = useEditRoom((s) => s.selectionBehavior);
@@ -298,8 +283,6 @@ export function MagicSelectOptions() {
     );
 }
 
-// ── lasso select ───────────────────────────────────────────────────
-
 export function LassoSelectOptions() {
     const selectionBehavior = useEditRoom((s) => s.selectionBehavior);
     const setSelectionBehavior = useEditRoom((s) => s.setSelectionBehavior);
@@ -333,8 +316,6 @@ export function LassoSelectOptions() {
         </div>
     );
 }
-
-// ── painter ────────────────────────────────────────────────────────
 
 export function PaintOptions() {
     const paintOptions = useEditRoom((s) => s.paintOptions);
@@ -402,8 +383,6 @@ export function PaintOptions() {
     );
 }
 
-// ── build ──────────────────────────────────────────────────────────
-
 export function BuildOptions() {
     const hotbar = useEditor((s) => s.hotbar);
     const activeSlotIndex = useEditRoom((s) => s.activeSlotIndex);
@@ -422,8 +401,6 @@ export function BuildOptions() {
     );
 }
 
-// ── brush ──────────────────────────────────────────────────────────
-
 const BRUSH_SHAPES: ReadonlyArray<{ id: BrushShape; label: string }> = [
     { id: 'sphere', label: 'sphere' },
     { id: 'cube', label: 'cube' },
@@ -439,8 +416,7 @@ export function BrushOptions() {
     function commitPattern(text: string) {
         const trimmed = text.trim();
         if (!trimmed) {
-            // empty falls back to $active so the brush always has *something*
-            // to sample; mirrors the visible default in the placeholder.
+            // falls back to $active, mirroring the visible default in the placeholder.
             setBrushOptions({ patternText: text, pattern: { kind: 'active' }, patternError: null });
             return;
         }
@@ -497,8 +473,6 @@ export function BrushOptions() {
         </div>
     );
 }
-
-// ── brush select ───────────────────────────────────────────────────
 
 export function BrushSelectOptions() {
     const brushSelectOptions = useEditRoom((s) => s.brushSelectOptions);
@@ -557,8 +531,6 @@ export function BrushSelectOptions() {
         </div>
     );
 }
-
-// ── smooth ─────────────────────────────────────────────────────────
 
 export function SmoothOptions() {
     const smoothOptions = useEditRoom((s) => s.smoothOptions);
@@ -619,8 +591,6 @@ export function SmoothOptions() {
     );
 }
 
-// ── elevation ──────────────────────────────────────────────────────
-
 const ELEVATION_MODES: ReadonlyArray<{ id: ElevationMode; label: string }> = [
     { id: 'raise', label: 'raise' },
     { id: 'lower', label: 'lower' },
@@ -633,9 +603,8 @@ const ELEVATION_FALLOFFS: ReadonlyArray<{ id: ElevationFalloff; label: string; f
     { id: 'sharp', label: 'sharp', fn: (t) => (1 - t) ** 3 },
 ];
 
-/** sampled svg path for a falloff curve drawn as a symmetric hill across
- *  the 0..w × 0..h box. x ∈ [-1, 1] maps to [0, w]; t = |x|; fn(t) is the
- *  normalised height (1 at the centre, 0 at the edges). */
+// draws fn as a symmetric hill across the 0..w by 0..h box: t = |x| in [-1, 1], fn(t) is the
+// normalised height, 1 at the centre and 0 at the edges.
 function falloffPath(fn: (t: number) => number, w: number, h: number, samples = 48): string {
     let d = '';
     for (let i = 0; i <= samples; i++) {
@@ -708,7 +677,7 @@ export function ElevationOptions() {
     function commitPattern(text: string) {
         const trimmed = text.trim();
         if (!trimmed) {
-            // empty falls back to the column-surface default (extends terrain).
+            // falls back to the column-surface default, extending terrain.
             setElevationOptions({ patternText: text, pattern: null, patternError: null });
             return;
         }
@@ -836,8 +805,6 @@ export function ElevationOptions() {
     );
 }
 
-// ── inspect ────────────────────────────────────────────────────────
-
 export function InspectOptions() {
     return (
         <div className="flex flex-col gap-1">
@@ -848,8 +815,6 @@ export function InspectOptions() {
         </div>
     );
 }
-
-// ── transform ──────────────────────────────────────────────────────
 
 function PivotRow() {
     const placementActive = useEditRoom((s) => s.placementActive);
@@ -995,8 +960,6 @@ export function TransformOptions() {
         </div>
     );
 }
-
-// ── root ───────────────────────────────────────────────────────────
 
 export function ToolOptions() {
     const activeTool = useEditRoom((s) => s.activeTool);

@@ -1,6 +1,4 @@
-// Latest on-disk scene schema version. Bump when you add a new branch
-// below. The runtime in lib/src/* assumes scenes are at this
-// version — migrateScene guarantees that.
+/** on-disk scene schema version. bump when adding a migration branch below. */
 export const SCENE_LATEST = 1;
 
 export function migrateScene(raw: unknown): Record<string, unknown> {
@@ -11,9 +9,7 @@ export function migrateScene(raw: unknown): Record<string, unknown> {
         throw new Error(`scene file at version ${start} is newer than SCENE_LATEST (${SCENE_LATEST}) — engine is out of date`);
     }
 
-    // 0 → 1: no-op placeholder. Proves the chain runs end to end.
-    // Replace this branch's body with the real transform the first
-    // time the scene schema actually changes.
+    // 0 -> 1: no-op, no schema change yet.
     if (start < 1) {
         scene = { ...scene, version: 1 };
     }

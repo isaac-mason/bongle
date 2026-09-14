@@ -19,7 +19,7 @@ export function fitCanvas(canvas: HTMLCanvasElement): { g: CanvasRenderingContex
 export type CanvasMonitorOptions = {
     /** minimum ms between ticks. 0 = every frame. */
     interval?: number;
-    /** runs every (throttled) tick, visible or not — keep ring buffers warm here. */
+    /** runs every (throttled) tick, visible or not; keep ring buffers warm here. */
     tick?: () => void;
     /** draws the widget. only runs when on-screen and in an active tab. `hover` is the
      * cursor position `[x, y]` in css px while the pointer is over the canvas, else null. */
@@ -28,11 +28,7 @@ export type CanvasMonitorOptions = {
     hover?: boolean;
 };
 
-/**
- * the shared scaffold for every canvas watch widget. DPR-correct sizing, clears
- * each frame, and pauses painting when the canvas is off-screen or in an inactive
- * tab. `tick` still runs while hidden so history stays continuous; only `paint` pauses.
- */
+/** shared scaffold for canvas watch widgets: DPR-correct sizing, per-frame clear, pauses `paint` off-screen. `tick` keeps running while hidden. */
 export function canvasMonitor<T>(ctx: Context, b: Base<T>, canvas: HTMLCanvasElement, opts: CanvasMonitorOptions): void {
     const g = canvas.getContext('2d')!;
     let onscreen = true;
@@ -41,9 +37,7 @@ export function canvasMonitor<T>(ctx: Context, b: Base<T>, canvas: HTMLCanvasEle
     let lastRoot = 0;
     const interval = opts.interval ?? 0;
 
-    // css size is tracked by a ResizeObserver so paint never reads layout (clientWidth
-    // forces a reflow — costly with many charts). dpr changes are caught in paint by a
-    // cheap number compare, not a layout read.
+    // tracked via ResizeObserver so paint never reads clientWidth (forces a reflow).
     let cssW = 1;
     let cssH = 1;
     let dpr = window.devicePixelRatio || 1;
@@ -70,7 +64,6 @@ export function canvasMonitor<T>(ctx: Context, b: Base<T>, canvas: HTMLCanvasEle
 
     if (opts.hover) {
         canvas.style.cursor = 'crosshair';
-        // data keeps flowing; hovering just records the cursor and repaints the overlay
         b.onDispose(
             on(canvas, 'pointermove', (e) => {
                 const p = e as PointerEvent;
@@ -86,9 +79,7 @@ export function canvasMonitor<T>(ctx: Context, b: Base<T>, canvas: HTMLCanvasEle
         );
     }
 
-    // the dock rebuilds the dom on layout changes, so the observer re-roots when its
-    // scroll container changes. the closest() walk is throttled — re-rooting only
-    // matters after a (rare) dock rebuild, not every frame.
+    // re-roots the observer when the dock rebuilds the dom and the scroll container changes; the closest() walk is throttled.
     const ensureObserver = () => {
         if (!canvas.isConnected) return;
         const now = performance.now();
@@ -130,10 +121,7 @@ export type WatchOptions = {
     update: () => void;
 };
 
-/**
- * the dom counterpart to canvasMonitor for widgets that render html (bars, stat).
- * throttles, pauses off-screen, and re-roots its observer on dock rebuilds.
- */
+/** dom counterpart to canvasMonitor for widgets that render html (bars, stat). Throttles, pauses off-screen, re-roots on dock rebuilds. */
 export function watch<T>(ctx: Context, b: Base<T>, target: HTMLElement, opts: WatchOptions): void {
     let onscreen = true;
     let observer: IntersectionObserver | undefined;

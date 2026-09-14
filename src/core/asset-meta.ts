@@ -1,24 +1,12 @@
-// ── asset meta: the fields every declared asset shares for people, not code ──
-//
-// `name` is what the editor shows, `tags` are what it searches. Both are
-// authored on the declaration next to the fields that matter to the engine,
-// and every asset kind carries them the same way (block, sprite, model,
-// sound, particle, scene, prefab), so a picker for any kind filters by one
-// rule: `assetMatches`. IDs stay the lookup key everywhere else.
-
-/** the authoring shape: both optional, both cosmetic. */
+/** Cosmetic fields every declared asset kind carries the same way, so a picker for any kind filters by one rule: `assetMatches`. IDs stay the lookup key everywhere else. */
 export type AssetMeta = {
-    /** human-readable display name for editor UIs (inventory, pickers,
-     *  inspectors). falls back to the string id when omitted. */
+    /** Display name for editor UIs. Falls back to the string id when omitted. */
     name?: string;
-    /** search words for editor UIs, lowercase, e.g. `['wood', 'tree', 'oak']`.
-     *  A search hits an asset when every word of the query is found in its
-     *  id, its name or one of its tags. Keep them to what someone would type
-     *  looking for this thing; the id and name are already searched. */
+    /** Lowercase search words, e.g. `['wood', 'tree', 'oak']`. The id and name are already searched. */
     tags?: readonly string[];
 };
 
-/** the resolved shape a def carries: always set, so readers never fall back. */
+/** The resolved shape a def carries: always set, so readers never fall back. */
 export type ResolvedAssetMeta = {
     name: string;
     tags: readonly string[];
@@ -41,23 +29,17 @@ export function normalizeTags(tags: readonly string[] | undefined): readonly str
 
 const EMPTY_TAGS: readonly string[] = Object.freeze([]);
 
-/** the words a search can hit for an asset: id, name, tags. */
+/** The words a search can hit for an asset: id, name, tags. */
 export function assetSearchTerms(asset: { id: string } & ResolvedAssetMeta): string[] {
     return [asset.id, asset.name, ...asset.tags];
 }
 
-/**
- * Does `query` hit this asset? Every whitespace-separated word of the query
- * must be found (case-insensitive substring) in at least one of the terms,
- * so `oak plant` finds oak leaves and not oak planks. An empty query hits
- * everything.
- */
+/** Every whitespace-separated word of `query` must be found (case-insensitive substring) in at least one term, so `oak plant` finds oak leaves and not oak planks. */
 export function assetMatches(asset: { id: string } & ResolvedAssetMeta, query: string): boolean {
     return termsMatch(assetSearchTerms(asset), query);
 }
 
-/** the same rule over any list of searchable strings (a picker's label,
- *  sublabel and keywords). */
+/** The same rule over any list of searchable strings (a picker's label, sublabel and keywords). */
 export function termsMatch(terms: readonly string[], query: string): boolean {
     const words = query
         .trim()

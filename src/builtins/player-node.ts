@@ -21,15 +21,11 @@ export type PlayerNodeSetup = {
 };
 
 /**
- * populate a freshly created + parented player node with the standard traits:
- * Transform + Player (ids / user / viewRadius), the character rig (mounted now
- * so join hooks can find rig bones), and — for play mode — the default humanoid
- * controls (movement + input/camera) at a default spawn.
+ * populates a freshly created + parented player node with the standard traits: Transform + Player,
+ * the character rig, and, for play mode, the default humanoid controls at a default spawn.
  *
- * shared by the server room join path (`createPlayerNode`) and client
- * authoritative local/standalone rooms (`synthesizePlayerNode`) so both build
- * players identically; without it a local room's player has no controller to
- * drive the camera and no avatar to render.
+ * shared by the server room join path and client authoritative local/standalone rooms so both
+ * build players identically.
  */
 export function addPlayerTraits(node: Node, setup: PlayerNodeSetup): void {
     const transform = addTrait(node, TransformTrait);
@@ -39,15 +35,10 @@ export function addPlayerTraits(node: Node, setup: PlayerNodeSetup): void {
     trait.viewRadius = setup.viewRadius;
     if (setup.userId !== undefined) trait.userId = setup.userId;
     if (setup.username !== undefined) trait.username = setup.username;
-    // add CharacterTrait + mount the rig now (not on the reconciler's first frame)
-    // so join hooks can findByName(playerNode, 'hand_right') synchronously.
+    // mount the rig now, not on the reconciler's first frame, so join hooks can findByName synchronously
     addCharacter(node);
-    // default play-mode players to the standard humanoid controls. the 90% case;
-    // games with a different scheme remove these in onJoin. edit players drive via
-    // the editor lens, so they're left without.
     if (setup.mode === 'play') {
-        // spawn slightly above origin so players drop onto ground at y=0 instead
-        // of clipping into it. games override in onJoin.
+        // spawn slightly above origin so players drop onto ground at y=0 instead of clipping into it
         setPosition(transform, setup.spawn ?? [0, 2, 0]);
         addTrait(node, CharacterControllerTrait);
         addTrait(node, PlayerControllerTrait);

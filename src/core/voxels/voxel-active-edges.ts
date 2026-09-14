@@ -1,30 +1,3 @@
-// ── voxel active-edge classifier ────────────────────────────────────
-//
-// purpose: decide whether a grid-aligned edge between cube voxels is a
-// real geometric feature or just a tessellation artifact of the voxel
-// grid. coplanar cube faces sharing a grid seam should NOT produce
-// active edge contacts; the kcc would otherwise see phantom snags as
-// it walks across flat ground.
-//
-// scope: cube voxels only (collider id 0). non-cube solids, slopes,
-// custom hulls, count as empty for this classifier. only cube-vs-cube
-// continuity smooths an edge; any cube-vs-custom seam is a real
-// geometric transition and stays active by construction.
-//
-// the classifier looks at the four voxel cells perpendicular to the
-// edge. with axis = X the four cells are at (gx, gy + dy, gz + dz)
-// for dy, dz ∈ {-1, 0}; the edge runs from (gx, gy, gz) to
-// (gx + 1, gy, gz). axes Y and Z follow the same pattern.
-//
-// pattern truth table (count = solid-cube count of the four cells):
-//   0  no exposed faces meet here              → false
-//   1  convex outer corner                     → true
-//   2  face-shared (two cells share a face,    → false
-//      i.e. they form a flat coplanar pair)
-//   2  diagonal (saddle / sharp ridge)         → true
-//   3  concave 90° interior corner             → true
-//   4  edge entirely interior                  → false
-
 import { AIR, BLOCK_FLAG_COLLISION, type Blocks, MISSING } from './block-registry';
 import { getBlockState, type Voxels } from './voxels';
 
@@ -37,6 +10,11 @@ function isSolidCube(voxels: Voxels, blocks: Blocks, x: number, y: number, z: nu
 
 export type EdgeAxis = 0 | 1 | 2;
 
+/**
+ * Whether a grid-aligned edge between cube voxels (colliderId 0) is a real geometric feature or a coplanar
+ * tessellation seam; seams must read inactive or the kcc sees phantom snags on flat ground. Any cube-vs-custom-shape edge stays active by construction.
+ * By solid count of the four cells perpendicular to the edge: 0 or 4 -> false, 1 or 3 -> true, 2 -> true only when the solid pair is diagonal, not face-shared.
+ */
 export function isCubeEdgeActive(voxels: Voxels, blocks: Blocks, axis: EdgeAxis, gx: number, gy: number, gz: number): boolean {
     let c00: boolean;
     let c01: boolean;
@@ -44,8 +22,7 @@ export function isCubeEdgeActive(voxels: Voxels, blocks: Blocks, axis: EdgeAxis,
     let c11: boolean;
 
     if (axis === 0) {
-        // edge runs along X. perpendicular plane is YZ.
-        // c{dy}{dz}: dy = first index, dz = second index, both ∈ {-1, 0}.
+        // edge runs along X, perpendicular plane is YZ; c{dy}{dz} with dy, dz in {-1, 0}.
         c00 = isSolidCube(voxels, blocks, gx, gy - 1, gz - 1);
         c01 = isSolidCube(voxels, blocks, gx, gy - 1, gz);
         c10 = isSolidCube(voxels, blocks, gx, gy, gz - 1);

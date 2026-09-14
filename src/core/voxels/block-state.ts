@@ -65,22 +65,13 @@ export type PropsValues<P extends PropsDef> = {
     readonly [K in keyof P]: PropValue<P[K]>;
 };
 
-// ── compiled property (internal) ────────────────────────────────────
-//
-// for properties [a(card=4), b(card=2), c(card=5)]:
-//   strides:     [1, 4, 8]
-//   totalStates: 4 * 2 * 5 = 40
-//   index = a_idx * 1 + b_idx * 4 + c_idx * 8
-//
-// property ordering follows Object.keys insertion order.
-
+// mixed-radix encoding over Object.keys insertion order: for [a(card=4), b(card=2), c(card=5)],
+// strides are [1, 4, 8], totalStates = 40, and index = a_idx*1 + b_idx*4 + c_idx*8.
 type CompiledProp = {
     readonly def: PropDef;
     readonly stride: number;
     readonly cardinality: number;
 };
-
-// ── encode/decode helpers (property value <-> integer index) ────────
 
 function encodePropValue(def: PropDef, value: boolean | string | number): number {
     switch (def.type) {
@@ -147,14 +138,8 @@ export type BlockStateDef<P extends PropsDef = PropsDef> = {
     with<K extends string & keyof P>(index: number, prop: K, value: PropValue<P[K]>): number;
 
     /**
-     * the stride (place-value multiplier) of a single property, the
-     * amount the encoded local index changes when this prop's value
-     * advances by 1. for an all-bool schema the strides are 1, 2, 4, 8…
-     * (a bitmask); for mixed schemas they're a mixed-radix sequence.
-     *
-     * use to inline encode in a hot path without allocating a props
-     * object: capture each stride at module scope and sum the
-     * contributions positionally. O(1).
+     * The stride (place-value multiplier) of a single property: how much the encoded index changes when this prop's value advances by 1.
+     * Capture strides at module scope to inline encode in a hot path without allocating a props object. O(1).
      *
      * ```ts
      * const N = FenceState.stride('north');
@@ -177,14 +162,13 @@ export type BlockStateDef<P extends PropsDef = PropsDef> = {
  *     axis: bs.enumeration(['x', 'y', 'z'] as const),
  * });
  *
- * LogStates.encode({ axis: 'y' }); // → 1
- * LogStates.decode(1);             // → { axis: 'y' }
- * LogStates.get(2, 'axis');        // → 'z'
- * LogStates.with(0, 'axis', 'z');  // → 2
+ * LogStates.encode({ axis: 'y' }); // 1
+ * LogStates.decode(1);             // { axis: 'y' }
+ * LogStates.get(2, 'axis');        // 'z'
+ * LogStates.with(0, 'axis', 'z');  // 2
  * ```
  */
 export function create<const P extends PropsDef>(props: P): BlockStateDef<P> {
-    // compile strides
     const propNames = Object.keys(props);
     const compiled: { [name: string]: CompiledProp } = {};
 

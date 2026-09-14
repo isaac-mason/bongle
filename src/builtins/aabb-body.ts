@@ -8,10 +8,8 @@ import * as AabbPhysics from '../core/physics/aabb';
 import { COLLISION_GROUP_NODES } from '../core/physics/rigid/rigid-world-settings';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 
-// lightweight axis-aligned body trait. wraps an `AabbPhysics.Body` from the
-// `AabbPhysics.World` and routes its contacts through `ContactsTrait` fan-out.
-// for callers that need many bodies and don't want trait/node overhead, use
-// the imperative `AabbPhysics.createBody(physics.aabb, ...)` API directly.
+// wraps an `AabbPhysics.Body` and routes its contacts through `ContactsTrait` fan-out. For callers
+// that need many bodies and don't want trait/node overhead, use `AabbPhysics.createBody` directly.
 
 export const AabbBodyMotionType = AabbPhysics.MotionType;
 export type AabbBodyMotionType = AabbPhysics.MotionType;
@@ -50,8 +48,6 @@ export const AabbBodyTrait = trait('aabbbody', {
 });
 
 export type AabbBodyTrait = TraitType<typeof AabbBodyTrait>;
-
-/* ── controls (editor + persistence) ── */
 
 control(AabbBodyTrait, 'halfExtents', {
     label: 'Half Extents',
@@ -111,8 +107,6 @@ control(AabbBodyTrait, 'rigidBodyImpostor', {
     },
 });
 
-/* ── syncs (replication) ── */
-
 sync(AabbBodyTrait, 'halfExtents', {
     schema: pack.list(pack.float32(), 3),
     pack: (t) => t.halfExtents,
@@ -151,8 +145,8 @@ sync(AabbBodyTrait, 'linearVelocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    dirty: dirty.diff(), // byte-stable when the body sleeps → silent
-    rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
+    dirty: dirty.diff(), // byte-stable when the body sleeps, silent
+    rate: rate.hz(TRANSFORM_SEND_HZ), // matches the transform broadcast cadence
 });
 
 sync(AabbBodyTrait, 'gravityFactor', {

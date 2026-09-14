@@ -1,32 +1,3 @@
-// ── mip levels for the block texture atlas ──────────────────────────
-//
-// The CPU-built mip chain for block tiles, run by the asset bake per tile
-// before the tiles are packed into the atlas, so each level of the atlas is a
-// blit of each tile's own level. Pure: raw RGBA8 in, raw RGBA8 out, no gpucat.
-//
-// gpucat's render-pass mip generator is a naive, non-premultiplied box filter,
-// which wrecks alpha-cutout block textures two ways:
-//
-//   1. fringe, transparent texels carry arbitrary RGB (often black);
-//                 averaging it in bleeds dark halos around cutout edges.
-//   2. erosion, averaging alpha then hard-discarding at ALPHA_REF shrinks
-//                 coverage every level, so foliage and glass thin out and
-//                 holes grow with distance.
-//
-// So each cutout layer gets:
-//   - premultiplied (gamma-correct) RGB downsampling, then un-premultiplied,
-//     which kills the fringe without darkening partly covered texels.
-//   - coverage-preserving alpha rescale (Castano): keep the fraction of texels
-//     above ALPHA_REF constant across levels, which kills the erosion.
-//
-// Opaque and translucent layers get the premultiplied RGB treatment but a plain
-// alpha average; coverage preservation is a cutout-only concern.
-//
-// Minecraft's `MipmapGenerator.alphaBlend` sums opaque children and divides by
-// four regardless, so its partly covered texels darken, and it snaps alpha
-// below 96 to zero. This chain is the textbook-correct version of the same
-// intent.
-
 export const BPP = 4;
 
 /** hard alpha-cutout threshold the transparent pass discards below. One
@@ -37,11 +8,9 @@ export const ALPHA_REF = 0.5;
 /** one mip level of a layer-packed buffer: `layerCount x width x height x RGBA8`. */
 export type MipLevel = { data: Uint8Array; width: number; height: number };
 
-// ── sRGB transfer (block textures are rgba8unorm-srgb) ──────────────
-//
-// downsampling must average in linear light, not gamma-encoded bytes,
-// matching what the GPU path does implicitly via its sRGB texture views.
-
+// block textures are rgba8unorm-srgb; downsampling must average in linear
+// light, not gamma-encoded bytes, matching what the GPU path does implicitly
+// via its sRGB texture views.
 function srgbToLinear(c: number): number {
     return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
@@ -49,11 +18,9 @@ function srgbToLinear(c: number): number {
 const SRGB_TO_LINEAR = new Float32Array(256);
 for (let i = 0; i < 256; i++) SRGB_TO_LINEAR[i] = srgbToLinear(i / 255);
 
-// The reverse transfer runs three times per destination texel and its `**` was
-// ~90% of the downsample cost, so it is a table lookup instead. The table is
-// indexed by sqrt(linear) (perceptually even spacing, so the dark end keeps its
-// resolution) and lands within 1 of the correct byte; SRGB_ROUND_EDGE then snaps
-// it, making the result bit-identical to evaluating the transfer directly.
+// the reverse transfer's `**` was ~90% of downsample cost, so it's a table
+// lookup indexed by sqrt(linear) (even perceptual spacing); SRGB_ROUND_EDGE
+// then snaps the +-1 error so the result is bit-identical to the direct transfer.
 const LINEAR_TO_SRGB_STEPS = 4096;
 
 /** exact linear -> sRGB byte. Table construction only; the hot path uses the table. */
@@ -84,17 +51,12 @@ function linearToSrgbByte(l: number): number {
 
 /**
  * Build mip levels 1..levelCount for a layer-packed set of same-sized tiles.
- * Each axis halves per level and floors at 1, so a level past the shorter
- * axis's last halving is a strip; the caller picks `levelCount` so that never
- * happens on an aligned tile (a multiple of 2^levelCount per side).
+ * Each axis halves per level and floors at 1; the caller picks `levelCount`
+ * so a tile (a multiple of 2^levelCount per side) never hits a 1-texel strip.
  *
- * @param baseData    packed level-0 data (layerCount x width x height x RGBA8), layer-major
- * @param layerCount  number of layers
- * @param width       tile width in texels
- * @param height      tile height in texels
- * @param levelCount  levels to build beyond level 0
- * @param isCutout    per-layer flag: true -> coverage-preserving alpha (alpha cutout block)
- * @returns           levels 1..levelCount, each layer-packed; level 0 is the caller's own data
+ * @param baseData packed level-0 data (layerCount x width x height x RGBA8), layer-major
+ * @param isCutout per-layer flag: true -> coverage-preserving alpha (alpha cutout block)
+ * @returns levels 1..levelCount, each layer-packed; level 0 is the caller's own data
  */
 export function buildMipLevels(
     baseData: Uint8Array,
@@ -104,9 +66,9 @@ export function buildMipLevels(
     levelCount: number,
     isCutout: (layer: number) => boolean,
 ): MipLevel[] {
-    // Pass 1, build the raw box-filtered chain (premultiplied RGB + averaged
-    // alpha), each level downsampled from the previous one. Coverage rescale is
-    // deliberately NOT applied here so it never feeds back into deeper levels.
+    // pass 1: raw box-filtered chain (premultiplied RGB + averaged alpha), each
+    // level from the previous one. coverage rescale is not applied here so it
+    // never feeds back into deeper levels.
     const rawLevels: MipLevel[] = [];
     let srcData = baseData;
     let srcW = width;
@@ -124,10 +86,9 @@ export function buildMipLevels(
         srcH = dstH;
     }
 
-    // Pass 2, rescale each cutout layer's alpha per level against the *base*
-    // coverage (Castano), independent of the chain. The target is a property of
-    // the base level, so it is the same for every level of a layer: resolve it
-    // once rather than rescanning the base per level.
+    // pass 2: rescale each cutout layer's alpha per level against the base
+    // coverage (Castano). the target is a property of the base level, so
+    // resolve it once rather than rescanning per level.
     const cutoutLayers: number[] = [];
     const coverageTargets: number[] = [];
     for (let layer = 0; layer < layerCount; layer++) {
@@ -147,8 +108,6 @@ export function buildMipLevels(
 
     return rawLevels;
 }
-
-// ── premultiplied 2x2 box downsample of one layer ───────────────────
 
 function downsampleLayerPremultiplied(
     srcData: Uint8Array,
@@ -177,8 +136,7 @@ function downsampleLayerPremultiplied(
             const o01 = o00 + stepY;
             const o11 = o01 + stepX;
 
-            // alpha weights stay as raw bytes: the 255 scale cancels against
-            // sumA in the un-premultiply, and the average is a plain byte mean.
+            // alpha weights stay as raw bytes: the 255 scale cancels against sumA below.
             const a0 = srcData[o00 + 3]!;
             const a1 = srcData[o10 + 3]!;
             const a2 = srcData[o01 + 3]!;
@@ -188,7 +146,7 @@ function downsampleLayerPremultiplied(
             const dst = dstLayerOffset + (dy * dstW + dx) * BPP;
 
             if (sumA > 0) {
-                // premultiplied: weight linear RGB by alpha, then un-premultiply.
+                // weight linear RGB by alpha, then un-premultiply.
                 const invSumA = 1 / sumA;
                 for (let ch = 0; ch < 3; ch++) {
                     const lin =
@@ -199,8 +157,7 @@ function downsampleLayerPremultiplied(
                     dstData[dst + ch] = linearToSrgbByte(lin * invSumA);
                 }
             } else {
-                // fully transparent footprint, no coverage to weight by; keep a
-                // plain linear average so the (invisible) RGB stays well-defined.
+                // no coverage to weight by; plain linear average.
                 for (let ch = 0; ch < 3; ch++) {
                     const lin =
                         SRGB_TO_LINEAR[srcData[o00 + ch]!]! +
@@ -216,27 +173,15 @@ function downsampleLayerPremultiplied(
     }
 }
 
-// ── coverage-preserving alpha rescale (Castano) ─────────────────────
-//
-// Find a per-level alpha scale so the fraction of texels passing ALPHA_REF
-// matches the base level, then bake it into this level's alpha. Without this,
-// the averaged alpha drops below the cutoff at the edges and the cutout erodes;
-// with it, distant foliage keeps its silhouette.
-
+/** find a per-level alpha scale (Castano) so the fraction of texels passing
+ *  ALPHA_REF matches the base level, then bake it into this level's alpha. */
 function preserveCoverage(dstData: Uint8Array, layer: number, texels: number, target: number): void {
     const dstLayerOffset = layer * texels * BPP;
 
-    // NOTHING TO FIX if the level already meets coverage at its natural alpha.
-    // Searching anyway is actively destructive: coverage is a step function, so
-    // many scales satisfy the target, and a [0, 4] search converges on the
-    // SMALLEST of them, which for a fully opaque layer is ALPHA_REF itself. That
-    // halved every alpha on an opaque texture (255 -> 128), parking it exactly on
-    // the discard threshold, where any averaging across taps or mip levels tips it
-    // under and the block disappears.
-    //
-    // Erosion is the only thing this exists to correct, and eroded coverage is
-    // always BELOW target, so the useful search range starts at 1 and only ever
-    // scales alpha up.
+    // skip if already at target: searching when unneeded is destructive, since
+    // for a fully opaque layer it converges on the smallest satisfying scale
+    // (ALPHA_REF itself), parking every alpha exactly on the discard threshold.
+    // erosion is always below target, so the search only ever scales up from 1.
     if (coverageOf(dstData, layer, texels, 1) >= target) return;
 
     // binary-search the scale; coverage is monotonic increasing in scale.
@@ -268,12 +213,6 @@ export function coverageOf(data: Uint8Array, layer: number, texels: number, scal
     }
     return passed / texels;
 }
-
-// ── rect <-> atlas copies ───────────────────────────────────────────
-//
-// The atlas is a packed image; the chain runs per tile. The bake slices each
-// tile out of the composed level 0 to build its chain, then blits every level
-// into the matching level of the atlas at the tile's rect halved per level.
 
 /** copy a `w x h` rect out of a `srcWidth`-wide RGBA8 image into a tight buffer. */
 export function sliceRect(

@@ -1,16 +1,3 @@
-// browser `DecodeAudio` impl for the pipeline (mediabunny + WebCodecs).
-//
-// The pipeline bakes in a Web Worker, where `OfflineAudioContext` (the obvious
-// `decodeAudioData` path) is `[Exposed=Window]` and thus unavailable. mediabunny
-// demuxes our source containers (wav/mp3/ogg/flac) and decodes through the
-// worker-exposed WebCodecs `AudioDecoder`, and its conversion pipeline resamples
-// to the atlas rate for us — so a single in-worker Conversion to an in-memory
-// pcm-s16 WAV gives us exactly the per-channel PCM the atlas encoder wants, with
-// no main-thread hop. (Sibling of the node impl, cli/bake/decode-audio-node.ts.)
-//
-// Non-PCM decoding rides the browser's WebCodecs, so it needs a Chromium-class
-// engine — which the editor already requires (WebGPU, SAB, OffscreenCanvas).
-
 import { ALL_FORMATS, BufferSource, BufferTarget, Conversion, Input, Output, WavOutputFormat } from 'mediabunny';
 import type { DecodeAudio, DecodedAudio } from './bake/decode-audio';
 

@@ -36,8 +36,7 @@ import {
 } from './contacts';
 import * as RigidPhysics from './rigid/rigid-world';
 
-// shared world settings + layer constants live in ./crashcat. re-exported
-// here so existing import sites (`from './physics'`) keep working.
+// re-exported so existing import sites (`from './physics'`) keep working.
 export {
     BROADPHASE_LAYER_EDITOR_NODES,
     BROADPHASE_LAYER_MOVING,
@@ -53,38 +52,18 @@ export {
     settings,
 } from './rigid/rigid-world-settings';
 
-// ── physics struct ───────────────────────────────────────────────────
-//
-// `Physics` is a thin coordinator over self-contained sub-worlds:
-//   - `rigid`, crashcat-backed rigid bodies + voxel terrain body. trait
-//     sync (RigidBodyTrait → World), listener, shape building, script hooks
-//     all live in `rigid/`.
-//   - `aabb`, analytical aabb sweep + items / particles. trait sync
-//     (AabbBodyTrait → World) lives in `aabb/` behind `bindNodeSync` (kept
-//     off the cycle path: trait passed in by the coordinator rather than
-//     imported as a value by the subsystem).
-//
-// the coordinator owns: the shared contact stream both subsystems write
-// into, the aabb→ContactPair translation sink, the character-VCC contact
-// bridge (staged + replayed via the rigid recorder), the fan-out from pairs
-// into per-node `ContactsTrait` observers (created lazily on first contact),
-// and the interpolation enrollment that unifies across subsystems.
+// thin coordinator over the rigid and aabb physics sub-worlds, sharing one contact stream.
 
 export type Physics = {
-    /** crashcat rigid body sub-world, full broadphase + manifolds + sleep. */
+    /** rigid-body sub-world: full broadphase, manifolds, sleep. */
     rigid: RigidPhysics.World;
     /** AABB physics sub-world, items / particles / throwables. analytical sweep. */
     aabb: AabbPhysics.World;
 
-    // ── contact output ───────────────────────────────────────────────
-
-    /** global contact stream, pairs un-normalized (A→B), with added/persisted/removed lifecycle. */
+    /** global contact stream, pairs un-normalized (A to B), with added/persisted/removed lifecycle. */
     contacts: PhysicsContacts;
-    /** pool of rigid-body-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     rigidBodyContactPool: RigidBodyContactPool;
-    /** pool of aabb-body-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     aabbBodyContactPool: AabbBodyContactPool;
-    /** pool of voxel-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     voxelContactPool: VoxelContactPool;
     /** pool of ContactPair instances backing `contacts.*` lists. */
     contactPairPool: ContactPairPool;
@@ -94,37 +73,19 @@ export type Physics = {
     /** sink passed into `AabbPhysics.tick`. drains pairs into `contacts`. */
     aabbPairSink: AabbPhysics.PairSink;
 
-    /** body contacts gathered by character VCCs during `runOnTick` (which runs
-     *  before the rigid solver). a VCC depenetrates its character off the bodies
-     *  it touches and teleport-follows its kinematic inner body, so by the time
-     *  the solver steps there's no overlap and no manifold, a fast projectile
-     *  would pass straight through with no contact event. these are replayed into
-     *  `contacts` each tick (see {@link ingestVccRigidContacts}) so they reach both
-     *  bodies' `ContactsTrait` like any solver contact. staged here (coordinator
-     *  level, not on the rigid world) since the producer is the character
-     *  controller and the replay writes the shared stream. `vccRigidContactCount` is
-     *  the live length; records are reused (no per-frame allocation). */
+    /** VCC body contacts staged for replay into `contacts` each tick (see `ingestVccRigidContacts`). */
     vccRigidContacts: VccRigidContact[];
     vccRigidContactCount: number;
 
-    /** same staging as {@link vccRigidContacts}, for the VCC's *voxel* (terrain)
-     *  contacts. the VCC sweeps voxels itself rather than through the solver,
-     *  so its terrain contacts never form a manifold; replayed each tick (see
-     *  {@link ingestVccVoxelContacts}) so they fan out to the character node's
-     *  `ContactsTrait` as VoxelContacts. `vccVoxelContactCount` is the live
-     *  length; records are reused. */
+    /** VCC voxel contacts staged for replay into `contacts` each tick (see `ingestVccVoxelContacts`). */
     vccVoxelContacts: VccVoxelContact[];
     vccVoxelContactCount: number;
 
-    /** set of nodes currently enrolled in interpolation because at least one
-     *  subsystem has a body for them. diffed each preStep against the union of
-     *  `rigid.nodeToBody ∪ aabb.nodeToBody`. (Contacts is not membership-driven:
-     *  a node's ContactsTrait is created lazily on its first contact, in fan-out.) */
+    /** nodes currently enrolled in interpolation because a subsystem has a body for them. */
     _companionNodes: Set<number>;
 };
 
-/** one rigid-body contact reported by a character VCC, pending replay into the
- *  contact stream. body ids (not refs) so a body removed mid-tick is skipped. */
+/** one rigid-body contact from a character VCC, pending replay; body ids (not refs) so a removed body is skipped. */
 export type VccRigidContact = {
     innerBodyId: BodyId;
     otherBodyId: BodyId;
@@ -133,8 +94,7 @@ export type VccRigidContact = {
     penetrationDepth: number;
 };
 
-/** one voxel (terrain) contact reported by a character VCC, pending replay into
- *  the contact stream. */
+/** one voxel (terrain) contact reported by a character VCC, pending replay. */
 export type VccVoxelContact = {
     innerBodyId: BodyId;
     voxelX: number;
@@ -145,8 +105,7 @@ export type VccVoxelContact = {
     point: Vec3;
     normal: Vec3;
     penetrationDepth: number;
-    /** true = solid block the VCC swept against; false = passable/liquid cell
-     *  the body is inside (reported by the character's overlap scan). */
+    /** true = solid block swept against; false = passable/liquid cell reported by overlap. */
     solid: boolean;
 };
 
@@ -177,19 +136,7 @@ export function init(sceneTree: SceneTree, voxels: Voxels): Physics {
     };
 }
 
-// ── vcc contact bridge ───────────────────────────────────────────────
-//
-// character VCCs surface the bodies they slide off during `runOnTick`, before
-// the rigid solver. we stage those contacts here and replay them into the
-// shared stream each tick via the rigid subsystem's contact recorder, so a
-// fast body (an arrow) the VCC depenetrated clear of still fires a contact
-// event on both bodies' `ContactsTrait`.
-
-/** record a body contact a character VCC saw this frame, to be replayed by
- *  {@link ingestVccRigidContacts}. called from the character controller's VCC
- *  listener during `runOnTick`. `innerBodyId` is the VCC's kinematic inner body
- *  (maps back to the character node); `otherBodyId` is the body it touched.
- *  `normal` is surface->character (VCC convention). */
+/** record a body contact a character VCC saw this frame, replayed by `ingestVccRigidContacts`. */
 export function pushVccRigidContact(
     physics: Physics,
     innerBodyId: BodyId,
@@ -219,11 +166,7 @@ export function pushVccRigidContact(
     physics.vccRigidContactCount++;
 }
 
-/** record a voxel (terrain) contact a character VCC saw this frame, to be
- *  replayed by {@link ingestVccVoxelContacts}. called from the character
- *  controller after `vcc.move`, iterating the VCC's own voxel contacts.
- *  `innerBodyId` is the VCC's kinematic inner body (maps back to the character
- *  node); `normal` is surface->character (VCC convention). */
+/** record a voxel (terrain) contact a character VCC saw this frame, replayed by `ingestVccVoxelContacts`. */
 export function pushVccVoxelContact(
     physics: Physics,
     innerBodyId: BodyId,
@@ -274,12 +217,7 @@ export function pushVccVoxelContact(
     physics.vccVoxelContactCount++;
 }
 
-/** replay this tick's VCC body contacts into the contact stream, then clear the
- *  buffer. MUST run inside the contacts frame (after the solver tick, before the
- *  frame ends) so the pairs diff and fan out like solver contacts. a pair the
- *  solver also recorded (a slow body the VCC didn't depenetrate clear of) shares
- *  the same key, so this just refreshes it, no double contact. resolves + records
- *  through the rigid subsystem, whose bodies these contacts involve. */
+/** replay this tick's VCC body contacts into the contact stream; must run inside the contacts frame. */
 function ingestVccRigidContacts(physics: Physics): void {
     const rigid = physics.rigid;
     for (let i = 0; i < physics.vccRigidContactCount; i++) {
@@ -301,9 +239,7 @@ function ingestVccRigidContacts(physics: Physics): void {
     physics.vccRigidContactCount = 0;
 }
 
-/** replay this tick's character-VCC voxel contacts into the contact stream, then
- *  clear the buffer. same timing contract as {@link ingestVccRigidContacts}: MUST run
- *  inside the contacts frame so the pairs diff and fan out like solver contacts. */
+/** replay this tick's character-VCC voxel contacts into the contact stream. */
 function ingestVccVoxelContacts(physics: Physics): void {
     const rigid = physics.rigid;
     for (let i = 0; i < physics.vccVoxelContactCount; i++) {
@@ -329,12 +265,7 @@ function ingestVccVoxelContacts(physics: Physics): void {
     physics.vccVoxelContactCount = 0;
 }
 
-// ── stats ────────────────────────────────────────────────────────────
-
-/** aggregate physics counts for the debug panel, summed across the rigid and
- *  AABB sub-worlds. `active` counts awake (integrating) bodies; `contacts` is
- *  the live manifold pair count (added + persisted); `vccContacts` is the
- *  character-controller rigid + voxel contacts replayed this frame. */
+/** aggregate physics counts for the debug panel, summed across the rigid and AABB sub-worlds. */
 export type PhysicsStats = {
     bodies: number;
     active: number;
@@ -359,37 +290,25 @@ export function stats(physics: Physics): PhysicsStats {
     };
 }
 
-/** step the physics world. fires pre/post hooks and runs the world update. */
 export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
     runOnPrePhysicsStep(sceneTree, { delta: dt });
 
     beginPhysicsContactsFrame(physics.contacts, physics.contactPairPool);
 
-    // tick rigid body physics. rigid-physics owns its listener and writes
-    // ContactPairs directly into the shared `contacts` stream via the pool.
     RigidPhysics.tick(physics.rigid, physics.contacts, physics.contactPairPool, dt);
-
-    // tick aabb physics after crashcat. aabb contact pairs flow into the
-    // same `contacts` stream via `aabbPairSink`, so fan-out treats them
-    // uniformly.
     AabbPhysics.tick(physics.aabb, physics.rigid.world, dt, physics.aabbPairSink);
 
-    // replay this tick's character-VCC body contacts (gathered in runOnTick,
-    // before the solver) into the same stream. without this a VCC depenetrates
-    // its character off a fast body and the solver never forms the manifold, so
-    // the contact is silently lost (e.g. an arrow passing through a player).
+    // gathered before the solver runs, so a VCC-depenetrated fast body still gets a contact event.
     ingestVccRigidContacts(physics);
     ingestVccVoxelContacts(physics);
 
     endPhysicsContactsFrame(physics.contacts);
 
-    // fan out pairs - writes to per-node ContactsTrait traits
     fanOutContacts(physics, sceneTree);
 
     runOnPostPhysicsStep(sceneTree, { delta: dt });
 }
 
-/** release all tracked bodies. call before discarding the physics world. */
 export function dispose(physics: Physics): void {
     RigidPhysics.dispose(physics.rigid);
     AabbPhysics.dispose(physics.aabb, physics.rigid.world);
@@ -412,40 +331,24 @@ export function postStep(physics: Physics, _sceneTree: SceneTree, identity: Play
     AabbPhysics.postStep(physics.aabb);
 }
 
-/**
- * Release per-frame physics scratch state, currently the voxel hit-info
- * pool. MUST be called after all subShapeId consumers for the frame have
- * run (contact listeners, getSurfaceNormal, getSupportingFace). Today
- * that means at the end of the engine tick on the server, and at the end
- * of the per-frame update on the client.
- */
+/** release per-frame physics scratch state; must run after all subShapeId consumers for the frame. */
 export function flush(_physics: Physics): void {
     flushHitBuffer();
 }
 
-// ── interpolation enrollment (cross-subsystem) ────────────────────────
-//
-// any node that holds a body in *either* subsystem gets enrolled in
-// interpolation (via setInterpolation, which lives on TransformTrait), and
-// unenrolled when its last body goes away. unified here (not per-subsystem)
-// so the policy and the diff live in one place, subsystems stay independent
-// of these import paths. Contacts is deliberately not handled here: a node's
-// ContactsTrait is born lazily on its first contact (see ensureContactsTrait
-// in the fan-out), so it needs neither membership nor a remove pass.
+// enrolls/unenrolls nodes in interpolation based on whether either subsystem holds a body for them.
 
 function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
     const want = new Set<number>();
     for (const nid of physics.rigid.nodeToBody.keys()) want.add(nid);
     for (const nid of physics.aabb.nodeToBody.keys()) want.add(nid);
 
-    // add to new entries
     for (const nid of want) {
         if (physics._companionNodes.has(nid)) continue;
         const node = getNodeById(sceneTree, nid);
         if (!node) continue;
         setInterpolation(node, true);
     }
-    // remove from gone entries
     for (const nid of physics._companionNodes) {
         if (want.has(nid)) continue;
         const node = getNodeById(sceneTree, nid);
@@ -456,11 +359,7 @@ function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
     physics._companionNodes = want;
 }
 
-// ── aabb pair sink ───────────────────────────────────────────────────
-//
-// drains AabbPhysics.PairInfo records from `AabbPhysics.tick` into the
-// global `physics.contacts` stream. lives here (not in aabb-physics.ts)
-// so that module stays decoupled from the contact-pair pool and keying.
+// drains AabbPhysics.PairInfo records into the global contacts stream.
 
 function makeAabbPairSink(contacts: PhysicsContacts, pool: ContactPairPool): AabbPhysics.PairSink {
     return {
@@ -507,17 +406,10 @@ function makeAabbPairSink(contacts: PhysicsContacts, pool: ContactPairPool): Aab
     };
 }
 
-// ── fan-out ──────────────────────────────────────────────────────────
-//
-// for each ContactPair, push observer-normalized Contacts into the
-// ContactsTrait of any side that is a node. one pair → up to 2 Contacts
-// (one per node-side observer). normal pre-flipped so it always points
-// away from `self`. per-trait Contact instances are throwaway each step:
-// fan-out clears every list, releases instances back to per-type pools,
-// then re-acquires fresh ones for active+removed.
+// pushes observer-normalized Contacts into the ContactsTrait of each node-side of a pair.
 
 function fanOutContacts(physics: Physics, sceneTree: SceneTree): void {
-    // 1. release the previous step's per-trait Contacts back to pools, clear lists.
+    // release the previous step's per-trait Contacts back to pools, clear lists.
     for (const [ct] of physics.contactsQuery) {
         for (const c of ct.active)
             releaseContact(physics.rigidBodyContactPool, physics.aabbBodyContactPool, physics.voxelContactPool, c);
@@ -529,19 +421,12 @@ function fanOutContacts(physics: Physics, sceneTree: SceneTree): void {
         ct.removed.length = 0;
     }
 
-    // 2. for each pair in this step's added/persisted/removed, project to up
-    //    to two per-observer Contacts.
     fanOutBucket(physics, sceneTree, physics.contacts.added, 'added');
     fanOutBucket(physics, sceneTree, physics.contacts.persisted, 'persisted');
     fanOutBucket(physics, sceneTree, physics.contacts.removed, 'removed');
 }
 
-// a node earns its ContactsTrait the moment a contact first resolves to it,
-// created here rather than enrolled up front by body membership. the trait is
-// never removed (an empty one just gets cleared each step by the contactsQuery
-// pass); presence therefore means "has had at least one contact", so consumers
-// read it null-safely. covers character VCC nodes for free: their inner body
-// resolves to the node via bodyToNode even though it's not in nodeToBody.
+// a node earns its ContactsTrait on first contact; it's never removed, only cleared each step.
 function ensureContactsTrait(node: Node): ContactsTrait {
     return getTrait(node, ContactsTrait) ?? addTrait(node, ContactsTrait);
 }
@@ -636,7 +521,6 @@ function emitForObserver(
         c.relativeVelocity[2] = flip ? -pair.relativeVelocity[2] : pair.relativeVelocity[2];
         contact = c;
     } else {
-        // otherKind === 'voxel'
         const c = acquireVoxelContact(physics.voxelContactPool);
         c.point[0] = pair.point[0];
         c.point[1] = pair.point[1];

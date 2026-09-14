@@ -1,18 +1,3 @@
-// smooth tool, worldedit-style heightmap gaussian.
-//
-// per (x,z) column inside the footprint we sample the topmost block that
-// satisfies `heightmapMask` (any non-air when null), then run `iterations`
-// passes of a 5×5 gaussian convolution over the heights, quantise back
-// to ints, and raise/lower the column inside its vertical band:
-//   raise → extend with the column's existing surface block
-//   lower → clear to air
-// raises/lowers are clamped to the column's footprint y range so the op
-// never escapes the user's stamp/selection.
-//
-// the brush variant accumulates a 3D Selection of stamps during drag (via the
-// shared `utils/brush` harness) and commits once on release. the region
-// command (`actions.smoothSelection`) shares `runSmooth()`.
-
 import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
@@ -25,9 +10,8 @@ import { playBulkEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
-// per-room state contract. the shared stroke harness is nested under `brush`
-// so a smooth-specific field can be added later as a sibling (no intersection,
-// no churn) without the parent EditorScript having to know.
+// the shared stroke harness is nested under `brush` so a smooth-specific field can be added
+// later as a sibling without the parent EditorScript having to know
 export type SmoothState = { brush: BrushStrokeState };
 export function createSmoothState(): SmoothState {
     return { brush: createBrushStrokeState() };
@@ -41,16 +25,10 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     }
 }
 
-// ── 5×5 gaussian kernel ────────────────────────────────────────────
-// matches worldedit's default GaussianKernel(2, 1.0). columns without a
-// surface drop out of the convolution (their weight is skipped and the
-// remaining weights are re-normalised), same as worldedit treating
-// unsampled cells as edges.
-
+// 5x5 gaussian kernel matching worldedit's default GaussianKernel(2, 1.0); columns without a
+// surface drop out of the convolution and the remaining weights are re-normalised
 const KERNEL_RADIUS = 2;
 const KERNEL = new Float32Array([1, 4, 6, 4, 1, 4, 16, 24, 16, 4, 6, 24, 36, 24, 6, 4, 16, 24, 16, 4, 1, 4, 6, 4, 1]);
-
-// ── per-frame update ───────────────────────────────────────────────
 
 export function updateSmooth(
     state: SmoothState,
@@ -78,42 +56,33 @@ export function updateSmooth(
     });
 }
 
-// ── shared core ────────────────────────────────────────────────────
-
 type Column = {
     wx: number;
     wz: number;
-    /** lowest y in the footprint at this (x,z). */
+    /** lowest y in the footprint at this (x,z) */
     yLo: number;
-    /** highest y in the footprint at this (x,z). */
+    /** highest y in the footprint at this (x,z) */
     yHi: number;
-    /** topmost y within [yLo..yHi] matching heightmapMask. null = empty. */
+    /** topmost y within [yLo..yHi] matching heightmapMask; null = empty */
     oldH: number | null;
-    /** block at oldH (the fill used when raising the column). */
+    /** block at oldH, the fill used when raising the column */
     oldKey: string | null;
-    /** running height during convolution. seeded from oldH; falls back to
-     *  yLo - 1 for empty columns so they participate as "ground level". */
+    /** running height during convolution, seeded from oldH, falling back to yLo - 1 for empty columns */
     h: number;
-    /** scratch slot for the next iteration's value. */
+    /** scratch slot for the next iteration's value */
     hNext: number;
 };
 
-/**
- * worldedit-style smooth: project the footprint to a per-(x,z) heightmap,
- * iterate a 5×5 gaussian, and emit raise/lower ops bounded by each column's
- * footprint y range. shared by the brush tool and the `/smooth` region cmd.
- *
- * the footprint Selection's vertical extent at each column doubles as the
- * height-scan range AND the cap on raise/lower so the op never writes
- * outside the user's stamp / selection.
- */
+// worldedit-style smooth: projects the footprint to a per-(x,z) heightmap, iterates a 5x5
+// gaussian, and emits raise/lower ops bounded by each column's footprint y range so the op
+// never writes outside the user's stamp/selection. shared by the brush tool and `/smooth`.
 export function runSmooth(
     voxels: Voxels,
     footprint: Selection.Selection,
     iterations: number,
     heightmapMask: Mask | null,
 ): { forward: VoxelOp[]; reverse: VoxelOp[] } {
-    // (1) project to (x,z) columns + collect y range.
+    // (1) project to (x,z) columns and collect y range
     const cols = new Map<string, Column>();
     Selection.forEach(footprint, (wx, wy, wz) => {
         const k = `${wx},${wz}`;
@@ -127,7 +96,7 @@ export function runSmooth(
     });
     if (cols.size === 0) return { forward: [], reverse: [] };
 
-    // (2) sample world surface per column inside its y band.
+    // (2) sample world surface per column inside its y band
     const rng = Math.random;
     for (const c of cols.values()) {
         for (let y = c.yHi; y >= c.yLo; y--) {
@@ -149,10 +118,9 @@ export function runSmooth(
         c.h = c.oldH ?? c.yLo - 1;
     }
 
-    // (3) iterate the 5×5 gaussian. unsampled cells outside the footprint
-    // and empty columns inside drop out; the kernel re-normalises by the
-    // accumulated weight. worldedit uses 1 iteration by default, higher
-    // ≈ a larger σ via repeated convolution.
+    // (3) iterate the 5x5 gaussian; unsampled cells and empty columns drop out and the kernel
+    // re-normalises by the accumulated weight. worldedit uses 1 iteration by default; more
+    // iterations approximate a larger sigma via repeated convolution.
     const passes = Math.max(1, Math.floor(iterations));
     for (let pass = 0; pass < passes; pass++) {
         for (const c of cols.values()) {
@@ -173,7 +141,7 @@ export function runSmooth(
         for (const c of cols.values()) c.h = c.hNext;
     }
 
-    // (4) emit ops within each column's y band.
+    // (4) emit ops within each column's y band
     const forward: VoxelOp[] = [];
     const reverse: VoxelOp[] = [];
     for (const c of cols.values()) {

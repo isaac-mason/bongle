@@ -28,12 +28,7 @@ import {
 const INDENTATION = 20;
 const ROW_HEIGHT = 22;
 
-/**
- * shallow-compare two flat lists, returns true if they represent the
- * same visible tree (same ids in same order with same depth/parentId/
- * collapsed/childCount/name/persist). avoids a react re-render when
- * sceneRevision bumps but nothing the hierarchy cares about actually changed.
- */
+// avoids a react re-render when sceneRevision bumps but nothing the hierarchy cares about changed.
 function flatListsEqual(a: FlattenedNode[], b: FlattenedNode[]): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
@@ -54,8 +49,6 @@ function flatListsEqual(a: FlattenedNode[], b: FlattenedNode[]): boolean {
     return true;
 }
 
-/* ── Hierarchy panel ────────────────────────────────────────────── */
-
 export function HierarchyPanel() {
     const room = useEditor((s) => s.room);
     const selectedNodeIds = useEditRoom((s) => s.selection.nodes);
@@ -74,59 +67,42 @@ export function HierarchyPanel() {
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
     const sceneTree = room?.scene ?? null;
 
-    // text filter, when non-empty, the tree shows only matching nodes + their
-    // ancestors, ignoring collapsed state.
+    // when non-empty, the tree shows only matching nodes + their ancestors, ignoring collapsed state.
     const [filter, setFilter] = useState('');
     const filterActive = filter.trim().length > 0;
 
-    // node currently being inline-renamed (single-active rename across the tree).
     const [renamingNodeId, setRenamingNodeId] = useState<number | null>(null);
 
-    // node id targeted by the next context menu open. set in onContextMenu of
-    // the scroll container before radix opens the shared menu.
+    // set in onContextMenu of the scroll container before radix opens the shared menu.
     const [contextNodeId, setContextNodeId] = useState<number | null>(null);
     const contextNode = contextNodeId !== null && sceneTree ? sceneTree.idToNode.get(contextNodeId) : null;
 
-    // anchor for shift+click range select, set by plain click and cmd/ctrl+click,
-    // unchanged by shift+click so a user can extend the range from a fixed anchor.
+    // anchor for shift+click range select; unchanged by shift+click so a user can extend from a fixed point.
     const selectionAnchorId = useRef<number | null>(null);
 
-    // collapsed nodes, tracked by numeric node id
     const [collapsedIds, setCollapsedIds] = useState<Set<number>>(() => new Set());
 
-    // node ids we've already auto-collapsed (prefabs + high-fan-out nodes),
     // guards against re-collapsing a node the user has explicitly expanded.
     const autoCollapsedSeenIds = useRef<Set<number>>(new Set());
 
-    // flattened items state, owned by this component, rebuilt from scene graph
     const [flattenedItems, setFlattenedItems] = useState<FlattenedNode[]>([]);
-
-    // track initial depth of dragged item
     const initialDepth = useRef(0);
-
-    // track removed children during drag (descendants of source)
+    // descendants of the drag source, removed from the flat list for the duration of the drag.
     const sourceChildren = useRef<FlattenedNode[]>([]);
-
-    // track whether a drag is in progress
     const isDragging = useRef(false);
 
-    // recompute flattened list from scene tree when not dragging.
-    // sceneRevision is intentionally in the dep array to trigger rebuilds on
-    // external scene tree mutations (e.g. node added via inspector).
     // biome-ignore lint/correctness/useExhaustiveDependencies: sceneRevision triggers rebuild on external scene tree mutations
     useEffect(() => {
         if (isDragging.current || !sceneTree) return;
 
         if (filterActive) {
-            // skip auto-collapse and use the filtered flatten path
             const next = flattenSceneTreeFiltered(sceneTree, filter);
             setFlattenedItems((prev) => (flatListsEqual(prev, next) ? prev : next));
             return;
         }
 
-        // auto-collapse every non-root node with children on first sight, so
-        // the default tree shows just the top level. once a user expands a
-        // node we remember it in autoCollapsedSeenIds and never re-collapse.
+        // auto-collapse every non-root node with children on first sight, so the default tree
+        // shows just the top level; autoCollapsedSeenIds prevents re-collapsing an expanded node.
         const rootId = sceneTree.root.id;
         const newlySeen: number[] = [];
         for (const node of sceneTree.idToNode.values()) {
@@ -180,10 +156,8 @@ export function HierarchyPanel() {
 
     const focusItem = useCallback(
         (nodeId: number) => {
-            // tree rows are <li data-node-id="...">, find and focus the row so
-            // subsequent arrow keys originate from the right place. with
-            // virtualization the row may be unmounted, so scroll it into view
-            // first and focus on the next frame once it's rendered.
+            // the row may be unmounted under virtualization, so scroll it into view first and
+            // focus on the next frame once it's rendered.
             const idx = flattenedItems.findIndex((it) => it.nodeId === nodeId);
             if (idx === -1) return;
             virtualizer.scrollToIndex(idx, { align: 'auto' });
@@ -316,17 +290,11 @@ export function HierarchyPanel() {
         setRenamingNodeId(null);
     }, []);
 
-    // on right-click anywhere in the scroll container, find the row that was
-    // clicked (via data-node-id) and stash its id so the shared context menu
-    // can target it. also select the node if it isn't already part of the
-    // current selection, preserves multi-select on right-click.
     const handleContextMenuTrigger = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
             const li = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]');
             if (!li) {
-                // empty space: suppress both the native menu and Base UI opening
-                // its context menu (Base UI honours preventBaseUIHandler, not
-                // preventDefault, for skipping its own handler).
+                // Base UI honours preventBaseUIHandler, not preventDefault, for skipping its own context menu.
                 e.preventDefault();
                 (e as typeof e & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
                 setContextNodeId(null);
@@ -335,6 +303,7 @@ export function HierarchyPanel() {
             const nodeId = Number(li.dataset.nodeId);
             if (Number.isNaN(nodeId)) return;
             setContextNodeId(nodeId);
+            // only select if it isn't already part of the selection, so right-click preserves multi-select.
             if (!activeEditRoomStore().getState().selection.nodes.has(nodeId)) {
                 selectNode(nodeId);
             }
@@ -353,9 +322,7 @@ export function HierarchyPanel() {
         createNode(contextNodeId, node.children.length, 'New Node');
     }, [contextNodeId, sceneTree, createNode]);
 
-    // when the right-clicked node is part of a multi-selection, shared menu
-    // ops (delete, focus first) act on the full selection in one undo entry;
-    // single-target items (duplicate, bake, rename, create child) are hidden.
+    // when true, shared menu ops act on the full selection and single-target items are hidden.
     const contextInMultiSelect = contextNodeId !== null && selectedNodeIds.has(contextNodeId) && selectedNodeIds.size > 1;
     const sharedMultiCount = contextInMultiSelect ? selectedNodeIds.size : 1;
     const sharedEntries =
@@ -437,13 +404,11 @@ export function HierarchyPanel() {
                                 const item = flattenedItems.find(({ id }) => id === String(source.id));
                                 if (!item) return;
 
-                                // store the source item's initial depth
                                 initialDepth.current = item.depth;
 
                                 setFlattenedItems((items) => {
                                     sourceChildren.current = [];
 
-                                    // get all descendants of the source item
                                     const descendants = getDescendantIds(items, source.id);
 
                                     return items
@@ -506,12 +471,10 @@ export function HierarchyPanel() {
                                 isDragging.current = false;
 
                                 if (event.canceled) {
-                                    // reset to scene tree state
                                     setFlattenedItems(flattenSceneTree(sceneTree, collapsedIds));
                                     return;
                                 }
 
-                                // compute reparent instructions and dispatch each one
                                 const instructions = computeReorderOps(sceneTree, flattenedItems, sourceChildren.current);
                                 sourceChildren.current = [];
 
@@ -519,7 +482,6 @@ export function HierarchyPanel() {
                                     reparentNode(instr.nodeId, instr.parentId, instr.index);
                                 }
 
-                                // rebuild from the now-mutated scene tree
                                 setFlattenedItems(flattenSceneTree(sceneTree, collapsedIds));
                             }}
                         >

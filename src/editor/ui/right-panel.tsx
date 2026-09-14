@@ -9,11 +9,7 @@ type ResizeHandleProps = {
     onResize: (dx: number) => void;
 };
 
-/**
- * thin drag handle sitting on the left edge of the right panel.
- * uses pointer capture so the drag stays live even if the pointer
- * leaves the element.
- */
+// pointer capture keeps the drag live even if the pointer leaves the element.
 function ResizeHandle({ onResize }: ResizeHandleProps) {
     const lastX = useRef<number>(0);
 
@@ -47,12 +43,7 @@ type RightPanelProps = {
     onResize: (dx: number) => void;
 };
 
-/**
- * right panel, scrollable column of collapsible panes.
- * order: hierarchy → tool space → active block → palette → history.
- * to reorder a pane, move its <CollapsiblePane> line.
- * width is controlled by the parent (ui.tsx) via drag handle.
- */
+// to reorder a pane, move its <CollapsiblePane> line.
 export function RightPanel({ width, onResize }: RightPanelProps) {
     const toolTitle = useToolPaneTitle();
 

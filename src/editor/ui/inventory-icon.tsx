@@ -1,11 +1,3 @@
-/**
- * shared icon renderer for blocks and prefabs in the inventory + hotbar.
- *
- * pulls atlas data from the editor store. falls back to a placeholder square
- * when the icon hasn't been generated yet (e.g. boot in progress) or the
- * coords map doesn't include the requested key.
- */
-
 import { memo } from 'react';
 import { useEditor } from '../editor-store';
 import type { InventoryItem } from '../inventory';
@@ -48,7 +40,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             return <PrefabThumb prefabId={item.prefabId} size={size} />;
         }
         case 'blueprint': {
-            // scene (blueprint) icons are not rendered — placeholder only.
+            // scene (blueprint) icons are not rendered, placeholder only.
             return <Placeholder size={size} />;
         }
         default:

@@ -1,12 +1,4 @@
-// canonical directional placement resolvers, pure functions of the
-// placement ctx (hit normal, hit point, camera yaw). single source of truth
-// for "which way does a block face when placed", shared by every directional
-// block preset and available to user-defined blocks. replaces the old
-// prop-name convention (editor/build-direction.ts) and the per-preset copies.
-//
-// world-axis convention (matches blueprint.ts / block-presets.ts):
-//   north = -Z, south = +Z, east = +X, west = -X, up = +Y, down = -Y
-
+// world-axis convention (matches blueprint.ts / block-presets.ts): north = -Z, south = +Z, east = +X, west = -X, up = +Y, down = -Y.
 import type { BlockPlaceCtx } from './blocks';
 
 export type Facing4 = 'north' | 'east' | 'south' | 'west';
@@ -16,8 +8,6 @@ export type Axis = 'x' | 'y' | 'z';
 /** clockwise step index per cardinal (north=0, east=1, south=2, west=3). */
 export const FACING4_STEPS: Record<Facing4, number> = { north: 0, east: 1, south: 2, west: 3 };
 export const FACING4_ORDER: readonly Facing4[] = ['north', 'east', 'south', 'west'];
-
-// ── placement resolvers (ctx → value) ───────────────────────────────
 
 /** dominant axis of the hit normal (logs, pillars). */
 export function axisFromPlaceCtx(ctx: BlockPlaceCtx): Axis {
@@ -40,9 +30,7 @@ export function facing6FromPlaceCtx(ctx: BlockPlaceCtx): Facing6 {
     return ctx.normalZ >= 0 ? 'south' : 'north';
 }
 
-/** 4-dir facing toward the placer, wall click → opposite of the clicked face
- *  (hit-normal direction); floor/ceiling click → camera yaw. ladders, stairs,
- *  doors, signs. */
+/** 4-dir facing toward the placer: wall click resolves to the opposite of the clicked face (hit-normal direction); floor/ceiling click uses camera yaw. Ladders, stairs, doors, signs. */
 export function facing4FromPlaceCtx(ctx: BlockPlaceCtx): Facing4 {
     const ax = Math.abs(ctx.normalX);
     const ay = Math.abs(ctx.normalY);
@@ -57,20 +45,15 @@ export function facing4FromPlaceCtx(ctx: BlockPlaceCtx): Facing4 {
     return fz >= 0 ? 'south' : 'north';
 }
 
-/** top/bottom half for slab/stair/trapdoor/door, top face click → bottom of
- *  the cell above; bottom face → top; wall click → by where on the wall. */
+/** top/bottom half for slab/stair/trapdoor/door: a top-face click resolves to the bottom of the cell above, a bottom-face click to top, and a wall click to whichever half was clicked. */
 export function halfFromPlaceCtx(ctx: BlockPlaceCtx): 'bottom' | 'top' {
     if (ctx.normalY > 0.5) return 'bottom';
     if (ctx.normalY < -0.5) return 'top';
     return ctx.hitY < 0.5 ? 'bottom' : 'top';
 }
 
-// ── facing transforms (blueprint rotate / flip) ─────────────────────
-//
-// cw=true matches the position rotation used by rotateVoxelsByQuat /
-// Blueprint.rotateAxis: under axis='y', +X → -Z, i.e.
-// east(+X) → north(-Z) → west(-X) → south(+Z).
-
+// cw=true matches the position rotation used by rotateVoxelsByQuat / Blueprint.rotateAxis: under axis='y',
+// +X -> -Z, i.e. east(+X) -> north(-Z) -> west(-X) -> south(+Z).
 const FACING4_ROT_Y_CW: Record<Facing4, Facing4> = {
     east: 'north',
     north: 'west',
@@ -98,7 +81,7 @@ export const FACING4_FLIP_Z: Record<Facing4, Facing4> = {
     west: 'west',
 };
 
-/** rotate a cardinal 90° around Y. cw = looking down +Y. */
+/** rotate a cardinal 90 degrees around Y. cw = looking down +Y. */
 export function rotateFacing4(f: Facing4, cw: boolean): Facing4 {
     return (cw ? FACING4_ROT_Y_CW : FACING4_ROT_Y_CCW)[f];
 }

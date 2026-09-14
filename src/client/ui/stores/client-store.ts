@@ -1,10 +1,3 @@
-/**
- * client-store, engine-essential UI state. Imported by both play and editor
- * builds (the editor reads/writes these alongside its own editor-store).
- * Lives outside `editor/` so engine-client.ts and play-ui can touch it
- * without pulling editor code into play bundles.
- */
-
 import { create } from 'zustand';
 import type { PlayerId } from '../../../core/client';
 import type * as Debug from '../../../core/debug';
@@ -59,10 +52,8 @@ export type ClientStore = {
     renderer: Renderer | null;
     setRenderer: (renderer: Renderer | null) => void;
 
-    /** every ClientRoom the engine is currently observing, keyed by playerId.
-     *  mirrored from `Rooms.rooms` via `setRoom` / `removeRoom`. The map identity
-     *  changes on each write so zustand selectors over the map (size, entries)
-     *  invalidate; per-room selectors via `useRoom` read through `activePlayerId`. */
+    /** every ClientRoom the engine is currently observing, keyed by playerId, mirrored from
+     *  Rooms.rooms. The map identity changes on each write so zustand selectors invalidate. */
     rooms: Map<PlayerId, ClientRoom>;
     setRoom: (playerId: PlayerId, room: ClientRoom) => void;
     removeRoom: (playerId: PlayerId) => void;

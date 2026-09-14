@@ -1,7 +1,3 @@
-// the `control` namespace — every mountable widget. re-exported from the root as
-// `export * as control`, so consumers write `control.vec3(...)` / `control.euler(...)`
-// with no clash against math's bare `vec3` / `quat`.
-
 export { graph } from '../monitors/graph';
 export { monitor } from '../monitors/monitor';
 export { boolean } from './boolean';

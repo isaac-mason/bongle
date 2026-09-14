@@ -1,10 +1,3 @@
-// pure swept-AABB primitives. no engine deps.
-//
-// shared by the voxel pass, the body-AABB pass, and stair-step retry.
-// the analytical TOI mirrors Minetest's `axisAlignedCollision`, Minkowski
-// difference, per-axis closed-form, return the *colliding axis* so the
-// caller can zero that velocity component and slide.
-
 /** axis index of a hit. -1 = no hit. */
 export const AXIS_NONE = -1;
 export const AXIS_X = 0;
@@ -50,40 +43,12 @@ function _miss(r: SweepResult): SweepResult {
 }
 
 /**
- * minkowski-difference per-axis swept AABB.
- *
- * computes the time of impact when a moving AABB at center `mc`
- * with half-extents `mh` translates by `dx,dy,dz` and intersects a
- * static AABB given by [aMinX..aMaxZ].
- *
- * "minkowski difference" = expand the static box by `mh` on each side,
- * shrink the moving box to a point at `mc`. then we just sweep a point
- * against an inflated box.
- *
- * returns the colliding axis and TOI; the caller uses these to advance
- * P by `displacement * toi`, zero the velocity on that axis, and continue
- * the slide.
- *
- * `epsilon` is added to the inflated box so that boxes that are just
- * touching (coplanar) report contact. callers pass a small positive
- * value to avoid sticking, or 0 for strict separation tests.
- *
- * @param mcX moving box center X
- * @param mcY moving box center Y
- * @param mcZ moving box center Z
- * @param mhX moving box half-extent X
- * @param mhY moving box half-extent Y
- * @param mhZ moving box half-extent Z
- * @param dx  displacement X
- * @param dy  displacement Y
- * @param dz  displacement Z
- * @param aMinX  static box min X
- * @param aMinY  static box min Y
- * @param aMinZ  static box min Z
- * @param aMaxX  static box max X
- * @param aMaxY  static box max Y
- * @param aMaxZ  static box max Z
- * @param out   reused result; pass `null` to use the module-private one (not safe for nested calls)
+ * Minkowski-difference per-axis swept AABB: computes the time of impact when a moving AABB at center `mc`
+ * with half-extents `mh` translates by `dx,dy,dz` and intersects the static AABB `[aMinX..aMaxZ]`. Expands the
+ * static box by `mh` on each side and shrinks the moving box to a point at `mc`, then sweeps the point against
+ * the inflated box. Returns the colliding axis and TOI; the caller advances position by `displacement * toi`,
+ * zeroes the velocity on that axis, and continues the slide.
+ * `out`, if `null`, falls back to the module-private scratch result (not safe for nested calls).
  */
 export function sweepAabbVsAabb(
     mcX: number,
@@ -113,13 +78,11 @@ export function sweepAabbVsAabb(
     const maxY = aMaxY + mhY;
     const maxZ = aMaxZ + mhZ;
 
-    // per-axis slab test. tEnter < 0 ⇒ that axis was entered in the past
-    // (currently overlapping on this axis with motion still pushing in).
-    // tEnter === -Infinity ⇒ axis has no motion AND char is currently inside
-    // the slab, axis contributes no constraint (analogue of Minetest's
-    // `if (speed.X) { ... }` skip). axes with no motion AND char outside
-    // their slab cause an early no-hit return, char never enters that
-    // slab so the box is unreachable.
+    // per-axis slab test. tEnter < 0 means that axis was entered in the past (currently overlapping on this
+    // axis with motion still pushing in). tEnter === -Infinity means the axis has no motion and the char is
+    // currently inside the slab, so the axis contributes no constraint (analogue of Minetest's
+    // `if (speed.X) { ... }` skip). axes with no motion and the char outside their slab cause an early no-hit
+    // return, since the char never enters that slab so the box is unreachable.
     let tEnterX: number;
     let tExitX: number;
     let signX: number;
@@ -246,9 +209,9 @@ export function sweepAabbVsAabb(
     if (tExitY < tExit) tExit = tExitY;
     if (tExitZ < tExit) tExit = tExitZ;
 
-    // separation: tEnter > tExit ⇒ slabs never overlap simultaneously.
-    // tEnter > 1 ⇒ won't reach within this displacement.
-    // tExit <= 0 ⇒ already exited (tunneled past), don't pull char back in.
+    // separation: tEnter > tExit means the slabs never overlap simultaneously.
+    // tEnter > 1 means it won't reach within this displacement.
+    // tExit <= 0 means already exited (tunneled past); don't pull the char back in.
     if (tEnter > tExit || tEnter > 1 || tExit <= 0) {
         return _miss(r);
     }
@@ -312,7 +275,7 @@ export function sweepAabbVsAabb(
         if (overlapZ <= PERP_EPS) return _miss(r);
     }
 
-    // emit. tEnter ∈ (-innerMarginSize/speedAbs, 1] now: negative means
+    // emit. tEnter is in (-innerMarginSize/speedAbs, 1] now: negative means
     // depenetration (caller moves char by `disp * tEnter`, backward); 0+
     // means forward TOI as usual.
     //

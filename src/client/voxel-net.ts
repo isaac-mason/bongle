@@ -11,23 +11,17 @@ type ChunkCoord = { cx: number; cy: number; cz: number };
 type RegionCoord = { rx: number; ry: number; rz: number };
 
 export type VoxelNet = {
-    /** individual chunk coords decoded + applied since the last flush —
-     *  PROMOTION channel only (voxel_chunk_full: an already-known chunk
-     *  re-sent after too many block-ops). drained into one voxel_ack.full
-     *  each, to release the server's per-chunk in-flight slots. */
+    /** chunk coords decoded + applied since the last flush, promotion channel
+     *  only (voxel_chunk_full). drained into one voxel_ack.full per player. */
     ackBuffer: Map<number, ChunkCoord[]>;
-    /** region coords decoded + applied since the last flush — DISCOVERY
-     *  channel (voxel_region_full). drained into one voxel_ack.regions each,
-     *  to release the server's per-region in-flight slots. */
+    /** region coords decoded + applied since the last flush, discovery channel
+     *  (voxel_region_full). drained into one voxel_ack.regions per player. */
     regionAckBuffer: Map<number, RegionCoord[]>;
-    /** per-player adaptive region-decode pacing (see voxel-pacing.ts). */
+    /** per-player adaptive region-decode pacing, see voxel-pacing.ts. */
     pacing: Map<number, Pacing.RegionBatchPacing>;
     /** decode wall-clock (ns) accumulated per player across the current
-     *  processInbox pass, via `recordRegionDecodeTime`. paired with the same
-     *  player's `regionAckBuffer` length (one decoded region = one ack entry)
-     *  for the pacing sample, then reset by flushAcks. promotion's individual
-     *  voxel_chunk_full isn't timed — it's a fixed-rate channel, not adaptive
-     *  (see discovery.ts's FULL_CHUNKS_PER_CLIENT_PER_TICK). */
+     *  processInbox pass; paired with `regionAckBuffer` length for the pacing
+     *  sample, then reset by flushAcks. */
     batchNanos: Map<number, number>;
 };
 
@@ -36,7 +30,7 @@ export function init(): VoxelNet {
 }
 
 /** record one voxel_region_full's decode wall-clock against this player's
- *  running batch total. call around `applyRegionFull`. */
+ *  running batch total, called around `applyRegionFull`. */
 export function recordRegionDecodeTime(voxelNet: VoxelNet, playerId: number, elapsedMs: number): void {
     voxelNet.batchNanos.set(playerId, (voxelNet.batchNanos.get(playerId) ?? 0) + elapsedMs * 1_000_000);
 }
@@ -86,10 +80,9 @@ function queueRegionAck(voxelNet: VoxelNet, playerId: number, coord: RegionCoord
     buf.push(coord);
 }
 
-// the mesher reads a 1-voxel apron from all 26 neighbours (6 faces + 12 edges +
-// 8 corners) for AO + smooth light, so a whole-chunk replacement must remesh
-// every one or stale light lingers at chunk edges. follows neighbour pointers,
-// so the chunk must already be linked.
+// mesher reads a 1-voxel apron from all 26 neighbours for AO + smooth light,
+// so a whole-chunk replacement must remesh every one or stale light lingers
+// at chunk edges. requires the chunk to already be linked to its neighbours.
 function dirtyAllNeighbors(voxels: Voxels.Voxels, chunk: Voxels.Chunk): void {
     for (let i = 0; i < chunk.neighbors.length; i++) {
         const n = chunk.neighbors[i];
@@ -98,9 +91,7 @@ function dirtyAllNeighbors(voxels: Voxels.Voxels, chunk: Voxels.Chunk): void {
 }
 
 /** decode + apply one occupied chunk's payload, whether it arrived as an
- *  individual voxel_chunk_full (promotion) or as one entry in a
- *  voxel_region_full bundle (discovery) — same chunk data, same application
- *  logic either way, just a different envelope. */
+ *  individual voxel_chunk_full or as one entry in a voxel_region_full bundle. */
 function applyOneChunkFull(
     voxels: Voxels.Voxels,
     cx: number,
@@ -122,8 +113,8 @@ function applyOneChunkFull(
     chunk.data = data;
     chunk.light = light;
 
-    // wire carries registry-global state ids; map each back to its durable key so
-    // the palette survives registry hot-reload. unknown ids (skew) fall back to ''.
+    // wire carries registry-global state ids; map each back to its durable key
+    // so the palette survives registry hot-reload. unknown ids fall back to ''.
     const stateToKey = voxels.registry.stateToKey;
     chunk.paletteKeys = palette.map((id) => stateToKey[id] ?? '');
     chunk.paletteMap = new Map();
@@ -133,19 +124,16 @@ function applyOneChunkFull(
 
     Voxels.resolveChunk(chunk, voxels.registry);
     Voxels.markChunkDirty(voxels, chunk);
-    // server light lands here WITHOUT going through propagateAllLight, so the
-    // light volume would otherwise never hear about it. Apron-fanned: this
-    // chunk's cells sit in its neighbours' padded bake regions, so their shared
-    // boundary planes are stale until they rebake too.
+    // server light lands here without going through propagateAllLight, so the
+    // light volume must be told explicitly; neighbours' padded bake regions
+    // also read into this chunk, so they stay stale until they rebake too.
     Voxels.markLightVolumeDirty(voxels, chunk);
     dirtyAllNeighbors(voxels, chunk);
 }
 
-/** create the all-air stub for one chunk slot known to be empty, whether it
- *  arrived as a voxel_region_full unset bit (discovery) — the only source
- *  today, promotion never announces empty slots. a real chunk already present
- *  (a full upgrade arrived first) wins, never overwritten by a later empty
- *  marker for the same slot. */
+/** create the all-air stub for one chunk slot known to be empty (a
+ *  voxel_region_full unset bit). a real chunk already present wins and is
+ *  never overwritten by a later empty marker for the same slot. */
 function applyOneChunkEmpty(voxels: Voxels.Voxels, cx: number, cy: number, cz: number): void {
     const key = Voxels.chunkKey(cx, cy, cz);
     if (voxels.chunks.has(key)) return;
@@ -154,11 +142,8 @@ function applyOneChunkEmpty(voxels: Voxels.Voxels, cx: number, cy: number, cz: n
     Voxels.linkChunkNeighbors(voxels, chunk);
 }
 
-/** drop one chunk slot, whether evicted individually (no longer reachable —
- *  eviction is region-bundled today, see applyRegionDel) or as part of a
- *  region's worth of removals. a no-op if the slot was never known (the
- *  common case for a region's air slots — most of a region's REGION_VOLUME
- *  local positions never had a chunk at all). */
+/** drop one chunk slot; a no-op if the slot was never known, the common case
+ *  for a region's air slots. */
 function applyOneChunkDel(voxels: Voxels.Voxels, cx: number, cy: number, cz: number): void {
     const key = Voxels.chunkKey(cx, cy, cz);
     const chunk = voxels.chunks.get(key);
@@ -169,21 +154,17 @@ function applyOneChunkDel(voxels: Voxels.Voxels, cx: number, cy: number, cz: num
     voxels.dirty.removed.add(key);
 }
 
-/** PROMOTION channel: an already-known chunk re-sent in full (too many
- *  block-ops landed in it server-side this tick). fixed-rate, not adaptive —
- *  see discovery.ts's FULL_CHUNKS_PER_CLIENT_PER_TICK — so this isn't timed
- *  for pacing the way applyRegionFull is. */
+/** promotion channel: an already-known chunk re-sent in full (too many
+ *  block-ops landed in it server-side this tick). fixed-rate, not adaptive,
+ *  so this isn't timed for pacing the way applyRegionFull is. */
 export function applyChunkFull(voxelNet: VoxelNet, voxels: Voxels.Voxels, message: Protocol.VoxelChunkFull): void {
     applyOneChunkFull(voxels, message.cx, message.cy, message.cz, message.palette, message.compressed);
     queueAck(voxelNet, message.playerId, { cx: message.cx, cy: message.cy, cz: message.cz });
 }
 
-/** DISCOVERY channel: a newly-known region's worth of chunks bundled into one
- *  message — a presence bitmask over the region's REGION_VOLUME local chunk
- *  slots (`REGION_LOCAL_CHUNK_OFFSETS` order, shared with the server) plus a
- *  dense list of only the occupied slots' payloads. no per-chunk coordinates
- *  on the wire: this walk reconstructs each slot's (cx,cy,cz) from the
- *  region's origin + its position in the shared fixed order. */
+/** discovery channel: a region's chunks bundled as a presence bitmask over its
+ *  local chunk slots (`REGION_LOCAL_CHUNK_OFFSETS` order) plus a dense list of
+ *  the occupied slots' payloads, no per-chunk coordinates on the wire. */
 export function applyRegionFull(voxelNet: VoxelNet, voxels: Voxels.Voxels, message: Protocol.VoxelRegionFull): void {
     const bx = message.rx * Voxels.REGION_CHUNKS_PER_AXIS;
     const by = message.ry * Voxels.REGION_CHUNKS_PER_AXIS;
@@ -206,11 +187,9 @@ export function applyRegionFull(voxelNet: VoxelNet, voxels: Voxels.Voxels, messa
     queueRegionAck(voxelNet, message.playerId, { rx: message.rx, ry: message.ry, rz: message.rz });
 }
 
-/** DISCOVERY channel's eviction counterpart: drop every chunk slot in a
- *  region the client drifted out of range of. no per-chunk coordinate list
- *  needed — walks the same shared REGION_LOCAL_CHUNK_OFFSETS order and drops
- *  whatever's actually present (most slots in a typical region are already
- *  air and were never a real chunk, applyOneChunkDel no-ops for those). */
+/** discovery channel's eviction counterpart: drop every chunk slot in a
+ *  region the client drifted out of range of, walking the same shared
+ *  REGION_LOCAL_CHUNK_OFFSETS order. */
 export function applyRegionDel(voxels: Voxels.Voxels, message: Protocol.VoxelRegionDel): void {
     const bx = message.rx * Voxels.REGION_CHUNKS_PER_AXIS;
     const by = message.ry * Voxels.REGION_CHUNKS_PER_AXIS;
@@ -227,20 +206,19 @@ export function applyChunkOps(voxels: Voxels.Voxels, message: Protocol.VoxelChun
         const chunk = voxels.chunks.get(key);
         if (!chunk) continue;
 
-        // COW out of the shared empty-stub array before mutating: chunks promoted
-        // from a voxel_region_full empty slot alias Voxels.EMPTY_DATA.
+        // chunks promoted from a voxel_region_full empty slot alias
+        // Voxels.EMPTY_DATA, copy out before mutating.
         if (chunk.data === Voxels.EMPTY_DATA) chunk.data = new Uint16Array(Voxels.EMPTY_DATA);
 
-        // each change carries a registry-global state id, interned into THIS
-        // chunk's own local palette slot so a client palette that diverged from
-        // the server's reconciles cleanly instead of drifting.
+        // each change carries a registry-global state id, interned into this
+        // chunk's own palette slot so a diverged client palette reconciles.
         const registry = voxels.registry;
         const stateToKey = registry.stateToKey;
         const cull = registry.cull;
         let faces = 0;
         for (const change of entry.changes) {
             // explicit `: number` cuts the inference chain: `change` is a recursive
-            // pack.SchemaType and chaining locals off it trips a tsgo circular bail.
+            // pack.SchemaType, chaining locals off it trips a tsgo circular bail.
             const oldPaletteIdx: number = chunk.data[change.index]!;
             const newStateId: number = change.stateId;
             const newPaletteIdx: number = Voxels.ensureChunkPaletteSlot(chunk, stateToKey[newStateId] ?? '', registry);
@@ -305,7 +283,7 @@ export function applyChunkLight(voxels: Voxels.Voxels, message: Protocol.VoxelCh
     dirtyAllNeighbors(voxels, chunk);
 }
 
-// scratch 3×3×3 neighbour mask, indexed (dz+1)*9 + (dy+1)*3 + (dx+1), reused
+// scratch 3x3x3 neighbour mask, indexed (dz+1)*9 + (dy+1)*3 + (dx+1), reused
 // across the delta loop to avoid per-chunk allocation.
 const neighbourCellMask = new Uint8Array(27);
 
@@ -342,9 +320,8 @@ export function applyChunkLightDelta(voxels: Voxels.Voxels, message: Protocol.Vo
 
     chunk.version++;
     Voxels.markChunkDirty(voxels, chunk);
-    // this chunk's own tile, plus the PRECISE apron below. `neighbourCellMask`
-    // already says which neighbours the changed cells reach, so a delta costs
-    // 1-7 rebakes rather than the blanket 27 a whole-chunk relight implies.
+    // `neighbourCellMask` says which neighbours the changed cells reach, so a
+    // delta costs 1-7 rebakes rather than the blanket 27 a full relight needs.
     voxels.dirty.lightVolume.add(chunk);
 
     for (let i = 0; i < 27; i++) {

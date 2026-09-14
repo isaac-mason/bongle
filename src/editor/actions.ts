@@ -1,17 +1,3 @@
-/**
- * editor action functions, unified voxel and scene mutations.
- *
- * each function takes the per-room store api as its first arg and a
- * ScriptContext as the second (both are available inside the editor script
- * factory). applies the mutation optimistically on the client, pushes an
- * undo entry onto the room editor stack, and sends the corresponding typed
- * command to the server.
- *
- * call-sites are the store closures set up in EditorScript client onInit.
- * components call e.g. useEditRoom((s) => s.createNode)(...), they never
- * import this file directly.
- */
-
 import type { Quat } from 'math';
 import { TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
@@ -64,8 +50,6 @@ import { playBulkEdit } from './sounds';
 import { runSmooth } from './tools/smooth';
 import { commitVoxelOps } from './voxel-edit';
 
-/* ── voxel actions ── */
-
 const OPS_PER_PACKET = 4096;
 
 function sendVoxelOps(ctx: ScriptContext, ops: VoxelOp[]): void {
@@ -74,17 +58,12 @@ function sendVoxelOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     }
 }
 
-/** resolve the active hotbar slot's block key for `$active` pattern tokens.
- *  empty string when the slot is empty or holds a non-block, the sampler
- *  will fall back to air for that case, which mirrors how `build` behaves
- *  with an empty hand. */
+/** empty string when the slot is empty or holds a non-block; the sampler falls back to air, mirroring `build` with an empty hand. */
 function activeBlockKey(state: EditRoomState): string {
     const slot = useEditor.getState().hotbar[state.activeSlotIndex];
     return slot && slot.kind === 'block' ? slot.blockKey : '';
 }
 
-/** resolve a fill into paired forward/reverse op lists in a single pass.
- *  drops mask-rejected voxels and no-ops where new key == old key. */
 function resolveFill(
     voxels: Voxels,
     selection: Selection.Selection,
@@ -139,7 +118,6 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
     const hasNodes = sel.nodes.size > 0;
     if (!hasVoxels && !hasNodes) return;
 
-    // build forward+reverse voxel ops in a single pass, skipping air cells.
     let forwardVoxelOps: VoxelOp[] | null = null;
     let reverseVoxelOps: VoxelOp[] | null = null;
     if (hasVoxels) {
@@ -157,7 +135,6 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
         }
     }
 
-    // snapshot nodes for undo (capture before destroying)
     let nodeCreateArgs: ReturnType<typeof captureSubtreeAsCreateArgs>[] | null = null;
     let nodeIds: number[] | null = null;
     if (hasNodes) {
@@ -252,9 +229,7 @@ export function pickBlock(state: EditRoomState, ctx: ScriptContext): void {
     useEditor.getState().setHotbarSlot(activeSlotIndex, { kind: 'block', blockKey: key });
 }
 
-/** for each non-air voxel in the selection, set the cell directly above to
- *  `pattern`, but only when that cell is currently air. mirrors WorldEdit's
- *  //overlay. the overlay row may sit one block outside the selection AABB. */
+/** mirrors WorldEdit's //overlay; the overlay row may sit one block outside the selection AABB. */
 export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
@@ -293,10 +268,8 @@ export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Patte
     return forward.length;
 }
 
-/** worldedit-style `//walls`: paint the pattern onto every voxel in the
- *  selection whose ±x or ±z neighbour falls outside the selection. vertical
- *  neighbours don't count, so the top and bottom of the selection are left
- *  untouched, you get the 4 vertical sides only. */
+/** worldedit-style `//walls`: paints voxels whose +-x or +-z neighbour falls outside the
+ *  selection. vertical neighbours don't count, so only the 4 vertical sides are touched. */
 export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
@@ -334,12 +307,9 @@ export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern
     return forward.length;
 }
 
-/** axiom-style `/elevation` over the current selection. walks each (x,z)
- *  column inside the selection, finds the topmost non-air block within
- *  the column's selection-y band, then raises/lowers/flattens by
- *  `amount` blocks (clamped to the column's band). flatten target
- *  defaults to the average of column tops. no falloff or image, those
- *  are brush-only. leaves the selection intact. */
+/** raises/lowers/flattens each (x,z) column's topmost non-air block by `amount`, clamped to the
+ *  column's selection-y band. flatten target defaults to the average of column tops. no falloff
+ *  or image (those are brush-only). leaves the selection intact. */
 export function elevateSelection(
     state: EditRoomState,
     ctx: ScriptContext,
@@ -446,11 +416,7 @@ export function elevateSelection(
     return forward.length;
 }
 
-/** worldedit-style `//smooth` over the current selection. projects to a per-
- *  (x,z) heightmap (topmost block matching `heightmapMask`, or any non-air
- *  when null), runs `iterations` 5×5 gaussian passes, then raises/lowers
- *  each column inside its selection y band. unlike //fill/replace, leaves
- *  the selection intact so you can iterate. */
+/** worldedit-style `//smooth`. unlike //fill/replace, leaves the selection intact so you can iterate. */
 export function smoothSelection(state: EditRoomState, ctx: ScriptContext, iterations: number, heightmapMask?: Mask): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
@@ -476,7 +442,6 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
-    // replace = fill restricted to non-air (or caller-supplied mask).
     const mask: Mask = from ?? { kind: 'existing' };
     const { forward, reverse } = resolveFill(ctx.voxels, sel, pattern, mask, activeBlockKey(state));
     if (forward.length === 0) {
@@ -498,8 +463,6 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
     state.clearVoxelSelection();
     return forward.length;
 }
-
-/* ── scene actions ── */
 
 export function createNodeAction(ctx: ScriptContext, parentId: number, index: number, name?: string): void {
     send(ctx, CreateNodeCommand, {
@@ -791,8 +754,6 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
     });
 }
 
-/* ── snapshot helpers ── */
-
 type CreateArgs = {
     id: number;
     parentId: number;
@@ -864,8 +825,6 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
     bumpNodeVersion(sceneTree, node);
 }
 
-/* ── prefab actions ── */
-
 export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, config: PrefabConfig): void {
     const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
@@ -917,11 +876,10 @@ export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, node
 }
 
 /**
- * concretize a prefab wrapper: stamp its current voxel content into the world,
- * promote its non-persistent prefab-emitted children to persist:true so they
- * survive the prefab clear, and strip `node.prefab`. snapshots forward/reverse
- * voxel ops at action-creation time; child id lookups happen lazily inside
- * do/undo so redo (after the reconciler destroys + recreates with fresh ids)
+ * concretizes a prefab wrapper: stamps its current voxel content into the world, promotes its
+ * non-persistent prefab-emitted children to persist:true so they survive the prefab clear, and
+ * strips `node.prefab`. voxel ops are snapshotted at action-creation time; child id lookups
+ * happen lazily inside do/undo so redo (after the reconciler recreates children with fresh ids)
  * still targets the right nodes.
  */
 export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
@@ -930,8 +888,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
 
     const prevPrefab = { ...node.prefab };
 
-    // snapshot voxel forward/reverse ops by re-creating the same world stamp
-    // the play-mode reconciler does (rotateVoxelsByQuat + round position).
+    // re-creates the same world stamp the play-mode reconciler does.
     const forwardOps: VoxelOp[] = [];
     const reverseOps: VoxelOp[] = [];
     const preparedVoxels = node.scene?.prefabs.state.get(node)?.voxels;
@@ -967,8 +924,6 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
         do() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            // capture child ids lazily, after undo + redo the reconciler will
-            // have recreated children with fresh ids.
             const childIds = n.children.map((c) => c.id);
 
             if (forwardOps.length > 0) sendVoxelOps(ctx, forwardOps);
@@ -980,8 +935,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            // children survive prefab clear as persist:true, flip them back
-            // to persist:false before restoring the prefab so the next
+            // flip children back to persist:false before restoring the prefab so the next
             // reconcile tick destroys them and re-expands the def fresh.
             const childIds = n.children.map((c) => c.id);
             for (const id of childIds) {

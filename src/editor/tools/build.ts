@@ -1,24 +1,3 @@
-// build tool update function.
-//
-// called each frame from EditorScript onFrame (client only).
-// left click: break (delete) the hovered voxel.
-// right click: place the active palette block on the adjacent face. the
-// trigger is mode-aware:
-//   - pointer already locked at RMB-down (e.g. character-controller view
-//     where RMB is unambiguous) → fire immediately on down for snappy
-//     placement feel.
-//   - cursor visible at RMB-down (fly / orbit) → fire on tap (mouse-up
-//     without crossing the drag threshold) so that a drag-look or
-//     drag-pan release doesn't also place a block.
-// the lock check on the tap branch prevents a double-fire: when the
-// down branch already placed, RMB-up will still produce a tap event
-// (no drag crossed because the cursor was frozen), but pointer-lock
-// is still active on that frame so the tap branch self-suppresses.
-//
-// each break/place is a single undoable action, and carries the touched
-// material's own sfx (sounds.ts). the slot flips on undo, since undoing a
-// place is a break.
-
 import type { PerspectiveCamera } from 'gpucat';
 import type { Quat, Vec3 } from 'math';
 import type { Input } from '../../client/input';
@@ -39,8 +18,6 @@ import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './
 
 type Op = { wx: number; wy: number; wz: number; key: string };
 
-// ── per-frame update ───────────────────────────────────────────────
-
 export function updateBuild(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
@@ -50,11 +27,9 @@ export function updateBuild(
     camera: PerspectiveCamera,
 ): void {
     const s = store.getState();
-    // auto-enter prefab placement when the active slot is a prefab. mirrors
-    // ctrl+v→g, ghost follows the cursor and right-click commits, then the
-    // continuous-placement loop re-arms the next instance. mismatch detection
-    // (user switched slot mid-placement) lives in inspect.ts since activeTool
-    // flips to 'transform' as soon as placement starts and we stop firing.
+    // auto-enters prefab placement when the active slot is a prefab, mirroring ctrl+v then g;
+    // mismatch detection (slot switched mid-placement) lives in inspect.ts since activeTool
+    // flips to 'transform' as soon as placement starts and this stops firing
     const hotbar = useEditor.getState().hotbar;
     const activeSlotIndex = s.activeSlotIndex;
     const slot = hotbar[activeSlotIndex] ?? null;
@@ -68,8 +43,7 @@ export function updateBuild(
         enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.scene, ctx);
         return;
     }
-    // same auto-enter flow for saved blueprints, the placement preview is
-    // the saved scene's voxels + nodes, committed via the standard path.
+    // same auto-enter flow for saved blueprints; the placement preview is the saved scene's voxels + nodes
     if (slot && slot.kind === 'blueprint' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
         const anchor: Vec3 = [
             s.hoverVoxel[0] + s.hoverNormal[0],
@@ -86,12 +60,10 @@ export function updateBuild(
         const [wx, wy, wz] = s.hoverVoxel;
         const oldKey = getBlock(voxels, wx, wy, wz);
 
-        // don't break air
         if (oldKey !== BLOCK_AIR) {
             const fwd: Op = { wx, wy, wz, key: BLOCK_AIR };
             const rev: Op = { wx, wy, wz, key: oldKey };
-            // sfx identity of this edit: the material that was here. resolved
-            // once at dispatch, the cell reads as air from here on.
+            // sfx identity resolved once at dispatch, since the cell reads as air from here on
             const state = resolveKey(ctx.blocks, oldKey);
 
             store.getState().action({
@@ -108,9 +80,8 @@ export function updateBuild(
         }
     }
 
-    // right click: place the active block on the adjacent face.
-    // prefab slots never reach here, auto-enter above intercepts them and
-    // commit/re-arm is driven by the transform-tool place-mode handler.
+    // right click places on the adjacent face: fires on down when pointer-locked (unambiguous RMB),
+    // else on tap, so a drag-look/pan release doesn't also place; the lock check below then stops a double-fire.
     const locked = !!document.pointerLockElement;
     const rmb = locked ? isMouseJustDown(input.mouseKeyboard, 'right') : isMouseTap(input.mouseKeyboard, 'right');
     if (rmb && s.hoverVoxel && s.hoverNormal) {
@@ -135,9 +106,8 @@ export function updateBuild(
                     ctx.blocks,
                 );
                 if (placement) {
-                    // the palette key, not a written op: a multi-cell `place`
-                    // hook (door, bed) writes several states, but they're one
-                    // material and one sound, at the cell the user aimed at.
+                    // sfx keyed to the palette selection, not the written op: a multi-cell
+                    // `place` hook (door, bed) writes several states but is one material and one sound
                     const state = resolveKey(ctx.blocks, activeBlockKey);
 
                     store.getState().action({
@@ -157,15 +127,8 @@ export function updateBuild(
     }
 }
 
-// ── placement resolution ──────────────────────────────────────────
-//
-// runs the block's `place` hook (if any) against a recording `io`: each
-// io.set becomes a forward edit op and (on first touch of a cell) captures
-// that cell's original key as the reverse op for undo; io.get reads the
-// world, reflecting this place-action's own pending writes. a block with no
-// `place` hook just writes its selected key at the target cell. returns null
-// if `place` wrote nothing (aborted), e.g. a door with no headroom.
-
+// runs the block's `place` hook (if any) against a recording `io`, capturing each touched cell's
+// original key for undo; returns null if `place` wrote nothing (aborted), e.g. a door with no headroom
 function resolvePlacement(
     activeBlockKey: string,
     hoverVoxel: readonly [number, number, number],
@@ -201,7 +164,7 @@ function resolvePlacement(
     };
 
     if (def?.place && hoverPoint) {
-        // hit point in the clicked block's [0..1]³ local space.
+        // hitX/Y/Z are in the clicked block's 0 to 1 local space
         def.place(
             {
                 worldX: targetX,
@@ -219,7 +182,6 @@ function resolvePlacement(
             io,
         );
     } else {
-        // no place hook, write the selected key as-is at the target cell.
         io.set(targetX, targetY, targetZ, activeBlockKey);
     }
 

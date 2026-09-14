@@ -1,25 +1,3 @@
-/**
- * WorldEdit-style block patterns. A Pattern is a plain-object AST that
- * answers "what block should I place here?", it is sampled per voxel by
- * bulk ops like fill / replace.
- *
- * The grammar is a subset of WorldEdit's (see worldedit-docs patterns.rst):
- *   - `stone`, single block (with optional `[k=v,...]` state)
- *   - `stone,dirt`, equal-weight random list
- *   - `10%stone,90%dirt`, weighted random (weights are relative, not %)
- *   - `$active`, resolves at sample-time to whatever block is
- *                               in the active hotbar slot. callers pass it via
- *                               `samplePattern(..., active)`; brushes default
- *                               their pattern to this token.
- *
- * Decimals on weights are allowed. Brackets are protected when splitting on
- * `,` so `stone_stairs[half=top],dirt` parses correctly.
- *
- * The union is intentionally open, add new kinds (randomState, category,
- * clipboard, typeApply, stateApply) by extending the type and matching them
- * in `parsePattern` / `samplePattern`.
- */
-
 import { fuzzyRank } from '../../core/utils/fuzzy';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -37,17 +15,8 @@ export type Pattern =
     | { kind: 'random'; choices: Array<{ pattern: Pattern; weight: number }> };
 
 /**
- * sample a pattern at a world position. returns a block key string e.g.
- * `oak_log[axis=y]`.
- *
- * `voxels` + `x,y,z` are mandatory so kinds that read world state at the
- * target position (future: `clipboard`, `typeApply`, `stateApply`,
- * `repeatingExtent`, `waterloggedRemover`) can do so without a signature
- * change. Current `block` / `random` kinds ignore them.
- *
- * `active` is the block key the `$active` token resolves to (the active
- * hotbar slot's block when called from the editor; falls back to air when
- * the slot is empty or non-block).
+ * Samples a pattern at a world position into a block key, e.g. `oak_log[axis=y]`.
+ * `voxels`/`x,y,z` are unused by `block`/`random` but let future kinds read world state.
  */
 export function samplePattern(
     p: Pattern,
@@ -113,12 +82,7 @@ function parseSingle(token: string): Pattern {
     return { kind: 'block', block };
 }
 
-// ── autocomplete ───────────────────────────────────────────────────
-// thin completion helper used by the editor's <ExprInput> wrapper. given
-// the input text + caret position, returns the substring range to replace
-// and a ranked candidate list. kept inside this module so the grammar and
-// its suggestions stay in lockstep, if a new pattern kind is added above,
-// add a token here too.
+// When a new pattern kind is added above, add a completion token below too.
 
 export type PatternSuggestion = { text: string; label?: string; detail?: string };
 export type PatternSuggestResult = {
@@ -134,8 +98,6 @@ export function suggestPattern(
     cursor: number,
     blockIds: ReadonlyArray<{ id: string; name?: string }>,
 ): PatternSuggestResult {
-    // walk back from cursor over non-comma at depth 0, that's the token
-    // currently being edited.
     let depth = 0;
     let tokenStart = 0;
     for (let i = 0; i < cursor; i++) {
@@ -158,20 +120,15 @@ export function suggestPattern(
 
     const tokenText = text.slice(tokenStart, tokenEnd);
     const weightMatch = WEIGHT_PREFIX_RE.exec(tokenText);
-    // strip leading whitespace inside the token (after a `,` users typically
-    // hit space) so the body offset is right.
     const wsLen = tokenText.match(/^\s*/)?.[0].length ?? 0;
     const prefixLen = weightMatch ? weightMatch[0].length : wsLen;
     const bodyStart = tokenStart + prefixLen;
     const body = text.slice(bodyStart, cursor).toLowerCase();
 
     const out: PatternSuggestion[] = [];
-    // `$active` always offered when body is empty or starts with `$`.
     if (body.length === 0 || '$active'.startsWith(body)) {
         out.push({ text: '$active', detail: 'active hotbar slot' });
     }
-    // empty body → preserve registry order (alphabetical block ids).
-    // non-empty → fuzzy-rank so 'plk' surfaces oak_planks, etc.
     if (body.length === 0) {
         for (const b of blockIds) {
             out.push({ text: b.id, label: b.id, detail: b.name && b.name !== b.id ? b.name : undefined });

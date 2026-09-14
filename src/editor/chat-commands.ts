@@ -1,13 +1,3 @@
-/**
- * editor builtin slash commands. registered per-room on `activate()` in the
- * EditorTrait script and torn down on deactivate via `unsubs`. Each command
- * closes over the per-room `EditRoomStoreApi` so /set, undo, redo land on
- * the *room's* selection / history rather than chasing the active room.
- *
- * `/help` lists every command registered against the room's chat, including
- * any registered by game scripts via `chat.command(ctx, ...)`.
- */
-
 import type { ChatClient } from '../client/chat';
 import * as ClientChat from '../client/chat';
 import type { ArgType, CommandHandler, CommandSpec, Suggestion } from '../core/chat-commands';
@@ -28,23 +18,18 @@ import { type Mask, parseMask } from './scene/mask';
 import { type Pattern, parsePattern, splitTopLevel } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
 
-// chat tokenize splits on spaces, so a /set arg is a single space-free
-// token. that's fine for patterns (`,` and `N%` are space-free) and for
-// most masks (`,`, `!`, `#`, `%`). top-level space intersection like
-// `!air stone` is unreachable until the tokenizer learns quoting, at
-// which point this arg type still works on the un-quoted contents.
+// chat tokenize splits on spaces, so a /set arg is a single space-free token; top-level space
+// intersection like `!air stone` is unreachable until the tokenizer learns quoting.
 
-// strip a `N%` weight prefix from a pattern segment, returning the rest.
+// strips a `N%` weight prefix from a pattern segment, returning the rest.
 const WEIGHT_RE = /^[0-9]+(?:\.[0-9]*)?%(.+)$/;
 function stripWeight(s: string): string {
     const m = WEIGHT_RE.exec(s);
     return m ? m[1]! : s;
 }
 
-// best-effort canonical serialisation so commands that *set* the brush
-// pattern/mask also fill in the matching `patternText` / `maskText` for
-// the brush-options UI. round-trips through parse* with the canonical
-// form (whitespace and prop ordering may differ from the user's input).
+// so commands that set the brush pattern/mask also fill in the matching patternText/maskText
+// for the brush-options UI; round-trips through parse* with the canonical form.
 function blockSpecToString(blockId: string, props?: Record<string, string>): string {
     if (!props || Object.keys(props).length === 0) return blockId;
     return `${blockId}[${Object.entries(props)
@@ -78,9 +63,8 @@ function maskToString(m: Mask): string {
     }
 }
 
-// candidate block id + the hint shown next to it. registry defs become
-// candidates, plus `air`, a valid clear/erase token for `/set` + `/replace`
-// that isn't a placeable block, so it carries its own hint instead of a name.
+// `air` is a valid clear/erase token for /set + /replace that isn't a placeable block, so it
+// carries its own hint instead of a name.
 type BlockCandidate = { id: string; detail?: string };
 
 const airCandidate: BlockCandidate = { id: 'air', detail: 'clear / empty' };
@@ -94,9 +78,7 @@ function blockCandidates(): BlockCandidate[] {
     ];
 }
 
-// fuzzy-match blocks against `partial`, packaged so the chat UI can swap
-// them in for the full current token. ranked by fuzzy score so e.g. `oklg`
-// finds `oak_log` ahead of `oak_planks`.
+// ranked by fuzzy score so e.g. `oklg` finds `oak_log` ahead of `oak_planks`.
 function blockSuggestions(prefix: string, partial: string): Suggestion[] {
     return fuzzyRank(partial, blockCandidates(), (c) => c.id).map(({ item: c }) => ({
         text: prefix + c.id,
@@ -111,9 +93,7 @@ export function installEditorChatCommands(
     ctx: ScriptContext,
     unsubs: Array<() => void>,
 ): void {
-    // walk the current selection and return unique non-air block ids,
-    // ordered by frequency (most-common first). drives `(in selection)`
-    // mask suggestions for /replace + /set.
+    // unique non-air block ids ordered by frequency; drives `(in selection)` mask suggestions.
     function selectionBlockIds(): string[] {
         const counts = new Map<string, number>();
         Selection.forEach(store.getState().selection, (wx, wy, wz) => {
@@ -126,10 +106,8 @@ export function installEditorChatCommands(
         return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
     }
 
-    // pattern token: comma-split (bracket-aware) random list; each segment
-    // may have a leading `N%`. suggestion targets the trailing segment.
-    // for patterns, in-selection block ids surface first too, handy for
-    // /set when you want to refill using what's already there.
+    // comma-split (bracket-aware) random list; each segment may have a leading `N%`.
+    // suggestion targets the trailing segment.
     const PatternArg: ArgType<Pattern> = {
         name: 'pattern',
         parse: (s) => {
@@ -150,8 +128,7 @@ export function installEditorChatCommands(
         describe: () => 'a block pattern (e.g. stone, oak_log, 30%stone,70%dirt)',
     };
 
-    // mask token: same comma-OR-list shape as a single pattern segment,
-    // plus optional `!` negation, `#existing`, or `%N` noise.
+    // same comma-OR-list shape as a single pattern segment, plus optional `!` negation, `#existing`, or `%N` noise.
     const MaskArg: ArgType<Mask> = {
         name: 'mask',
         parse: (s) => {
@@ -180,9 +157,8 @@ export function installEditorChatCommands(
         describe: () => 'a mask (e.g. stone, !air, stone,dirt, #existing, %50)',
     };
 
-    // prepend in-selection blocks (fuzzy-ranked) as `(in selection)`
-    // suggestions, then fall back to the registry, deduped so a block
-    // doesn't appear twice.
+    // prepends in-selection blocks (fuzzy-ranked) as `(in selection)` suggestions, then falls
+    // back to the registry, deduped so a block doesn't appear twice.
     function withSelectionFirst(prefix: string, partial: string): Suggestion[] {
         const inSel = fuzzyRank(partial, selectionBlockIds(), (id) => id).map((r) => r.item);
         const seen = new Set(inSel);

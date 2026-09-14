@@ -73,11 +73,8 @@ export function lines(opts: LinesOptions = {}): Control<Record<string, number>> 
             for (const s of series.values()) s.sampler.clear();
         });
 
-        // runtime view state, driven by the header button + legend clicks.
         let stacked = opts.stacked ?? false;
-        // the isolated set: empty means "show all". clicking a legend key solos it,
-        // clicking more keys grows the set, clicking a shown key drops it, and once
-        // every series is back in the set it collapses to "show all" again.
+        // empty solo set means "show all"; clicking keys grows it, and once every series is back in it collapses to "show all".
         const solo = new Set<string>();
         const visible = (key: string) => solo.size === 0 || solo.has(key);
         const toggleSolo = (key: string) => {
@@ -118,7 +115,7 @@ export function lines(opts: LinesOptions = {}): Control<Record<string, number>> 
             return s;
         };
 
-        // the sample index the legend + crosshair read: the cursor's while hovering, else latest.
+        // the cursor's index while hovering, else the latest sample.
         const indexAt = (hoverX: number | null, w: number, n: number) =>
             hoverX === null ? n - 1 : Math.max(0, Math.min(n - 1, Math.round((hoverX / w) * (n - 1))));
 
@@ -128,7 +125,7 @@ export function lines(opts: LinesOptions = {}): Control<Record<string, number>> 
             tick: () => {
                 const rec = prop.get() ?? {};
                 for (const key in rec) ensureSeries(key);
-                // advance every known series each tick so their sample counts stay aligned
+                // advance every known series each tick so their sample counts stay aligned.
                 for (const key of order) {
                     const s = series.get(key)!;
                     s.sampler.push(s.smooth(rec[key] ?? 0));
@@ -137,11 +134,9 @@ export function lines(opts: LinesOptions = {}): Control<Record<string, number>> 
             paint: (g, w, h, hover) => {
                 const n = order.length ? series.get(order[0])!.sampler.count : 0;
                 const idx = indexAt(hover?.[0] ?? null, w, n);
-                // series currently drawn: everything, or just the isolated set.
                 const shown = order.filter(visible);
 
-                // legend values (at the cursor while hovering, else latest), threshold-tinted.
-                // hidden series keep showing their value so you can still read what you dropped.
+                // hidden series still show their value so you can read what you dropped.
                 for (const key of order) {
                     const s = series.get(key)!;
                     s.swatchEl.style.background = color(s.color);
@@ -157,7 +152,7 @@ export function lines(opts: LinesOptions = {}): Control<Record<string, number>> 
                 }
 
                 const yFor = (v: number, lo: number, hi: number) => h - ((v - lo) / (hi - lo)) * h;
-                // which series the cursor is over: the band it sits in (stacked) or the nearest line
+                // which series the cursor is over: the band it sits in (stacked) or the nearest line.
                 let hovered: string | undefined;
 
                 if (stacked) {

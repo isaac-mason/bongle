@@ -1,14 +1,3 @@
-// Starter pack tiles: the 16x16 entries of the voxel atlas.
-//
-// Each `tile()` sources its image via `asset('./…', import.meta.url)`, so the
-// texture file ships alongside this module and resolves relative to it wherever
-// the starter package is installed; the pipeline reads the resolved path and
-// bakes it into the atlas.
-//
-// Exposed individually so the package index can re-export them as
-// `export * as tiles`. Consumers reach them as `tiles.stone`,
-// `tiles.grassTop`, etc.
-
 import { asset, type TextureHandle, texture, tile } from 'bongle';
 import * as tex from './textures';
 
@@ -172,7 +161,7 @@ export const oakSapling = tile('kit:oak_sapling', {
 // independently. four frames each, and the last frame leads back into the
 // first, so the loop is continuous.
 //
-// interpolate is ON. It does blend between frames, which puts colours on screen
+// interpolate is on. It does blend between frames, which puts colours on screen
 // that are not in the four-tone palette, but a liquid whose whole animation is a
 // scroll of one tile per cycle steps hard in four-pixel jumps without it. The
 // motion matters more here than palette purity, and the blend is between two
@@ -329,9 +318,9 @@ export const slimeTransparent = tile('kit:slime_transparent', {
 const WOOL_WEAVE = 30;
 const CONCRETE_WEAVE = 5;
 
-// The tint is a computed TEXTURE wrapped in a single-frame tile. `base` is passed as a
+// The tint is a computed texture wrapped in a single-frame tile. `base` is passed as a
 // texture handle, so the derived texture carries a real dep edge back to the shared
-// grayscale base rather than a copy of its resolved path — re-authoring the base
+// grayscale base rather than a copy of its resolved path, so re-authoring the base
 // invalidates all 31 tints. The texture takes the tile's id verbatim: different stores,
 // so there is no collision, and it matches what the `src` sugar does for a single frame.
 const multiplyTintedTile = (id: string, base: TextureHandle, r: number, g: number, b: number, minWeave: number) =>

@@ -4,71 +4,62 @@ import { el, on } from '../dom';
 import { injectStyles } from '../theme';
 import { createTicker } from '../ticker';
 
-/** a panel is a floating window that is itself a container of controls. */
+/** A panel is a floating window that is itself a container of controls. */
 export type Panel = Container & {
-    /** the floating window element. */
     readonly root: HTMLElement;
     title(text: string): Panel;
-    /** collapse the body to just the title bar. */
+    /** Collapse the body to just the title bar. */
     collapse(collapsed?: boolean): Panel;
-    /** detach the panel but keep it alive (reopen from a panel's right-click menu, or `show()`). */
+    /** Detach the panel but keep it alive (reopen from a panel's right-click menu, or `show()`). */
     hide(): Panel;
-    /** re-attach a hidden panel and raise it to the front. */
+    /** Re-attach a hidden panel and raise it to the front. */
     show(): Panel;
-    /** close and dispose the panel permanently. */
+    /** Close and dispose the panel permanently. */
     close(): void;
 };
 
 export type PanelOptions = {
     title?: string;
-    /** window position `[x, y]` in px (relative to the viewport). default cascades from the top-left. */
+    /** Window position `[x, y]` in px (relative to the viewport). Default cascades from the top-left. */
     position?: [number, number];
-    /** start collapsed to just the title bar. */
+    /** Start collapsed to just the title bar. */
     collapsed?: boolean;
-    /** show a close (hide) button (default true). */
+    /** Show a close (hide) button (default true). */
     closable?: boolean;
-    /** allow dragging the bottom-right corner to resize the window. */
+    /** Allow dragging the bottom-right corner to resize the window. */
     resizable?: boolean;
 };
 
 export type Dashboard = {
-    /** the layer element that hosts every floating panel. */
+    /** The layer element that hosts every floating panel. */
     readonly root: HTMLElement;
-    /** open a floating panel. */
     panel(opts?: PanelOptions): Panel;
-    /** the live floating panels (visible + hidden). */
+    /** The live floating panels (visible + hidden). */
     readonly panels: Panel[];
-    /** panels that have been hidden (reopenable). */
+    /** Panels that have been hidden (reopenable). */
     readonly hidden: Panel[];
-    /** the shared per-frame ticker (listen / monitors / predicates). */
+    /** The shared per-frame ticker (listen/monitors/predicates). */
     readonly context: Context;
-    /** drive one frame in `clock: 'manual'` mode: samples every widget once. pass your loop's
-     * timestamp (ms) to make `interval` throttling honor your clock. no-op under 'auto'. */
+    /** Drives one frame in `clock: 'manual'` mode. No-op under 'auto'. */
     update(now?: number): void;
-    /** hold the shared ticker while the dashboard is out of view: no widget samples
-     *  or repaints until it resumes. gates the rAF loop only, so `update()` still
-     *  drives a frame by hand. */
+    /** Holds the shared ticker while the dashboard is out of view; gates the rAF loop only, so `update()` still drives a frame by hand. */
     pause(paused?: boolean): void;
     destroy(): void;
 };
 
 export type DashboardOptions = {
-    /** mount the panel layer into a target instead of the document body. */
+    /** Mount the panel layer into a target instead of the document body. */
     target?: HTMLElement;
-    /**
-     * how the shared ticker is driven. 'auto' (default) runs its own rAF loop.
-     * 'manual' never self-drives — call `dashboard.update()` once per frame to
-     * sample every widget in phase with your own loop.
-     */
+    /** How the shared ticker is driven. 'auto' (default) runs its own rAF loop; 'manual' requires calling `dashboard.update()` once per frame. */
     clock?: 'auto' | 'manual';
 };
 
 type MenuItem = { label: string; action: () => void } | { separator: true };
 
-/** create a dashboard: a manager for many floating panels. */
+/** Creates a dashboard: a manager for many floating panels. */
 export function dashboard(opts: DashboardOptions = {}): Dashboard {
     injectStyles();
-    // a full-cover layer that passes pointer events through except over its panels
+    // A full-cover layer that passes pointer events through except over its panels.
     const layer = el('div', 'dashcat dc-layer');
     if (opts.target) layer.classList.add('dc-layer--target');
     (opts.target ?? document.body).append(layer);
@@ -80,17 +71,15 @@ export function dashboard(opts: DashboardOptions = {}): Dashboard {
     let cascade = 0;
     let zTop = 10;
 
-    // the layer's box in viewport space: the window when the layer is fixed
-    // full-cover, the target element when mounted into one
+    // The layer's box in viewport space: the window when fixed full-cover, the target element when mounted into one.
     const bounds = () => {
         const r = layer.getBoundingClientRect();
         return r.width && r.height ? r : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
     };
 
-    // keep a panel within the layer AND cap its height to the room below its
-    // top edge, so the body scrolls inside the viewport wherever the panel
-    // sits rather than running off the bottom. runs on mount, show, drag,
-    // resize, window resize and whenever the panel's own size changes.
+    // Keeps a panel within the layer and caps its height to the room below its top edge, so
+    // the body scrolls inside the viewport wherever the panel sits rather than running off
+    // the bottom.
     const MARGIN = 4;
     const MIN_HEIGHT = 80;
     const fitPanel = (root: HTMLElement) => {
@@ -98,9 +87,8 @@ export function dashboard(opts: DashboardOptions = {}): Dashboard {
         const r = root.getBoundingClientRect();
         if (!r.width) return;
         const left = Math.max(MARGIN, Math.min(b.width - r.width - MARGIN, r.left - b.left));
-        // the cap comes from where the panel wants to sit, and the clamp then
-        // uses the CAPPED height: a tall panel keeps its top and scrolls,
-        // rather than being shoved up to the margin to make room
+        // The clamp uses the capped height, so a tall panel keeps its top and scrolls
+        // rather than being shoved up to the margin to make room.
         const wantedTop = Math.max(MARGIN, r.top - b.top);
         const maxHeight = Math.max(MIN_HEIGHT, b.height - wantedTop - MARGIN);
         const height = Math.min(r.height, maxHeight);
@@ -113,11 +101,9 @@ export function dashboard(opts: DashboardOptions = {}): Dashboard {
         for (const p of panels) if (!hidden.includes(p)) fitPanel(p.root);
     };
     const stopResize = on(window, 'resize', fitAllPanels);
-    // content growing (a tab with more rows, a chart added) changes the
-    // panel's height; re-fit so the cap follows
+    // Content growing (a tab with more rows, a chart added) changes the panel's height; re-fit so the cap follows.
     const sizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(fitAllPanels) : null;
 
-    /* ---- context menu (reopen hidden panels) ---- */
     let menuEl: HTMLElement | null = null;
     let menuCleanup: (() => void) | null = null;
     const closeMenu = () => {
@@ -165,7 +151,7 @@ export function dashboard(opts: DashboardOptions = {}): Dashboard {
     const startDrag = (handle: HTMLElement, root: HTMLElement) => {
         on(handle, 'pointerdown', (e) => {
             const ev = e as PointerEvent;
-            if ((ev.target as HTMLElement).closest('button')) return; // let the chrome buttons work
+            if ((ev.target as HTMLElement).closest('button')) return; // Let the chrome buttons work.
             ev.preventDefault();
             const rect = root.getBoundingClientRect();
             const offX = ev.clientX - rect.left;
@@ -176,8 +162,7 @@ export function dashboard(opts: DashboardOptions = {}): Dashboard {
                 const y = Math.max(0, Math.min(b.height - 20, m.clientY - b.top - offY));
                 root.style.left = `${x}px`;
                 root.style.top = `${y}px`;
-                // the height cap follows the drag, so pulling the panel down
-                // shrinks it onto its scrollbar instead of pushing it offscreen
+                // The height cap follows the drag, so pulling the panel down shrinks it onto its scrollbar instead of pushing it offscreen.
                 root.style.maxHeight = `${Math.max(MIN_HEIGHT, b.height - y - MARGIN)}px`;
             };
             const up = () => {

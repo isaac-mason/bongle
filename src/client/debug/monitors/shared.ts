@@ -1,7 +1,3 @@
-// shared bits for the watch-widget family: a series palette, semantic-color
-// resolution against the theme, threshold -> color mapping, deterministic
-// name-hashed colors, and the chart chrome (grid, scale labels, baseline).
-
 import type { Formatter } from '../format';
 
 /** a value that, once crossed, colors the widget. list ascending by `at`. */
@@ -18,29 +14,18 @@ const TOKENS: Record<string, string> = {
     fg: '--dc-fg',
 };
 
-/**
- * resolve a color to a concrete string for canvas drawing. `ok`/`warn`/`danger`/
- * `accent`/`muted`/`border`/`fg` read the current theme token off `el`; any other
- * value is passed through as a literal css color (e.g. '#f0f' or 'tomato').
- *
- * one-off; for hot paths use `colorResolver` which caches.
- */
+/** resolves a semantic name (`ok`/`warn`/`danger`/`accent`/`muted`/`border`/`fg`) to a theme token, or passes through a literal css color. One-off; use `colorResolver` for hot paths. */
 export function resolveColor(el: HTMLElement, color: string, fallback = '#2b5fd9'): string {
     const token = TOKENS[color];
     if (!token) return color;
     return getComputedStyle(el).getPropertyValue(token).trim() || fallback;
 }
 
-/**
- * a cached color resolver for per-frame drawing. literal css colors are returned
- * as-is (no work); theme tokens hit `getComputedStyle` at most once per `ttl` ms,
- * so paints stay off the style-recalc path while runtime retheming still lands
- * within a second. create one per widget and call it in paint.
- */
+/** cached color resolver for per-frame drawing; theme tokens hit `getComputedStyle` at most once per `ttl` ms. Create one per widget and call it in paint. */
 export function colorResolver(el: HTMLElement, ttl = 1000): (color: string) => string {
     const cache = new Map<string, { v: string; at: number }>();
     return (color) => {
-        if (!TOKENS[color]) return color; // literal — never touch the dom
+        if (!TOKENS[color]) return color; // literal, never touch the dom
         const now = performance.now();
         const hit = cache.get(color);
         if (hit && now - hit.at < ttl) return hit.v;
@@ -56,11 +41,7 @@ const PALETTE = ['#4c8bf5', '#4ade80', '#fbbf24', '#f87171', '#a78bfa', '#22d3ee
 /** the i-th series color, cycling the palette. */
 export const paletteColor = (i: number): string => PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length];
 
-/**
- * the active threshold color for a value: the color of the highest `at` that the
- * value has reached (order-independent). returns undefined when none apply, so the
- * caller can fall back to a base color.
- */
+/** the color of the highest threshold `at` the value has reached (order-independent), or undefined when none apply. */
 export function thresholdColor(value: number, thresholds?: Threshold[]): string | undefined {
     if (!thresholds || thresholds.length === 0) return undefined;
     let best: string | undefined;
@@ -74,8 +55,7 @@ export function thresholdColor(value: number, thresholds?: Threshold[]): string 
     return best;
 }
 
-// deterministic per-name coloring: the same scope key always gets the same hue,
-// so a scope reads as one color across the flame graph and the time series.
+// same scope key always gets the same hue, so a scope reads as one color across the flame graph and the time series.
 export function hashHue(s: string): number {
     let h = 2166136261; // FNV-1a
     for (let i = 0; i < s.length; i++) {
@@ -89,8 +69,6 @@ export function hashHue(s: string): number {
 export function hashColor(s: string, lightness = 52): string {
     return `hsl(${hashHue(s)} 55% ${lightness}%)`;
 }
-
-// ── chart chrome, shared by the time-series widgets ──────────────────
 
 // faint horizontal rules at the min / mid / max of the current y-range.
 export function drawGrid(g: CanvasRenderingContext2D, w: number, h: number, stroke: string) {

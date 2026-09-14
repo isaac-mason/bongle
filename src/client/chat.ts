@@ -1,15 +1,3 @@
-/**
- * per-room client chat. composes core/chat-commands. owns the displayable
- * line buffer + UI subscribers + message-listener set. data-driven
- * transport: inbound `chat_broadcast` payloads land in `inbox`, outbound
- * user-typed lines land in `outbox`. `tick(net, room)` drains both each
- * frame, inbox entries become lines + fan out to listeners, outbox lines
- * are enqueued as `chat_input` protocol messages.
- *
- * scripts and the UI panel call `submit(chat, line)` for input and
- * `subscribe(chat, fn)` for re-renders.
- */
-
 import type { CommandHandler, CommandInvocation } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
 import type { ClientNet } from './net';
@@ -31,24 +19,19 @@ export type MessageHandler = (msg: ChatBroadcastMsg) => void;
 const MAX_LINES = 100;
 
 export type ChatClient = {
-    /** false hides this room's chat panel; the line buffer and transport keep
-     *  running, so only the UI is gated. toggled by `setEnabled`. */
+    /** hides the chat panel without stopping the line buffer or transport. */
     enabled: boolean;
     /** slash-command specs + their local listeners for this room. */
     commands: ChatCommands.ChatCommands;
-    /** displayable line buffer, capped at `MAX_LINES`. replaced (never mutated
-     *  in place) on append so `useSyncExternalStore` sees a fresh snapshot. */
+    /** displayable line buffer, capped at `MAX_LINES`; replaced (not mutated) on append. */
     lines: ChatLine[];
-    /** UI re-render callbacks, fired on any change to `lines`, `enabled`, or
-     *  the command list. */
+    /** UI re-render callbacks, fired on any change to `lines`, `enabled`, or the command list. */
     subscribers: Set<() => void>;
     /** script listeners for inbound plain chat (`chat.onMessage`). */
     messageListeners: Set<MessageHandler>;
-    /** inbound `chat_broadcast` payloads queued by the network layer;
-     *  drained by `tick` into `lines` + `messageListeners`. */
+    /** inbound `chat_broadcast` payloads, drained by `tick` into `lines` + `messageListeners`. */
     inbox: ChatBroadcastMsg[];
-    /** outbound lines queued by `submit`; drained by `tick` into
-     *  `chat_input` protocol messages. */
+    /** outbound lines queued by `submit`, drained by `tick` into `chat_input` protocol messages. */
     outbox: string[];
 };
 
@@ -66,8 +49,7 @@ export function init(): ChatClient {
     return chat;
 }
 
-/** built-in commands available in every room (play and edit). currently just
- *  `/help`, which dumps the full command list grouped by WE-style vs. bare. */
+/** built-in commands available in every room: currently just `/help`. */
 function registerBuiltins(chat: ChatClient): void {
     ChatCommands.register(chat.commands, {
         name: 'help',
@@ -92,8 +74,7 @@ export function subscribe(chat: ChatClient, fn: () => void): () => void {
     return () => chat.subscribers.delete(fn);
 }
 
-/** show or hide this room's chat panel. notifies subscribers so the panel
- *  re-renders — they snapshot `enabled` alongside `lines`. */
+/** show or hide this room's chat panel, notifying subscribers. */
 export function setEnabled(chat: ChatClient, enabled: boolean): void {
     if (chat.enabled === enabled) return;
     chat.enabled = enabled;
@@ -111,9 +92,8 @@ function notify(chat: ChatClient): void {
 }
 
 export function appendLine(chat: ChatClient, line: Omit<ChatLine, 'ts'>): void {
-    // new array reference each append, useSyncExternalStore compares
-    // snapshots by Object.is, so an in-place push would silently skip
-    // re-renders (visible as "new messages don't appear" while closed).
+    // new array reference each append: useSyncExternalStore compares by Object.is,
+    // so an in-place push would silently skip re-renders.
     const next = chat.lines.concat({ ...line, ts: Date.now() });
     chat.lines = next.length > MAX_LINES ? next.slice(-MAX_LINES) : next;
     notify(chat);
@@ -126,8 +106,7 @@ export function addMessageListener(chat: ChatClient, fn: MessageHandler): () => 
     };
 }
 
-/** ChatCommands.register + notify so the panel reflects the new command in
- *  its completion list. */
+/** registers the command and notifies subscribers of the new completion. */
 export function registerCommand(chat: ChatClient, spec: ChatCommands.CommandSpec): void {
     ChatCommands.register(chat.commands, spec);
     notify(chat);
@@ -142,26 +121,16 @@ export function addCommandListener(chat: ChatClient, name: string, fn: CommandHa
     return ChatCommands.addListener(chat.commands, name, fn);
 }
 
-/** queue an inbound `chat_broadcast` payload for processing on the next
- *  tick. called by the network layer in `engine-client.ts`. */
+/** queue an inbound `chat_broadcast` payload for the next tick. */
 export function enqueueBroadcast(chat: ChatClient, msg: ChatBroadcastMsg): void {
     chat.inbox.push(msg);
 }
 
 /**
- * user submitted `line` via the chat panel (or a script called
- * `chat.message(ctx, line)`).
- *   - slash command with a local listener → echo locally + dispatch, done.
- *   - slash command with a local spec but no local listener → echo locally
- *     + forward to the server (the spec was registered on both sides; the
- *     listener lives server-side).
- *   - slash command with no local spec → echo locally + error. every legit
- *     command registers a spec on the client (see api/chat.ts) so an
- *     unknown slash is a typo, not a server-side command.
- *   - plain chat (no leading '/') → no local echo; stage onto `outbox` for
- *     the next tick to forward as `chat_input`. the server fans it back via
- *     `chat_broadcast` (which includes us), so a local echo would double
- *     up.
+ * a slash command with a local listener dispatches locally; one with only a
+ * server listener echoes and forwards; an unregistered slash echoes an error.
+ * plain chat gets no local echo, it queues to `outbox` and the server fans it
+ * back via `chat_broadcast` (which includes us), avoiding a double echo.
  */
 export function submit(chat: ChatClient, line: string): void {
     const trimmed = line.trim();
@@ -191,11 +160,7 @@ export function submit(chat: ChatClient, line: string): void {
     chat.outbox.push(trimmed);
 }
 
-/**
- * drain inbox and outbox. inbox payloads append to `lines` + fan out to
- * `messageListeners`; outbox lines flush as `chat_input` protocol messages.
- * called once per client frame per room from the client tick loop.
- */
+/** drains inbox into `lines` + `messageListeners` and outbox into `chat_input` messages. */
 export function tick(chat: ChatClient, net: ClientNet, roomId: string): void {
     for (let i = 0; i < chat.inbox.length; i++) {
         const msg = chat.inbox[i]!;

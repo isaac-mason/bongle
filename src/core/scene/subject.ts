@@ -2,46 +2,30 @@ import type * as sceneTree from './scene-tree';
 import type { ScriptContext } from './scripts';
 
 /**
- * the client's current subject: the node local input drives and the engine
- * treats as this client's point of view (renderer + audio). scripts compare
- * their own ctx.node to it to gate per-frame work that should only run on the
- * active subject (camera writes, input-driven movement, etc.); other nodes
- * still run their remaining hooks unconditionally.
- *
- * a plain field on the single client state (`ctx.client.subject`), so a write
- * is observed everywhere without re-seating. server-side, ctx.client is
- * undefined and this returns null (server scripts shouldn't gate on POV).
+ * The client's current subject: the node local input drives and the engine treats as this
+ * client's point of view (renderer + audio). Scripts compare their own ctx.node to it to
+ * gate per-frame work that should only run on the active subject. Server-side, ctx.client
+ * is undefined and this returns null.
  */
 export function getSubject(ctx: ScriptContext): sceneTree.Node | null {
     return ctx.client?.subject ?? null;
 }
 
-/**
- * swap the client's subject. plain in-place write to `ctx.client.subject`.
- * pass `null` to clear. client-only: a no-op on the server. purely local, it
- * changes what this client controls/sees, never ownership or the server-side
- * streaming anchor (that stays the player node).
- */
+/** Swaps the client's subject; pass `null` to clear. Client-only, a no-op on the server. Purely local: it never changes ownership or the server-side streaming anchor. */
 export function setSubject(ctx: ScriptContext, node: sceneTree.Node | null): void {
     if (ctx.client) ctx.client.subject = node;
 }
 
 /**
- * the active render camera node, what the renderer composes the render camera
- * from each frame (its TransformTrait pose + CameraTrait projection). defaults
- * to the room's camera node; the editor lens and DIY setups repoint it.
- *
- * server-side, ctx.client is undefined and this returns null.
+ * The active render camera node, composed each frame from its TransformTrait pose and
+ * CameraTrait projection. Defaults to the room's camera node. Server-side, ctx.client is
+ * undefined and this returns null.
  */
 export function getCamera(ctx: ScriptContext): sceneTree.Node | null {
     return ctx.client?.camera ?? null;
 }
 
-/**
- * point the active render camera at `node`. plain in-place write to the single
- * client state (`ctx.client.camera`), observed by the renderer and every
- * script without re-seating. client-only: a no-op on the server.
- */
+/** Points the active render camera at `node`. Client-only, a no-op on the server. */
 export function setCamera(ctx: ScriptContext, node: sceneTree.Node): void {
     if (ctx.client) ctx.client.camera = node;
 }

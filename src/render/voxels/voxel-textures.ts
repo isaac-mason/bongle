@@ -1,29 +1,3 @@
-// ── voxel textures ──────────────────────────────────────────────────
-//
-// The voxel texture subsystem (see `VoxelTextures` at the foot of the file):
-// the packed block atlas + per-texture rects + texture-animation metadata +
-// the atlas load lifecycle.
-//
-// The atlas is one 2D texture the bake packed (asset-pipeline/bake/tile-atlas):
-// tiles of any multiple-of-16 size in 16-aligned cells, with its mip chain
-// shipped as one PNG per level. A quad carries a texture index and tile-local
-// UVs; the material looks the index up in the `TextureEntry` table (normalised
-// atlas rect + animation per index) and samples the atlas at
-// `rect.xy + uv * rect.zw`. Animation is rect-index arithmetic, frame `f` of
-// texture `i` is entry `i + f`, so the atlas is never re-uploaded per tick.
-//
-// two-phase approach:
-//   1. createVoxelTextures(registry), sync, immediate. a 1x1 white atlas, every
-//      entry's rect covering it, so the world renders instantly (white blocks).
-//   2. loadVoxelTextures(...), async. fetches the baked atlas + levels + manifest
-//      and swaps them in: the Texture is resized in place, so every material
-//      that bound it keeps its binding.
-//
-// sampler: nearest within a level and linear between levels, the sampler
-// vanilla hands Sodium. The material adds Sodium's explicit-LOD supersampling
-// on top (voxel-material), which is what makes nearest-within-level read
-// cleanly at distance.
-
 import {
     createStorageBuffer,
     d,
@@ -38,8 +12,6 @@ import {
 import type { Region } from '../../core/atlas/skyline';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { Blocks } from '../../core/voxels/block-registry';
-
-// ── constants ───────────────────────────────────────────────────────
 
 /** bytes per pixel (rgba8unorm). */
 const BPP = 4;
@@ -63,8 +35,7 @@ const ENTRY_F32S = layoutStrideOf(TextureEntry) / 4;
 const RECT_OFFSET = 0;
 const ANIM_OFFSET = 4;
 
-// ── atlas metadata (must match asset-pipeline/bake/tile-atlas) ──────
-
+// must match asset-pipeline/bake/tile-atlas
 export type TileAtlasMetadata = {
     version: number;
     atlasWidth: number;
@@ -78,10 +49,9 @@ export type TileAtlasMetadata = {
     hash: string;
 };
 
-/** Load the atlas manifest. Client fetches it (assetUrl); the asset pipeline
- *  reads it off disk via the injected loader; the editor reads the vfs. A missing
- *  atlas (404 / parse fail) → null, so the world renders untextured. Shared by
- *  both backends' `load`/`refresh`. */
+/** Loads the atlas manifest. Client fetches it, asset pipeline reads it off disk via the
+ *  injected loader, editor reads the vfs. A missing atlas (404 or parse fail) resolves to
+ *  null, so the world renders untextured. */
 export async function loadAtlasMeta(loader: ResourceLoader): Promise<TileAtlasMetadata | null> {
     try {
         const bytes = await loader.loadBytes('voxels-atlas.json');
@@ -90,8 +60,6 @@ export async function loadAtlasMeta(loader: ResourceLoader): Promise<TileAtlasMe
         return null;
     }
 }
-
-// ── voxel textures subsystem ────────────────────────────────────────
 
 export type VoxelTextures = {
     /** the packed block atlas. */
@@ -159,12 +127,10 @@ export function createVoxelTextures(registry: Blocks): VoxelTextures {
     };
 }
 
-/** Fetch the server-built atlas manifest + upload its pixels, settling
- *  `textures.ready`. `meta` may be pre-fetched by a caller (e.g. a hash
- *  compare); otherwise it is loaded here. By default the upload is fire-and-forget
- *  (`ready` settles on success or failure so callers never hang). With `serialize`,
- *  the returned promise awaits the pixel upload before resolving — the WebGPU backend
- *  uses this so the sharp decode finishes before it compiles the voxel computes. */
+/** Fetches the server-built atlas manifest and uploads its pixels, settling textures.ready.
+ *  By default the upload is fire-and-forget; with serialize, the returned promise awaits
+ *  the pixel upload before resolving, which the WebGPU backend needs before compiling the
+ *  voxel computes. */
 export async function loadVoxelTextures(
     textures: VoxelTextures,
     registry: Blocks,
@@ -172,11 +138,8 @@ export async function loadVoxelTextures(
     meta?: TileAtlasMetadata | null,
     serialize = false,
 ): Promise<void> {
-    // Start the level-0 download before resolving the manifest. The PNG doesn't
-    // depend on the manifest, so awaiting the manifest first would stack two
-    // serial round trips on a cold client. The pipeline emits no PNG when
-    // nothing declares a texture, so skip it there rather than 404. A missing
-    // atlas rejects here; park that until whoever consumes the bytes reports it.
+    // start the level-0 download before resolving the manifest, since the PNG doesn't
+    // depend on it and awaiting first would stack two serial round trips on a cold client.
     const pixelBytes = registry.textures.length > 0 ? loader.loadBytes('voxels-atlas.png') : null;
     pixelBytes?.catch(() => {});
 
@@ -274,9 +237,8 @@ function writeRects(textures: VoxelTextures, textureNames: string[], meta: TileA
     textures.texelSize.value = [invW, invH];
 }
 
-/** PNG bytes → tightly packed RGBA8 of the expected size. The asset pipeline
- *  has no DOM and injects `loader.decodeImage` (sharp / skia); the browser path
- *  is below. */
+/** Decodes PNG bytes to tightly packed RGBA8 of the expected size. The asset pipeline has
+ *  no DOM and injects loader.decodeImage (sharp/skia); the browser path is below. */
 async function decodeRgba(loader: ResourceLoader, bytes: Uint8Array, width: number, height: number): Promise<Uint8Array> {
     const rgba = loader.decodeImage
         ? (await loader.decodeImage(bytes, 'image/png')).rgba
@@ -285,13 +247,9 @@ async function decodeRgba(loader: ResourceLoader, bytes: Uint8Array, width: numb
     return rgba;
 }
 
-/**
- * WebCodecs first: it hands back raw RGBA with no canvas in the middle. The
- * canvas fallback is lossy for every partially transparent texel, because a 2D
- * backing store is premultiplied — drawImage premultiplies, getImageData
- * un-premultiplies, and the RGB of a low-alpha texel is quantised by the round
- * trip. A typical block atlas is ~10% partial alpha (glass, water, leaf edges).
- */
+/** WebCodecs first, since it hands back raw RGBA with no canvas in the middle. The canvas
+ *  fallback is lossy for every partially transparent texel: a 2D backing store is
+ *  premultiplied, so the premultiply/un-premultiply round trip quantises low-alpha RGB. */
 async function decodeRgbaInBrowser(bytes: Uint8Array, width: number, height: number): Promise<Uint8Array> {
     const tightBytes = width * height * BPP;
     if (typeof ImageDecoder !== 'undefined') {

@@ -1,9 +1,3 @@
-// editor/debug-options.ts, the editor's tab on the engine debug dashboard: the
-// debug view toggles + the ws-latency sim. All global editor state (useEditor),
-// bound via get/set accessors; `listen` reflects external changes, `show` reveals
-// the sim sliders only while latency sim is on. Registered through
-// `extendDebugDashboard` by mountEditUI.
-
 import type { TabGroup } from '../client/debug';
 import { useClient } from '../client/ui/stores/client-store';
 import { useEditor } from './editor-store';

@@ -1,16 +1,3 @@
-/**
- * Starter pack textures: the pixel sources, for building your own tiles and
- * sprites from.
- *
- * Most kit textures are declared implicitly by the `src` sugar on a `tile()` or
- * `sprite()` and are not interesting on their own. What lands here is the
- * handful worth reaching for directly, either as a `sprite()`/`tile()` frame or
- * as an `inputs` entry of a computed `texture()` of your own.
- *
- * Exposed individually so the package index can re-export them as
- * `export * as textures`. Consumers reach them as `textures.white`.
- */
-
 import { asset, texture } from 'bongle';
 
 /**
@@ -20,13 +7,13 @@ import { asset, texture } from 'bongle';
  * flat particle, a bar or underlay that wants a colour rather than art. Tint
  * multiplies against it, so white is the identity.
  *
- * Computed rather than shipped as a PNG — a one-pixel file is more to lose track
+ * Computed rather than shipped as a PNG, a one-pixel file is more to lose track
  * of than the four lines that draw it.
  *
  * 1x1 is safe here specifically because the sprite atlas samples `nearest`
  * (`render/sprites/sprite-resources.ts`): every sample lands on the one texel.
  * The atlas does not edge-extend into its padding gutter, so under a linear
- * sampler this size WOULD bleed to transparent at the quad edges.
+ * sampler this size would bleed to transparent at the quad edges.
  */
 export const white = texture('kit:white', {
     size: [1, 1],
@@ -102,13 +89,13 @@ export const leaves = texture('kit:leaves', {
  * the cube's own texel density.
  *
  * The mask matters more than it sounds. A plane carrying the square leaf tile
- * reads as a green CARD stuck through the block; the whole reason the
+ * reads as a green card stuck through the block; the whole reason the
  * technique works is that each plane is a soft-edged clump with nothing at
  * its corners.
  *
  * Built per row as hard-edged spans, never as a filled arc: an antialiased
  * edge puts partial alpha into a cutout texture, where every pixel must be
- * fully on or fully off. ONE path filled ONCE: a `destination-in` op
+ * fully on or fully off. One path filled once, a `destination-in` op
  * composites against the whole canvas, so filling row by row would keep only
  * the last row.
  */

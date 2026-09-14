@@ -1,6 +1,3 @@
-// dynamic bounding-volume tree over fat AABBs. Leaves carry an opaque numeric `data`.
-// SAH sibling choice on insert, AVL rebalance to the root on every insert/remove.
-
 import type { Frustum } from 'gpucat';
 import { type Box3, box3 } from 'math/shapes';
 

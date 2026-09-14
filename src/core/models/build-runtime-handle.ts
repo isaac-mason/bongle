@@ -1,17 +1,3 @@
-// build-runtime-handle.ts, construct a `ModelDef` from a parsed
-// `Model`. Used by `Resources.ensureModel` to hydrate the empty handle
-// that `setModel` created for runtime models (avatars, uploaded assets).
-// Structurally mirrors the bongle pipeline's codegen barrel
-// (`renderModelConstruction` in src/asset-pipeline/bake/models.ts), the
-// codegen path is still the source of truth for *declared* models
-// because it gives a synchronous typed handle at module-eval; this
-// function is the runtime equivalent for models that have no codegen
-// because they were uploaded at runtime.
-//
-// Mutates the passed-in `handle` in place (same object identity) so any
-// user code that grabbed a ref to the empty shell stays valid; bumps
-// `handle.version` so dependent prefabs / queries re-trigger.
-
 import type { Box3 } from 'math/shapes';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
@@ -23,27 +9,20 @@ import type { Model, ModelNode } from './model';
 const TRS_EPS = 1e-6;
 
 /**
- * Hydrate `handle` from `model` in place. Reads the node tree under
- * `model.root`, the by-name indices, and per-mesh AABBs. Writes node
- * tree, flat node index, mesh ref index, clip ref index, root-local
- * AABB. Bumps `handle.version`.
- *
- * Identity isn't preserved across re-hydration, fresh `Node` objects
- * are created each call. Re-hydration isn't part of the normal flow
- * anyway: model swap goes via setModel + a fresh handle for a different id.
+ * Hydrates `def` from `model` in place: writes node tree, flat node index, mesh ref index, clip
+ * ref index, root-local AABB, and bumps `def.version`. Fresh `Node` objects are created each call,
+ * identity isn't preserved across re-hydration.
  */
 export function hydrateRuntimeHandle(def: ModelDef, model: Model): void {
     const modelId = def.modelId;
 
-    // animated set: any ModelNode that's a target of at least one channel.
-    // gates TransformTrait stamping on identity non-mesh nodes.
+    // any ModelNode that's a target of at least one channel; gates TransformTrait stamping on identity non-mesh nodes
     const animated = new Set<ModelNode>();
     for (const clip of model.clipsByName.values()) {
         for (const ch of clip.channels) animated.add(ch.target);
     }
 
-    // walk the runtime tree in DFS, building a parallel Node tree. keep
-    // a parallel ModelNode→Node map so addChild() can wire parents.
+    // parallel ModelNode -> Node map so addChild() can wire parents while walking the runtime tree in DFS
     const nodeByModel = new Map<ModelNode, Node>();
     const nameIndex: Record<string, Node> = {};
 
@@ -86,8 +65,7 @@ export function hydrateRuntimeHandle(def: ModelDef, model: Model): void {
         animations[c.name] = { name: c.name, modelId };
     }
 
-    // mutate the same def object in place, user refs (and the
-    // resources-side entry from setModel) stay valid.
+    // mutate the same def object in place so held refs (including the resources-side entry from setModel) stay valid
     const target = def as {
         -readonly [K in keyof ModelDef]: ModelDef[K];
     };

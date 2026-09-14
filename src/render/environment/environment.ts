@@ -1,30 +1,3 @@
-/**
- * environment, sky, sun, moon, stars, clouds.
- *
- * the GPU side is engine-global: three `frameGroup` UBOs (`envTime`, `envConfig`,
- * `envSky`) live on `EnvironmentResources`, wrapped once as shared nodes
- * (`timeNode`/`cfgNode`/`skyNode`) that every env-aware material captures
- * value-based (no per-geometry binding). the CPU side is per-room: each
- * `Environment` holds its own `_config` / `_sky` shadow that `setEnvironment`
- * mutates without touching GPU state, plus a `time`. only the active room's
- * `updateForCamera` flush points the shared UBOs at its shadow each frame, and
- * `flushActive` does the same on room activation.
- *
- *   `envTime`, per-frame values (`time` time-of-day [0,1), `wallTime` monotonic
- *              seconds); split into their own tiny UBO so only these re-pack each
- *              frame. `envConfig`, rarely-changing knobs (sun/star/cloud config +
- *              master `enabled`). `envSky`, 4-stop sky LUT (12 vec3).
- *
- * values are handed to the UBOs as objects / nested arrays; gpucat packs each per
- * backend at bind ('wgsl-uniform' on WebGPU, 'std140' on WebGL), so this file
- * carries no layout — the same code drives both backends.
- *
- * the sky sphere material paints only the cheap, full-screen part (LUT gradient +
- * horizon sun-wash); sun/moon/stars are instanced billboards. voxel + model + cloud
- * materials capture the same `timeNode`/`cfgNode`, so one env write animates the
- * whole active room's sky + world.
- */
-
 import * as gpu from 'gpucat';
 import type { Vec3 } from 'math';
 import {
@@ -40,54 +13,30 @@ import type * as CloudResources from './clouds/cloud-resources';
 import * as CloudVisuals from './clouds/cloud-visuals';
 import * as Fog from './fog';
 
-/* ── types ────────────────────────────────────────────────────────── */
-
-/**
- * engine-global env GPU handles + the shared shader nodes every env-aware
- * material captures. The env binding is value-based now (materials capture
- * `cfgNode`/`skyNode` directly), not name-based per-geometry; `envConfig`/`envSky`
- * are `frameGroup` UBOs (one std140 uniform bound once per frame, works on both
- * backends). Inferred from `createEnvironmentResources` to avoid hand-writing
- * gpucat's generic node/uniform types.
- */
+/** Engine-global env GPU handles and the shared shader nodes every env-aware material captures, value-based rather than name-based per-geometry. */
 export type EnvironmentResources = ReturnType<typeof createEnvironmentResources>;
 
-/**
- * Active-room environment RENDER state — owned by the renderer (built + torn down
- * as it reconciles its active-room slot). The engine-global `EnvironmentResources`
- * + `CloudResources` it draws with are NOT stored here; the renderer threads them
- * into the flush (it owns them).
- */
+/** Active-room environment render state, owned by the renderer. The engine-global `EnvironmentResources`/`CloudResources` it draws with are threaded into the flush, not stored here. */
 export type EnvVisuals = {
-    /** per-room sky sphere (added to room.render.scene). */
     skyMesh: gpu.Mesh;
-    /** per-room sun + moon billboard pair (2 instances). */
+    /** Sun + moon billboard pair (2 instances). */
     sunMoonMesh: gpu.Mesh;
-    /** per-room star-field billboards (`STAR_COUNT` instances). */
+    /** Star-field billboards (`STAR_COUNT` instances). */
     starMesh: gpu.Mesh;
-    /** per-room scene anchor for the engine-global cloud system (Mesh + Scene;
-     *  heavy state lives on `CloudResources`). The CPU cull runs in
-     *  `updateForCamera` and writes the *shared* compacted instance buffer;
-     *  safe because only the active room renders per frame. */
+    /** Per-room scene anchor for the engine-global cloud system; heavy state lives on `CloudResources`. */
     clouds: CloudVisuals.CloudVisuals;
 };
-
-/* ── GPU struct layout ────────────────────────────────────────────── */
 
 // `enabled` (in EnvConfig) is a u32 mask read by sky + voxel materials.
 // 0 = sky mesh effectively transparent, voxel skyBrightness pinned to 1.0.
 
-/** per-frame env values (change every frame) — split from the rarely-changing
- *  config so only these two floats re-pack each frame (frameGroup UBO). */
+/** Per-frame env values, split from the rarely-changing config so only these re-pack each frame. */
 export const EnvTime = gpu.struct('EnvTime', {
     time: gpu.d.f32,
     wallTime: gpu.d.f32,
-    /** fog colour resolved on the CPU each frame (see `fog.resolveFogColor`);
-     *  the `'sky'` vs authored-colour choice never reaches the GPU. */
+    /** Resolved on the CPU each frame; the `'sky'` vs authored-colour choice never reaches the GPU. */
     fogColor: gpu.d.vec3f,
-    /** fog bands, both resolved on the CPU each frame (see `fog.resolveFogBands`):
-     *  the spherical one a game pins with a numeric `fog.end`, and the cylindrical
-     *  one sized from this client's view radius. */
+    /** Spherical band pinned by a numeric `fog.end`, cylindrical band sized from this client's view radius; both resolved on the CPU each frame. */
     fogStart: gpu.d.f32,
     fogEnd: gpu.d.f32,
     renderFogStart: gpu.d.f32,
@@ -115,30 +64,22 @@ export const EnvConfig = gpu.struct('EnvConfig', {
 const SKY_VEC3_PER_STOP = 3; // zenith, horizon, nadir
 const SKY_VEC3_COUNT = SKY_STOPS * SKY_VEC3_PER_STOP;
 
-/* ── hardcoded constants ──────────────────────────────────────────── */
-
-// authored as sRGB and decoded to linear so voxel textures (which the
-// atlas decodes on sample) and these billboard tints agree on what e.g.
-// "orange" is. see luanti `skyparams.h` for the source values.
+// Authored as sRGB and decoded to linear so voxel textures (atlas-decoded on sample) and these billboard tints agree on what e.g. "orange" is.
 const SUN_COLOR: Vec3 = srgbBytesToLinear(255, 255, 255);
 const MOON_COLOR: Vec3 = srgbBytesToLinear(229, 229, 255); // ~#e5e5ff
 const STAR_COLOR: Vec3 = srgbBytesToLinear(255, 255, 255);
 const FOG_SUN_TINT: Vec3 = srgbBytesToLinear(244, 125, 29); // #f47d1d
-// deeper red that the sun tint blends toward as the sun approaches the
-// horizon. drives the dramatic flare at sunrise / sunset peak.
+// Deeper red the sun tint blends toward as the sun approaches the horizon; drives the flare at sunrise/sunset peak.
 const SUNSET_DEEP_TINT: Vec3 = srgbBytesToLinear(255, 70, 30); // #ff461e
 
-// sun + moon are camera-facing square billboards on the far sphere.
-// HALF_SIZE is the angular half-extent (≈ chord on the unit sphere).
-// EDGE_FEATHER is the smoothstep band that keeps the square edges crisp
-// without MSAA aliasing.
+// Sun + moon are camera-facing square billboards on the far sphere. HALF_SIZE is the
+// angular half-extent; EDGE_FEATHER is the smoothstep band keeping edges crisp without MSAA.
 const SUN_HALF_SIZE = 0.05;
 const MOON_HALF_SIZE = 0.045;
 const BODY_EDGE_FEATHER = 0.12;
 
-// stars are camera-facing round-dot billboards on the far sphere, baked
-// once. STAR_COUNT is the pool size; the live `starsDensity` config gates
-// what fraction is visible (per-star `gate` vs density in the shader).
+// Stars are camera-facing round-dot billboards, baked once. STAR_COUNT is the pool
+// size; the live `starsDensity` config gates what fraction is visible.
 const STAR_COUNT = 2000;
 const STAR_TWINKLE_SPEED = 2.2;
 const STAR_MIN_SIZE = 0.0035;
@@ -146,34 +87,26 @@ const STAR_SIZE_SPREAD = 0.0035;
 const STAR_DOT_RADIUS = 0.8;
 const STAR_DOT_FEATHER = 0.35;
 
-/* ── sky-body instance layouts (sun/moon + stars) ─────────────────── */
-
-/** one per celestial body (2 instances: sun, moon). `kind` 0=sun, 1=moon
- *  selects direction/enable/fade in the shader; direction itself is
- *  derived from `EnvConfig.time`, so this buffer is baked once. */
-/** the voxel light volume's residency-grid shape as the shader needs it:
- *  `mask = dim - 1`, and strides rather than shift counts because WGSL wants a
- *  u32 shift amount while gpucat's node types insist it match the i32 value;
- *  `x << b` is `x * 2^b`. One engine-global frameGroup uniform like the rest
- *  of env, pointed at the live volume by `VoxelResources.init`; declared here
- *  and not in voxels/ so env never value-imports the voxel modules (that
- *  import order is a cycle through core/voxels for the node CLI). */
+/**
+ * The voxel light volume's residency-grid shape as the shader needs it: `mask = dim - 1`,
+ * and strides rather than shift counts because WGSL wants a u32 shift amount while
+ * gpucat's node types insist it match the i32 value (`x << b` is `x * 2^b`). Declared
+ * here rather than in voxels/ so env never value-imports the voxel modules.
+ */
 export const LightVolumeConfig = gpu.struct('LightVolumeConfig', {
     mask: gpu.d.i32,
     rowStride: gpu.d.i32,
     sliceStride: gpu.d.i32,
 });
 
+/** One per celestial body (2 instances: sun, moon). `kind` 0=sun, 1=moon selects direction/enable/fade in the shader; direction is derived from `EnvConfig.time`, so the buffer is baked once. */
 export const SkyBodyInstance = gpu.struct('SkyBodyInstance', {
     color: gpu.d.vec3f,
     kind: gpu.d.f32,
     halfSize: gpu.d.f32,
 });
 
-/** one per star. all fields static; twinkle/night-fade/density read
- *  `EnvConfig` in the shader, so the buffer is baked once and never
- *  updated. `gate` is a uniform random in [0,1) compared against
- *  `starsDensity`; `phase` in [0,1) offsets the twinkle sine. */
+/** One per star; all fields static. `gate` is a uniform random in [0,1) compared against `starsDensity`; `phase` in [0,1) offsets the twinkle sine. */
 export const StarInstance = gpu.struct('StarInstance', {
     dir: gpu.d.vec3f,
     size: gpu.d.f32,
@@ -182,22 +115,10 @@ export const StarInstance = gpu.struct('StarInstance', {
     gate: gpu.d.f32,
 });
 
-/* ── value builders ───────────────────────────────────────────────────
- * we hand the Uniforms structured VALUES (objects / nested arrays), not
- * pre-packed bytes; gpucat packs each per backend at bind ('wgsl-uniform' on
- * WebGPU, 'std140' on WebGL). so there's no layout to manage here.
- */
+// Uniforms are handed structured values (objects/nested arrays), not pre-packed bytes;
+// gpucat packs each per backend at bind, so there's no layout to manage here.
 
-/* ── resources (engine-global) ────────────────────────────────────── */
-
-/**
- * allocate the engine-global env buffers, seeded from `initial`. shape
- * and sizing are fixed once here, every per-room `Environment` flushes
- * into the same two buffers; only one room's state is live on the GPU
- * at a time (the active one).
- */
-// node-wrapping helpers, also used to derive the node param types the material
-// builders take (ReturnType keeps us off gpucat's raw generics).
+// Node-wrapping helpers, also used to derive the node param types the material builders take (ReturnType keeps us off gpucat's raw generics).
 function makeTimeNode(u: gpu.Uniform<typeof EnvTime>) {
     return gpu.fields(gpu.uniform(u));
 }
@@ -212,11 +133,8 @@ type TimeNode = ReturnType<typeof makeTimeNode>;
 type CfgNode = ReturnType<typeof makeCfgNode>;
 type SkyNode = ReturnType<typeof makeSkyNode>;
 
+/** Allocates the engine-global env buffers, seeded from `initial`. Every per-room `Environment` flushes into the same buffers; only one room's state is live on the GPU at a time. */
 export function createEnvironmentResources(initial: ResolvedEnvironment) {
-    // frameGroup UBOs: shared uniforms bound once per frame. we set `.value` to
-    // structured values (objects / nested arrays); gpucat packs each per backend
-    // at bind ('wgsl-uniform' on WebGPU, 'std140' on WebGL). `time`/`wallTime` are
-    // split into their own tiny UBO so only those re-pack every frame.
     const envTime = new gpu.Uniform(
         EnvTime,
         { time: 0.6, wallTime: 0, fogColor: [0, 0, 0], fogStart: 0, fogEnd: 0, renderFogStart: 0, renderFogEnd: 0 },
@@ -224,33 +142,25 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
     );
     const envConfig = new gpu.Uniform(EnvConfig, buildConfigObject(initial), gpu.frameGroup);
     const envSky = new gpu.Uniform(skyArraySchema(), buildSkyValue(initial.sky.stops), gpu.frameGroup);
-    // the light volume's grid shape. Engine-global like the rest: every
-    // light-sampling material reads this one uniform, and `VoxelResources.init`
-    // points it at the volume it creates.
+    // Engine-global like the rest: every light-sampling material reads this one uniform, and `VoxelResources.init` points it at the volume it creates.
     const lightVolumeConfig = new gpu.Uniform(LightVolumeConfig, { mask: 0, rowStride: 1, sliceStride: 1 }, gpu.frameGroup);
 
-    // shared nodes captured (value-based) by every env-aware material.
     const timeNode = makeTimeNode(envTime);
     const cfgNode = makeCfgNode(envConfig);
     const skyNode = makeSkyNode(envSky);
     const lightVolumeCfgNode = gpu.fields(gpu.uniform(lightVolumeConfig));
 
-    // engine-global, baked-once per-instance data for the sun/moon + star billboards
-    // (static; identical every room). captured by the materials as instanced vertex
-    // attributes (a raw Float32Array — no GpuBuffer, no per-frame update), so they
-    // work on both backends.
+    // Baked-once per-instance data for the sun/moon + star billboards (static, identical every
+    // room), captured by the materials as instanced vertex attributes: a raw Float32Array, no
+    // GpuBuffer, no per-frame update, works on both backends.
     const skyBodyData = bakeSkyBodyInstances();
     const starData = bakeStarInstances();
 
-    // env-owned materials, built once and stored here (no module-scope caches).
     const skyMaterial = buildSkyMaterial(timeNode, cfgNode, skyNode);
     const skyBodyMaterial = buildSkyBodyMaterial(timeNode, cfgNode, skyBodyData);
     const starMaterial = buildStarMaterial(timeNode, cfgNode, starData);
 
-    // resolved fog bands, recomputed each frame in `updateForCamera` from the
-    // room config + the client's visual chunk radius. held here so `flushActive`
-    // (room activation, offline icon renders) reuses them instead of flashing
-    // fog off for a frame.
+    // Held here so `flushActive` (room activation, offline icon renders) reuses them instead of flashing fog off for a frame.
     const fogBands = Fog.createFogBands();
 
     return {
@@ -270,11 +180,8 @@ export function createEnvironmentResources(initial: ResolvedEnvironment) {
 }
 
 export function disposeResources(_res: EnvironmentResources): void {
-    // frameGroup UBOs live for the engine lifetime (env is engine-global, never
-    // rebuilt mid-session); the group owns the underlying buffer. nothing to free.
+    // frameGroup UBOs live for the engine lifetime; the group owns the underlying buffer, nothing to free.
 }
-
-/* ── sky shader ───────────────────────────────────────────────────── */
 
 const {
     f32,
@@ -305,11 +212,7 @@ const {
     d,
 } = gpu;
 
-/** far-plane billboard basis: expand a unit direction `dir` by the quad's
- *  local plane offset (`aPos` in [-0.5,0.5]) along the camera's world
- *  right/up, transform as a direction (w=0, camera-locked like the sky
- *  sphere), and pin z=w so the body sits on the far plane. `fullSize` is
- *  the full angular extent (2× the half-size). */
+/** Far-plane billboard basis: expands a unit direction `dir` by the quad's local plane offset along the camera's world right/up, and pins z=w so the body sits on the far plane. `fullSize` is the full angular extent (2x the half-size). */
 function billboardFarPlaneVertex(
     dir: gpu.Node<typeof gpu.d.vec3f>,
     aPos: gpu.Node<typeof gpu.d.vec3f>,
@@ -330,24 +233,14 @@ function billboardFarPlaneVertex(
     return vec4f(clip.x, clip.y, clip.w, clip.w);
 }
 
-/**
- * engine-global sky material. shader reads env via name-based storage,
- * each per-room mesh resolves the `env` + `envSky` buffer names through
- * its own geometry, so one compiled pipeline serves every room. lazy-
- * initialized on first `createSkyMesh` call (must run after the WebGPU
- * device is up, since gpu.Material constructs nodes that touch the
- * shader graph).
- */
+/** Engine-global sky material; one compiled pipeline serves every room via the shared value-bound nodes. */
 function buildSkyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyNode: SkyNode): gpu.Material {
     const cfg = cfgNode;
     const skyArr = skyNode;
     const tNode = timeNode.time;
 
-    // ── vertex ──
-    // pin the sphere to the far plane (background trick), and compute every
-    // uniform-only sky scalar here (per-vertex, ~1k verts) so the fragment
-    // (millions of pixels) does none of it. sun/moon/stars are separate
-    // billboards now — this shader only paints the gradient + horizon wash.
+    // Pins the sphere to the far plane, and computes every uniform-only sky scalar here
+    // (per-vertex, ~1k verts) so the fragment (millions of pixels) does none of it.
     const pos = attribute('position', d.vec3f);
     const viewPos = mul(cameraViewMatrix, vec4f(pos, f32(0))).toVar('viewPos');
     const clipPos = mul(cameraProjectionMatrix, vec4f(viewPos.xyz, f32(1))).toVar('clipPos');
@@ -355,8 +248,7 @@ function buildSkyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyNode: SkyNode
 
     const dir = varying(normalize(pos), 'vDir');
 
-    // LUT interp by time-of-day → current zenith/horizon/nadir colours.
-    // depends only on `time`, so it's flat across the sphere.
+    // LUT interp by time-of-day to current zenith/horizon/nadir colours; depends only on `time`, so it's flat across the sphere.
     const scaled = mul(tNode, f32(4)).toVar('lutScaled');
     const segF = floor(scaled).toVar('lutSegF');
     const fracT = sub(scaled, segF).toVar('lutFracT');
@@ -374,19 +266,18 @@ function buildSkyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyNode: SkyNode
         'vNadir',
     ).setInterpolation('flat');
 
-    // sun direction (t=0.25 sunrise east, 0.5 noon up) + sunset atmospherics.
+    // Sun direction: t=0.25 sunrise east, 0.5 noon up.
     const TAU = f32(Math.PI * 2);
     const sunAngle = mul(sub(tNode, f32(0.25)), TAU).toVar('sunAngle');
     const sunDir = vec3f(cos(sunAngle), sin(sunAngle), f32(0)).toVar('sunDir');
     const sunDirV = varying(sunDir, 'vSunDir').setInterpolation('flat');
 
-    // sunset peaks when the sun sits right at the horizon; drives a redder,
-    // stronger, wider horizon wash and a dimmer rest-of-sky.
+    // Sunset peaks when the sun sits right at the horizon; drives a redder, stronger, wider horizon wash and a dimmer rest-of-sky.
     const sunsetNear = sub(f32(1), clamp(mul(abs(sunDir.y), f32(3.5)), f32(0), f32(1))).toVar('sunsetNear');
     const sunAboveGate = smoothstep(f32(-0.12), f32(0.08), sunDir.y).toVar('sunAboveGate');
     const sunsetFactor = mul(sunsetNear, sunAboveGate).toVar('sunsetFactor');
 
-    // single-term wash: tight warm halo around the sun that widens at dusk.
+    // Single-term wash: tight warm halo around the sun that widens at dusk.
     const glowPowV = varying(mix(f32(8), f32(5), sunsetFactor), 'vGlowPow').setInterpolation('flat');
     const glowStrengthV = varying(mix(f32(0.4), f32(0.95), sunsetFactor), 'vGlowStrength').setInterpolation('flat');
     const skyDimV = varying(sub(f32(1), mul(sunsetFactor, f32(0.35))), 'vSkyDim').setInterpolation('flat');
@@ -396,7 +287,7 @@ function buildSkyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyNode: SkyNode
     const sunEnabledV = varying(cfg.sunEnabled.toF32(), 'vSunEnabled').setInterpolation('flat');
     const enabledMaskV = varying(cfg.enabled.toF32(), 'vEnabledMask').setInterpolation('flat');
 
-    // ── fragment: vertical gradient + a single-term horizon sun-wash ──
+    // Fragment: vertical gradient plus a single-term horizon sun-wash.
     const y = dir.y;
     const above = step(f32(0), y).toVar('above');
     const tUp = smoothstep(f32(0), f32(1), clamp(abs(y), f32(0), f32(1))).toVar('tUp');
@@ -424,30 +315,22 @@ function buildSkyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyNode: SkyNode
     });
 }
 
-/* ── sun + moon (instanced billboards) ────────────────────────────── */
-
-/**
- * engine-global sun/moon material: 2 camera-facing square billboards on
- * the far sphere. `kind` (0 sun, 1 moon) selects direction, enable and
- * day/night fade — all derived from `EnvConfig.time` in-shader, so the
- * instance buffer is static. lazy-cached like `getSkyMaterial`.
- */
+/** Sun/moon material: 2 camera-facing square billboards on the far sphere. `kind` (0 sun, 1 moon) selects direction, enable, and day/night fade, all derived from `EnvConfig.time` in-shader. */
 function buildSkyBodyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyBodyData: Float32Array): gpu.Material {
     const cfg = cfgNode;
-    // per-instance data via instanced vertex attributes (both backends; the data is
-    // static, baked once). std430 field offsets: color vec3f@0, kind@12, halfSize@16.
+    // std430 field offsets: color vec3f@0, kind@12, halfSize@16.
     const stride = gpu.layoutStrideOf(SkyBodyInstance);
     const color = attribute(skyBodyData, d.vec3f, { instanced: true, stride, offset: 0 }).toVar('sbColor');
     const kind = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 12 }).toVar('sbKind'); // 0 sun, 1 moon
     const halfSize = attribute(skyBodyData, d.f32, { instanced: true, stride, offset: 16 }).toVar('sbHalf');
 
-    // sun/moon directions from time; select by kind (0/1) via mix.
+    // Sun/moon directions from time; select by kind (0/1) via mix.
     const TAU = f32(Math.PI * 2);
     const sunAngle = mul(sub(timeNode.time, f32(0.25)), TAU).toVar('sbSunAngle');
     const sunDir = vec3f(cos(sunAngle), sin(sunAngle), f32(0)).toVar('sbSunDir');
     const dir = mix(sunDir, mul(sunDir, f32(-1)), kind).toVar('sbDir');
 
-    // day/night fade: sun visible while up, moon while the sky is dark.
+    // Day/night fade: sun visible while up, moon while the sky is dark.
     const nightFactor = clamp(mul(sub(f32(0.3), sunDir.y), f32(2)), f32(0), f32(1)).toVar('sbNight');
     const aboveHorizon = smoothstep(f32(-0.05), f32(0.05), dir.y).toVar('sbAbove');
     const sunAlpha = aboveHorizon.toVar('sbSunAlpha');
@@ -462,7 +345,7 @@ function buildSkyBodyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyBodyData:
     const vAlpha = varying(alpha, 'sbAlphaV').setInterpolation('flat');
     const vUv = varying(attribute('uv', d.vec2f), 'sbUv');
 
-    // feathered square: L∞ distance from centre in [-1,1] quad space.
+    // Feathered square: L-infinity distance from centre in [-1,1] quad space.
     const c = sub(mul(vUv, f32(2)), vec2f(f32(1), f32(1))).toVar('sbC');
     const dSquare = max(abs(c.x), abs(c.y)).toVar('sbDSquare');
     const edge = sub(f32(1), smoothstep(sub(f32(1), f32(BODY_EDGE_FEATHER)), f32(1), dSquare)).toVar('sbEdge');
@@ -473,8 +356,7 @@ function buildSkyBodyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyBodyData:
         vertex,
         fragment,
         cullMode: 'none',
-        // pinned to the far plane (depth 1.0); `less-equal` lets it draw
-        // against the cleared sky while nearer terrain still occludes it.
+        // Pinned to the far plane (depth 1.0); `less-equal` lets it draw against the cleared sky while nearer terrain still occludes it.
         depthTest: true,
         depthCompare: 'less-equal',
         depthWrite: false,
@@ -482,8 +364,7 @@ function buildSkyBodyMaterial(timeNode: TimeNode, cfgNode: CfgNode, skyBodyData:
     });
 }
 
-/** 2-instance sun/moon buffer, baked once (colour + angular size per body).
- *  direction/fade are derived in-shader from time. */
+/** 2-instance sun/moon buffer, baked once (colour + angular size per body); direction/fade are derived in-shader from time. */
 function bakeSkyBodyInstances(): Float32Array {
     const stride = gpu.layoutStrideOf(SkyBodyInstance) / 4;
     const out = new Float32Array(2 * stride);
@@ -497,8 +378,7 @@ function bakeSkyBodyInstances(): Float32Array {
 }
 
 function createSkyBodyMesh(res: EnvironmentResources): gpu.Mesh {
-    // per-instance data is the engine-global static buffer captured by the material
-    // as instanced attributes; the plane geometry + `count` are all the mesh needs.
+    // Per-instance data is the material's static instanced attribute buffer; the plane geometry + `count` are all the mesh needs.
     const geometry = gpu.createPlaneGeometry(1, 1);
     const mesh = new gpu.Mesh(geometry, res.skyBodyMaterial);
     mesh.name = 'sky-bodies';
@@ -508,19 +388,10 @@ function createSkyBodyMesh(res: EnvironmentResources): gpu.Mesh {
     return mesh;
 }
 
-/* ── stars (instanced billboards) ─────────────────────────────────── */
-
-/**
- * engine-global star material: `STAR_COUNT` camera-facing round-dot
- * billboards on the far sphere. per-star data (dir/size/brightness/phase/
- * gate) is static; twinkle, night fade and the live density gate read
- * `EnvConfig` in-shader, and invisible stars collapse to zero size so
- * daytime costs no fragments. lazy-cached like the others.
- */
+/** Star material: `STAR_COUNT` camera-facing round-dot billboards. Per-star data is static; twinkle, night fade, and the live density gate read `EnvConfig` in-shader, and invisible stars collapse to zero size. */
 function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float32Array): gpu.Material {
     const cfg = cfgNode;
-    // per-instance data via instanced vertex attributes (static, baked once). std430
-    // field offsets: dir vec3f@0, size@12, brightness@16, phase@20, gate@24.
+    // std430 field offsets: dir vec3f@0, size@12, brightness@16, phase@20, gate@24.
     const stride = gpu.layoutStrideOf(StarInstance);
     const dir = attribute(starData, d.vec3f, { instanced: true, stride, offset: 0 }).toVar('stDir');
     const baseSize = attribute(starData, d.f32, { instanced: true, stride, offset: 12 }).toVar('stSize');
@@ -533,7 +404,7 @@ function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float
     const sunY = sin(sunAngle).toVar('stSunY');
     const nightFactor = clamp(mul(sub(f32(0.3), sunY), f32(2)), f32(0), f32(1)).toVar('stNight');
     const aboveHorizon = smoothstep(f32(0), f32(0.04), dir.y).toVar('stAbove');
-    // live density: a star shows when its baked gate falls under the config.
+    // A star shows when its baked gate falls under the config.
     const densityVis = step(gate, cfg.starsDensity).toVar('stDensity');
     const starsOn = mul(cfg.starsEnabled.toF32(), cfg.enabled.toF32()).toVar('stOn');
     const vis = mul(mul(mul(nightFactor, aboveHorizon), densityVis), starsOn).toVar('stVis');
@@ -544,7 +415,7 @@ function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float
     ).toVar('stTwinkle');
     const brightnessOut = mul(mul(brightness, twinkle), vis).toVar('stBrightOut');
 
-    // collapse invisible stars to a degenerate quad → zero fragments.
+    // Collapse invisible stars to a degenerate quad: zero fragments.
     const effSize = mul(baseSize, step(f32(0.001), vis)).toVar('stEffSize');
 
     const aPos = attribute('position', d.vec3f);
@@ -553,7 +424,7 @@ function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float
     const vBright = varying(brightnessOut, 'stBrightV').setInterpolation('flat');
     const vUv = varying(attribute('uv', d.vec2f), 'stUv');
 
-    // round dot: radial falloff from the quad centre.
+    // Round dot: radial falloff from the quad centre.
     const c = sub(mul(vUv, f32(2)), vec2f(f32(1), f32(1))).toVar('stC');
     const r = sqrt(dot(c, c)).toVar('stR');
     const dot2 = sub(f32(1), smoothstep(sub(f32(STAR_DOT_RADIUS), f32(STAR_DOT_FEATHER)), f32(STAR_DOT_RADIUS), r)).toVar(
@@ -567,8 +438,7 @@ function buildStarMaterial(timeNode: TimeNode, cfgNode: CfgNode, starData: Float
         vertex,
         fragment,
         cullMode: 'none',
-        // far-plane pinned; `less-equal` draws against the cleared sky and
-        // lets terrain occlude stars near the horizon.
+        // Far-plane pinned; `less-equal` draws against the cleared sky and lets terrain occlude stars near the horizon.
         depthTest: true,
         depthCompare: 'less-equal',
         depthWrite: false,
@@ -583,8 +453,7 @@ function starHash(i: number, salt: number): number {
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-/** bake `STAR_COUNT` stars: Fibonacci-sphere directions for even spread,
- *  hashed size/brightness/phase/gate. baked once, identical every room. */
+/** Bakes `STAR_COUNT` stars: Fibonacci-sphere directions for even spread, hashed size/brightness/phase/gate. Identical every room. */
 function bakeStarInstances(): Float32Array {
     const stride = gpu.layoutStrideOf(StarInstance);
     const out = new Float32Array((STAR_COUNT * stride) / 4);
@@ -605,7 +474,6 @@ function bakeStarInstances(): Float32Array {
 }
 
 function createStarMesh(res: EnvironmentResources): gpu.Mesh {
-    // per-instance data is the engine-global static buffer captured by the material.
     const geometry = gpu.createPlaneGeometry(1, 1);
     const mesh = new gpu.Mesh(geometry, res.starMaterial);
     mesh.name = 'stars';
@@ -615,16 +483,9 @@ function createStarMesh(res: EnvironmentResources): gpu.Mesh {
     return mesh;
 }
 
-/**
- * per-room sky sphere. material is engine-global (cached); geometry binds
- * this room's env buffers by name so the shared shader resolves to per-
- * room storage at render time.
- */
+/** Per-room sky sphere; material is engine-global. Env is bound value-based (the material captured `res.cfgNode`/`res.skyNode`), no per-geometry env buffer. */
 function createSkyMesh(res: EnvironmentResources): gpu.Mesh {
     const geometry = gpu.createSphereGeometry(1, 32, 32);
-    // env is bound value-based (the material captured `res.cfgNode`/`res.skyNode`);
-    // no per-geometry env buffer.
-
     const mesh = new gpu.Mesh(geometry, res.skyMaterial);
     mesh.name = 'sky';
     mesh.frustumCulled = false;
@@ -632,13 +493,7 @@ function createSkyMesh(res: EnvironmentResources): gpu.Mesh {
     return mesh;
 }
 
-/* ── lifecycle ────────────────────────────────────────────────────── */
-
-/**
- * Build a room's env RENDER state (sky/sun/moon/star meshes + cloud anchor),
- * added to `scene`. Owned by the renderer; drawn with the engine-global
- * `resources` + `cloudResources` (threaded into `updateForCamera`, not stored).
- */
+/** Builds a room's env render state (sky/sun/moon/star meshes plus cloud anchor), added to `scene`. Drawn with the engine-global `resources`/`cloudResources`, threaded into `updateForCamera`, not stored. */
 export function initEnvVisuals(
     scene: gpu.Scene,
     resources: EnvironmentResources,
@@ -658,17 +513,15 @@ export function disposeEnvVisuals(vis: EnvVisuals): void {
     vis.skyMesh.removeFromParent();
     vis.sunMoonMesh.removeFromParent();
     vis.starMesh.removeFromParent();
-    // sky/body/star materials + their static instance data are engine-global (built
-    // once in createEnvironmentResources), so nothing per-room to free here; the
-    // per-room plane geometries drop with the meshes.
+    // sky/body/star materials and their static instance data are engine-global, so nothing per-room to free; the per-room plane geometries drop with the meshes.
     CloudVisuals.dispose(vis.clouds);
 }
 
-/** run the CPU cloud cull + pack the compacted instance buffer, advance the
- *  wall-clock field, and flush pending CPU→GPU writes for the env buffers.
- *  ACTIVE ROOM ONLY — the engine-global resource buffers hold exactly one room's
- *  state at a time (the currently rendered one). The renderer supplies its own
- *  `resources` + `cloudResources`; `env` is the room's client-side config. */
+/**
+ * Runs the CPU cloud cull, packs the compacted instance buffer, and flushes pending
+ * CPU-to-GPU writes for the env buffers. Active room only: the engine-global resource
+ * buffers hold exactly one room's state at a time.
+ */
 export function updateForCamera(
     vis: EnvVisuals,
     env: Environment,
@@ -681,18 +534,13 @@ export function updateForCamera(
     syncEnvVisibility(vis, env);
     CloudVisuals.update(vis.clouds, cloudResources, env, camera, time);
 
-    // fog's default `end: 'view'` tracks the client's own visual radius (a
-    // perf-tier setting a script can't know), so the bands resolve here where
-    // both the room config and the radius are in hand.
+    // Fog's default `end: 'view'` tracks the client's own visual radius, a perf-tier setting a script can't know, so the bands resolve here.
     Fog.resolveFogBands(resources.fogBands, env.config, viewChunkRadius);
 
     flush(env, resources);
 }
 
-/** Sync the sky/sun/moon/star/cloud MESH visibility from the config's master
- *  `enabled` toggle (was flipped inline in `applyConfig`; now render state the
- *  renderer drives). Called from `updateForCamera` on the live path, and directly
- *  by offline icon renders (which flush without a per-frame `updateForCamera`). */
+/** Syncs the sky/sun/moon/star/cloud mesh visibility from the config's master `enabled` toggle. Called from `updateForCamera` and directly by offline icon renders. */
 export function syncEnvVisibility(vis: EnvVisuals, env: Environment): void {
     const enabled = env.config.enabled;
     vis.skyMesh.visible = enabled;
@@ -701,9 +549,7 @@ export function syncEnvVisibility(vis: EnvVisuals, env: Environment): void {
     vis.clouds.mesh.visible = enabled;
 }
 
-/** force a push of this room's CPU shadow into the engine-global UBOs. call when
- *  a room becomes active, its config/sky may have drifted from the GPU contents
- *  while another room was active. */
+/** Forces a push of this room's CPU shadow into the engine-global UBOs. Call when a room becomes active, since its config/sky may have drifted from the GPU contents while another room was active. */
 export function flushActive(env: Environment, resources: EnvironmentResources): void {
     env._configDirty = true;
     env._skyDirty = true;
@@ -713,12 +559,7 @@ export function flushActive(env: Environment, resources: EnvironmentResources): 
 const _fogColorScratch: Vec3 = [0, 0, 0];
 
 function flush(env: Environment, resources: EnvironmentResources): void {
-    // point the engine-global frameGroup UBOs at this (active) room's CPU shadow;
-    // gpucat re-packs from `.value` per backend. only the active room flushes, so
-    // background rooms never touch the shared uniforms.
-    //
-    // time/wallTime are per-frame — set the small time UBO every tick. config/sky
-    // are rarely-changing — set only when dirty.
+    // Points the engine-global frameGroup UBOs at this (active) room's CPU shadow. time/wallTime are per-frame; config/sky are set only when dirty.
     Fog.resolveFogColor(_fogColorScratch, env);
     resources.envTime.value = {
         time: env.time,

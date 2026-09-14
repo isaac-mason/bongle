@@ -1,27 +1,3 @@
-// VoxelMeshResources, engine-global baked-mesh material.
-//
-// builds one Material per `EngineClient`; shared across all rooms. each
-// room's per-instance buffers (meshQuads, instanceData, slotMap,
-// chunkInfoTable) are routed by name via `geometry.setBuffer(...)`.
-//
-// the baked path mirrors the chunk path's unified all-quads format
-// (14 u32/quad, header + per-corner light interleaved; see
-// voxel-material.ts and chunk-mesher.ts PassMesh), but uses HW instancing:
-//   - one DrawIndirect per (model × source-chunk) bucket; instanceCount =
-//     number of currently-visible VoxelMeshTraits referencing that model.
-//   - the per-frame `slotMap` packs (realSlot | bucketId<<24) so the VS
-//     can resolve both the per-instance data and the per-bucket chunk info
-//     from a single read.
-//   - `chunkInfoTable[bucketId]` carries the source-chunk's `subOrigin` and
-//     `quadStart`.
-//   - `instanceData[realSlot]` carries the world matrix + InstanceParams
-//     (merged into one binding, same shape as mesh-resources).
-//
-// CPU frustum cull: voxel-mesh-visuals reads each instance's own
-// `cull.visible` (written by the room culler). per-corner
-// light is sampled from the GPU light volume per instance, not baked into
-// `meshQuads`, written by `meshChunk`'s `emitQuadLight*` helpers.
-
 import {
     add,
     BufferLifecycle,
@@ -70,8 +46,6 @@ import {
     pickCornerIdx,
 } from './voxel-material';
 
-// ── gpu structs ─────────────────────────────────────────────────────
-
 export const InstanceParams = struct('VoxelMeshInstanceParams', {
     /** rgb is the recolour target, a the intensity (lightness-preserving). */
     tint: d.vec4f,
@@ -86,20 +60,18 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
     dither: d.f32,
 });
 
-// Per-slot stable instance record. Merges world matrix + InstanceParams
-// into one binding, same shape as mesh-resources.ModelInstance. Layout:
-// mat4x4f (64B, align 16) then InstanceParams (64B, align 16, no pad)
-// → 128B per slot, struct align 16.
+// Per-slot stable instance record: mat4x4f (64B) then InstanceParams (64B, no pad),
+// 128B per slot, struct align 16. Same shape as mesh-resources.ModelInstance.
 export const ModelInstance = struct('VoxelMeshModelInstance', {
     worldMatrix: d.mat4x4f,
     params: InstanceParams,
 });
 
-/** one entry per (model × source-chunk) bucket emitted this frame.
+/** one entry per (model x source-chunk) bucket emitted this frame.
  *  the VS reads it via `chunkInfoTable[bucketId]`. */
 export const ChunkInfo = struct('VoxelMeshChunkInfo', {
     /** model-local origin of this source-chunk's data; added to the per-
-     *  corner u8×3 chunk-local position before applying the world matrix. */
+     *  corner u8x3 chunk-local position before applying the world matrix. */
     subOrigin: d.vec3f,
     /** first quad in meshQuadArena for this bucket. */
     quadStart: d.u32,
@@ -112,7 +84,7 @@ export const MODEL_INSTANCE_PARAMS_OFFSET = 64;
 export const CHUNK_INFO_STRIDE = layoutStrideOf(ChunkInfo);
 
 /** slotMap packs (realSlot | bucketId << SLOT_BITS). 24 bits of slot
- *  (≈16M instances) and 8 bits of bucket (256 unique model×chunk per
+ *  (~16M instances) and 8 bits of bucket (256 unique model x chunk per
  *  frame). bump SLOT_BITS to 20 if bucket counts ever push past 256. */
 export const SLOT_BITS = 24;
 export const SLOT_MASK = (1 << SLOT_BITS) - 1;
@@ -121,17 +93,10 @@ export const MAX_BUCKETS = 1 << (32 - SLOT_BITS);
 /** f32 count per `ModelInstance` slot (128B / 4 = 32). */
 export const MODEL_INSTANCE_STRIDE_F32 = MODEL_INSTANCE_STRIDE / 4;
 
-// ── instance batch (client-global, persistent GPU allocation) ───────
-// The shared meshArena (refcounted baked-model quads) + per-slot instance buffer
-// + slotMap + chunkInfoTable + their Mesh/Geometry + the model registry live
-// here, NOT on per-room visuals. One room renders at a time, so a room swap
-// REUSES this GPU allocation (reset counts + re-add the Mesh) instead of freeing
-// + reallocating it. Per-room `VoxelMeshVisuals` keep only this-room's use —
-// alive-states, cull entries, scene-tree query. Because the arena is now
-// client-global, a baked model's GPU quads are keyed by VoxelModel and refcounted
-// across the active room's instances (drained on room teardown, re-baked on the
-// next room's first tick into the same buffers).
-
+// the shared meshArena, per-slot instance buffer, slotMap, chunkInfoTable, and model
+// registry are client-global, not per-room: one room renders at a time, so a room swap
+// reuses this GPU allocation (reset counts, re-add the Mesh) instead of reallocating it.
+// Per-room VoxelMeshVisuals keep only this room's alive-states, cull entries, and query.
 const INITIAL_INSTANCE_CAPACITY = 64;
 const INITIAL_MAX_BUCKETS = 256;
 const INITIAL_MESH_QUAD_CAPACITY = 16384;
@@ -199,7 +164,7 @@ export type VoxelMeshBatch = {
     instanceCapacity: number;
     maxBuckets: number;
     instanceAllocator: Allocator;
-    /** ref-counted geometry registry (model → baked arena allocations). */
+    /** ref-counted geometry registry (model to baked arena allocations). */
     modelEntries: Map<VoxelModel, ModelEntry>;
     /** monotonic id for ModelEntry.id, used in bucket keys. */
     nextModelId: number;
@@ -266,10 +231,9 @@ function createVoxelMeshBatch(material: Material): VoxelMeshBatch {
     };
 }
 
-/** Ready the batch for a fresh room: empty the allocator + scratch + draws +
- *  model registry. Buffers are NOT touched. The arena is empty here — room
- *  teardown drains every model's refcount (freeing its ranges), so a fresh room
- *  re-bakes into the same buffers. */
+/** Readies the batch for a fresh room: empties the allocator, scratch, draws, and model
+ *  registry. Buffers are not touched; room teardown drains every model's refcount, so a
+ *  fresh room re-bakes into the same buffers. */
 export function resetVoxelMeshBatch(batch: VoxelMeshBatch): void {
     batch.instanceAllocator.head = 0;
     batch.instanceAllocator.freeList.length = 0;
@@ -343,14 +307,10 @@ function disposeVoxelMeshBatch(batch: VoxelMeshBatch): void {
     batch.chunkInfoBuf.dispose();
 }
 
-// ── resources ───────────────────────────────────────────────────────
-
 export type VoxelMeshResources = {
     /** engine-global baked-mesh material, binds per-room buffers by name. */
     material: Material;
-    /** client-global instance batch (Mesh/Geometry + mesh arena + per-slot
-     *  buffers + model registry). Reused across room swaps; per-room
-     *  `VoxelMeshVisuals` drive it. */
+    /** client-global instance batch, reused across room swaps; per-room VoxelMeshVisuals drive it. */
     batch: VoxelMeshBatch;
 };
 
@@ -369,8 +329,6 @@ export function dispose(resources: VoxelMeshResources): void {
     disposeVoxelMeshBatch(resources.batch);
     resources.material.dispose();
 }
-
-// ── material ────────────────────────────────────────────────────────
 
 function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f32>, env: EnvironmentResources): Material {
     // per-name storage bindings
@@ -411,13 +369,11 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
 
     const cornerIdx = pickCornerIdx(diagFlip, vertInQuad);
     const { chunkLocalByte, uv, modelNormal } = decodeQuadCorner(meshQuads, realQuadId, cornerIdx);
-    // inverse of mesher pos16's 255/16 scale (byte 0 → 0, byte 255 → 16).
-    // matches chunk shader so sub-chunk boundaries within a baked mesh
-    // meet seamlessly, the old 1/16 scale left a ~0.0625-voxel gap at
-    // every byte=255 corner.
+    // inverse of mesher pos16's 255/16 scale (byte 0 -> 0, byte 255 -> 16), matching the
+    // chunk shader so sub-chunk boundaries within a baked mesh meet seamlessly.
     const chunkLocal = chunkLocalByte.mul(f32(POS_DECODE_SCALE)).sub(f32(POS_DECODE_ORIGIN)).toVar('chunkLocal');
 
-    // chunk-local → model-local → world (before animation)
+    // chunk-local to model-local to world (before animation)
     const modelLocal = add(subOrigin, chunkLocal).toVar('modelLocal');
     const worldPosBase = mul(worldMatrix, vec4f(modelLocal, f32(1.0))).toVar('worldPosBase');
 
@@ -452,12 +408,8 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
     // env-derived sky/sun
     const { sunDirection, sunIntensity, skyBrightness, ambientMinimum } = buildEnvSky(env);
 
-    // per-instance light: [sky, r, g, b] sampled from the GPU light volume at
-    // the instance origin. expand sky->skyBrightness and
-    // combine with block RGB the same way `unpackVoxelLight` does so the
-    // two paths live on the same scale. max(perCorner, perInstance).
-    // per-instance light floor, sampled in the shader at the instance origin
-    // (where the CPU used to sample it) rather than uploaded per frame.
+    // per-instance light sampled from the GPU light volume at the instance origin, combined
+    // with block RGB the same way unpackVoxelLight does so both paths share a scale.
     const instLight = sampleWorldLight(bindLightVolume(env), worldMatrix.element(u32(3)).xyz).toVar('instLight');
     const instSkyContrib = vec3f(
         mul(instLight.x, skyBrightness),
@@ -468,10 +420,8 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
 
     const instLitMin = instParams.field('litMin').toVar('instLitMin');
     const litMinFloor = vec3f(instLitMin, instLitMin, instLitMin).toVar('litMinFloor');
-    // A block model is an ENTITY: it moves, so per-corner light baked at mesh
-    // time would be wrong the moment it did. The per-instance volume sample is
-    // the only live source, so it IS the light rather than a floor under a
-    // baked value.
+    // a block model moves, so per-corner light baked at mesh time would go stale; the
+    // per-instance volume sample is the only live source, so it is the light, not a floor.
     const voxelLight = max(instFloor, litMinFloor).toVar('voxelLight');
 
     // varyings

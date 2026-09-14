@@ -3,36 +3,26 @@ import { get, registry, type ProtocolTable } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 
-/* ── rpc direction constants ─────────────────────────────────────────── */
-
 export const CLIENT_TO_SERVER = 'client_to_server' as const;
 export const SERVER_TO_CLIENT = 'server_to_client' as const;
 
 export type RpcDirection = typeof CLIENT_TO_SERVER | typeof SERVER_TO_CLIENT;
 
-/* ── Rpc state ───────────────────────────────────────────────────────── */
-
-/**
- * side-specific outbound transport. server impl routes via Net.send /
- * Net.broadcastToRoom; client impl routes via ClientNet.send. constructed
- * by `server/rpc.ts` and `client/rpc.ts`; lives on `NodesRuntime` so
- * scripts can dispatch sends without knowing the side.
- */
+/** side-specific outbound transport. Server impl routes via Net.send /
+ *  Net.broadcastToRoom; client impl routes via ClientNet.send. Constructed
+ *  by `server/rpc.ts` and `client/rpc.ts`; lives on `NodesRuntime` so
+ *  scripts can dispatch sends without knowing the side. */
 export type RpcDriver = {
-    /**
-     * unified outbound. `client` is the optional addressee:
-     * - client→server side: client param is ignored (client only ever sends to its server)
-     * - server→client side: client param routes to that specific peer; absent = noop
-     *   (server uses `broadcast` for the to-all path)
-     */
+    /** unified outbound. `client` is the optional addressee: on the
+     *  client-to-server side it's ignored; on server-to-client it routes to
+     *  that specific peer, absent means noop (server uses `broadcast` for
+     *  the to-all path). */
     send(commandIndex: number, roomId: string, payload: Uint8Array, client?: unknown): void;
     broadcast(commandIndex: number, roomId: string, payload: Uint8Array): void;
 };
 
-/**
- * registered listener entry. `room` is the roomId the handler is scoped to,
- * dispatch matches it against the inbound message's roomId.
- */
+/** registered listener entry. `room` is the roomId the handler is scoped to,
+ *  matched against the inbound message's roomId at dispatch time. */
 export type ListenerEntry = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fn: (...args: any[]) => void;
@@ -40,14 +30,10 @@ export type ListenerEntry = {
 };
 
 /**
- * one Rpc state per side. the driver carries side-specific send impls;
- * `listeners` is a per-room registry, entries scoped by roomId, matched
- * against `message.roomId` at dispatch time.
- *
- * the command wire-index table lives on `ProjectModule.commandProtocolTable`,
- * not here, callers of `send`/`dispatchNetMessage` pass it in. that way
- * one rebuild (`getProjectModule()`) covers every wire-index table the
- * project derives from its registries (commands, traits).
+ * one Rpc state per side. The driver carries side-specific send impls;
+ * `listeners` is a per-room registry. The command wire-index table lives on
+ * `ProjectModule.commandProtocolTable`, not here; callers of
+ * `send`/`dispatchNetMessage` pass it in.
  */
 export type Rpc = RpcDriver & {
     listeners: Map<string, Set<ListenerEntry>>;
@@ -60,12 +46,9 @@ export function init(driver: RpcDriver): Rpc {
     };
 }
 
-/**
- * register a handler for a command, scoped to `room`. returns the
- * registered entry so callers can hold it as data and pass it to
- * `unlisten` later, no closure-based unsubscribe, callers are
- * responsible for the bookkeeping.
- */
+/** register a handler for a command, scoped to `room`. Returns the
+ *  registered entry so callers can hold it as data and pass it to
+ *  `unlisten` later; callers own the bookkeeping. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function listen(rpc: Rpc, commandId: string, fn: (...args: any[]) => void, room: string): ListenerEntry {
     let set = rpc.listeners.get(commandId);
@@ -84,16 +67,11 @@ export function unlisten(rpc: Rpc, commandId: string, entry: ListenerEntry): voi
 }
 
 /**
- * resolve, unpack, and invoke listeners for an inbound NetMessage. handlers
- * are called as `fn(args, from)`; the server passes the originating client
- * as `from`, the client passes nothing (server→client handlers register
- * with a `(data) => void` shape and ignore the extra arg). matches entries
- * whose `room` equals the message's roomId.
- *
- * commandIndex → id via `commandProtocolTable` (caller passes it from the
- * current ProjectModule); def (serdes) via the live `commandsRegistry`.
- * stale `CommandHandle.serdes` captured in user closures is not consulted
- * on the dispatch path.
+ * resolve, unpack, and invoke listeners for an inbound NetMessage. Handlers
+ * are called as `fn(args, from)`; the server passes the originating client as
+ * `from`, the client passes nothing. Matches entries whose `room` equals the
+ * message's roomId. `commandIndex` resolves to an id via `commandProtocolTable`
+ * and the def (serdes) via the live `commandsRegistry`.
  */
 export function dispatchNetMessage(
     rpc: Rpc,
@@ -128,16 +106,12 @@ export function dispatchNetMessage(
 }
 
 /**
- * resolve, pack, and dispatch an outbound command. side-agnostic, server
- * and client both reach the wire via the same path. the script `send(ctx,
- * ...)` API in scene/scripts wraps this with ctx-derived runtime/rpc/roomId.
+ * resolve, pack, and dispatch an outbound command. Side-agnostic; server and
+ * client both reach the wire via the same path. The script `send(ctx, ...)`
+ * API in scene/scripts wraps this with ctx-derived runtime/rpc/roomId.
  * `client` is the addressee for server-side targeted sends; omit for the
- * broadcast path.
- *
- * commandIndex via `commandProtocolTable` (caller passes it from the current
- * ProjectModule); serdes via the live `commandsRegistry`. stale
- * `CommandHandle.serdes` captured in user closures is not used, closures
- * resolve fresh serdes on every send.
+ * broadcast path. Serdes is resolved fresh on every send from the live
+ * `commandsRegistry`, never a stale closure-captured one.
  */
 export function send<S extends pack.Schema, D extends RpcDirection>(
     rpc: Rpc,
@@ -166,11 +140,9 @@ export function send<S extends pack.Schema, D extends RpcDirection>(
     }
 }
 
-/* ── types ───────────────────────────────────────────────────────── */
-
-/** a command handle returned by command(). */
-/** Stable wrapper around a `CommandDef`. Identity plus the live def; the schema
- *  and codec are read through `.def` rather than copied out (see `declare`). */
+/** stable wrapper around a `CommandDef`, returned by `command()`. Identity
+ *  plus the live def; the schema and codec are read through `.def` rather
+ *  than copied out (see `declare`). */
 export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
     /** the declared id (identity, never changes). */
     readonly id: string;
@@ -185,11 +157,7 @@ export type CommandDef = {
     id: string;
     direction: RpcDirection;
     schema: pack.Schema;
-    /** codec built from `schema`. DERIVED, so it is rebuilt whenever the schema
-     *  moves and excluded from `commandHash`. */
+    /** codec built from `schema`, derived so it is rebuilt whenever the
+     *  schema moves and excluded from `commandHash`. */
     serdes: ReturnType<typeof pack.build>;
 };
-
-/* ── command() ─────────────────────────────────────────────────────── */
-
-

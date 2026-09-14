@@ -1,18 +1,3 @@
-/**
- * fly controller, trait + script.
- *
- * the trait holds tunables (speed, look sensitivity, scroll-adjust bounds)
- * so they can be edited in the inspector. on init the script grabs the active
- * camera node (`getCamera(ctx)`) and writes pose to its TransformTrait each
- * frame while it's the subject; the renderer reads pose + projection from
- * there. the editor lens points `client.camera` at a lens-private camera so
- * its pose survives play↔edit toggles.
- *
- * polls blocks' Input each frame instead of attaching DOM listeners (only
- * exception: contextmenu suppression so right-drag works, and pointer-lock
- * request/exit on right-button press/release).
- */
-
 import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
@@ -63,14 +48,8 @@ function headDrop(node: Parameters<typeof findByName>[0], rootTransform: Transfo
 
 const PITCH_LIMIT = Math.PI / 2 - 0.01;
 
-// ── trait ─────────────────────────────────────────────────────────────
-
-/**
- * fly controller tunables.
- *
- * `speed` is the live move speed; updated by the wheel-adjust path while
- * pointer-locked. the rest are caps and rates configurable via inspector.
- */
+/** fly controller tunables. `speed` is the live move speed, updated by the wheel-adjust path
+ *  while pointer-locked; the rest are caps and rates configurable via inspector. */
 export const FlyControllerTrait = trait(
     'engine:fly-controller',
     {
@@ -85,11 +64,8 @@ export const FlyControllerTrait = trait(
         minSpeed: 0.1,
         maxSpeed: 200,
 
-        /**
-         * smoothing half-life in seconds for both translation and look.
-         * 0 = off (instant, snappy, default).
-         * higher = smoother for cinematic / video capture (try 0.1-0.3).
-         */
+        /** smoothing half-life in seconds for both translation and look. 0 = off (instant,
+         *  default); higher = smoother for cinematic capture (try 0.1-0.3). */
         damping: 0,
     },
     { persist: false },
@@ -150,32 +126,20 @@ script(
         const client = ctx.client!;
         const { input } = client;
 
-        // ── camera: the active camera node on the client state
-        // (`getCamera(ctx)`, the room default in play, a lens-private camera
-        // under the editor). the camera node lives at the scene root (NOT
-        // parented under ctx.node) which dodges parent-frame
-        // inheritance from controllers like CharacterController whose body yaw
-        // would otherwise drag the camera with the head.
-        // re-resolved each active frame in onFrame; the init value seeds baseQuat.
+        // the camera node lives at the scene root, not parented under ctx.node, which dodges
+        // parent-frame inheritance from controllers like CharacterController whose body yaw
+        // would otherwise drag the camera with the head. re-resolved each active frame in
+        // onFrame; the init value here seeds baseQuat.
         let cameraNode = getCamera(ctx)!;
         let cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
-        // mirror targets for the camera pose. fly only writes to cameraTransform
-        // (a separate scene-root camera node), so ctx.node's TransformTrait never
-        // moves. that matters because:
-        //  - real edit room: ctx.node === room.playerNode, server-authoritative.
-        //    server's Discovery.getPlayerChunkCoord reads this trait, without
-        //    a write here, the anchor stays stuck at spawn.
-        //  - local editor lens: ctx.node is a realm:'client' editorNode the
-        //    server never sees; we additionally mirror into room.playerNode so
-        //    its owner-synced TransformTrait carries the anchor to the server.
+        // fly only writes to cameraTransform, so ctx.node's TransformTrait never moves on its
+        // own; mirrored below each frame so the server-authoritative anchor (room.playerNode)
+        // and voxel chunk streaming stay near the camera instead of stuck at spawn.
         const nodeTransform = getTrait(ctx.node, TransformTrait);
 
-        // ── state (closure, mutable) ───────────────────────────────────
-        // base orientation captured at takeover (and on any external camera
-        // change); yaw/pitch are deltas applied around world-Y and local-X
-        // respectively. this preserves any prior orientation including roll
-        // exactly at the moment of transition (orbit→fly handoff).
+        // base orientation captured at takeover (and on any external camera change); yaw/pitch
+        // are deltas applied around world-Y and local-X so a transition preserves prior roll exactly.
         const baseQuat: Quat = quat.clone(getWorldQuaternion(cameraTransform));
         // applied yaw/pitch; lerps toward target* when damping > 0
         let yawDelta = 0;
@@ -184,7 +148,7 @@ script(
         let targetYawDelta = 0;
         let targetPitchDelta = 0;
         // absolute world-pitch baked into baseQuat. the clamp below enforces
-        // basePitch + pitchDelta ∈ [−PITCH_LIMIT, PITCH_LIMIT] so total pitch
+        // basePitch + pitchDelta in [-PITCH_LIMIT, PITCH_LIMIT] so total pitch
         // stays bounded across rebases (right-click handoff or focusNode teleport).
         let basePitch = 0;
         const lastQuaternion: Quat = quat.clone(baseQuat);
@@ -215,8 +179,8 @@ script(
         };
         window.addEventListener('contextmenu', onContextMenu);
 
-        // fly declares no persistent lock intent — it locks only during a right-
-        // drag. clear any intent a prior lens (character) left set on this room.
+        // fly declares no persistent lock intent, it locks only during a right-drag; clear any
+        // intent a prior lens (character) left set on this room.
         setPointerLock(ctx, false);
 
         onDispose(ctx, () => {
@@ -226,8 +190,8 @@ script(
 
         onFrame(ctx, ({ delta }) => {
             if (getSubject(ctx) !== ctx.node) return;
-            // re-resolve the active camera (subject ⟹ client.camera is ours),
-            // so an editor lens swap never strands us on a stale camera node.
+            // re-resolve the active camera each frame so an editor lens swap never strands us
+            // on a stale camera node.
             cameraNode = getCamera(ctx)!;
             cameraTransform = getTrait(cameraNode, TransformTrait)!;
             const fly = ctx.trait;
@@ -245,15 +209,11 @@ script(
                 rebaseToCurrent();
             }
 
-            // ── pointer-lock right-drag look ───────────────────────
-            // wait for the drag threshold so a quick right-click stays
-            // available to other tools (e.g. build tool placement).
+            // wait for the drag threshold so a quick right-click stays available to other tools.
             if (isMouseDragStart(input.mouseKeyboard, 'right')) {
-                // rebase on click so the ±PITCH_LIMIT clamp is measured
-                // from the current orientation rather than the original base.
+                // rebase on click so the +-PITCH_LIMIT clamp is measured from the current
+                // orientation rather than the original base.
                 rebaseToCurrent();
-                // the right button is held here (active user gesture), so this
-                // acquires the lock immediately.
                 setPointerLock(ctx, true);
             }
             if (isMouseJustUp(input.mouseKeyboard, 'right')) {
@@ -269,16 +229,13 @@ script(
                 targetPitchDelta = Math.max(-PITCH_LIMIT - basePitch, Math.min(PITCH_LIMIT - basePitch, targetPitchDelta));
             }
 
-            // exponential smoothing factor, k=1 when damping=0 (instant snap,
-            // preserves the original snappy behavior). higher damping → slower
-            // lerp, smoother camera for video capture.
+            // exponential smoothing factor, k=1 when damping=0 (instant snap); higher damping
+            // means a slower lerp, smoother camera for video capture.
             const k = fly.damping > 0 ? 1 - Math.exp(-delta / fly.damping) : 1;
             yawDelta += (targetYawDelta - yawDelta) * k;
             pitchDelta += (targetPitchDelta - pitchDelta) * k;
 
-            // ── wheel speed adjust ─────────────────────────────────
-            // gate on the lock so the wheel is free for editor scrolling
-            // (e.g. inventory, inspector) when the user isn't actively flying.
+            // gate on the lock so the wheel is free for editor scrolling when not actively flying.
             if (locked && input.mouseKeyboard._wheelDeltaY !== 0) {
                 if (input.mouseKeyboard._wheelDeltaY < 0) {
                     fly.speed = Math.min(fly.maxSpeed, fly.speed * fly.speedScrollFactor);
@@ -287,15 +244,12 @@ script(
                 }
             }
 
-            // ── compose target world-quat from base + yaw + pitch ──
             quat.setAxisAngle(_qYaw, AXIS_UP, yawDelta);
             quat.setAxisAngle(_qPitch, AXIS_RIGHT, pitchDelta);
             quat.multiply(_qTmp, _qYaw, baseQuat);
             quat.multiply(_qOut, _qTmp, _qPitch);
 
-            // ── WASD movement (pointer-locked only) ────────────────
-            // gate all movement on the lock so WASD/Space/Shift stay free
-            // for editor shortcuts and selection modifiers when not flying.
+            // gate all movement on the lock so WASD/Space/Shift stay free for editor shortcuts.
             const fwd = locked
                 ? (isKeyDown(input.mouseKeyboard, 'KeyW') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'KeyS') ? 1 : 0)
                 : 0;
@@ -325,7 +279,6 @@ script(
             _velocity[1] += (_targetVel[1] - _velocity[1]) * k;
             _velocity[2] += (_targetVel[2] - _velocity[2]) * k;
 
-            // ── write pose to the camera node transform ────────────
             const camPos = getWorldPosition(cameraTransform);
             _posOut[0] = camPos[0] + _velocity[0] * delta;
             _posOut[1] = camPos[1] + _velocity[1] * delta;

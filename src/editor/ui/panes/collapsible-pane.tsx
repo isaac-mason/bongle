@@ -12,14 +12,7 @@ type CollapsiblePaneProps = {
 
 const MIN_HEIGHT = 48;
 
-/**
- * a collapsible pane section used inside <RightPanel>.
- * title bar has a chevron toggle. content slot is freely composable.
- * moving a pane = moving its <CollapsiblePane> line in right-panel.tsx.
- *
- * when defaultHeight is provided the content area has an explicit height
- * and a bottom-edge drag handle lets the user resize it.
- */
+// moving a pane's position = moving its <CollapsiblePane> line in right-panel.tsx.
 export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, children }: CollapsiblePaneProps) {
     const [open, setOpen] = useState(defaultOpen);
     const [height, setHeight] = useState<number | undefined>(defaultHeight);
@@ -55,7 +48,6 @@ export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, chil
                 <div className="relative flex flex-col min-h-0 overflow-y-auto" style={resizable ? { height } : undefined}>
                     {children}
 
-                    {/* bottom-edge resize handle, only when resizable */}
                     {resizable && (
                         <div
                             onPointerDown={onPointerDown}

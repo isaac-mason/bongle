@@ -25,8 +25,7 @@ interface DropdownMenuTriggerProps {
 export function DropdownMenuTrigger({ children, asChild, className }: DropdownMenuTriggerProps) {
     if (asChild && isValidElement(children)) {
         const child = children as ReactElement;
-        // host non-button elements (e.g. a positioned <div>) aren't native
-        // buttons; component triggers are assumed to render one.
+        // host non-button elements (e.g. a positioned div) aren't native buttons; component triggers are assumed to render one.
         const nativeButton = typeof child.type === 'string' ? child.type === 'button' : true;
         return <Menu.Trigger nativeButton={nativeButton} render={child} />;
     }

@@ -1,20 +1,3 @@
-/**
- * Server-side avatar wiring. The avatar a player renders with is
- * resolved upstream, the matchmaker resolves it at allocation time and
- * stamps it into the join reservation, so it arrives synchronously at
- * `onClientJoin` (the dev/edit path has no matchmaker → builtin). This
- * module records that identity on the ClientState and writes it onto
- * each of the client's Players' `CharacterTrait`.
- *
- * Because identity (`modelId` + `rigType`) is known at join, the trait
- * is stamped before `onJoin` fires, game scripts see the right avatar
- * immediately, and `JoinArgs` carries it. The model *payload* still
- * loads asynchronously: for runtime avatars we acquire + ensure the
- * bytes into Resources here, and the `WorldTrait` reconciler in
- * `character.ts` mounts the rig once they land. Bundled avatars (the
- * builtin) are codegen-hydrated already.
- */
-
 import type { Client, ResolvedAvatar } from 'bongle/interface';
 import { RIG_TYPE_6BONE } from '../../avatar/rig';
 import type { Avatar } from '../core/avatar/avatar';
@@ -26,22 +9,12 @@ import type { ClientState } from './clients';
 import type { Player, Room } from './rooms';
 import type { EngineServer } from './server';
 
-/**
- * Record the client's resolved avatar identity and kick its payload
- * load. Called from `onClientJoin` BEFORE the client's player nodes are
- * created, so `enqueuePlayer` stamps the trait synchronously and
- * `onJoin` observes the right `modelId` / `rigType`. `resolved` is
- * absent on the dev/edit path (no matchmaker), default to the engine
- * builtin.
- */
+/** records the client's resolved avatar identity and kicks its payload load. Called
+ *  from `onClientJoin` before player nodes are created. `resolved` is absent on the
+ *  dev/edit path (no matchmaker), default to the builtin. */
 export function setClientAvatar(state: EngineServer, cs: ClientState, resolved: ResolvedAvatar | undefined): void {
-    // Idempotent, the avatar is fixed for the connection (resolved once
-    // by the matchmaker). Guards against a re-entered onClientJoin
-    // double-acquiring the runtime model and leaking a refcount.
+    // idempotent: avatar is fixed for the connection's lifetime once resolved.
     if (cs.avatar) return;
-    // Absent (dev/edit, no matchmaker) ⇒ the builtin. `acquireAvatarModel`
-    // handles both arms: +1 refcount + ensure for runtime, ensure-only for
-    // bundled/builtin. The payload streams in behind the now-known identity.
     const avatar: ResolvedAvatar = resolved ?? { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID };
     cs.avatar = acquireAvatarModel(state.resources, avatar);
 }
@@ -58,51 +31,32 @@ function stampPlayerCharacter(state: EngineServer, cs: ClientState, playerId: Pl
     assignAvatar(playerNode, avatar.modelId, avatar.rigType);
 }
 
-/**
- * Stamp the client's resolved avatar onto a newly-created Player's
- * `CharacterTrait`. The identity is set on the ClientState at join, so
- * this is always synchronous, no waiting on a load.
- */
+/** stamps the client's resolved avatar onto a newly-created Player's `CharacterTrait`. */
 export function enqueuePlayer(state: EngineServer, _room: Room, player: Player): void {
     const cs = state.clients.connected.get(player.client);
     if (!cs) return;
     stampPlayerCharacter(state, cs, player.id);
 }
 
-/**
- * The client's resolved avatar identity, or the builtin if (defensively)
- * unset, `setClientAvatar` always sets it before any player node is
- * created, so the fallback only guards a missing ClientState. Used to
- * populate `JoinArgs` for onJoin.
- */
+/** the client's resolved avatar identity, or the builtin if unset (missing ClientState). */
 export function clientAvatarIdentity(cs: ClientState | undefined): Avatar {
     return cs?.avatar ?? { modelId: BUILTIN_BASE_AVATAR_ID, rigType: RIG_TYPE_6BONE };
 }
 
-/**
- * Release the client's runtime model refcount on disconnect. No-op for
- * bundled / unresolved clients, `releaseRuntimeModel` filters bundled
- * entries internally.
- */
+/** releases the client's runtime model refcount on disconnect; no-op for bundled clients. */
 export function releaseClientAvatar(state: EngineServer, cs: ClientState): void {
     const modelId = cs.avatar?.modelId;
     if (modelId) Resources.releaseRuntimeModel(state.resources, modelId);
     cs.avatar = null;
 }
 
-/**
- * Swap a connected client's avatar at runtime (release the old runtime model,
- * acquire the new, re-stamp every live player node this client owns). The
- * `CharacterTrait` reconciler unmounts the old rig + mounts the new one on the
- * next pass. `resolved` MUST carry a FRESH `modelId` — same id is a reconciler
- * no-op (nothing to converge). Used by the editor's live avatar preview: an
- * edited glb is re-registered under a new id + re-applied without a re-join.
- */
+/** swaps a connected client's avatar at runtime and re-stamps every live player node
+ *  it owns. `resolved` must carry a fresh `modelId`; the same id is a reconciler no-op. */
 export function reloadClientAvatar(state: EngineServer, client: Client, resolved: ResolvedAvatar): void {
     const cs = state.clients.connected.get(client);
     if (!cs) return;
-    releaseClientAvatar(state, cs); // drop the old model + clear cs.avatar
-    setClientAvatar(state, cs, resolved); // acquire the new (cs.avatar was cleared, so not skipped)
+    releaseClientAvatar(state, cs);
+    setClientAvatar(state, cs, resolved);
     for (const player of state.rooms.players.values()) {
         if (player.client === client) stampPlayerCharacter(state, cs, player.id);
     }

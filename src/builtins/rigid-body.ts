@@ -9,10 +9,7 @@ import { dirty, rate, type TraitType } from '../api/traits';
 import { control, sync, trait } from '../core/registry';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 
-// observer-normalized contact lifecycle lives on `ContactsTrait` (see
-// builtins/contacts.ts) and is driven by physics.ts fan-out.
-
-/* ── shape defs ─────────────────────────────────────────────────── */
+// observer-normalized contact lifecycle lives on `ContactsTrait` (see builtins/contacts.ts), driven by physics.ts fan-out.
 
 export const AutoShapeDef = prop.object({
     type: prop.literal('auto'),
@@ -52,14 +49,7 @@ export const ShapeDef = prop.union('type', [AutoShapeDef, BoxShapeDef, SphereSha
 
 export type ShapeDef = prop.SchemaType<typeof ShapeDef>;
 
-/* ── rigid body def ─────────────────────────────────────────────── */
-
-/**
- * declarative body recipe. when the trait carries a `def`, the installer
- * builds + owns the body from it. matches the optional fields on crashcat's
- * `RigidBodySettings` so the editor / serialized scenes can drive the full
- * surface without ceremony.
- */
+/** declarative body recipe; when the trait carries a `def`, the installer builds + owns the body from it. */
 export const RigidBodyDef = prop.object({
     shape: ShapeDef,
     motionType: prop.optional(
@@ -132,36 +122,17 @@ export type RigidBodyDef = {
     collideKinematicVsNonDynamic?: boolean;
 };
 
-/* ── trait ───────────────────────────────────────────────────────── */
-
 export const RigidBodyTrait = trait('rigidbody', {
-    /**
-     * declarative recipe. when set, the installer builds + owns the body
-     * from this. ref-change at runtime → installer destroys the previous
-     * installer-owned body and builds a new one. when null, the trait is
-     * in adopt mode: a script assigns `body` directly.
-     */
+    /** declarative recipe; when set, the installer builds + owns the body from this. Null puts the trait in adopt mode: a script assigns `body` directly. */
     def: null as RigidBodyDef | null,
 
-    /**
-     * the live crashcat body, either installer-built (from `def`) or
-     * script-adopted. trait owns teardown either way: removed on dispose
-     * unless the script nulls `body` first (escape hatch for bodies shared
-     * across traits).
-     */
+    /** the live crashcat body, installer-built or script-adopted. Removed on dispose unless the script nulls `body` first (bodies shared across traits). */
     body: null as RigidBody | null,
 
-    /**
-     * intent, drives `effectiveMotionType` under authority/prediction
-     * rules. seeded from `def.motionType` at install time when present;
-     * otherwise defaults to DYNAMIC. user can reassign at runtime.
-     */
+    /** intent, drives `effectiveMotionType` under authority/prediction rules. Seeded from `def.motionType` at install time when present. */
     motionType: MotionType.DYNAMIC as MotionType,
 
-    /**
-     * if true, non-owner clients run dynamic locally for prediction. seeded
-     * from `def.prediction` at install time when present.
-     */
+    /** if true, non-owner clients run dynamic locally for prediction. Seeded from `def.prediction` at install time when present. */
     prediction: true,
 
     /** canonical linear velocity. */
@@ -171,10 +142,7 @@ export const RigidBodyTrait = trait('rigidbody', {
     angularVelocity: vec3.create() as Vec3,
 });
 
-/** instance type for RigidBodyTrait */
 export type RigidBodyTrait = TraitType<typeof RigidBodyTrait>;
-
-/* ── controls (editor + persistence) ── */
 
 control(RigidBodyTrait, 'def', {
     label: 'Rigid Body',
@@ -184,8 +152,6 @@ control(RigidBodyTrait, 'def', {
         t.def = (v ?? null) as RigidBodyDef | null;
     },
 });
-
-/* ── syncs (replication) ── */
 
 const defSchema = propToPack(prop.nullable(RigidBodyDef));
 if (!defSchema) throw new Error('RigidBodyDef has no packable schema');
@@ -220,8 +186,8 @@ sync(RigidBodyTrait, 'linear-velocity', {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
     authority: 'owner',
-    dirty: dirty.diff(), // byte-stable when the body sleeps → silent
-    rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
+    dirty: dirty.diff(), // byte-stable when the body sleeps, silent
+    rate: rate.hz(TRANSFORM_SEND_HZ), // matches the transform broadcast cadence
 });
 
 sync(RigidBodyTrait, 'angular-velocity', {
@@ -231,6 +197,6 @@ sync(RigidBodyTrait, 'angular-velocity', {
         vec3.copy(t.angularVelocity, v as Vec3);
     },
     authority: 'owner',
-    dirty: dirty.diff(), // byte-stable when the body sleeps → silent
-    rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
+    dirty: dirty.diff(), // byte-stable when the body sleeps, silent
+    rate: rate.hz(TRANSFORM_SEND_HZ), // matches the transform broadcast cadence
 });

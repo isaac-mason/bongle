@@ -1,9 +1,3 @@
-// chunk-bounds-visuals.ts, wireframe boxes around every loaded voxel chunk.
-//
-// debug overlay toggled by the editor's "show chunk boundaries" checkbox.
-// rebuilds the segment list only when the chunk set changes (size delta) or
-// when the toggle flips on.
-
 import { LineMaterial, LineSegments, LineSegmentsGeometry, type Scene, vec4f } from 'gpucat';
 
 import { CHUNK_SIZE, type Voxels } from '../../core/voxels/voxels';
@@ -45,8 +39,7 @@ function buildPoints(voxels: Voxels): number[] {
 }
 
 export function init(scene: Scene): ChunkBoundsVisualsState {
-    // placeholder geometry: a single degenerate segment outside the world.
-    // real points are written by update() the first time the toggle goes on.
+    // degenerate placeholder segment, replaced by update() once the toggle goes on
     const placeholder = [0, 0, 0, 0, 0, 0];
     const geometry = new LineSegmentsGeometry(placeholder);
     const material = new LineMaterial({
@@ -77,7 +70,7 @@ export function update(state: ChunkBoundsVisualsState, voxels: Voxels, enabled: 
     }
 
     if (count === 0) {
-        // hide entirely, LineSegmentsGeometry requires ≥1 segment to update.
+        // LineSegmentsGeometry requires at least 1 segment to update, so hide instead
         state.lines.visible = false;
         state.lastChunkCount = 0;
         state.lastEnabled = true;

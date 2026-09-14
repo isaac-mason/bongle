@@ -1,49 +1,3 @@
-// builds the audio atlas + standalone files + codegen from soundsRegistry.
-//
-// reads source audio files (.wav/.mp3/.ogg/.flac) listed by `sound()`
-// declarations, partitions on `long: true` and emits:
-//   resources/client/audio-atlas.webm, concatenated long:false bucket
-//   resources/client/audio/{id}.mp3, one file per long:true clip
-//   resources/client/audio-manifest.json, both buckets, with offsets
-//   src/generated/sounds.ts, single barrel: all handles inline
-//
-// codegen emits ALL SoundHandles inline in a single barrel file (no per-id
-// sidecars). Each handle is a small object literal so the whole file stays
-// short even with 77+ engine builtins. The barrel declaration-merges
-// `SoundHandleMap` for typed lookup and calls `registerSound(id, handle)`
-// (imported from `bongle/internal`) to mutate the existing registry payload in
-// place. User code holding
-// `const Foo = sound('foo', ...)` sees the updated `.duration` on next
-// access without ref invalidation.
-//
-// Single-file rationale: cold start writes 1 file vs N+1, eliminating the
-// HMR wall when many sounds are declared (the engine ships 77 builtins).
-// Re-evaluating all handles on any sound edit is cheap, they're inert
-// object literals.
-//
-// the artifact manifest is the cache marker for the atlas + standalone
-// build (single rebuild gate). independent hashes per bucket inside the
-// manifest let us skip atlas rebuilds when only a long clip changed and
-// vice-versa. sidecars are always re-emitted from the decoded durations
-// (cheap, keeps types in sync). change gates hash source BYTES (loaded via
-// the injected loader), not mtimes: mtimes don't exist in the browser fs,
-// and content hashing is the same gate every other builder uses.
-//
-// codecs — no native binary, no child_process, no ffprobe:
-//   - decode: the injected `decodeAudio` capability (browser
-//     OfflineAudioContext, resamples in one call). durations come from the
-//     decoded PCM sample counts, exact for the atlas offsets, no probe.
-//   - atlas: WebM-Opus (bake/opus.ts — our own libopus wasm + mediabunny's WebM
-//     mux). Lossy but ~4x smaller than FLAC on real SFX (the atlas ships to every
-//     player). Opus carries an encoder pre-skip, but Ogg/WebM signal it: the
-//     decoder trims the front lookahead (CodecDelay from the OpusHead) so audio
-//     aligns to sample 0, and the padded tail is trailing silence PAST the last
-//     clip. So per-clip offsets stay time-accurate, and `decodeAudioData` decodes
-//     WebM-Opus on Chrome/Firefox/Safari 14.1+. (MP3/lamejs couldn't do this — no
-//     gapless header — which is why the atlas was FLAC before.)
-//   - standalone: MP3 via lamejs (bake/mp3.ts). long clips play from offset 0
-//     so encoder delay is irrelevant, and they need lossy compression.
-
 import type { Filesystem } from '../../../os/interface';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
@@ -55,19 +9,13 @@ import { encodeOpusAtlasWebm } from './opus';
 
 const SAMPLE_RATE = 48000;
 const STANDALONE_BITRATE_KBPS = 128;
-/** atlas Opus bitrate (VBR). 96k is ~4x smaller than the old FLAC atlas and
- *  transparent for SFX; the atlas ships to every player, so size wins. */
-// Mono SFX is near-transparent around 48-64 kbps; 96k was a stereo-music number that
-// doubled the atlas for nothing audible. Complexity 5 encodes the kit's 88 clips in half
-// the time of libopus's default 10 for byte-identical output at this bitrate (measured on
-// the real clips; the difference only appears at 96k+).
+/** VBR; mono SFX is near-transparent at this bitrate, and the atlas ships to every player, so size wins. */
 const ATLAS_OPUS_BITRATE = 48_000;
+/** libopus's default 10 is byte-identical at this bitrate but twice as slow to encode. */
 const ATLAS_OPUS_COMPLEXITY = 5;
 
-// folded into atlasHash so that a builder-format change invalidates any
-// on-disk atlas + manifest without the user having to nuke their cache.
-// bump this when the encode pipeline changes in a way that affects manifest
-// offsets or the atlas byte layout.
+// folded into atlasHash so a builder-format change invalidates any on-disk atlas + manifest
+// without requiring a cache wipe; bump when the encode pipeline affects offsets or byte layout.
 const ATLAS_FORMAT_VERSION = 'v9-opus-webm-48k';
 
 export type BuildAudioOptions = {
@@ -142,33 +90,20 @@ export {};
 `;
 
 /**
- * build the audio atlas + standalone files + barrel from soundsRegistry
- * contents.
- *
- * iterates soundsRegistry, partitions on `long`. produces one WebM-Opus atlas
- * for the long:false bucket plus one MP3 per long:true clip. manifest
- * carries hashes per bucket so a long-clip edit doesn't bust the atlas
- * cache and vice versa. duration (from the decoded PCM sample count) is
- * baked into each handle literal in the barrel so user code reads
- * `handle.duration` statically.
- *
- * returns true if anything was rebuilt, false on full cache hit.
+ * duration (from the decoded PCM sample count) is baked into each handle literal in the barrel
+ * so user code reads `handle.duration` statically. returns true if anything was rebuilt.
  */
 export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: BuildAudioOptions): Promise<boolean> {
     const { fs, loader, decodeAudio } = opts;
 
-    // partition sources, sorted by id for deterministic order (the atlas
-    // concatenation order — and thus its offsets — follows this).
+    // sorted by id for deterministic order; the atlas concatenation order (and thus its offsets) follows this.
     const all = [...soundsRegistry.byId.entries()]
         .map(([id, h]) => ({ id, name: h.name, tags: h.tags, src: h.src, long: h.long }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
     if (all.length === 0) {
-        // No sounds declared: emit a valid empty manifest (no clips) rather than
-        // deleting it, so the client never 404s on audio-manifest.json. Drop the
-        // atlas/standalone binaries (unreferenced with 0 clips). The empty `hash`
-        // reads back falsy, so change gates treat it like missing audio and a
-        // later non-empty build rebuilds.
+        // emit a valid empty manifest rather than deleting it, so the client never 404s. the
+        // empty `hash` reads back falsy, so change gates treat it like missing audio.
         await fs.remove(ATLAS_PATH);
         await fs.remove(STANDALONE_DIR, { recursive: true });
         const empty: AudioManifest = {
@@ -245,11 +180,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
         console.log(`[bongle] audio built: atlas ${atlasEntries.length} clips, standalone ${standaloneEntries.length} files`);
     }
 
-    // ── codegen barrel ──────────────────────────────────────────────
-    // assemble per-id entries by joining all declared sounds against the
-    // manifest's decoded durations, then emit a single barrel file with
-    // all handle literals inline. Cheap to re-emit unconditionally;
-    // keeps the generated types in lockstep with current handle metadata.
+    // joins all declared sounds against the manifest's decoded durations; cheap to re-emit unconditionally.
     const durationById = new Map<string, number>();
     for (const e of manifest.atlas) durationById.set(e.id, e.duration);
     for (const e of manifest.standalone) durationById.set(e.id, e.durationSec);
@@ -268,14 +199,11 @@ export async function buildAudio(soundsRegistry: KindStore<SoundDef>, opts: Buil
     return rebuilt;
 }
 
-/* ── source loading ── */
-
 async function loadSources(
     loader: ResourceLoader,
     sounds: Array<{ id: string; src: string; long: boolean }>,
 ): Promise<LoadedSource[]> {
-    // each load is a service-worker round trip to the project fs; one at a time they were the
-    // longest part of the audio stage. mapConcurrent keeps the input order.
+    // each load is a service-worker round trip to the project fs; mapConcurrent keeps input order.
     return mapConcurrent(sounds, BAKE_CONCURRENCY, async (s) => {
         let bytes: Uint8Array;
         try {
@@ -286,8 +214,6 @@ async function loadSources(
         return { ...s, bytes };
     });
 }
-
-/* ── manifest helpers ── */
 
 async function readManifest(projectFs: Filesystem): Promise<AudioManifest | null> {
     try {
@@ -307,9 +233,7 @@ async function readManifest(projectFs: Filesystem): Promise<AudioManifest | null
     return null;
 }
 
-/** Content hash over a bucket's sources, in declaration order (id-sorted by
- *  the caller — order matters, it's the atlas concat order). Folds in each
- *  source's id + src + byte digest, plus an optional format-version salt. */
+/** order matters, it's the atlas concat order (id-sorted by the caller). */
 async function computeBucketHash(sources: LoadedSource[], salt = ''): Promise<string> {
     const parts: string[] = [];
     if (salt) parts.push(salt);
@@ -327,9 +251,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     return hex;
 }
 
-/* ── builders ── */
-
-/** Downmix per-channel s16 → mono s16 (channel average). The atlas is mono. */
+/** per-channel s16 -> mono s16 (channel average); the atlas is mono. */
 function downmixMono(channels: Int16Array[]): Int16Array {
     if (channels.length === 1) return channels[0]!;
     const n = channels[0]!.length;
@@ -348,13 +270,8 @@ async function buildAtlas(decodeAudio: DecodeAudio, sources: LoadedSource[], fs:
         return [];
     }
 
-    // Decode every source to mono s16 PCM at SAMPLE_RATE, concatenate, then encode
-    // the whole stream as WebM-Opus. Opus preserves interior sample positions (48k
-    // native, no resample) and the decoder trims the front pre-skip, so every clip's
-    // offset + duration (from the PCM sample counts below) lands time-accurate.
-    // Decodes fan out (WebCodecs in the browser, native in node — both hand off and return a
-    // promise), but the ORDER of the result is load-bearing: the concatenation below is what each
-    // clip's atlas offset is derived from. mapConcurrent keeps input order.
+    // decode order is load-bearing: the concatenation below is what each clip's atlas offset is
+    // derived from. mapConcurrent keeps input order even though decodes fan out concurrently.
     const tDecode = performance.now();
     const pcmChunks = await mapConcurrent(sources, BAKE_CONCURRENCY, async (s) =>
         downmixMono((await decodeAudio(s.bytes, SAMPLE_RATE)).channels),
@@ -390,9 +307,7 @@ async function buildStandalones(
     sources: LoadedSource[],
     fs: Filesystem,
 ): Promise<AudioManifestStandaloneEntry[]> {
-    // Per-clip and independent. The mp3 encode itself is lamejs, pure JS and therefore in-thread,
-    // so only the decode and the write actually overlap here — the encode is what a worker pool
-    // would buy later.
+    // the mp3 encode is lamejs, pure JS and in-thread, so only decode and write actually overlap here.
     return mapConcurrent(sources, BAKE_CONCURRENCY, async (s) => {
         const decoded = await decodeAudio(s.bytes, SAMPLE_RATE);
         const mp3 = encodeMp3(decoded.channels, SAMPLE_RATE, STANDALONE_BITRATE_KBPS);
@@ -430,8 +345,6 @@ function concatInt16(chunks: Int16Array[]): Int16Array {
     return out;
 }
 
-/* ── codegen: single-file barrel ── */
-
 /** @internal exported for the codegen barrel tests. */
 export function renderBarrel(entries: CodegenEntry[]): string {
     if (entries.length === 0) return EMPTY_BARREL;
@@ -445,8 +358,6 @@ export function renderBarrel(entries: CodegenEntry[]): string {
     lines.push(`import { registerSound } from 'bongle/internal';`);
     lines.push(``);
 
-    // inline every handle literal, one short block per id. ~7 lines each;
-    // 77 builtins + N user sounds stays under ~1000 lines total.
     for (const e of entries) {
         const constId = sanitizeIdent(e.id);
         lines.push(`// source: ${e.src}`);
@@ -480,15 +391,8 @@ export function renderBarrel(entries: CodegenEntry[]): string {
     return lines.join('\n');
 }
 
-/* ── helpers ── */
-
-/**
- * Sound ids must be unique AFTER `sanitizeIdent` because every id becomes
- * a top-level `const` name in the generated barrel. Two ids that sanitize
- * to the same identifier (`'foo-bar'` and `'foo_bar'` → `foo_bar`) would
- * silently produce duplicate declarations and fail downstream with a
- * cryptic TS error. Surface the actual conflict here with the offending ids.
- */
+/** ids must be unique after `sanitizeIdent` since every id becomes a top-level `const` name in
+ *  the generated barrel; two ids that sanitize to the same identifier would silently collide. */
 function assertNoIdentCollisions(ids: string[]): void {
     const byIdent = new Map<string, string[]>();
     for (const id of ids) {

@@ -1,11 +1,3 @@
-// Headless render context for the pipeline worker's icon bakers. Thin wrapper
-// over the offline render backend seam (`render/offline`): `createHeadlessRenderContext`
-// stands one up (backend chosen the same way the live client's is — a forwarded
-// `?renderer=`, else a real adapter probe), and `buildRenderDeps` rebuilds the
-// per-bake render resources through it.
-// All backend specifics (device, voxel producer, readback) live behind
-// the `OfflineRenderer` handle, so block/prefab icon rendering is backend-neutral.
-
 import type { ResourceLoader } from '../core/resource-loader';
 import type { RendererBackendKind } from '../render/backend';
 import { loadOfflineBackend, type OfflineRenderer } from '../render/offline';
@@ -13,7 +5,7 @@ import type * as VoxelArena from '../render/voxels/voxel-arena';
 import type * as Performance from './performance';
 import type { RenderRoomDeps } from './rooms';
 
-/** Persistent offline render context. Created once per worker: the device
+/** Persistent offline render context, created once per worker since the device
  *  handshake and pipeline compiles are expensive and atlas-independent. */
 export type HeadlessRenderContext = {
     offline: OfflineRenderer;
@@ -21,11 +13,9 @@ export type HeadlessRenderContext = {
     budget: VoxelArena.VoxelArenaBudget;
 };
 
-/** Stand up a headless renderer via the offline seam. `gpu` is the injected Node
- *  Dawn device (WebGPU); the browser worker leaves it undefined and the backend
- *  acquires its own. `backend` is the pipeline worker's forwarded `?renderer=`
- *  override (its `self.location` can't carry the page query); absent → the offline
- *  seam probes the adapter and picks WebGPU or WebGL2. */
+/** `gpu` is the injected Node Dawn device; the browser worker leaves it undefined
+ *  and the backend acquires its own. `backend` is the forwarded `?renderer=`
+ *  override; absent, the offline seam probes the adapter itself. */
 export async function createHeadlessRenderContext(
     gpu?: { device: GPUDevice; adapter: GPUAdapter },
     backend?: RendererBackendKind,
@@ -34,12 +24,8 @@ export async function createHeadlessRenderContext(
     return { offline, performance: offline.performance, budget: offline.budget };
 }
 
-/**
- * Rebuild the `RenderRoomDeps` (+ teardown) against the just-baked assets read
- * through `loader`. Delegates to the offline backend, which picks its voxel
- * producer (WebGPU compute / WebGL CPU) and wires `deps.offline` back to itself.
- * Rebuilt per bake so the voxel atlas reflects the latest baked textures.
- */
+/** Rebuild `RenderRoomDeps` against the just-baked assets read through `loader`.
+ *  Called per bake so the voxel atlas reflects the latest baked textures. */
 export function buildRenderDeps(
     ctx: HeadlessRenderContext,
     loader: ResourceLoader,

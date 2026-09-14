@@ -1,19 +1,4 @@
-// ── OffsetAllocator ────────────────────────────────────────────────
-//
-// TypeScript port of sebbbi/OffsetAllocator (MIT, (C) Sebastian Aaltonen 2023):
-//   https://github.com/sebbbi/OffsetAllocator
-//
-// O(1) suballocator over a fixed-size address space. 256 bins with an 8-bit
-// floating-point size distribution (3-bit mantissa + 5-bit exponent) bound the
-// per-allocation internal fragmentation to ≤12.5% (≈6.25% average). Free
-// segments are kept in per-bin LIFO lists; a 32-bit top-bin mask + 32×8-bit
-// leaf-bin masks make "find the smallest fitting non-empty bin" cost two
-// `clz32`s. `free()` coalesces with address-order neighbours.
-//
-// Storage is struct-of-arrays in Uint32Array/Uint8Array to avoid per-node JS
-// object overhead. The allocator owns no GPU memory, it just hands out
-// offsets. Use it under a `SegmentArena`-style wrapper that owns the actual
-// buffers and writes by offset.
+// TypeScript port of sebbbi/OffsetAllocator (MIT): https://github.com/sebbbi/OffsetAllocator
 
 const MANTISSA_BITS = 3;
 const MANTISSA_VALUE = 1 << MANTISSA_BITS; // 8
@@ -28,13 +13,11 @@ const NUM_LEAF_BINS = NUM_TOP_BINS * BINS_PER_LEAF; // 256
 export const OA_UNUSED = 0xffffffff;
 const NO_SPACE = 0xffffffff;
 
-// ── SmallFloat ──────────────────────────────────────────────────────
-//
-// Piecewise-linear log approximation: sizes < 8 are stored exactly (denorm),
-// larger sizes use 3 mantissa bits relative to the highest set bit. Per-bin
-// quantization step is ≤1/8 of the bin midpoint → ≤12.5% rounding overhead.
+// SmallFloat: piecewise-linear log approximation. Sizes < 8 are stored exactly
+// (denorm), larger sizes use 3 mantissa bits relative to the highest set bit.
+// Per-bin quantization step is <=1/8 of the bin midpoint (<=12.5% rounding overhead).
 
-/** Round `size` UP to the smallest bin guaranteed to fit it. Used at allocate. */
+/** Rounds `size` up to the smallest bin guaranteed to fit it. Used at allocate. */
 function uintToFloatRoundUp(size: number): number {
     if (size < MANTISSA_VALUE) {
         // Denorm: exact mapping 0..7 → bin 0..7.
@@ -52,7 +35,7 @@ function uintToFloatRoundUp(size: number): number {
     return (exp << MANTISSA_BITS) + mantissa;
 }
 
-/** Round `size` DOWN to the largest bin that fits inside it. Used at free. */
+/** Rounds `size` down to the largest bin that fits inside it. Used at free. */
 function uintToFloatRoundDown(size: number): number {
     if (size < MANTISSA_VALUE) return size;
     const leadingZeros = Math.clz32(size);
@@ -63,8 +46,7 @@ function uintToFloatRoundDown(size: number): number {
     return (exp << MANTISSA_BITS) | mantissa;
 }
 
-/** Inverse: bin index → its floor size. `>>> 0` keeps the result unsigned so
- *  large bins (≥ 2^31) don't decode as negative numbers. */
+/** Inverse: bin index to its floor size. `>>> 0` keeps the result unsigned so large bins (>= 2^31) don't decode as negative numbers. */
 function floatToUint(binIndex: number): number {
     const exp = binIndex >>> MANTISSA_BITS;
     const mantissa = binIndex & MANTISSA_MASK;
@@ -72,9 +54,7 @@ function floatToUint(binIndex: number): number {
     return ((mantissa | MANTISSA_VALUE) << (exp - 1)) >>> 0;
 }
 
-// ── bit helpers ─────────────────────────────────────────────────────
-
-/** Lowest set bit at index ≥ startBitIndex; NO_SPACE if none. */
+/** Lowest set bit at index >= startBitIndex; NO_SPACE if none. */
 function findLowestSetBitAfter(bitMask: number, startBitIndex: number): number {
     const maskBeforeStartIndex = (1 << startBitIndex) - 1;
     const maskAfterStartIndex = ~maskBeforeStartIndex;
@@ -83,8 +63,6 @@ function findLowestSetBitAfter(bitMask: number, startBitIndex: number): number {
     // tzcnt: lowest set bit of x is 31 - clz(x & -x).
     return 31 - Math.clz32(bitsAfter & -bitsAfter);
 }
-
-// ── allocator ───────────────────────────────────────────────────────
 
 export type OAHandle = {
     /** Byte/slot offset into the managed space. */
@@ -97,14 +75,12 @@ export type OffsetAllocator = {
     readonly capacity: number;
     readonly maxAllocs: number;
 
-    // bin tier, usedBinsTop is a single u32 stored as a JS number (bits, not
-    // value-comparable when bit 31 is set; only used with bitwise ops).
+    // usedBinsTop is a single u32 stored as a JS number: bits, not value-comparable
+    // when bit 31 is set, only used with bitwise ops.
     usedBinsTop: number;
     usedBins: Uint8Array; // length NUM_TOP_BINS
     binIndices: Uint32Array; // length NUM_LEAF_BINS, head node per bin
 
-    // node pool (SoA). `nodeUsed` is a flag, not packed into the index space
-    // (kept simple, the C++ has the same TODO comment).
     nodeOffset: Uint32Array;
     nodeSize: Uint32Array;
     binPrev: Uint32Array;
@@ -113,7 +89,6 @@ export type OffsetAllocator = {
     nbrNext: Uint32Array;
     nodeUsed: Uint8Array;
 
-    // freelist stack of unused node indices
     freeNodes: Uint32Array;
     freeOffset: number; // top of stack; -1 == empty (out of nodes)
 
@@ -152,12 +127,11 @@ export function oaReset(a: OffsetAllocator): void {
     a.binIndices.fill(OA_UNUSED);
     a.nodeUsed.fill(0);
 
-    // Freelist is a stack with `freeOffset` pointing at the top entry.
-    // Nodes pushed in reverse so that pop order is 0, 1, 2, …
+    // Nodes pushed in reverse so pop order is 0, 1, 2, ...
     a.freeOffset = a.maxAllocs - 1;
     for (let i = 0; i < a.maxAllocs; i++) a.freeNodes[i] = a.maxAllocs - i - 1;
 
-    // Seed: one giant free node covering the whole address space.
+    // One giant free node covering the whole address space.
     insertNodeIntoBin(a, a.capacity, 0);
 }
 
@@ -165,8 +139,7 @@ export function oaReset(a: OffsetAllocator): void {
 export function oaAllocate(a: OffsetAllocator, size: number): OAHandle | null {
     if (size <= 0) throw new Error('OffsetAllocator: size must be > 0');
 
-    // Out of node-pool entries? (we need at least one to record the alloc and
-    // potentially a split remainder)
+    // Need at least one free node-pool entry to record the alloc and a possible split remainder.
     if (a.freeOffset === 0) return null;
 
     const minBinIndex = uintToFloatRoundUp(size);
@@ -176,13 +149,11 @@ export function oaAllocate(a: OffsetAllocator, size: number): OAHandle | null {
     let topBinIndex = minTopBinIndex;
     let leafBinIndex = NO_SPACE;
 
-    // Try the requested top bin first.
     if ((a.usedBinsTop & (1 << topBinIndex)) !== 0) {
         leafBinIndex = findLowestSetBitAfter(a.usedBins[topBinIndex]!, minLeafBinIndex);
     }
 
-    // Fall through to higher top bins. Any leaf there fits (top bin was
-    // rounded up), so take its lowest.
+    // Any leaf in a higher top bin fits, since the top bin was rounded up, so take its lowest.
     if (leafBinIndex === NO_SPACE) {
         topBinIndex = findLowestSetBitAfter(a.usedBinsTop, minTopBinIndex + 1);
         if (topBinIndex === NO_SPACE) return null;
@@ -193,7 +164,6 @@ export function oaAllocate(a: OffsetAllocator, size: number): OAHandle | null {
 
     const binIndex = (topBinIndex << TOP_BINS_INDEX_SHIFT) | leafBinIndex;
 
-    // Pop the bin's head node.
     const nodeIndex = a.binIndices[binIndex]!;
     const nodeTotalSize = a.nodeSize[nodeIndex]!;
     const nodeOffset = a.nodeOffset[nodeIndex]!;
@@ -205,7 +175,6 @@ export function oaAllocate(a: OffsetAllocator, size: number): OAHandle | null {
     if (nextHead !== OA_UNUSED) a.binPrev[nextHead] = OA_UNUSED;
     a.freeStorage -= nodeTotalSize;
 
-    // If bin is empty, clear its mask bits.
     if (a.binIndices[binIndex] === OA_UNUSED) {
         a.usedBins[topBinIndex] = a.usedBins[topBinIndex]! & ~(1 << leafBinIndex);
         if (a.usedBins[topBinIndex] === 0) {
@@ -213,7 +182,6 @@ export function oaAllocate(a: OffsetAllocator, size: number): OAHandle | null {
         }
     }
 
-    // Split off the remainder and thread it into address-order list.
     const remainderSize = nodeTotalSize - size;
     if (remainderSize > 0) {
         const newNodeIndex = insertNodeIntoBin(a, remainderSize, nodeOffset + size);
@@ -235,7 +203,6 @@ export function oaFree(a: OffsetAllocator, h: OAHandle): void {
     let offset = a.nodeOffset[nodeIndex]!;
     let size = a.nodeSize[nodeIndex]!;
 
-    // Coalesce with prev free neighbour.
     const prev = a.nbrPrev[nodeIndex]!;
     if (prev !== OA_UNUSED && a.nodeUsed[prev] === 0) {
         offset = a.nodeOffset[prev]!;
@@ -244,7 +211,6 @@ export function oaFree(a: OffsetAllocator, h: OAHandle): void {
         a.nbrPrev[nodeIndex] = a.nbrPrev[prev]!;
     }
 
-    // Coalesce with next free neighbour.
     const next = a.nbrNext[nodeIndex]!;
     if (next !== OA_UNUSED && a.nodeUsed[next] === 0) {
         size += a.nodeSize[next]!;
@@ -255,11 +221,9 @@ export function oaFree(a: OffsetAllocator, h: OAHandle): void {
     const neighborNext = a.nbrNext[nodeIndex]!;
     const neighborPrev = a.nbrPrev[nodeIndex]!;
 
-    // Recycle this node's slot.
     a.nodeUsed[nodeIndex] = 0;
     a.freeNodes[++a.freeOffset] = nodeIndex;
 
-    // Insert combined free node.
     const combinedIndex = insertNodeIntoBin(a, size, offset);
     if (neighborNext !== OA_UNUSED) {
         a.nbrNext[combinedIndex] = neighborNext;
@@ -284,7 +248,7 @@ export type StorageReport = {
 export function oaStorageReport(a: OffsetAllocator): StorageReport {
     let largestFree = 0;
     if (a.freeOffset > 0 && a.usedBinsTop !== 0) {
-        // Highest set bit of usedBinsTop → highest non-empty top bin.
+        // Highest set bit of usedBinsTop is the highest non-empty top bin.
         const topBinIndex = 31 - Math.clz32(a.usedBinsTop);
         const leafMask = a.usedBins[topBinIndex]!;
         const leafBinIndex = 31 - Math.clz32(leafMask);
@@ -292,8 +256,6 @@ export function oaStorageReport(a: OffsetAllocator): StorageReport {
     }
     return { totalFree: a.freeStorage, largestFree };
 }
-
-// ── internal: bin list maintenance ──────────────────────────────────
 
 function insertNodeIntoBin(a: OffsetAllocator, size: number, dataOffset: number): number {
     const binIndex = uintToFloatRoundDown(size);
@@ -330,7 +292,7 @@ function removeNodeFromBin(a: OffsetAllocator, nodeIndex: number): void {
         a.binNext[prev] = next;
         if (next !== OA_UNUSED) a.binPrev[next] = prev;
     } else {
-        // Head of its bin. Recompute bin index from size (round down, matches insert).
+        // Head of its bin: recompute bin index from size, round down to match insert.
         const binIndex = uintToFloatRoundDown(a.nodeSize[nodeIndex]!);
         const topBinIndex = binIndex >>> TOP_BINS_INDEX_SHIFT;
         const leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;
@@ -351,8 +313,7 @@ function removeNodeFromBin(a: OffsetAllocator, nodeIndex: number): void {
     a.freeStorage -= a.nodeSize[nodeIndex]!;
 }
 
-// ── exported for tests only ─────────────────────────────────────────
-
+// Exported for tests only.
 export const _internal = {
     uintToFloatRoundUp,
     uintToFloatRoundDown,

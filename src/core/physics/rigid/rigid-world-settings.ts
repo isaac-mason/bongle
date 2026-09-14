@@ -1,10 +1,3 @@
-// shared crashcat world settings + layer constants.
-//
-// extracted from physics.ts so subsystems (aabb-physics, vcc, body-shape-sweep,
-// editor tooling) can import object-layer constants without pulling in the
-// full physics module. registerShapes runs at module init, first import
-// wins, subsequent imports are no-ops.
-
 import {
     ALL_SHAPE_DEFS,
     addBroadphaseLayer,

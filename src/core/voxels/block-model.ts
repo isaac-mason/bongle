@@ -11,15 +11,7 @@ const DEFAULT_QUAD_UVS: [Vec2, Vec2, Vec2, Vec2] = [
     [0, 0],
 ];
 
-/**
- * create a single quad. quad-only authoring is the convention,
- * the mesher rejects non-quad input at registry-build time.
- *
- * @param verts - 4 vertices in CCW order, block-local [0,1] space
- * @param normal - face normal
- * @param tile - the tile this quad samples
- * @param options - optional uvs, cullFace, material
- */
+/** create a single quad from 4 CCW vertices in block-local [0,1] space. */
 export function quad(
     verts: [Vec3, Vec3, Vec3, Vec3],
     normal: Vec3,
@@ -44,37 +36,17 @@ export function quad(
 
 type FaceDir = 'up' | 'down' | 'north' | 'south' | 'east' | 'west';
 
-/**
- * generate 6 quads (one per face) from an axis-aligned box.
- *
- * @param from - min corner [x, y, z] in block-local space [0, 1]
- * @param to - max corner [x, y, z] in block-local space [0, 1]
- * @param tiles - per-face tile assignment, same format as CubeTiles
- * @param options - optionally exclude faces or override cull behavior
- */
+/** generate the 6 quads of an axis-aligned box in block-local [0,1] space. */
 export function box(
     from: Vec3,
     to: Vec3,
     tiles: CubeTiles,
     options?: {
-        /** faces to exclude from generation */
         exclude?: FaceDir[];
-        /**
-         * override cull face auto-detection. by default, faces flush
-         * with the block boundary (0 or 1) get a cullFace. set to false
-         * to disable, or provide a map of overrides.
-         */
+        /** faces flush with the block boundary auto-cull by default; false disables, or override per face. */
         cull?: boolean | Partial<Record<FaceDir, boolean>>;
-        /** material type for all quads in this box. */
         material?: MaterialType;
-        /**
-         * uv mapping mode.
-         *   'stretch' (default), full texture stretched across each face.
-         *     mostly useful for full-block boxes where the face is 1×1.
-         *   'local', sample only the texture sub-rect matching the face's
-         *     world-local extent. preserves pixel density across boxes of
-         *     different sizes (post + arms, torches, panels).
-         */
+        /** 'stretch' fills each face; 'local' samples the sub-rect matching the face's local extent. */
         uvs?: 'stretch' | 'local';
     },
 ): BlockQuad[] {
@@ -87,7 +59,6 @@ export function box(
 
     const tex = resolveTiles(tiles);
 
-    // auto-cull: face is cullable if it sits exactly on the block boundary
     function shouldCull(dir: FaceDir, coord: number, boundary: number): CullFace | undefined {
         if (options?.cull === false) return undefined;
         if (typeof options?.cull === 'object') {
@@ -108,10 +79,8 @@ export function box(
         quads.push(quad(verts, normal, tile, { cullFace, material: mat, uvs: localUvs }));
     }
 
-    // +y (up)
     if (!excluded.has('up')) {
-        // up face UVs match the default cube convention (u=z, v=1-x) so a
-        // local sub-rect samples the same orientation as a full-cube top.
+        // up face UVs use u=z, v=1-x to match the default cube convention.
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
                   [z0, 1 - x0],
@@ -134,7 +103,6 @@ export function box(
         );
     }
 
-    // -y (down)
     if (!excluded.has('down')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
@@ -158,7 +126,6 @@ export function box(
         );
     }
 
-    // +z (south)
     if (!excluded.has('south')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
@@ -182,7 +149,6 @@ export function box(
         );
     }
 
-    // -z (north)
     if (!excluded.has('north')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
@@ -206,7 +172,6 @@ export function box(
         );
     }
 
-    // +x (east)
     if (!excluded.has('east')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
@@ -230,7 +195,6 @@ export function box(
         );
     }
 
-    // -x (west)
     if (!excluded.has('west')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
             ? [
@@ -285,14 +249,6 @@ function resolveTiles(tex: CubeTiles): ResolvedTiles {
     };
 }
 
-// ── rotation helpers ────────────────────────────────────────────────
-//
-// rotate BlockQuad[] around the Y axis by 90° increments.
-// positions rotate around the block center (0.5, y, 0.5).
-// normals and cullFace directions rotate accordingly.
-//
-// steps: 0=0°, 1=90° CW, 2=180°, 3=270° CW (all viewed from +Y)
-
 /** rotate a cullFace direction CW by `steps` 90° increments around Y. */
 const CULL_FACE_ROTATE: Record<string, readonly [CullFace, CullFace, CullFace, CullFace]> = {
     north: ['north', 'west', 'south', 'east'],
@@ -308,7 +264,7 @@ function rotateCullFace(cf: CullFace | undefined, steps: number): CullFace | und
     return CULL_FACE_ROTATE[cf]![steps]!;
 }
 
-/** rotate a position [x,y,z] around the block center (0.5, y, 0.5) by steps × 90° CW. */
+/** rotate a position [x,y,z] around the block center (0.5, y, 0.5) by steps x 90 degrees CW. */
 function rotatePos(v: Vec3, steps: number): Vec3 {
     const [x, y, z] = v;
     switch (steps) {
@@ -323,7 +279,7 @@ function rotatePos(v: Vec3, steps: number): Vec3 {
     }
 }
 
-/** rotate a normal [nx,ny,nz] by steps × 90° CW around Y. */
+/** rotate a normal [nx,ny,nz] by steps x 90 degrees CW around Y. */
 function rotateNormal(n: Vec3, steps: number): Vec3 {
     const [nx, ny, nz] = n;
     switch (steps) {
@@ -338,26 +294,7 @@ function rotateNormal(n: Vec3, steps: number): Vec3 {
     }
 }
 
-/**
- * "uvlock" for a Y rotation: re-derive the uvs of the two faces perpendicular
- * to the Y axis (normal ±Y) straight from each vertex's (already rotated) world
- * position, matching Minecraft's uvlock. this pins their texture to world axes
- * regardless of facing AND keeps 1:1 texel density (the sub-rect a face samples
- * equals its world footprint), so non-square faces — stair step tops and
- * exposed tread rects — don't squish.
- *
- * the mapping (u=x,v=z for +Y; u=x,v=1-z for -Y) mirrors the full-cube mesher's
- * top/bottom convention (chunk-mesher.ts FACE_UVS, faces 2/3) — NOT box()'s
- * local formula, which is rotated 90° from it. keep these in sync with the
- * mesher so a locked stair tread's grain continues an adjacent full block's.
- *
- * faces in the XZ plane are left as authored: a Y rotation keeps their vertical
- * axis vertical, so their texture is already world-consistent.
- *
- * note: for ±Y faces this ignores the authored uvs (they'd fight the lock).
- * only opt in (uvlock: true) for blocks whose top/bottom should track world,
- * i.e. planar-tiled surfaces like stairs — not ones with a bespoke top atlas.
- */
+// must stay in sync with chunk-mesher.ts FACE_UVS faces 2/3 (rotated 90° from box()'s local formula).
 function lockUvsY(
     verts: readonly Vec3[],
     normal: Vec3,
@@ -383,18 +320,7 @@ function lockUvsY(
     return uvs;
 }
 
-/**
- * rotate an array of BlockQuad around the Y axis by `steps` × 90° CW.
- * positions rotate around block center (0.5, y, 0.5).
- * normals and cullFace directions rotate accordingly.
- *
- * uvs are preserved by default (texture orientation stays fixed relative to the
- * face, so it spins with the geometry). pass `uvlock: true` to instead pin the
- * top/bottom faces' texture to world axes (see lockUvsY) — this is what keeps a
- * directional top texture (e.g. wood grain on stairs) aligned across facings.
- * because uvlock derives ±Y uvs from world position, it applies even at steps=0
- * so the reference facing matches the rotated ones.
- */
+/** rotate quads around Y by `steps` x 90 degrees CW about the block center; `uvlock` pins top/bottom UVs to world axes. */
 export function rotateY(quads: BlockQuad[], steps: number, options?: { uvlock?: boolean }): BlockQuad[] {
     const s = ((steps % 4) + 4) % 4;
     const uvlock = options?.uvlock ?? false;
@@ -419,35 +345,22 @@ export function rotateY(quads: BlockQuad[], steps: number, options?: { uvlock?: 
     });
 }
 
-// ── mirror (X) helper ───────────────────────────────────────────────
-//
-// reflect across the plane x = 0.5 to produce the chiral opposite, used
-// for left/right-handed variants (door hinge, etc.). a reflection flips
-// winding, so per-quad vertex + uv order reverses to keep faces outward;
-// the x-normal flips and east↔west cullFaces swap. because uvs reverse in
-// lockstep with verts, the texture mirrors with the geometry.
-
 /** mirror a position [x,y,z] across the plane x = 0.5. */
 function mirrorPosX(v: Vec3): Vec3 {
     return [1 - v[0], v[1], v[2]];
 }
 
-/** mirror a normal across X (negate x). */
 function mirrorNormalX(n: Vec3): Vec3 {
     return [-n[0], n[1], n[2]];
 }
 
-/** mirror a cullFace direction across X (east ↔ west; others unchanged). */
 function mirrorCullFaceX(cf: CullFace | undefined): CullFace | undefined {
     if (cf === 'east') return 'west';
     if (cf === 'west') return 'east';
     return cf;
 }
 
-/**
- * mirror an array of BlockQuad across the plane x = 0.5 (block-local).
- * involutive: mirrorX(mirrorX(q)) === q.
- */
+// mirroring flips winding, so vertex and uv order reverses to keep faces outward; involutive (mirrorX(mirrorX(q)) === q).
 export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
     return quads.map((q) => ({
         verts: [mirrorPosX(q.verts[3]), mirrorPosX(q.verts[2]), mirrorPosX(q.verts[1]), mirrorPosX(q.verts[0])] as const,
@@ -460,14 +373,7 @@ export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
     }));
 }
 
-// ── free-form rotate / translate helpers ────────────────────────────
-//
-// rotateY handles the common 90° cases with cullFace remapping. these
-// cover the off-axis cases (tilted geometry like a wall torch): a
-// free-form rotation about an arbitrary axis through a pivot, and a
-// plain translation. faces of tilted geometry no longer sit flush with
-// the block boundary, so rotateAxis clears cullFace, build the source
-// box with `cull: false`.
+// for off-axis geometry (tilted like a wall torch); build the source box with cull: false since tilted faces don't sit flush with the block boundary.
 
 /** rotate a position about `axis` through `pivot` by `cos`/`sin` of the angle. */
 function rotateAxisPos(v: Vec3, axis: 'x' | 'y' | 'z', cos: number, sin: number, pivot: Vec3): Vec3 {
@@ -496,11 +402,7 @@ function rotateAxisNormal(n: Vec3, axis: 'x' | 'y' | 'z', cos: number, sin: numb
     }
 }
 
-/**
- * rotate an array of BlockQuad by `angleDeg` around `axis` through `pivot`
- * (block-local space). positive angles follow the right-hand rule. cullFace
- * is cleared because tilted faces no longer align to a block boundary.
- */
+/** rotate quads by `angleDeg` around `axis` through `pivot` (block-local space, right-hand rule); clears cullFace. */
 export function rotateAxis(quads: BlockQuad[], axis: 'x' | 'y' | 'z', angleDeg: number, pivot: Vec3): BlockQuad[] {
     const rad = (angleDeg * Math.PI) / 180;
     const cos = Math.cos(rad);
@@ -521,18 +423,7 @@ export function rotateAxis(quads: BlockQuad[], axis: 'x' | 'y' | 'z', angleDeg: 
     }));
 }
 
-/**
- * shear an array of BlockQuad along `axis` as a linear function of height:
- * a vertex at y=`yBase` is unmoved, one at y=`yBase + ySpan` shifts by
- * `delta` along `axis`, with a proportional shift in between. unlike
- * rotateAxis (which introduces sin/cos and pulls vertices off the lattice),
- * a shear by lattice-aligned `delta`/`ySpan` keeps every input vertex on the
- * 1/16 grid, so geometry survives the voxel vertex format's 1/16 position
- * quantization with uniform thickness, instead of rounding unevenly per
- * corner. used for the wall torch's grid-aligned lean. normals are left
- * as-is: callers shear emissive geometry (face-shade bypassed) and gpucat
- * culls by winding, which the shear preserves.
- */
+/** shear quads along `axis` as a linear function of height: a vertex at `yBase` is unmoved, one at `yBase + ySpan` shifts by `delta`. */
 export function shearByHeight(quads: BlockQuad[], axis: 'x' | 'z', yBase: number, ySpan: number, delta: number): BlockQuad[] {
     const ai = axis === 'x' ? 0 : 2;
     const shift = (v: Vec3): Vec3 => {
@@ -570,14 +461,7 @@ export function translate(quads: BlockQuad[], delta: Vec3): BlockQuad[] {
     }));
 }
 
-// ── layer helper ────────────────────────────────────────────────────
-
-/**
- * create one up-facing quad covering the cell at height `y` (block units),
- * for ground cover that has no thickness (leaf litter, petals). same uv
- * orientation as a cube's top face, so `rotateY` keeps it in step with the
- * block below. nothing faces down: the block under it is what it lies on.
- */
+/** create one up-facing quad covering the cell at height `y` (block units). */
 export function layer(tile: TileHandle, y: number, options?: { material?: MaterialType }): BlockQuad[] {
     return [
         quad(
@@ -594,14 +478,7 @@ export function layer(tile: TileHandle, y: number, options?: { material?: Materi
     ];
 }
 
-// ── cross helper ────────────────────────────────────────────────────
-//
-// two diagonal planes, each double-sided (4 quads).
-// double-sided because gpucat uses backface culling by default,
-// without reversed-winding duplicates, one side of each plane
-// would be invisible. no z-fighting because only the camera-facing
-// side rasterizes fragments at any given pixel.
-
+// double-sided: gpucat backface-culls by default, so each plane needs a reversed-winding duplicate.
 const INV_SQRT2 = Math.SQRT1_2;
 
 // uvs: V=0 at top of image (high Y verts), V=1 at bottom (low Y verts)
@@ -618,27 +495,14 @@ const CROSS_BACK_UVS: [Vec2, Vec2, Vec2, Vec2] = [
     [0, 1],
 ];
 
-/**
- * create two intersecting diagonal planes (4 quads, front + back per plane).
- * used for vegetation: flowers, tall grass, saplings, mushrooms, etc.
- */
+/** create two intersecting double-sided diagonal planes (4 quads) for vegetation. */
 export function cross(
     tile: TileHandle,
     options?: { height?: number; tileBlocks?: number; material?: MaterialType },
 ): BlockQuad[] {
     const mat = options?.material;
     const height = options?.height ?? 1;
-    // y top capped 0.1 below the height so fract(world.y) > 0 at the top vert
-    // for PLANT_WIND_SWAY (at integer block y, fract(N+1)=0 would freeze it).
-    // x/z inset by INSET so floor(world.x), floor(world.z) is identical for
-    // all four corners of one block.
-    //
-    // A plane taller than a block reaches into the cell above and samples a
-    // tile `tileBlocks` blocks tall (default: as many as the height needs),
-    // showing its bottom `TOP` blocks, so the texel density stays the cube's.
-    // A crop's early stages pass `tileBlocks` explicitly to show the bottom of
-    // the same tall tile while still short. A one-block plane on a one-block
-    // tile keeps the whole tile, as it always has.
+    // top sits 0.1 below height so fract(world.y) > 0 there, since PLANT_WIND_SWAY freezes at integer block y.
     const TOP = height - 0.1;
     const tileBlocks = options?.tileBlocks ?? Math.ceil(height);
     const v0 = tileBlocks > 1 ? 1 - TOP / tileBlocks : 0;
@@ -658,7 +522,6 @@ export function cross(
     const LO = INSET;
     const HI = 1 - INSET;
     return [
-        // plane A front
         quad(
             [
                 [LO, 0, LO],
@@ -670,7 +533,6 @@ export function cross(
             tile,
             { uvs: front, material: mat },
         ),
-        // plane A back (reversed winding)
         quad(
             [
                 [LO, TOP, LO],
@@ -682,7 +544,6 @@ export function cross(
             tile,
             { uvs: back, material: mat },
         ),
-        // plane B front
         quad(
             [
                 [HI, 0, LO],
@@ -694,7 +555,6 @@ export function cross(
             tile,
             { uvs: front, material: mat },
         ),
-        // plane B back (reversed winding)
         quad(
             [
                 [HI, TOP, LO],
@@ -709,33 +569,11 @@ export function cross(
     ];
 }
 
-// axis-aligned plant planes. `hash` and `plus` differ only in where the planes
-// sit, so the geometry is built once and each shape supplies its own offsets.
-//
-// TOP/INSET carry the same constraints as `cross`: the top verts stay below 1.0
-// so fract(world.y) > 0 keeps PLANT_WIND_SWAY alive at the tip, and every vert
-// stays strictly inside the cell so floor(world.x), floor(world.z) is identical
-// across the whole block and the sway phases as one piece.
-//
-// normals MUST match the CCW winding (the `box` convention), not `cross`'s
-// inverted one. `classifyFacing` (chunk-mesher.ts) bins an exactly-axis-aligned
-// normal into a cardinal facing slice, and the opaque/transparent passes
-// back-face cone-cull whole slices per chunk (voxel-resources-gpu.ts:375). An
-// inverted normal puts the quad in the slice opposite the side it is visible
-// from, so the cull drops it exactly when it should be drawn and the planes pop
-// as chunks cross the camera's half-plane.
-//
-// `cross` gets away with inverted normals only because its 0.707 components
-// fail the |axis| > 0.999 test and land in UNASSIGNED, which is exempt.
+// normals must match box()'s CCW winding, not cross()'s inverted one: classifyFacing (chunk-mesher.ts) cone-culls by facing.
 const PLANE_TOP = 0.9;
 const PLANE_INSET = 0.01;
 
-/** one double-sided plane per offset, on both axes. `leanDeg` tilts each
- *  plane away from the block centre about its own base line, so the tops fan
- *  out over the neighbouring cells and a planted field closes up into a bush
- *  rather than reading as rows of cards; a centred plane (offset 0.5) has no
- *  outward side and stays upright. A leaned normal is off-axis and lands in
- *  the UNASSIGNED facing, which the cone-cull exempts. */
+// each plane leans outward from block center by leanDeg so planted fields read as a bush, not rows of cards.
 function axisPlanes(tile: TileHandle, offsets: readonly number[], mat: MaterialType | undefined, leanDeg = 0): BlockQuad[] {
     const TOP = PLANE_TOP;
     const LO = PLANE_INSET;
@@ -748,7 +586,6 @@ function axisPlanes(tile: TileHandle, offsets: readonly number[], mat: MaterialT
         const lean = leanDeg * outward;
         const zPlane: BlockQuad[] = [];
         const xPlane: BlockQuad[] = [];
-        // plane facing Z (spans X), front then back.
         zPlane.push(
             quad(
                 [
@@ -773,7 +610,6 @@ function axisPlanes(tile: TileHandle, offsets: readonly number[], mat: MaterialT
                 { uvs: CROSS_BACK_UVS, material: mat },
             ),
         );
-        // plane facing X (spans Z), front then back.
         xPlane.push(
             quad(
                 [
@@ -802,82 +638,28 @@ function axisPlanes(tile: TileHandle, offsets: readonly number[], mat: MaterialT
             quads.push(...zPlane, ...xPlane);
             continue;
         }
-        // right-hand rotations: about +x the top of a z plane swings toward +z,
-        // about +z the top of an x plane swings toward -x. Pivot on the plane's
-        // own base line so the roots stay put.
+        // right-hand rule: about +x a z-plane's top swings toward +z, about +z an x-plane's top swings toward -x.
         quads.push(...rotateAxis(zPlane, 'x', lean, [0.5, 0, offset]), ...rotateAxis(xPlane, 'z', -lean, [offset, 0, 0.5]));
     }
     return quads;
 }
 
-/** the quarter marks, matching minecraft's 4/16 crop inset and luanti's "#". */
 const HASH_OFFSETS = [0.25, 0.75] as const;
-/** the centre line: one plane per axis, crossing in the middle of the cell. */
 const PLUS_OFFSETS = [0.5] as const;
 
-/**
- * create four axis-aligned vertical planes (8 quads, front + back per plane),
- * two facing X and two facing Z, on the quarter marks. viewed from above the
- * arrangement reads as a `#`, where `cross` reads as an `x`.
- *
- * used for crops. the planes line up with the block grid across neighbouring
- * cells, so a tilled field reads as rows; `cross`'s diagonals read as one
- * isolated clump per cell instead.
- *
- * @param tile - the tile every plane samples
- */
+/** create four axis-aligned vertical planes (8 quads) on the quarter marks, reading as a hash from above; used for crops. */
 export function hash(tile: TileHandle, options?: { lean?: number; material?: MaterialType }): BlockQuad[] {
     return axisPlanes(tile, HASH_OFFSETS, options?.material, options?.lean ?? 0);
 }
 
-/**
- * create two axis-aligned vertical planes (4 quads, front + back per plane),
- * one facing X and one facing Z, crossing on the cell's centre line. viewed
- * from above it reads as a `+`.
- *
- * the sparse sibling of `hash`: same grid alignment, half the geometry. `cross`
- * has the same quad count but sits diagonally, so it clumps where this still
- * lines up with the cells either side.
- *
- * @param tile - the tile every plane samples
- */
+/** create two axis-aligned vertical planes (4 quads) crossing at the cell center, reading as a plus from above. */
 export function plus(tile: TileHandle, options?: { material?: MaterialType }): BlockQuad[] {
     return axisPlanes(tile, PLUS_OFFSETS, options?.material);
 }
 
-// ── fluff ───────────────────────────────────────────────────────────
-//
-// Overhanging planes for foliage that should not end on a hard cube edge. The
-// plane layout is Jerm's Better Leaves `template_leaves_cross`: four
-// zero-thickness planes, two crossed pairs (an x-spanning and a z-spanning
-// plane each), one pair swung -22.5 degrees about y and the other +22.5,
-// every plane 2 blocks wide and 2 blocks tall (half a block past the cell on
-// every side). Every plane carries the same round leaf blob, so each is one
-// full clump and the four together are a layered mass. Unshaded
-// (`shade: false`), as the source is.
-//
-// Two departures from the source. Each plane also LEANS about its own
-// horizontal axis (`lean`, the -22.5 pair one way and the +22.5 pair the
-// other), which puts y into every plane equation so vertically stacked
-// blocks never share a plane, and shows the planes' area from above where a
-// vertical plane is edge-on. And the source's split upper/lower textures are
-// one blob here, so the canopy reads as layers of clumps rather than as
-// hemispheres.
-//
-// Deliberately NOT cullFaced. `leaves()` is CullType.PARTIAL, which never culls
-// against a neighbouring leaf, so a cullFace pointing at one could not fire
-// anyway. This is the whole cost question for the technique: every leaf block
-// pays for these quads, including ones buried inside a canopy.
-//
-// 22.5 degrees is not an accident: no lattice translation lies in a 22.5
-// degree plane (tan 22.5 is irrational), so horizontally adjacent blocks
-// never share a plane. The rotation also keeps the planes out of the cardinal
-// facing slices: a rotated normal fails `classifyFacing`'s |axis| > 0.999 test
-// and lands in UNASSIGNED, which the renderer's back-face cone-cull exempts.
+// 22.5 degrees keeps tan irrational so adjacent blocks never share a plane, and keeps the normal out of classifyFacing's cardinal slices.
 
-/** one plane of the source model in its 0..16 units: a zero-thickness box
- *  from `from` to `to` (x or z constant), swung `angle` degrees about y
- *  through `origin`. */
+/** a zero-thickness plane in 0..16 units, swung `angle` degrees about y through `origin`. */
 type FluffPlane = { from: Vec3; to: Vec3; angle: number; origin: Vec3 };
 
 const FLUFF_PLANES: readonly FluffPlane[] = [
@@ -887,12 +669,10 @@ const FLUFF_PLANES: readonly FluffPlane[] = [
     { from: [13.9999, -8, -9.3125], to: [13.9999, 24, 22.6875], angle: 22.5, origin: [13.875, -10, 22.5] },
 ];
 
-/** default lean, degrees. Enough that stacked blocks sit ~0.05 apart and the
- *  planes show from above; small enough that the clumps still read upright. */
+/** default lean in degrees; stacked blocks sit ~0.05 apart while the clumps still read upright. */
 export const FLUFF_LEAN_DEG = 10;
 
-/** front and back share a texel at every point: the back's u runs the same
- *  way in world space, so the blob is not mirrored when seen from behind. */
+// front and back share a texel at every point so the blob isn't mirrored when seen from behind.
 const FLUFF_FRONT_UVS: [Vec2, Vec2, Vec2, Vec2] = [
     [0, 1],
     [1, 1],
@@ -906,8 +686,7 @@ const FLUFF_BACK_UVS: [Vec2, Vec2, Vec2, Vec2] = [
     [0, 1],
 ];
 
-/** a double-sided vertical plane. `from`/`to` in block units with either x or
- *  z equal; the front face's normal points +z (x-spanning) or +x (z-spanning). */
+/** a double-sided vertical plane between `from` and `to` (block units, x or z constant). */
 function fluffPlaneQuads(tile: TileHandle, from: Vec3, to: Vec3, mat: MaterialType | undefined): BlockQuad[] {
     const [x0, y0, z0] = from;
     const [x1, y1, z1] = to;
@@ -966,21 +745,7 @@ function fluffPlaneQuads(tile: TileHandle, from: Vec3, to: Vec3, mat: MaterialTy
 
 const sixteenth = (v: Vec3): Vec3 => [v[0] / 16, v[1] / 16, v[2] / 16];
 
-/**
- * create the four crossed, overhanging, unshaded, leaning planes (8 quads)
- * that soften a foliage cube's silhouette. meant to be concatenated onto a
- * `box`, not used alone; `leaves()` adds the y rotations.
- *
- * costs 8 quads per block with no culling, so a canopy multiplies its quad
- * count. the transparent pass is capped and truncates silently
- * (`MAX_QUADS_PER_PASS`), so measure before shipping it on every leaf type.
- *
- * @param tile - the round blob every plane samples (`textures.leavesFluff`);
- *   a square leaf tile here reads as a card, not foliage
- * @param options.lean - degrees each plane tilts about its own horizontal
- *   axis, the -22.5 pair by `+lean` and the +22.5 pair by `-lean` (default
- *   `FLUFF_LEAN_DEG`); pass the negative to mirror the splay
- */
+/** create the four crossed, overhanging, unshaded leaning planes (8 quads) that soften a foliage cube's silhouette. */
 export function fluff(tile: TileHandle, options?: { lean?: number; material?: MaterialType }): BlockQuad[] {
     const lean = options?.lean ?? FLUFF_LEAN_DEG;
     const quads: BlockQuad[] = [];
@@ -988,8 +753,7 @@ export function fluff(tile: TileHandle, options?: { lean?: number; material?: Ma
         const a = sixteenth(from);
         const b = sixteenth(to);
         const plane = fluffPlaneQuads(tile, a, b, options?.material);
-        // lean about the plane's own horizontal axis through its centre, before
-        // the swing carries that axis round with it.
+        // lean about the plane's own horizontal axis through its centre, before the y-swing carries it around.
         const centre: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
         const leanAxis = a[2] === b[2] ? 'x' : 'z';
         const leaned = rotateAxis(plane, leanAxis, angle < 0 ? lean : -lean, centre);

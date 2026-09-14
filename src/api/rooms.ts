@@ -1,14 +1,3 @@
-// api/rooms.ts, script-facing rooms surface.
-//
-// Polymorphic verbs: most accept any ScriptContext and dispatch on
-// ctx.server vs ctx.client. Membership verbs (join/leave/swap) are
-// server-only; active/observed are client-only.
-//
-// Namespace gating: every authored verb requires the target room to
-// be in the caller's namespace. Reaching into another namespace from
-// authored code is rejected, only the editor's Admin path bypasses
-// this gate.
-
 import type { Client } from 'bongle/interface';
 import * as ClientRooms from '../client/rooms';
 import type { PlayerMode } from '../core/protocol';
@@ -16,8 +5,6 @@ import type { ScriptContext } from '../core/scene/scripts';
 import { env } from '../env';
 import * as Net from '../server/net';
 import * as ServerRooms from '../server/rooms';
-
-/* ── helpers ─────────────────────────────────────────────────────── */
 
 function callerNamespace(ctx: ScriptContext): string {
     return ctx.server?.room.namespace ?? ctx.client?.room?.namespace ?? 'main';
@@ -29,25 +16,19 @@ function assertSameNamespace(callerNs: string, targetNs: string, roomId: string)
     }
 }
 
-/* ── lifecycle ───────────────────────────────────────────────────── */
-
-// synthetic, never-content-backed scene ids for empty rooms. unique per process
-// so two empty rooms never alias; never collide with a real `ns:name` scene id.
+// Synthetic scene id for empty rooms, unique per process so instances never
+// alias on save/disk paths; never collides with a real `ns:name` scene id.
 let emptyRoomCounter = 0;
 
 /**
- * Create a new room.
+ * Create a new room. With `o.sceneId`, boots from that scene's content;
+ * without it, boots empty (root node, empty voxels, no content file) for the
+ * caller to author itself, e.g. a procedurally generated world via `setBlock`.
  *
- * With `o.sceneId`: boots from that scene's content. Without it: boots EMPTY —
- * just the root node + empty voxels, no content file — for the caller to author
- * itself, e.g. a procedurally generated world written via `setBlock`.
- *
- * Server: allocates a server room in the caller's namespace. Returns the new
- * roomId. Client: creates a local-only ClientRoom.
+ * Server allocates a room in the caller's namespace and returns its roomId;
+ * client creates a local-only ClientRoom.
  */
 export function create(ctx: ScriptContext, o?: { sceneId?: string; mode?: PlayerMode; sourceRoomId?: string }): string {
-    // no sceneId → a synthetic id resolving to no content, so the room boots
-    // blank. unique per empty room so instances never alias on save/disk paths.
     const sceneId = o?.sceneId ?? `__empty:${emptyRoomCounter++}`;
     if (env.server && ctx.server) {
         const ns = callerNamespace(ctx);
@@ -72,12 +53,9 @@ export function create(ctx: ScriptContext, o?: { sceneId?: string; mode?: Player
 }
 
 /**
- * Stop a room.
- *
- * Server: destroys the server room. Forbidden across namespaces.
- *
- * Client: disposes a local ClientRoom; throws on server-mirrored rooms
- * (those are membership-driven, not script-controlled).
+ * Stop a room. Server destroys the server room (forbidden across namespaces);
+ * client disposes a local ClientRoom, throws on server-mirrored rooms (those
+ * are membership-driven, not script-controlled).
  */
 export function stop(ctx: ScriptContext, roomId: string): void {
     if (env.server && ctx.server) {
@@ -99,31 +77,21 @@ export function stop(ctx: ScriptContext, roomId: string): void {
 
 /**
  * Recreate the caller's room: boot a fresh room from the same on-disk scene,
- * move every client into it, then destroy the old room. Server-only.
+ * move every client into it, then destroy the old room, a whole-map reset for
+ * a new round. Server-only. The fresh room re-runs every script's onInit and
+ * each client re-joins via the normal onJoin path (reset to spawn).
  *
- * The fresh room loads pristine voxels from disk and re-runs every script
- * onInit (fresh authored/spawned entities), and each client re-joins via the
- * normal onJoin path (reset to spawn), i.e. a whole-map reset for a new round.
- * The successor runs the same scripts, so a round timer driving this restarts
- * on its own.
- *
- * Runs inline (no deferral): the old room is torn down with destroyRoom, the
- * direct, non-cascading teardown, which is safe mid-tick because every
- * downstream tick stage iterates queries, and destroyNode removes dying nodes
- * from every query as it goes, so those stages simply see nothing this frame.
+ * Runs inline: destroyRoom is safe mid-tick because tick stages iterate
+ * queries, and destroyNode removes dying nodes from every query as it goes.
  */
 export function recreate(ctx: ScriptContext): void {
     if (!env.server || !ctx.server) throw new Error('[bongle] rooms.recreate: server-only');
     const state = ctx.server.state;
     const old = ctx.server.room;
 
-    // fresh room from the same scene, in the same namespace, options and
-    // matchmaking are namespace-scoped, so they carry over untouched.
     const fresh = ServerRooms.createRoomInNamespace(state, old.sceneId, old.mode, old.namespace, old.sourceRoomId ?? undefined);
 
-    // move every client across: a fresh player node + onJoin in the new room,
-    // then point their active view at it. snapshot the clients first, since
-    // addClientToRoom mutates membership.
+    // Snapshot clients before mutating membership, addClientToRoom changes it.
     const clients = new Set<Client>();
     for (const playerId of old.players) {
         const player = state.rooms.players.get(playerId);
@@ -135,18 +103,14 @@ export function recreate(ctx: ScriptContext): void {
         Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
     }
 
-    // retire the old room, its now-inactive players and all its nodes are
-    // cleaned up here.
     ServerRooms.destroyRoom(state.rooms, old.id);
 }
-
-/* ── active control ──────────────────────────────────────────────── */
 
 /**
  * Activate a room, make it the focused view.
  *
- * Server form (4 args): instructs `client` to activate (roomId, mode).
- * Sends an `activate_room` message over the per-client outbox.
+ * Server form (4 args): instructs `client` to activate (roomId, mode), sending
+ * an `activate_room` message over the per-client outbox.
  *
  * Client form (3 args): switches the local active view among rooms the
  * client already observes (server-mirrored or local).
@@ -159,7 +123,6 @@ export function activate(
     b?: string | { mode?: PlayerMode },
     c?: { mode?: PlayerMode },
 ): void {
-    // server form: (ctx, client, roomId, opts?)
     if (typeof a !== 'string') {
         if (!env.server) {
             throw new Error('[bongle] rooms.activate (server form): not in a server bundle');
@@ -182,7 +145,6 @@ export function activate(
         return;
     }
 
-    // client form: (ctx, roomId, opts?)
     if (!env.client) {
         throw new Error('[bongle] rooms.activate (client form): not in a client bundle');
     }
@@ -206,10 +168,8 @@ export function activate(
     ClientRooms.setActivePlayer(rooms, ctx.client.state.net, target.playerId);
 }
 
-/* ── enumeration ─────────────────────────────────────────────────── */
-
 /**
- * List rooms visible to the caller, all roomIds in the caller's
+ * List rooms visible to the caller: all roomIds in the caller's
  * namespace (server) or all roomIds the client observes (client).
  */
 export function list(ctx: ScriptContext): string[] {
@@ -225,13 +185,11 @@ export function list(ctx: ScriptContext): string[] {
     throw new Error('[bongle] rooms.list: ctx has neither server nor client');
 }
 
-/* ── cross-room access ──────────────────────────────────────────── */
-
 /**
- * Return a ScriptContext pointing at another room. Returns null if the
- * target is unknown (or in a different namespace, server) or not
- * observed (client). Mutation through the returned context is allowed,
- * advanced; it bypasses the calling room's tick boundaries.
+ * Return a ScriptContext pointing at another room, or null if the target is
+ * unknown (or in a different namespace, server) or not observed (client).
+ * Mutation through the returned context bypasses the calling room's tick
+ * boundaries.
  */
 export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode }): ScriptContext | null {
     if (env.server && ctx.server) {
@@ -285,10 +243,8 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
     throw new Error('[bongle] rooms.view: ctx has neither server nor client');
 }
 
-/* ── membership (server-only) ───────────────────────────────────── */
-
 /**
- * Add `client` as a Player in `roomId`. Does NOT activate; pair with
+ * Add `client` as a Player in `roomId`. Does not activate; pair with
  * rooms.activate when the new view should become focused.
  */
 export function join(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void {
@@ -301,7 +257,7 @@ export function join(ctx: ScriptContext, client: Client, roomId: string, o?: { m
 }
 
 /**
- * Remove `client`'s Player from `roomId`. Does NOT auto-destroy the
+ * Remove `client`'s Player from `roomId`. Does not auto-destroy the
  * room when empty, use rooms.stop explicitly.
  */
 export function leave(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void {
@@ -333,13 +289,9 @@ export function swap(ctx: ScriptContext, client: Client, toRoomId: string, o?: {
     const fromRoomId = o?.fromRoomId ?? ServerRooms.getActivePlayer(state.rooms, client)?.roomId;
     const mode = o?.mode ?? target.mode;
 
-    // Join + activate the destination BEFORE leaving the origin. Tearing the
-    // origin down while it's still the active view runs its controllers'
-    // onDispose against the live input — e.g. PlayerController's onDispose
-    // releases pointer lock, which would drop the cursor mid-swap. Activating
-    // the destination first means that release lands on a now-inactive room and
-    // the incoming (lock-wanting) room keeps the lock. The client sees
-    // activate_room before room_left, so the active view never blanks.
+    // Join + activate the destination before leaving the origin: tearing down the
+    // origin first would run its onDispose (e.g. pointer-lock release) while it's
+    // still the active view, dropping the cursor mid-swap.
     const player = ServerRooms.addClientToRoom(state, client, target, mode);
     Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
 
@@ -352,8 +304,6 @@ export function swap(ctx: ScriptContext, client: Client, toRoomId: string, o?: {
         }
     }
 }
-
-/* ── client-only observation ─────────────────────────────────────── */
 
 /** The client's active room view, or null. */
 export function active(ctx: ScriptContext): { roomId: string; mode: PlayerMode } | null {

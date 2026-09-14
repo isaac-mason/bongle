@@ -1,8 +1,3 @@
-// clipboard.ts, system clipboard copy/cut/paste handlers for the editor.
-//
-// extracts the clipboard event logic from client.ts so that onInit stays thin.
-// handlers are created once on init and registered via document.addEventListener.
-
 import type { ClientRoom } from '../client/rooms';
 import type { ScriptContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
@@ -20,17 +15,12 @@ export type ClipboardHandlers = {
     onKeyDown: (e: KeyboardEvent) => void;
 };
 
-// snapshot the current store selection (voxels + nodes already unified).
 function buildCurrentSelection(api: EditRoomStoreApi): Selection.Selection {
     return Selection.clone(api.getState().selection);
 }
 
-/**
- * build a blueprint of the current selection and write it to the system
- * clipboard via the async navigator API. used by ui paths that aren't
- * inside a native ClipboardEvent (e.g. context menus). the ctrl+c path
- * uses the native handler so it can preventDefault and write synchronously.
- */
+/** for ui paths outside a native ClipboardEvent (context menus); ctrl+c uses the native handler
+ *  below so it can preventDefault and write synchronously. */
 export function copySelectionToSystemClipboard(api: EditRoomStoreApi, ctx: ScriptContext): void {
     const selection = buildCurrentSelection(api);
     if (Selection.isEmpty(selection)) return;
@@ -51,9 +41,8 @@ export function createClipboardHandlers(
     room: ClientRoom,
     transformToolState: TransformToolState,
 ): ClipboardHandlers {
-    // ClipboardEvent has no modifier-key info, so we sample shift state from the
-    // keydown that triggered the paste/cut. holding shift turns the placement
-    // into a continuous loop (each commit re-arms with the same blueprint).
+    // ClipboardEvent has no modifier-key info, so shift state is sampled from the triggering
+    // keydown; holding shift turns the placement into a continuous loop.
     let shiftHeldAtTrigger = false;
     const onKeyDown = (e: KeyboardEvent) => {
         if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'x' || e.key === 'V' || e.key === 'X')) {
@@ -85,7 +74,6 @@ export function createClipboardHandlers(
 
         e.preventDefault();
 
-        // offset blueprint to last hover voxel if available
         const hv = api.getState().lastHoverVoxel;
         if (hv) {
             blueprint.origin[0] = hv[0];
@@ -111,13 +99,12 @@ export function createClipboardHandlers(
         api.setState({ activeBlueprint: blueprint });
         console.log(`[bongle] cut blueprint: ${blueprint.label}`);
 
-        // build reverse ops to restore voxels on cancel, and forward ops to erase them now
+        // cutReverseOps restores voxels on cancel; cutSourceOps' occupied cells are erased now.
         const { forward: cutSourceOps, reverse: cutReverseOps } = Blueprint.buildPasteOps(
             blueprint,
             blueprint.origin,
             ctx.voxels,
         );
-        // erase source voxels immediately (set each occupied cell to air)
         const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
         commitVoxelOps(ctx, airOps);
 

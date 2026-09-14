@@ -4,18 +4,6 @@ import { type Formatter, resolveFormat } from '../format';
 import { canvasMonitor } from './canvas';
 import { colorResolver, drawBaseline, drawGrid, drawScaleLabels, paletteColor, type Threshold, thresholdColor } from './shared';
 
-// ── series ──────────────────────────────────────────────────────────
-//
-// a stacked/line chart driven by an EXTERNAL history source, not an internal
-// sampler. the source returns each series' whole point array (aligned length,
-// oldest → newest), typically the last N frames read straight out of a profiler
-// ring, and this only draws it. there is no second sampling clock: the data and
-// its history live in one place, so the x-axis is real frames and a frozen ring
-// holds the chart still for hovering.
-//
-// the sampling counterpart is `lines`, which is right when there is no history
-// behind the source and the widget has to build one.
-
 export type SeriesOptions = {
     label?: string;
     /** fixed y-range; omit to autoscale to the data in view. */
@@ -76,11 +64,8 @@ export function series(opts: SeriesOptions = {}): Control<Record<string, number[
         const items = new Map<string, Item>();
         const order: string[] = [];
 
-        // runtime view state, driven by the header button + legend clicks.
         let stacked = opts.stacked ?? false;
-        // the isolated set: empty means "show all". clicking a legend key solos it,
-        // clicking more keys grows the set, clicking a shown key drops it, and once
-        // every series is back in the set it collapses to "show all" again.
+        // empty solo set means "show all"; clicking keys grows it, and once every series is back in it collapses to "show all".
         const solo = new Set<string>();
         const visible = (key: string) => solo.size === 0 || solo.has(key);
         const toggleSolo = (key: string) => {
@@ -121,7 +106,7 @@ export function series(opts: SeriesOptions = {}): Control<Record<string, number[
             return item;
         };
 
-        // the sample index the legend + crosshair read: the cursor's while hovering, else latest.
+        // the cursor's index while hovering, else the latest sample.
         const indexAt = (hoverX: number | null, w: number, n: number) =>
             hoverX === null ? n - 1 : Math.max(0, Math.min(n - 1, Math.round((hoverX / w) * (n - 1))));
 
@@ -130,16 +115,14 @@ export function series(opts: SeriesOptions = {}): Control<Record<string, number[
             paint: (g, w, h, hover) => {
                 const data = prop.get() ?? {};
                 for (const key in data) ensureItem(key);
-                // a key the source stopped emitting keeps its legend row (so the
-                // colors stay put) but drops out of the drawing.
+                // a key the source stopped emitting keeps its legend row (colors stay put) but drops out of the drawing.
                 const present = order.filter((key) => data[key] !== undefined);
                 const shown = present.filter(visible);
                 const first = present[0];
                 const n = first ? data[first]!.length : 0;
                 const idx = indexAt(hover?.[0] ?? null, w, n);
 
-                // legend values (at the cursor while hovering, else latest), threshold-tinted.
-                // hidden series keep showing their value so you can still read what you dropped.
+                // hidden series still show their value so you can read what you dropped.
                 for (const key of order) {
                     const item = items.get(key)!;
                     item.swatchEl.style.background = color(item.color);
@@ -156,7 +139,7 @@ export function series(opts: SeriesOptions = {}): Control<Record<string, number[
                 }
 
                 const yFor = (v: number, lo: number, hi: number) => h - ((v - lo) / (hi - lo)) * h;
-                // which series the cursor is over: the band it sits in (stacked) or the nearest line
+                // which series the cursor is over: the band it sits in (stacked) or the nearest line.
                 let hovered: string | undefined;
 
                 if (stacked) {
@@ -197,8 +180,6 @@ export function series(opts: SeriesOptions = {}): Control<Record<string, number[
                         g.globalAlpha = 1;
                         for (let i = 0; i < n; i++) cum[i]! += arr[i] ?? 0;
                     }
-                    // the budget line belongs on the stack too: it is the whole point of
-                    // the frame chart, where the sum crossing it is the thing to see.
                     if (opts.baseline !== undefined) drawBaseline(g, w, h, yFor(opts.baseline, lo, hi), color('muted'));
                     if (opts.scale !== false) drawScaleLabels(g, w, h, lo, hi, fmt, color('muted'));
                 } else {

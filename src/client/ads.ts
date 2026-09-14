@@ -1,10 +1,4 @@
-/**
- * Host platform ad state (CrazyGames / Poki / none). The game's audio is muted
- * for the lifetime of every ad automatically: `whileShowing` raises `active`
- * while the ad runs, and the client update loop reconciles the audio output mute
- * against it each frame. Games never manage it.
- */
-
+/** Host platform ad state; the client mutes audio output while `active`. */
 export type Ads = {
     /** true while an interstitial / rewarded break is showing. */
     active: boolean;

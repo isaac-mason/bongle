@@ -1,13 +1,3 @@
-// In-browser block-icon atlas render.
-//
-// Runs against the live engine (shared device, voxel atlas, shared arena) with
-// no offline asset-pipeline. Transient + on-demand: called when the block/
-// texture registry changes, it builds a headless `RenderRoom`, renders every
-// renderable block into one atlas at the room's own arena index (so the block
-// chunk coexists with the resident world instead of evicting it), and tears the
-// room down. Same `createRenderRoom` → populate → `renderRoomToTarget` → dispose
-// shape as prefab icons — blocks just populate one voxel instead of a prefab.
-
 import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
@@ -21,8 +11,8 @@ import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './room
 /** icon tile size; part of the icon bake's cache key (see asset-pipeline/icons). */
 export const ICON_PX = 128;
 const CAM_DIST = 64;
-// half-extent of the ortho frustum. a unit cube projects to ~1.4 units wide at
-// 45° azimuth, so 1.0 gives a snug fit with a small margin.
+// half-extent of the ortho frustum; a unit cube projects to ~1.4 units wide at
+// 45 degrees azimuth, so 1.0 gives a snug fit with a small margin.
 const HALF_EXTENT = 1.0;
 // every icon reuses one arena slot via the packer's upsert-replace path.
 const ICON_CHUNK_KEY = '0,0,0';
@@ -32,7 +22,7 @@ export type BlockIconAtlas = {
     pixels: Uint8Array;
     atlasWidth: number;
     atlasHeight: number;
-    /** blockKey → [col, row] tile position in the atlas grid. */
+    /** blockKey to [col, row] tile position in the atlas grid. */
     coords: Record<string, [number, number]>;
     iconPx: number;
     cols: number;
@@ -49,10 +39,8 @@ const EMPTY_ATLAS: BlockIconAtlas = {
     rows: 0,
 };
 
-/** Global state ids that get an icon tile, in atlas order: skips AIR (0),
- *  MISSING (1), every MODEL_NONE state, and any state with no string key.
- *  Shared with the icon bake's cache key, so the gate can't drift from what
- *  actually gets rendered. */
+/** state ids that get an icon tile, skipping AIR, MISSING, MODEL_NONE states, and keyless states.
+ *  shared with the icon bake's cache key, so the gate can't drift from what's rendered. */
 export function renderableBlockStates(blocks: Blocks): number[] {
     const states: number[] = [];
     for (let sid = 2; sid < blocks.totalStates; sid++) {
@@ -63,12 +51,8 @@ export function renderableBlockStates(blocks: Blocks): number[] {
     return states;
 }
 
-/**
- * Render every renderable block state into a single icon atlas, in-browser.
- * Synchronous burst (safe to reuse the engine-global cull scratch since the
- * world isn't rendering mid-call; the world re-flushes its environment next
- * frame).
- */
+/** renders every renderable block state into a single icon atlas, in-browser.
+ *  safe to reuse the engine-global cull scratch since the world isn't rendering mid-call. */
 export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockIconAtlas> {
     const registry = engineRegistry.blockRegistry;
 
@@ -85,17 +69,15 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     const coords: Record<string, [number, number]> = {};
 
     const room = createRenderRoom(deps);
-    // flat + full-bright: disable the env so an overhead sun doesn't crush the
-    // side faces and the sky/cloud meshes don't bleed in — the classic
-    // inventory-icon look (per-face directional factor still gives the 3D read).
+    // flat, full-bright inventory-icon look: disable the env so an overhead sun
+    // doesn't crush the side faces and the sky/cloud meshes don't bleed in.
     applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
     Environment.flushActive(room.environment, deps.environmentResources);
-    // hide the sky/cloud meshes (config.enabled=false) — no per-frame
-    // updateForCamera on the offline icon path, so sync visibility directly.
+    // no per-frame updateForCamera on the offline icon path, so sync visibility directly.
     Environment.syncEnvVisibility(room.envVisuals, room.environment);
 
-    // isometric ortho camera, framing the block centered at voxel (1.5,1.5,1.5)
-    // (the mesher places the block spanning (1,1,1)→(2,2,2)).
+    // isometric ortho camera framing the block centered at voxel (1.5,1.5,1.5),
+    // the voxel the mesher places spanning (1,1,1) to (2,2,2).
     const elev = Math.PI / 6;
     const azim = Math.PI / 4;
     const cx = 1.5;
@@ -110,12 +92,10 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     camera.updateWorldMatrix();
     camera.updateViewMatrix(); // the offline path has no controls to refresh the view matrix
 
-    // Two phases into ONE grid, then ONE readback (vs the old readback-per-icon stall):
-    //  1) composite each block's GEOMETRY into its cell of an HDR scene-color grid, using
-    //     the target's scissor. This draws the scene directly (composeSceneToTarget →
-    //     renderer.render), NOT through a PassNode (which owns its own texture and would
-    //     ignore our scissor), so the icons land in their cells instead of full-size.
-    //  2) run the fullscreen fxaa + tonemap ONCE over the whole grid → the rgba8unorm atlas.
+    // two phases into one grid, then one readback: composite each block's geometry into
+    // its cell of an HDR scene-color grid via the target's scissor (composeSceneToTarget
+    // draws directly, not through a PassNode, which owns its own texture and would ignore
+    // the scissor), then run the fullscreen fxaa + tonemap once over the grid into the atlas.
     const sceneColor = new RenderTarget(atlasWidth, atlasHeight, {
         colorFormat: 'rgba16float',
         depthFormat: 'depth24plus',
@@ -131,8 +111,8 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     const chunk = room.voxels.chunks.get(ICON_CHUNK_KEY)!;
 
     let atlasPixels: Uint8Array;
-    // the first icon that actually renders clears the whole scene-color grid; the rest
-    // LOAD, each into its own cell — so disjoint tiles composite into one target.
+    // the first icon that actually renders clears the whole scene-color grid; the
+    // rest load into their own cell, so disjoint tiles composite into one target.
     let cleared = false;
     try {
         for (let i = 0; i < renderable.length; i++) {
@@ -155,7 +135,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             cleared = true;
         }
         if (cleared) {
-            // one fullscreen post over the whole grid, then ONE readback of the atlas.
+            // one fullscreen post over the whole grid, then one readback of the atlas.
             deps.offline.renderPostToTarget(atlas, postPipeline);
             atlasPixels = await deps.offline.readTarget(atlas);
         } else {

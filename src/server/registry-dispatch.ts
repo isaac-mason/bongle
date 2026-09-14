@@ -1,42 +1,3 @@
-/**
- * registry-dispatch.ts, drains pending changes from the unified `registry`
- * singleton and applies them to the server-side engine state. invoked by
- * the bongle() vite plugin's hmr-end hook after a hot reload settles.
- *
- * dispatch order is encoded as call order here, not as a numeric priority
- * on each kind. ordering rule: producers before consumers, block textures
- * must rebuild atlas before blocks rewire voxels, models before model
- * handles, traits late so script swap sees settled state. each branch
- * gates on its kind store's pendingChanges length to keep no-op flushes
- * cheap; branches clear their own queues; one final `bumpVersion` marks
- * the flush boundary.
- *
- * tiles + blocks drain together via one wholesale BlockRegistry
- * rebuild + per-room rewire. server has no atlas / GPU work; chunks just
- * remesh on next tick. the freshly-derived BlockRegistry is read via
- * `registry.blockRegistry` (lazy, keyed on the source kinds' revisions).
- *
- * model resources are per-id: `registry.models.pendingChanges` drive
- * `Resources.setModel` (added/changed, with server-side bin url) and
- * `Resources.deleteModel` + `releaseModel` (removed).
- *
- * Server-side config (server maxPlayers / room cap) is read fresh on
- * each allocation via `resolveConfig(registry)`, so a config edit takes
- * effect on the next allocation without explicit rewiring.
- *
- * scenes: when a `scene()` declaration is added or changed, read the
- * authored payload off `handle._payload` (stamped at module-eval by the
- * codegen barrel's `_registerScenePayload` calls) and feed it through
- * `Content.populateScene` so the declared `SceneHandle` reflects the
- * authored state. Live disk-edit updates flow separately through bongle's
- * `bongle:scenes` Vite plugin → HMR event → `applyScenePayload` in the
- * server boot template. Removed declarations clear the handle.
- *
- * trait changes drive a per-room script-instance swap via `applyTraitSwap`.
- * factory closures re-run against the current `registry.traits`; `onSwap`
- * preserves opt-in state across the swap.
- */
-
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
 import { bumpVersion, logPendingChanges, protocolManifest, registry, reindexRegistry } from '../core/registry';
@@ -83,36 +44,26 @@ export function applyRegistryChanges(state: EngineServer): void {
     ];
     logPendingChanges('server', allStores);
 
-    // resolve the DepGraph dirty consumer set BEFORE any branch drains its
-    // queue, `collectDirtyByRegistry` reads `pendingChanges` arrays. each
-    // dispatch branch below clears its own queue once it acts, so the
-    // dirty map captures the full flush before we lose it.
+    // resolve the DepGraph dirty consumer set before any branch drains its queue,
+    // since `collectDirtyByRegistry` reads the `pendingChanges` arrays.
     const dirtyByRegistry = collectDirtyByRegistry(allStores);
     const dirtyPrefabIds = dirtyByRegistry.get('prefabs') ?? new Set<string>();
     const dirtyScriptIds = dirtyByRegistry.get('scripts') ?? new Set<string>();
-    // direct script-store changes feed the same applyTraitSwap path, keys
-    // already match `ScriptDef.key` (`${traitId}.${scriptId}`). a removed
-    // script (its `script()` call deleted from source) is pruned from the
-    // owning trait def here so applyTraitSwap disposes the live instance and
-    // instantiateTraitScripts can't resurrect it, see pruneRemovedScript.
+    // a removed script is pruned from its owning trait def here so applyTraitSwap
+    // disposes the live instance and instantiateTraitScripts can't resurrect it.
     for (const ch of registry.scripts.pendingChanges) {
         dirtyScriptIds.add(ch.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.payload);
     }
 
-    // snapshot the OLD protocol id lists, then rebuild the derived index fields
-    // from the (already-updated) stores so this flush's reactions read a fresh
-    // `blockRegistry` / `slotToTrait` / `protocol`, and we can compare against
-    // the pre-flush lists to decide whether to re-broadcast our manifest.
+    // snapshot the old protocol id lists before reindexing, to compare against
+    // afterward and decide whether to re-broadcast the manifest.
     const prevTraitIds = registry.protocol.traits.indexToId;
     const prevCommandIds = registry.protocol.commands.indexToId;
     reindexRegistry(registry);
 
-    // block textures feed into BlockRegistry (textures map + texAnimData), so
-    // either queue draining requires a wholesale rebuild + per-room rewire.
-    // server has no atlas / GPU work, chunks just remesh on next tick. read
-    // the rebuilt registry once via the lazy `blockRegistry` getter so every
-    // room points at the same instance.
+    // block/tile changes need a wholesale BlockRegistry rebuild + per-room rewire;
+    // chunks remesh on next tick.
     if (registry.blocks.pendingChanges.length > 0 || registry.tiles.pendingChanges.length > 0) {
         const blockRegistry = registry.blockRegistry;
         for (const room of state.rooms.rooms.values()) {
@@ -130,8 +81,8 @@ export function applyRegistryChanges(state: EngineServer): void {
                 Resources.deleteModel(state.resources, id);
                 Resources.releaseModel(state.resources, id);
             } else {
-                // added or changed, re-register with both per-side urls and
-                // drop any stale payload so the next ensureModel() refetches.
+                // re-register with both per-side urls; drop any stale payload
+                // so the next ensureModel() refetches.
                 Resources.releaseModel(state.resources, id);
                 Resources.setModel(state.resources, id, {
                     clientUrl: change.payload.bin.client,
@@ -144,15 +95,8 @@ export function applyRegistryChanges(state: EngineServer): void {
         registry.models.pendingChanges.length = 0;
     }
 
-    // trait def changes, swap every live script instance against the
-    // current `registry.traits`. factory closures re-run; onSwap preserves
-    // opt-in state. removed traits/scripts get disposed inside applyTraitSwap.
-    //
-    // dual path:
-    //   - trait body change → wholesale swap (every instance), since trait
-    //     structure (script index, field layout) may have moved.
-    //   - producer-only change reaching `scripts:<id>` via DepGraph → narrow
-    //     swap targeting only the affected script ids.
+    // trait body change: wholesale swap (structure may have moved). producer-only
+    // change reaching `scripts:<id>` via DepGraph: narrow swap of affected ids only.
     if (registry.traits.pendingChanges.length > 0) {
         for (const room of state.rooms.rooms.values()) {
             applyTraitSwap(room.context);
@@ -164,11 +108,8 @@ export function applyRegistryChanges(state: EngineServer): void {
         }
     }
 
-    // scenes: declaration-side change. read each declared handle's
-    // `_payload` (stamped by the codegen barrel) and apply it. `removed`
-    // clears the handle. live disk-edit updates are out-of-band: bongle's
-    // `bongle:scenes` plugin fires HMR events that the boot template
-    // routes through `applyScenePayload` directly.
+    // declaration-side scene change; live disk-edit updates flow separately through
+    // bongle's `bongle:scenes` plugin into `applyScenePayload`.
     if (registry.scenes.pendingChanges.length > 0) {
         for (const change of registry.scenes.pendingChanges) {
             const sceneId = change.id;
@@ -190,27 +131,17 @@ export function applyRegistryChanges(state: EngineServer): void {
         registry.scenes.pendingChanges.length = 0;
     }
 
-    // prefabs: mark dirty anchors in edit rooms so the next prefab tick
-    // re-instantiates them with the fresh def + dep content. play rooms
-    // stay stable across HMR (preserves gameplay state), only setPrefab /
-    // registerSubtree dirty anchors there. dirtyPrefabIds folds both
-    // directly-changed prefabs and transitive dep-change consumers.
+    // mark dirty anchors in edit rooms so the next prefab tick re-instantiates them.
+    // play rooms stay stable across HMR to preserve gameplay state.
     if (dirtyPrefabIds.size > 0) {
         for (const room of state.rooms.rooms.values()) {
             if (room.mode !== 'edit') continue;
             markPrefabAnchorsDirty(room.scene, dirtyPrefabIds);
         }
     }
-    // commands + traits: wire-index tables for both are lazy-derived on
-    // `registry.commandWireIndex` / `.traitWireIndex` and recompute on next
-    // read after the revision bumps from the draining above. nothing to do
-    // here beyond draining the queue.
+    // wire-index tables recompute lazily on next read; nothing to do beyond draining.
     registry.commands.pendingChanges.length = 0;
-
-    // controls / sync / scripts: per-trait registrations whose runtime
-    // effect is consumed via the trait def. drain so the queue doesn't
-    // grow unbounded, script swap was already handled above through the
-    // merged `dirtyScriptIds`.
+    // script swap already handled above via the merged `dirtyScriptIds`.
     registry.controls.pendingChanges.length = 0;
     registry.sync.pendingChanges.length = 0;
     registry.scripts.pendingChanges.length = 0;
@@ -218,25 +149,15 @@ export function applyRegistryChanges(state: EngineServer): void {
     registry.prefabs.pendingChanges.length = 0;
     registry.config.pendingChanges.length = 0;
 
-    // sounds: server has no playback runtime, drain so the queue doesn't
-    // grow unbounded across HMR flushes.
+    // sounds/sprites/particles are client-only; drain so the queues don't grow
+    // unbounded across HMR flushes.
     registry.sounds.pendingChanges.length = 0;
-
-    // sprites: client-only (atlas + rendering). drain so the queue doesn't
-    // grow unbounded across HMR flushes on the server side.
     registry.sprites.pendingChanges.length = 0;
-
-    // particles: client-only (spawn pool + sprite atlas). drain so the
-    // queue doesn't grow unbounded across HMR flushes on the server side.
     registry.particles.pendingChanges.length = 0;
 
-    // emit `wire_table` to every connected client if our outbound id sets
-    // shifted. messages enqueued AFTER this call (e.g. scene_syncs from
-    // the next tick's `Discovery.flush`) will encode against the new
-    // tables; WS ordering means the client adopts the new inbound mapping
-    // before decoding those follow-ups. messages already in the per-client
-    // outbox were encoded under the OLD tables and decode correctly on
-    // arrival (client's inbound hasn't been updated yet).
+    // messages enqueued after this point encode against the new tables; the client
+    // adopts the new inbound mapping (via wire_table) before decoding them, while
+    // anything already in the outbox was encoded under the old tables.
     const nextTraitIds = registry.protocol.traits.indexToId;
     const nextCommandIds = registry.protocol.commands.indexToId;
     if (!idListsEqual(prevTraitIds, nextTraitIds) || !idListsEqual(prevCommandIds, nextCommandIds)) {

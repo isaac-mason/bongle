@@ -1,22 +1,14 @@
-/**
- * Static device CAPABILITY probe (resolved once at boot; hardware doesn't change
- * mid-session). The separate question of which input is being used RIGHT NOW —
- * the one that gates pointer lock and touch controls — is the live `inputMode` on
- * the client store (client/ui/client-store), because a single "isTouch" boolean is
- * a category error on hybrids (a touchscreen laptop has a digitizer AND a mouse).
- */
-
 export type DeviceType = 'mouseOnly' | 'touchOnly' | 'hybrid';
 
+/** Static capability probe, resolved once at boot. Which input is used right now
+ *  (gates pointer lock and touch controls) is the live `inputMode` on the client store instead. */
 export type Device = {
-    /** static capability class. `hybrid` = has both a fine pointer and touch
-     *  (touchscreen laptop / Surface). Probed from `any-pointer`/`any-hover`, which
-     *  query EVERY attached pointer (unlike `(pointer: coarse)`, which reports only
-     *  the primary and so can't tell a hybrid from a touch-only tablet). */
+    /** `hybrid` = has both a fine pointer and touch. Probed from
+     *  `any-pointer`/`any-hover`, which query every attached pointer, unlike
+     *  `(pointer: coarse)` which reports only the primary. */
     deviceType: DeviceType;
-    /** a phone-class device (Client Hints `userAgentData.mobile`, else a UA
-     *  regex). viewport-independent, so it holds on a phone even when the page is
-     *  rendered desktop-width. drives the compact phone HUD (see `isMobile`). */
+    /** phone-class device, viewport-independent so it holds even when the page
+     *  renders desktop-width. Drives the compact phone HUD. */
     mobile: boolean;
 };
 
@@ -27,9 +19,8 @@ export function init(): Device {
 
 type UADataLike = { mobile?: boolean };
 
-/** a phone-class device. prefers UA Client Hints (`navigator.userAgentData.mobile`,
- *  definitive on Chromium/Android), falling back to a UA regex for Safari/iOS and
- *  older browsers. NOT a viewport check — that misfires on desktop-styled host pages. */
+/** Prefers UA Client Hints, falling back to a UA regex for Safari/iOS and older
+ *  browsers. Not a viewport check, that misfires on desktop-styled host pages. */
 function detectMobile(): boolean {
     if (typeof navigator === 'undefined') return false;
     const uaData = (navigator as Navigator & { userAgentData?: UADataLike }).userAgentData;
@@ -37,9 +28,8 @@ function detectMobile(): boolean {
     return /Android|iPhone|iPod|Windows Phone|IEMobile|BlackBerry|Opera Mini/i.test(navigator.userAgent || '');
 }
 
-/** classify capability from `any-pointer`/`any-hover` (ALL attached pointers, so a
- *  hybrid is distinguishable from touch-only). `maxTouchPoints`/`mobile` backstop the
- *  coarse signal; a device with no signal at all (SSR, ancient browser) is mouseOnly. */
+/** `maxTouchPoints`/`mobile` backstop the coarse signal; a device with no
+ *  signal at all (SSR, ancient browser) is mouseOnly. */
 function detectDeviceType(mobile: boolean): DeviceType {
     const hasFinePointer = matchMediaMatches('(any-pointer: fine)') || matchMediaMatches('(any-hover: hover)');
     const hasTouchPointer =

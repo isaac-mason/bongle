@@ -9,22 +9,6 @@ import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { parsePattern } from '../scene/pattern';
 
-/**
- * context- and tool-aware action buttons.
- * floats as an overlay in the top-left of the canvas area.
- *
- * inspect (with nodes selected):
- *   - translate, rotate, scale (enters transform mode)
- *
- * transform:
- *   - translate, rotate, scale (toggles gizmo mode)
- *
- * selection tools (box-select, magic-select):
- *   - fill, delete, replace, pick (enabled when there is a selection or hover)
- *
- * build / paint:
- *   - pick (enabled when there is a hover)
- */
 export function ToolActions() {
     const activeTool = useEditRoom((s) => s.activeTool);
     const hasSelection = useEditRoom((s) => !Selection.isEmpty(s.selection));
@@ -62,10 +46,9 @@ export function ToolActions() {
     const hasNodes = nodeCount > 0;
     const hasSelectionOrHover = hasSelection || hasHover;
 
-    // inspect with no node selection and transform with no nodes, no actions
     if (isInspect && !hasNodes) return null;
 
-    // helper to enter transform mode from inspect or switch gizmo mode in transform
+    // enters transform mode when called from inspect; just switches gizmo mode when already in it.
     function gizmoAction(mode: TransformMode) {
         if (isInspect) {
             setTransformMode(mode);
@@ -185,8 +168,7 @@ function ActionBtn({
     icon: React.ElementType;
     disabled: boolean;
     onClick: () => void;
-    /** optional WE-style equivalent, shown as a popover below the button on
-     *  hover so users can discover the slash form of the same action. */
+    /** WE-style slash form of the same action, shown as a popover on hover. */
     slashCmd?: string;
 }) {
     const [hovered, setHovered] = useState(false);

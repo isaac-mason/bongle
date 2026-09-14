@@ -2,14 +2,11 @@ import { protocolManifest, registry } from '../core/registry';
 import type { ClientNet } from './net';
 import * as Net from './net';
 
-/**
- * Outbound protocol-manifest publication (the client->server counterpart to the
- * inbound decode table `state.inbound`). We publish our registry's manifest so
- * the server decodes our traffic by id.
- */
+/** Outbound protocol-manifest publication, the client->server counterpart to
+ *  the inbound decode table `state.inbound`. */
 export type Manifest = {
-    /** registry revision last published via wire_table; -1 forces a resend on the
-     *  next sync (used after (re)join, once our ClientState exists server-side). */
+    /** registry revision last published via wire_table; -1 forces a resend on
+     *  the next sync, used after (re)join. */
     lastSent: number;
 };
 

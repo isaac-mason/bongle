@@ -1,15 +1,3 @@
-// Standalone ser/des shape exploration for chunk_full payloads.
-//   run: node_modules/.bin/tsx src/core/voxels/chunk-codec-bench.ts
-//
-// input to every codec is the live in-memory chunk form:
-//   data:  Uint16Array(4096) of palette INDICES (small ints)
-//   light: Uint16Array(4096) of packed (sky<<12)|rgb
-// paletteKeys (string[]) ride the wire identically for every variant, so
-// they're excluded from the size comparison.
-//
-// goal: does dropping deflate + splitting streams (like the light codec
-// already does) kill the inflateSync decode spike without bloating size?
-
 import { deflateSync, inflateSync } from 'fflate';
 
 const CHUNK_SIZE = 16;
@@ -17,7 +5,7 @@ const CHUNK_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // 4096
 const vi = (x: number, y: number, z: number) => x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
 const packLight = (sky: number, r: number, g: number, b: number) => (sky << 12) | (r << 8) | (g << 4) | b;
 
-// ── RLE (uint16 value/count pairs), copied from chunk-codec.ts ──────
+// RLE (uint16 value/count pairs), copied from chunk-codec.ts
 function rleEncode(input: Uint16Array): Uint16Array {
     if (input.length === 0) return new Uint16Array(0);
     const pairs = new Uint16Array(input.length * 2);
@@ -62,10 +50,8 @@ function splitLight(light: Uint16Array): { sky: Uint16Array; rgb: Uint16Array } 
     return { sky, rgb };
 }
 
-// ── codec variants ──────────────────────────────────────────────────
-// each returns { bytes, dec } where bytes is the wire byte count and
-// dec() reconstructs {data, light} for correctness checking.
-
+// each codec's run() returns { bytes, decode } where bytes is the wire byte count and decode()
+// reconstructs {data, light} for correctness checking.
 type Codec = {
     name: string;
     run: (
@@ -77,7 +63,7 @@ type Codec = {
     };
 };
 
-// A. baseline, current production: interleave → RLE u16 → deflate
+// A. baseline, current production: interleave, RLE u16, deflate
 const A_baseline: Codec = {
     name: 'A baseline (interleave+RLE+deflate)',
     run(data, light) {
@@ -106,7 +92,7 @@ const A_baseline: Codec = {
     },
 };
 
-// B. split, NO deflate, RLE(data) + RLE(sky) + RLE(rgb), three fast expands
+// B. split, no deflate, RLE(data) + RLE(sky) + RLE(rgb), three fast expands
 const B_splitNoDeflate: Codec = {
     name: 'B split, no deflate (RLE data/sky/rgb)',
     run(data, light) {
@@ -128,7 +114,7 @@ const B_splitNoDeflate: Codec = {
     },
 };
 
-// D. split + ONE deflate over concatenated RLE streams (one inflate on decode)
+// D. split + one deflate over concatenated RLE streams (one inflate on decode)
 const D_splitDeflateOnce: Codec = {
     name: 'D split + single deflate (concat)',
     run(data, light) {
@@ -213,8 +199,7 @@ const E_bitpackIdx: Codec = {
     },
 };
 
-// D2. data + COMBINED light (no sky/rgb split), RLE each, single deflate.
-//     does the channel split earn its keep once deflate runs?
+// D2. data + combined light (no sky/rgb split), RLE each, single deflate.
 const D2_combinedLightDeflate: Codec = {
     name: 'D2 data+combined-light RLE, 1 deflate',
     run(data, light) {
@@ -242,8 +227,7 @@ const D2_combinedLightDeflate: Codec = {
     },
 };
 
-// D3. split sky/rgb but NO RLE (raw u16 bytes) + single deflate.
-//     does RLE earn its keep once deflate runs?
+// D3. split sky/rgb but no RLE (raw u16 bytes) + single deflate.
 const D3_splitNoRleDeflate: Codec = {
     name: 'D3 split raw (no RLE), 1 deflate',
     run(data, light) {
@@ -300,7 +284,6 @@ const CODECS = [
     E_bitpackIdx,
 ];
 
-// ── scenarios ───────────────────────────────────────────────────────
 type Scene = { name: string; data: Uint16Array; light: Uint16Array };
 
 function sceneUniformAir(): Scene {
@@ -408,22 +391,19 @@ const SCENES = [
     sceneNoisy(),
 ];
 
-// ── correctness ─────────────────────────────────────────────────────
 function eq(a: Uint16Array, b: Uint16Array): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     return true;
 }
 
-// ── timing ──────────────────────────────────────────────────────────
 function timeUs(fn: () => void, iters: number): number {
     for (let i = 0; i < Math.min(50, iters); i++) fn(); // warmup
     const t0 = performance.now();
     for (let i = 0; i < iters; i++) fn();
-    return ((performance.now() - t0) / iters) * 1000; // µs/op
+    return ((performance.now() - t0) / iters) * 1000; // us per op
 }
 
-// ── run ─────────────────────────────────────────────────────────────
 const ENC_ITERS = 2000,
     DEC_ITERS = 5000;
 const pad = (s: string, n: number) => s.padEnd(n);

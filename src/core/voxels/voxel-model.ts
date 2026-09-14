@@ -1,25 +1,17 @@
-// voxel model, pure voxel data container.
-//
-// holds a Voxels grid plus derived bounds, dimensions, voxel count, and
-// a default origin (center of the occupied bounding box). renderer-agnostic,
-// VoxelMeshTrait references one for rendering, and the same data can drive
-// crashcat shape factories, collision, etc.
-//
-// the underlying Voxels should not be mutated after construction,
-// consumers (VoxelMeshVisuals) cache derived geometry keyed by VoxelModel
-// identity and assume the data is immutable.
-
 import type { Vec3 } from 'math';
 import { AIR, MISSING } from './block-registry';
 import { CHUNK_SIZE, type Chunk, type Voxels, voxelIndex } from './voxels';
 
+/**
+ * Pure voxel data container: a Voxels grid plus derived bounds, dimensions, count, and a default origin.
+ * Renderer-agnostic; VoxelMeshTrait references one for rendering, and the same data can drive crashcat shape factories.
+ * The underlying Voxels must not be mutated after construction; consumers cache derived geometry keyed by VoxelModel identity.
+ */
 export class VoxelModel {
-    // the source voxel data. treated as immutable after construction,
-    // modifying it after creating the VoxelModel is undefined behavior.
+    // treated as immutable after construction; modifying it afterward is undefined behavior.
     voxels: Voxels;
 
-    // integer bounding box of occupied voxels (inclusive min, exclusive max).
-    // e.g. a 3x3x3 cube at origin: boundsMin=[0,0,0], boundsMax=[3,3,3].
+    // integer bounding box of occupied voxels (inclusive min, exclusive max); e.g. a 3x3x3 cube at origin has boundsMin=[0,0,0], boundsMax=[3,3,3].
     boundsMin: Vec3;
     boundsMax: Vec3;
 
@@ -29,9 +21,7 @@ export class VoxelModel {
     // total number of non-air voxels.
     voxelCount: number;
 
-    // origin point (model-space pivot). when meshed for rendering, vertex
-    // positions are offset by -origin so the model rotates/scales around
-    // this point. defaults to the center of the bounding box.
+    // model-space pivot; mesh vertex positions are offset by -origin so the model rotates/scales around this point. defaults to the bounding box center.
     origin: Vec3;
 
     constructor(voxels: Voxels) {
@@ -43,12 +33,9 @@ export class VoxelModel {
         this.voxelCount = voxelCount;
         this.dimensions = [boundsMax[0] - boundsMin[0], boundsMax[1] - boundsMin[1], boundsMax[2] - boundsMin[2]];
 
-        // default origin: center of bounding box
         this.origin = [(boundsMin[0] + boundsMax[0]) / 2, (boundsMin[1] + boundsMax[1]) / 2, (boundsMin[2] + boundsMax[2]) / 2];
     }
 }
-
-// ── internal: scan voxel bounds ─────────────────────────────────────
 
 function scanBounds(voxels: Voxels): { boundsMin: Vec3; boundsMax: Vec3; voxelCount: number } {
     let minX = Infinity;

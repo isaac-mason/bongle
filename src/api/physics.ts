@@ -1,5 +1,3 @@
-/** per-body verb namespace for AABB bodies, mirroring crashcat's `rigidBody.*`.
- *  curated to the script-facing surface in `aabb/aabb-verbs.ts`. */
 export { aabbBody } from '../core/physics/aabb';
 export type { Physics } from '../core/physics/physics';
 export { objectLayerForMotionType } from '../core/physics/rigid/rigid-world';
@@ -12,8 +10,6 @@ export {
     OBJECT_LAYER_VOXELS,
 } from '../core/physics/rigid/rigid-world-settings';
 
-// ── collision groups ──────────────────────────────────────────────────
-//
 // crashcat bodies collide when `(a.groups & b.mask) && (b.groups & a.mask)`.
 // the engine reserves the low bits (voxels, nodes, characters); games declare
 // their own groups above that range with `defineCollisionGroups(...)`, then
@@ -24,10 +20,9 @@ export {
 export const RESERVED_COLLISION_GROUP_BITS = 3;
 
 /** declare a game's collision groups once, in a stable order, and get a named
- *  bit for each. bit assignment is positional (first name → first free bit
- *  above the reserved range), so it's identical on every side, groups aren't
- *  synced, so a game MUST declare them the same way everywhere (call this once
- *  at module load with a fixed list, don't build the list conditionally).
+ *  bit for each. bit assignment is positional (first name gets the first free
+ *  bit above the reserved range) and not synced, so a game must declare them
+ *  the same way everywhere: call this once at module load with a fixed list.
  *
  *  @example
  *  const G = defineCollisionGroups('enemies', 'pickups', 'playerBullets');

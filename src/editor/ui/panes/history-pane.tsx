@@ -1,10 +1,5 @@
 import { useEditRoom } from '../../edit-room-store';
 
-/**
- * linear history list. undo stack newest-first, then a divider,
- * then the redo stack (greyed). clicking an entry walks the stack
- * to that position.
- */
 export function HistoryPane() {
     const undoStack = useEditRoom((s) => s.undoStack);
     const redoStack = useEditRoom((s) => s.redoStack);
@@ -30,7 +25,6 @@ export function HistoryPane() {
                     key={`undo-${i}`}
                     type="button"
                     onClick={() => {
-                        // walk back i+1 steps
                         for (let n = 0; n <= i; n++) undo();
                     }}
                     className="text-left px-3 py-0.5 text-[10px] font-mono text-fg hover:bg-surface-muted cursor-pointer"
@@ -39,7 +33,6 @@ export function HistoryPane() {
                 </button>
             ))}
 
-            {/* current position marker */}
             <div className="flex items-center gap-2 px-3 py-0.5 my-0.5">
                 <div className="flex-1 h-px bg-border" />
                 <span className="text-[9px] font-mono text-fg-muted shrink-0">now</span>
@@ -52,7 +45,6 @@ export function HistoryPane() {
                     key={`redo-${i}`}
                     type="button"
                     onClick={() => {
-                        // walk forward i+1 steps
                         for (let n = 0; n <= i; n++) redo();
                     }}
                     className="text-left px-3 py-0.5 text-[10px] font-mono text-fg-muted hover:bg-surface-muted cursor-pointer"

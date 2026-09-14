@@ -1,37 +1,8 @@
-// curated motion vocabulary for particle update fns.
-//
-// Two layers, all sharing the `(pool, i, dt, voxels)` per-particle
-// signature so they compose freely:
-//
-//   primitives, gravity / drag / integrate / collideSlide / collideLand
-//                 / collideBounce / collideDestroy. building blocks.
-//   complete, dust / smoke / spark / snow / rain. drop straight into
-//                 `update:`, but also serve as readable examples for
-//                 hand-rolling custom motion.
-//
-// engine handles natural death (`expiresAt <= now`) at compact time, so
-// there's no `expireOnAge` primitive, motion fns just do motion and
-// collision response. to kill from inside a fn (any non-age reason),
-// write `pool.expiresAt[i] = 0`.
-//
-// the `collide*` primitives all do an Amanatides-Woo voxel-grid sweep
-// from `prev*` to `pos*` (i.e. they're meant to run *after* `integrate`
-// has stamped both fields), reading `voxels.registry.flags` for the
-// `BLOCK_FLAG_COLLISION` check. cube blocks (colliderId 0) snap at the
-// DDA face crossing; non-cube blocks (slabs/stairs/fences) delegate to
-// a slab-method segment-vs-AABB pass against `shapeAabbs[colliderId]`,
-// so a particle landing on a slab snaps to y=0.5, not the enclosing
-// cell's y=1.0. cheaper than `castShape`, never enters the physics-body
-// layer (rigid-body queries skip particles for free). motion fns that
-// don't want collision simply omit the primitive.
-
 import type { AABB } from '../voxels/block-collider';
 import { BLOCK_FLAG_COLLISION } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
 import { getBlockState } from '../voxels/voxels';
 import type { ParticlePool, ParticleUpdateFn } from './particles';
-
-/* ── primitives ── */
 
 /** apply gravity along Y. positive `g` = rises (e.g. smoke), negative
  *  `g` = falls (e.g. rain). units: world-units / s². */
@@ -204,8 +175,7 @@ function sweepAabbs(
  * the starting cell is treated as free for cubes (escape rule for
  * particles spawned inside terrain) but still tested for sub-AABBs with
  * `t > 0` so a particle in an air pocket of a stair cell still sees the
- * stair's vertical face. inside-an-AABB at t=0 returns tNear ≤ 0 and is
- * excluded by the same rule, escape behavior preserved.
+ * stair's vertical face.
  *
  * single shared `HIT` is fine here: collide* primitives consume the
  * result before yielding control, no caller holds a ref across calls.
@@ -348,8 +318,6 @@ function collideDestroy(pool: ParticlePool, i: number, _dt: number, voxels: Voxe
     pool.expiresAt[i] = 0;
 }
 
-/* ── tint primitives ── */
-
 // the `(pool, i, dt, voxels)` signature carries no `now`, so these decay
 // toward the target at a per-second `rate` (dt-correct, unlike `drag`'s
 // per-frame multiplier) rather than keying off lifetime fraction. to
@@ -373,8 +341,6 @@ function fadeRgb(pool: ParticlePool, i: number, dt: number, rate: number): void 
 function fadeAlpha(pool: ParticlePool, i: number, dt: number, rate: number): void {
     pool.tintA[i] = Math.max(0, pool.tintA[i]! - rate * dt);
 }
-
-/* ── curated complete update fns ── */
 
 /** drift + drag, falls under gravity, slides along geometry. */
 const dust: ParticleUpdateFn = (pool, i, dt, voxels) => {

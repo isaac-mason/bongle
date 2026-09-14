@@ -1,21 +1,10 @@
-// debug-visuals.ts, physics collider debug rendering.
-//
-// iterates the world's body pool and emits wireframes via crashcat's
-// per-body debug.body(), skipping editor-layer bodies (transform gizmos,
-// selection helpers, etc). renders via gpucat's LineSegmentsGeometry +
-// LineMaterial for screen-space constant-width lines.
-
 import { debug, rigidBody, type World } from 'crashcat';
 import { LineMaterial, LineSegmentsGeometry, Mesh, type Scene, vec4f } from 'gpucat';
 import { OBJECT_LAYER_EDITOR_NODES } from '../../core/physics/physics';
 
-// ── constants ──────────────────────────────────────────────────────
-
-const MAX_POINTS = 200_000; // max point count (2 points per segment)
+const MAX_POINTS = 200_000; // 2 points per segment
 const LINE_WIDTH_PX = 5;
 const LINE_COLOR: [number, number, number, number] = [1.0, 0.0, 1.0, 1.0]; // magenta
-
-// ── state ──────────────────────────────────────────────────────────
 
 export type DebugVisualsState = {
     mesh: Mesh;
@@ -26,7 +15,7 @@ export type DebugVisualsState = {
 };
 
 export function init(scene: Scene): DebugVisualsState {
-    // start with a dummy segment; maxPoints pre-allocates buffers
+    // dummy segment; MAX_POINTS pre-allocates the buffer
     const geometry = new LineSegmentsGeometry([0, 0, 0, 0, 0, 0], MAX_POINTS);
     geometry.drawRange.count = 0;
 
@@ -48,8 +37,6 @@ export function init(scene: Scene): DebugVisualsState {
         scratch: new Float32Array(MAX_POINTS * 3),
     };
 }
-
-// ── update ─────────────────────────────────────────────────────────
 
 export function update(state: DebugVisualsState, world: World, enabled: boolean): void {
     if (!enabled) {
@@ -80,8 +67,6 @@ export function update(state: DebugVisualsState, world: World, enabled: boolean)
         state.mesh.visible = false;
     }
 }
-
-// ── dispose ────────────────────────────────────────────────────────
 
 export function dispose(state: DebugVisualsState, scene: Scene): void {
     scene.remove(state.mesh);

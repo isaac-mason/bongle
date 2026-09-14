@@ -1,10 +1,5 @@
 import { type ComponentProps, forwardRef } from 'react';
 
-// The editor's button, and the house look it encodes: SQUARE (no radius), a 1px
-// border, tight padding, monospace. Every bordered affordance in the chrome is one
-// of these boxes, so the vocabulary lives here rather than being retyped as utility
-// soup per call site. Pairs with <Kbd>, which follows the same rules.
-
 /** the box: `icon*` are fixed squares (a glyph, no label), the rest size to content. */
 export type ButtonSize = 'xs' | 'sm' | 'icon-sm' | 'icon';
 /** idle, selected (accent fill: a held tool, an open panel), or a solid action fill. */
@@ -26,11 +21,9 @@ const TONES: Record<ButtonTone, string> = {
     danger: 'bg-danger-solid text-white border-danger-solid hover:opacity-85',
 };
 
-/** the class string on its own, for call sites that compose their own element —
- *  a split tab, an anchor, a button that also carries layout classes. */
+/** the class string on its own, for call sites that compose their own element (a split tab, an anchor). */
 export function buttonClass(size: ButtonSize = 'sm', tone: ButtonTone = 'default', disabled = false): string {
-    // disabled dims the tone rather than replacing it, so a solid action button
-    // stays recognisably itself while it's unavailable.
+    // disabled dims the tone rather than replacing it, so a solid action button stays recognisable.
     return `${BASE} ${SIZES[size]} ${TONES[tone]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`;
 }
 

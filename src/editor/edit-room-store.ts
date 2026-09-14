@@ -1,24 +1,3 @@
-/**
- * per-edit-room zustand store. one instance per joined edit room, created
- * inside EditorScript's onInit closure and registered on `useEditor`
- * (keyed by roomId). The store's action closures capture per-room locals
- * (ctx, room, transformToolState) at creation time, they're never re-bound.
- * switching the active room just swaps which store the UI reads from;
- * tool/options/selection state survives intact for as long as the room
- * is joined.
- *
- * Selection & per-frame scratch (hover, brush, in-progress box/lasso/cursor)
- * live directly on the store. Tools assign these fields with FRESH refs
- * each mutation, the new ref is itself the re-render signal, so per-field
- * zustand selectors (`s.selection`, `s.lasso`, …) wake only their own
- * subscribers. No global tick.
- *
- * `sceneRevision` is a separate, narrow signal: the editor script mirrors the
- * runtime's `scene.replication.versionCounter` into it each frame, so the
- * inspector/hierarchy re-derive whenever the scene tree changed, locally or
- * over the wire. It does NOT fire on selection/hover/etc.
- */
-
 import type { JsonValue } from 'bongle/interface';
 import type { Vec3 } from 'math';
 import { create, type StoreApi, useStore } from 'zustand';
@@ -73,8 +52,7 @@ export type SelectionBehavior = 'replace' | 'add';
 
 export type MagicSelectCompare = 'block' | 'blockstate' | 'solid' | 'any';
 
-/** undo/redo stack entry. `do` runs on initial dispatch and on redo; `undo`
- *  reverses it. closures are kept on the per-room store, never replicated. */
+/** undo/redo stack entry; `do` runs on initial dispatch and on redo, `undo` reverses it. */
 export type Action = {
     label: string;
     do: () => void;
@@ -101,15 +79,7 @@ export type LassoSelectOptions = {
     maxDistance: number;
 };
 
-/** elevation tool, axiom-style heightmap sculpt. modes:
- *  raise extends the top block upward, lower clears top blocks to air,
- *  flatten drags every column under the disc toward the click y.
- *  continuous mode integrates per-column over time: every frame each
- *  column's accumulator grows by `rate · amount · falloff · imageWeight · dt`
- *  and a single block flips whenever floor(accum) advances. center cells
- *  fill first; edge cells trail, natural smooth dome / valley shape.
- *  single mode applies one stamp of `round(amount · falloff · imageWeight)`
- *  per click. */
+/** raise extends the top block upward, lower clears top blocks to air, flatten drags every column under the disc toward the click y. */
 export type ElevationMode = 'raise' | 'lower' | 'flatten';
 export type ElevationFalloff = 'linear' | 'cosine' | 'sharp';
 
@@ -136,43 +106,29 @@ export type ElevationOptions = {
     /** optional grayscale image, luminance scales the per-cell delta. */
     heightmap: ElevationImage | null;
     heightmapError: string | null;
-    /** pattern used for new cells on raise / flatten-up. null = extend the
-     *  column's existing top block (the natural terrain default). */
+    /** null = extend the column's existing top block. */
     pattern: Pattern | null;
     patternText: string;
     patternError: string | null;
-    /** mask restricting which columns the tool affects (sampled at the
-     *  topmost cell in the y band). null = no restriction. */
+    /** null = no restriction; sampled at the topmost cell in the y band. */
     mask: Mask | null;
     maskText: string;
     maskError: string | null;
 };
 
-/** smooth tool config, matches worldedit's //smooth and /brush smooth.
- *  per (x,z) column inside the brush footprint we sample the topmost
- *  block matching `heightmapMask` (any non-air when mask is null), then
- *  run `iterations` passes of a fixed 5×5 gaussian blur over the per-
- *  column heights, quantise back to ints, and raise/lower the column:
- *  raise = extend with the column's existing top block; lower = clear
- *  to air. each iteration is one full gaussian pass, so higher
- *  iterations → smoother result (per CLT, equivalent to a larger σ). */
+/** each iteration runs a 5x5 gaussian pass over per-column top-block heights, then raises/lowers columns to match. */
 export type SmoothOptions = {
     shape: BrushShape;
     size: number;
     height: number;
     iterations: number;
-    /** filter for which blocks count as "surface" when building the
-     *  heightmap. null = any non-air block counts. */
+    /** null = any non-air block counts as surface. */
     heightmapMask: Mask | null;
     heightmapMaskText: string;
     heightmapMaskError: string | null;
 };
 
-/** brush tool config. `pattern` / `mask` are the parsed ASTs used at apply
- *  time; `patternText` / `maskText` are the raw editor strings (preserved
- *  across renders so the inspector doesn't fight the user mid-edit). when
- *  text parses, both fields update together; on a parse error the parsed
- *  field stays at its last good value and the matching `*Error` is set. */
+/** `patternText`/`maskText` are the raw editor strings; on a parse error the parsed field keeps its last good value. */
 export type BrushOptions = {
     shape: BrushShape;
     /** voxel radius from the centre cell (0 = single voxel). */
@@ -188,11 +144,7 @@ export type BrushOptions = {
     maskError: string | null;
 };
 
-/** brush-select tool config. mirrors the brush rasteriser (shape / size /
- *  height) but selects voxels instead of placing them, so it carries no
- *  pattern, just an optional `mask` narrowing which cells in the stroke
- *  footprint get added to the selection. `maskText` / `maskError` follow the
- *  same raw-string-plus-last-good-AST scheme as BrushOptions. */
+/** mirrors the brush rasteriser but selects voxels instead of placing them, so no pattern. */
 export type BrushSelectOptions = {
     shape: BrushShape;
     /** voxel radius from the centre cell (0 = single voxel). */
@@ -205,14 +157,10 @@ export type BrushSelectOptions = {
     maskError: string | null;
 };
 
-/** paint shares the brush config shape exactly, same rasteriser, same
- *  pattern/mask AST. the only behavioural divergence (live-during-drag vs
- *  commit-on-release) is in the tool's stroke loop, not the options. kept
- *  as its own store field so each tool remembers its own size/shape. */
+/** shares BrushOptions' shape; kept as its own store field so each tool remembers its own size/shape. */
 export type PaintOptions = BrushOptions;
 
-/** in-progress box-select corner state. previewB tracks the cursor each
- *  frame; once committed via mouseup the box is folded into `selection`. */
+/** in-progress box-select corner state; previewB tracks the cursor until mouseup folds the box into `selection`. */
 export type BoxSelectState = {
     cornerA: [number, number, number];
     previewB: [number, number, number] | null;
@@ -225,10 +173,8 @@ export type LassoState = {
 };
 
 export type EditRoomState = {
-    /* ── tools ── */
     activeTool: EditorTool;
 
-    /* ── transform options ── */
     transformMode: TransformMode;
     transformSpace: TransformSpace;
     translationSnap: number | null;
@@ -240,34 +186,22 @@ export type EditRoomState = {
     placementIsNodeOnly: boolean;
     transformHasVoxels: boolean;
 
-    /* ── selection & per-frame scratch ── */
-    /** unified voxel + node selection. never null, empty = Selection.create(). */
+    /** never null (empty = Selection.create()); tools assign a fresh ref on each mutation as the zustand re-render signal. */
     selection: Selection.Selection;
-    /** any-shape sparse bitset visualised as the brush overlay (hover preview,
-     *  wip box region, arbitrary brush shapes). null when nothing is shown. */
+    /** sparse bitset visualised as the brush overlay; null when nothing is shown. */
     brush: Selection.Selection | null;
-    /** brush fill rgba, null = default cyan. tools point at a preset from
-     *  `BRUSH_TINTS` for static intent, or allocate a fresh tuple each frame
-     *  for animated colors (pulse). selection-mesh dirty-checks by reference
-     *  so the uniform pushes exactly when the value actually changes. */
+    /** null = default cyan. selection-mesh dirty-checks by reference, so a fresh tuple each frame animates. */
     brushFill: Rgba | null;
     /** brush edge rgba, same semantics as brushFill. */
     brushEdges: Rgba | null;
     /** voxel currently under the cursor, drives brush (idle) + hover outline. */
     hoverVoxel: [number, number, number] | null;
-    /** face normal of the hovered voxel. */
     hoverNormal: [number, number, number] | null;
-    /** world-space hit point on the hovered face. */
     hoverPoint: [number, number, number] | null;
-    /** world-space AABB of the hovered block's colliders ([x0,y0,z0,x1,y1,z1]).
-     *  for cube blocks this is the unit cube around `hoverVoxel`; for non-cube
-     *  blocks (stairs, slabs, …) it's the tight union of the block's collider
-     *  AABBs. drives the hover outline so the highlight wraps the actual block
-     *  shape instead of the full voxel cell. null when nothing is hovered. */
+    /** [x0,y0,z0,x1,y1,z1]. unit cube for cube blocks; tight union of collider AABBs for non-cube blocks. */
     hoverAabb: [number, number, number, number, number, number] | null;
     /** in-progress box-select (corner A placed, aiming for corner B). */
     boxSelect: BoxSelectState | undefined;
-    /** in-progress lasso stroke. */
     lasso: LassoState | null;
     /** keyboard cursor for selection tools (arrow keys / [ / ]). */
     cursor: [number, number, number] | null;
@@ -276,7 +210,6 @@ export type EditRoomState = {
     /** last-clicked voxel info shown in the inspector. */
     inspectedVoxel: { wx: number; wy: number; wz: number; key: string } | null;
 
-    /* ── selection tool config ── */
     selectionBehavior: SelectionBehavior;
     selectTarget: SelectTarget;
     selectorMode: SelectorMode;
@@ -285,68 +218,51 @@ export type EditRoomState = {
     lassoOptions: LassoSelectOptions;
     brushSelectOptions: BrushSelectOptions;
 
-    /* ── brush tool config ── */
     brushOptions: BrushOptions;
 
-    /* ── paint tool config ── */
     paintOptions: PaintOptions;
 
-    /* ── smooth tool config ── */
     smoothOptions: SmoothOptions;
 
-    /* ── elevation tool config ── */
     elevationOptions: ElevationOptions;
 
-    /* ── viewport context menu ── */
     /** when non-null, the ViewportContextMenu opens anchored at these canvas-pixel coords. */
     viewportContextMenu: { x: number; y: number } | null;
 
-    /* ── clipboard ── */
     activeBlueprint: Blueprint.Blueprint | null;
 
-    /* ── inventory session state (hotbar contents stay global) ── */
+    // hotbar contents stay global
     activeSlotIndex: number;
     libraryOpen: boolean;
     carriedItem: HotbarSlot;
     hoveredInventoryItem: HotbarSlot;
     placementContinuous: boolean;
 
-    /* ── camera/control ── */
     controlMode: ControlMode;
     flySpeed: number | null;
     flySpeedShownAt: number;
-    /** copy/cut/paste handlers for this room's editor. the page-level listeners
-     *  (lens.ts) dispatch to the active room's. */
+    /** copy/cut/paste handlers for this room's editor; the page-level listeners dispatch to the active room's. */
     clipboard: ClipboardHandlers | null;
 
-    /* ── undo / redo ── */
     undoStack: Action[];
     redoStack: Action[];
 
-    /** mirror of `scene.replication.versionCounter`, projected each frame by the
-     *  editor script. Subscribed by inspector/hierarchy to re-derive their views. */
+    /** mirror of `scene.replication.versionCounter`, projected each frame; subscribed by inspector/hierarchy to re-derive their views. */
     sceneRevision: number;
 
-    /* ── room cmds ── */
     play: () => void;
     openScene: (sceneId: string) => void;
     renameScene: (oldSceneId: string, newSceneId: string) => void;
     deleteScene: (sceneId: string) => void;
-    /** persist an edit scene to disk (Ctrl+S / tab → Save). */
-    /** persist this room now (Ctrl+S, the tab menu). */
+    /** persists this room now (Ctrl+S, the tab menu). */
     save: () => void;
     undo: () => void;
     redo: () => void;
-    /** dispatch an action: runs `do()` immediately, pushes onto undoStack,
-     *  clears redoStack. callers (verbs in actions.ts / tools) use this
-     *  instead of touching the stacks directly. */
+    /** runs `do()` immediately, pushes onto undoStack, clears redoStack. */
     action: (a: Action) => void;
-    /** clear the voxel half of the selection: resets selection.chunks but
-     *  keeps selection.nodes intact. used by verbs after they apply a
-     *  selection-bound voxel op. */
+    /** resets selection.chunks but keeps selection.nodes intact. */
     clearVoxelSelection: () => void;
 
-    /* ── scene mutation actions ── */
     createNode: (parentId: number, index: number, name?: string) => void;
     destroyNode: (nodeId: number) => void;
     setName: (nodeId: number, name: string | undefined) => void;
@@ -360,7 +276,6 @@ export type EditRoomState = {
     clearPrefab: (nodeId: number) => void;
     bakePrefab: (nodeId: number) => void;
 
-    /* ── selection actions ── */
     selectNode: (nodeId: number | null) => void;
     addToSelection: (nodeId: number) => void;
     removeFromSelection: (nodeId: number) => void;
@@ -368,33 +283,25 @@ export type EditRoomState = {
     clearSelection: () => void;
     focusNode: (nodeId: number) => void;
     copyToClipboard: () => void;
-    /** save the current selection as a persistent blueprint scene. when name
-     * is omitted the server allocates `blueprint-NNN`. fire-and-forget, the
-     * server posts back a chat line on completion. */
+    /** saves the current selection as a persistent blueprint scene; omitted name allocates `blueprint-NNN`. */
     saveBlueprint: (name?: string) => void;
     destroySelectedNodes: () => void;
     openViewportContextMenu: (x: number, y: number) => void;
     closeViewportContextMenu: () => void;
 
-    /* ── voxel actions ── */
     fill: (pattern: Pattern, mask?: Mask) => number;
     delete: () => void;
     replace: (pattern: Pattern, from?: Mask) => number;
     overlay: (pattern: Pattern) => number;
     pick: () => void;
     cutMove: () => void;
-    /** rotate the active blueprint (and the live placement preview if one
-     *  exists) by 90-degree turns. positive = CW looking down the positive
-     *  axis. returns true if anything changed. NOT undoable, mirrors
-     *  WorldEdit semantics (clipboard ops don't touch the world). */
+    /** positive = CW looking down the positive axis. not undoable, clipboard ops don't touch the world. */
     rotate: (yawTurns: number, pitchTurns: number, rollTurns: number) => boolean;
-    /** mirror the active blueprint (and the live placement preview) across
-     *  the plane perpendicular to `axis`. NOT undoable. */
+    /** mirrors the active blueprint (and live placement preview) across the plane perpendicular to `axis`. not undoable. */
     flip: (axis: 'x' | 'y' | 'z') => boolean;
     setBlock: (wx: number, wy: number, wz: number, key: string) => void;
     setPlacementPivotPreset: (preset: PivotPreset) => void;
 
-    /* ── setters ── */
     setActiveTool: (tool: EditorTool) => void;
     setTransformMode: (mode: TransformMode) => void;
     setTransformSpace: (space: TransformSpace) => void;
@@ -417,7 +324,6 @@ export type EditRoomState = {
     setSmoothOptions: (opts: Partial<SmoothOptions>) => void;
     setElevationOptions: (opts: Partial<ElevationOptions>) => void;
 
-    /* ── inventory + active slot ── */
     setActiveSlot: (index: number) => void;
     cycleActiveSlot: (delta: number) => void;
     toggleLibrary: () => void;
@@ -562,42 +468,26 @@ function initialFields() {
 
 export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
     const { ctx, room, transformToolState } = refs;
-    // forward ref, actions need to pass the StoreApi to helpers (so they
-    // can read/write fresh state), but `create()` only provides set/get
-    // inside the factory. assign after to satisfy the closures.
+    // actions need the StoreApi to read/write fresh state, but create() only provides set/get inside the factory.
     let api: EditRoomStoreApi;
 
     const store = create<EditRoomState>((set, get) => ({
         ...initialFields(),
 
-        /* ── room cmds ── */
         play: () => {
-            // fire-and-forget: the play room activates asynchronously. flag the
-            // request as pending so the Play button (and Tab) show a loading
-            // state; `setRoomMode` clears it when the room activates. ignore
-            // repeat requests while one is already in flight.
+            // play request is pending until `setRoomMode` clears it when the room activates; ignore repeats.
             if (useEditor.getState().playPending) return;
             useEditor.getState().setPlayPending(true);
             const state = ctx.client!.state!;
 
-            // play preview branches on the game's launch config (live in the
-            // registry since this client realm booted). a standalone (client-only)
-            // game has no server to preview against, so spawn a client-only local
-            // room instead of routing a `play` request through the edit-server
-            // worker. the edit room itself stays client-server (untouched below).
+            // a standalone game has no server to preview against, so spawn a client-only local room instead.
             if (isStandaloneBuild()) {
-                // startStandaloneRoom mounts a local room (roomMode 'play') and
-                // makes it the active player; setActivePlayer flips roomMode to
-                // 'play', which clears the pending spinner (setRoomMode).
                 startStandaloneRoom(state, room.sceneId);
                 return;
             }
 
             const net = state.net;
-            // ride the editor's current viewpoint along as `__editor` join data
-            // so games can offer "play from here" (they opt in to using it).
-            // absent outside this editor play flow, so production joins are
-            // unaffected.
+            // rides the editor's current viewpoint along as join data so games can opt in to "play from here".
             const joinData: Record<string, JsonValue> = {};
             const cameraTransform = getTrait(room.client.camera, TransformTrait);
             if (cameraTransform) {
@@ -608,8 +498,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                     quaternion: [q[0], q[1], q[2], q[3]],
                 };
             }
-            // the play room boots from the scene store, so land this room's unsaved
-            // edits there first. same socket, so the server saves before it forks.
+            // the play room boots from the scene store; save first so it forks from current edits.
             send(ctx, SaveSceneCommand, { sceneId: room.sceneId });
             Net.send(net, {
                 type: 'play',
@@ -661,7 +550,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             });
         },
 
-        /* ── scene mutation actions ── */
         createNode: (parentId, index, name) => Actions.createNodeAction(ctx, parentId, index, name),
         destroyNode: (nodeId) => Actions.destroyNodeAction(get(), ctx, nodeId),
         setName: (nodeId, name) => Actions.setNameAction(get(), ctx, nodeId, name),
@@ -675,7 +563,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         clearPrefab: (nodeId) => Actions.clearPrefabAction(get(), ctx, nodeId),
         bakePrefab: (nodeId) => Actions.bakePrefabAction(get(), ctx, nodeId),
 
-        /* ── selection actions ── */
         selectNode: (nodeId) => {
             const s = get();
             const nodes = new Set<number>();
@@ -737,7 +624,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         openViewportContextMenu: (x, y) => set({ viewportContextMenu: { x, y } }),
         closeViewportContextMenu: () => set({ viewportContextMenu: null }),
 
-        /* ── voxel actions ── */
         fill: (pattern, mask) => Actions.fill(get(), ctx, pattern, mask),
         delete: () => Actions.del(get(), ctx),
         replace: (pattern, from) => Actions.replace(get(), ctx, pattern, from),
@@ -805,7 +691,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             TransformTool.setPlacementPivot(transformToolState, preset);
         },
 
-        /* ── simple setters ── */
         setActiveTool: (activeTool) => set({ activeTool, brushFill: null, brushEdges: null }),
         setTransformMode: (transformMode) => set({ transformMode }),
         setTransformSpace: (transformSpace) => set({ transformSpace }),
@@ -931,11 +816,7 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setPlacementContinuous: (placementContinuous) => set({ placementContinuous }),
 }));
 
-/**
- * Resolve the per-room store API for the active edit room. Returns the
- * FALLBACK_STORE when no edit room is currently active so callers don't
- * have to null-check.
- */
+/** returns FALLBACK_STORE when no edit room is active so callers don't have to null-check. */
 export function activeEditRoomStore(): EditRoomStoreApi {
     const { room, playerEditStores } = useEditor.getState();
     if (room && playerEditStores[room.playerId]) return playerEditStores[room.playerId];

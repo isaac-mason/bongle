@@ -29,29 +29,16 @@ import { scriptsById, type TraitBase, type TraitHandle } from './traits';
 
 export type Unsubscribe = () => void;
 
-/**
- * client-side debug state, reachable from scripts as `ctx.client.debug`. a
- * plain state bag (no methods) — ergonomics live in the `debug.*` api helpers.
- */
+/** client-side debug state, reachable from scripts as `ctx.client.debug`. */
 export type ClientDebugState = {
-    /** the shared debug dashboard; games dock panels here. */
     readonly dashboard: Dashboard;
 };
 
-/**
- * the gpucat render scenes for a room. grouped so the logical scene tree can
- * own the bare `scene` name; the render scenes live under `render`.
- */
+/** the gpucat render scenes for a room; grouped so the logical scene tree can own the bare `scene` name. */
 export type RenderScenes = {
-    /** the gpucat scene for this room. contains all renderable objects */
     scene: Scene;
 
-    /**
-     * the gpucat overlay scene for this room: crisp, post-fxaa content rendered
-     * by the engine's overlay pass (CanvasTrait panels, future world-space HUD).
-     * shares the main scene's depth read-only, so meshes with `depthTest` are
-     * occluded by world geometry but never blurred by the post-chain.
-     */
+    /** crisp, post-fxaa overlay content; shares the main scene's depth read-only so `depthTest` meshes aren't blurred by the post-chain. */
     overlayScene: Scene;
 };
 
@@ -59,134 +46,60 @@ export type ClientContext = {
     /** the gpucat render scenes this client renders into */
     render: RenderScenes;
 
-    /**
-     * the subject: the node local input drives and what the renderer + audio
-     * treat as this client's point of view. a plain field on the single client
-     * state (no box), so a write is observed everywhere that holds this
-     * ClientContext (scripts via `ctx.client`, room-layer via `room.client`).
-     * read it with `getSubject(ctx)`, swap with `setSubject(ctx, node)`.
-     * defaults to `defaultSubject` (the player node).
-     */
+    /** the node local input drives and what renderer + audio treat as this client's point of view; read/swap via getSubject/setSubject. */
     subject: SceneTree.Node | null;
 
-    /** local player body node, alias for `room.playerNode`. the server-side
-     *  streaming anchor; keep it where interest should be. */
+    /** local player body node, alias for `room.playerNode`; the server-side streaming anchor. */
     player: SceneTree.Node;
 
-    /**
-     * active render camera node: what the renderer composes the render camera
-     * from each frame (TransformTrait pose + CameraTrait projection). defaults
-     * to `defaultCamera` (`room.cameraNode`) and is repointed by whichever
-     * controller / lens is driving the view. read it with `getCamera(ctx)`
-     * (or `ctx.client.camera`), swap it with `setCamera(ctx, node)`. single
-     * source of truth; room-layer reaches it via `room.client`.
-     */
+    /** active render camera node; read/swap via getCamera/setCamera, defaults to `defaultCamera`. */
     camera: SceneTree.Node;
 
-    /**
-     * the subject to return to when a temporary override (editor lens,
-     * spectator, cinematic) ends. plain config field, seeded to the player
-     * node at room setup; games may repoint it to control something other
-     * than the player by default. no set/reset helpers, editor and games read
-     * it and restore `subject` themselves.
-     */
+    /** the subject to return to when a temporary override (editor lens, spectator, cinematic) ends. */
     defaultSubject: SceneTree.Node | null;
 
-    /**
-     * the camera to return to alongside `defaultSubject`. plain config field,
-     * seeded to `room.cameraNode` at room setup. mostly a follower of the
-     * default subject's controller camera; stands alone for controller-less
-     * default views (a fixed / scripted camera).
-     */
+    /** the camera to return to alongside `defaultSubject`. */
     defaultCamera: SceneTree.Node;
 
-    /**
-     * per-room overlay viewport div, stacked above the single shared render canvas
-     * (a backdrop sibling). scripts can append HTML overlays here (debug HUDs, custom
-     * UI). the viewport hides/shows with the active room and is removed when the room
-     * is disposed, so script overlays automatically follow room lifecycle.
-     *
-     * has `pointer-events: none` so empty-area gestures fall through to the canvas
-     * below; overlays that need interactivity must set `pointer-events: auto` on
-     * themselves.
-     */
+    /** per-room overlay viewport div for HTML overlays; `pointer-events: none` unless a child opts in. */
     viewport: HTMLDivElement;
 
-    /**
-     * per-room touch overlay div under `viewport`, appended AFTER the html UI overlay
-     * so it stacks visually above everything by DOM order alone. touch controls helpers
-     * (joystick / button) mount their roots here; pointer events live on the helper
-     * roots, not on this container (which stays `pointer-events: none`).
-     */
+    /** per-room touch overlay div under `viewport`; touch controls mount their roots here. */
     touchOverlay: HTMLDivElement;
 
-    /** our own client id */
     clientId: ClientId | undefined;
 
-    /**
-     * client debug surface. `dashboard` is the shared `Dashboard` —
-     * games dock their own panels on it (or via the scoped `debug.panel(ctx, …)`
-     * helper, which auto-cleans on script dispose). the raw handle is the
-     * escape hatch for full dashboard control. built lazily on first access.
-     *
-     * future home for the client-global metrics/logs handles + open flag
-     * that currently live on the store / ClientRoom.
-     */
+    /** client debug surface; `dashboard` is the shared `Dashboard` games dock panels on, built lazily on first access. */
     debug: ClientDebugState;
 
-    /** client input state, read keyboard/mouse here in onFrame hooks */
     input: Input;
 
-    /** top-level client engine state, populated by engine-client on room creation */
     state?: EngineClient;
 
-    /** the client room this script is running in */
     room?: ClientRoom;
 };
 
 export type ServerContext = {
-    /** top-level server engine state */
     state: EngineServer;
 
-    /** the server room this script is running in */
     room: Room;
 
-    /**
-     * Matchmaking opts on this room's namespace. Stamped at namespace-creation
-     * time, by the `play` handler for `client.matchmake`-allocated rooms, by
-     * the runtime at boot for the deployed 'main' namespace. Empty for the
-     * editor namespace and for dev runs that never received options.
-     */
+    /** matchmaking opts stamped on this room's namespace at creation; empty for the editor namespace. */
     readonly options: Readonly<Record<string, string | number | boolean>>;
 };
 
 export type SceneTreeContext = {
-    /** room id for rpc send/broadcast */
     roomId: string;
 
-    /**
-     * the viewer's mode for this room (the PlayerMode of the Player it
-     * represents). surfaced to scripts as `ctx.mode`; drives script-side
-     * filtering of editor vs play behavior. on the server this equals
-     * `roomMode` (no distinct viewer); the edit-viewer-of-a-play-room split
-     * is a client concern.
-     */
+    /** the viewer's mode for this room, surfaced to scripts as `ctx.mode`; equals `roomMode` on the server. */
     playerMode: PlayerMode;
 
-    /**
-     * the room's authoritative mode (independent of the viewer). drives
-     * room-level decisions like prefab previews vs voxel baking: an edit
-     * Player attached to a play room still bakes voxels (no preview ghosts),
-     * because the room is play.
-     */
+    /** the room's authoritative mode, independent of the viewer; an edit Player attached to a play room still bakes voxels. */
     roomMode: RoomMode;
 
-    /** shared resources (scenes cache, per-scene versions) */
     resources: Resources;
 
-    /** shared per-side rpc (driver + listener registry). one instance is
-     *  shared across every room on this side; `listen()` scopes
-     *  registrations by roomId so per-room handlers don't cross rooms. */
+    /** `listen()` scopes registrations by roomId so per-room handlers don't cross rooms. */
     rpc: Rpc.Rpc;
 
     /** client-specific context, undefined on server */
@@ -195,79 +108,47 @@ export type SceneTreeContext = {
     /** server-specific context, undefined on client */
     server: ServerContext | undefined;
 
-    /** whether this runtime is the authority for the room's simulation, i.e.
-     *  it owns gameplay rather than replicating a remote server. true on a
-     *  real server room AND on a client-only local/standalone room (the client
-     *  IS the server); false on a client room connected to a remote server.
-     *  server-authority hooks (onJoin/onLeave/onBlock*) gate on this, NOT on
-     *  `env.server` or client-context presence, so they fire in local rooms. */
+    /** true on a real server room and on a client-only local room; false on a client connected to a remote server. */
     authority: boolean;
 
-    /** per-room voxel data */
     voxels: Voxels;
 
-    /** per-room physics world */
     physics: Physics;
 
-    /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry */
     blocks: Blocks;
 
-    /** live script instances, keyed by node id → script id → instance.
-     *  script id is `${trait.id}#${scriptIndex}` where scriptIndex is the
-     *  script's position in its trait def's `scripts` array. */
+    /** live script instances, keyed by node id, then script id (`${trait.id}#${scriptIndex}`). */
     instances: Map<number, Map<string, ScriptInstance>>;
 };
 
 export type ScriptOptions = {
-    /**
-     * whether the script should run in edit mode.
-     * @default false
-     */
+    /** whether the script should run in edit mode, default false. */
     editor?: boolean;
 
-    /**
-     * producer handles whose changes trigger this script to be re-built
-     * on its attached trait instances. accepts anything with a DepGraph
-     * `dependency` stamp, scene, model, block, trait, command, prefab
-     * handles, etc. usually injected by the AST rewriter from identifiers
-     * the factory body closes over; list manually for procedural cases
-     * the rewriter can't see.
-     */
+    /** producer handles whose changes trigger a rebuild of this script; usually injected by the AST rewriter. */
     deps?: ReadonlyArray<DepHandle>;
 };
 
 export type ScriptContext<T extends TraitBase = TraitBase> = {
-    /** the mode of the room this script is running in */
     mode: 'edit' | 'play';
 
-    /** the trait instance this script is bound to. fully typed for the
-     *  TraitHandle passed to `script()`. */
+    /** the trait instance this script is bound to, fully typed for the TraitHandle passed to `script()`. */
     trait: T;
 
-    /** the node the bound trait is attached to (shortcut for `ctx.trait._node`) */
+    /** the node the bound trait is attached to */
     node: SceneTree.Node;
 
-    /** the scene tree this script is running in */
     scene: SceneTree.SceneTree;
 
-    /** per-room voxel data */
     voxels: Voxels;
 
-    /** per-room physics world */
     physics: Physics;
 
-    /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry, flat lookup tables for block type/state info.
-     *  DERIVED from `voxels.registry` (a getter at the construction site), never a
-     *  captured copy: `registry-dispatch.refreshBlockResources` repoints
-     *  `voxels.registry` and re-resolves every chunk palette to the new state ids on
-     *  an HMR block change. A second cached `Blocks` misses that swap and then indexes
-     *  new state ids into the old, shorter typed arrays. */
+    /** derived from `voxels.registry` at construction, never cached: an HMR block change repoints `voxels.registry`. */
     blocks: Blocks;
 
     /** client information, safe to ! bang if env.client is true */
@@ -284,17 +165,13 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
 };
 
 export type ScriptInstance = {
-    /** the script definition */
     def: ScriptDef;
 
-    /** whether the script has been initialized */
     initialized: boolean;
 
-    /** the node this script instance is attached to */
     node: SceneTree.Node;
 
-    /** the trait instance this script is bound to. used to filter live
-     *  instances on removeTrait. */
+    /** the trait instance this script is bound to; used to filter live instances on removeTrait. */
     trait: TraitBase;
 
     /** fired once on initial script attach, before the script enters the scene tree */
@@ -303,16 +180,14 @@ export type ScriptInstance = {
     /** client-only: fires once per frame at the very start, before onUpdate. */
     onInput: Set<(args: FrameArgs) => void>;
 
-    /** fired once per frame, before the tick loop. use for input polling and camera updates. */
+    /** fired once per frame, before the tick loop */
     onUpdate: Set<(args: UpdateArgs) => void>;
 
-    /** fired once per fixed-timestep tick */
     onTick: Set<(args: TickArgs) => void>;
 
-    /** client-only: fires once per frame, before the tick loop. use for input polling and camera updates. */
+    /** client-only: fires once per frame, before the tick loop */
     onFrame: Set<(args: FrameArgs) => void>;
 
-    /** fired when the script instance is disposed */
     onDispose: Set<() => void>;
 
     /** fired when the node enters the scene tree (initial attach or reparent attach) */
@@ -321,54 +196,37 @@ export type ScriptInstance = {
     /** fired when the node exits the scene tree (detach or before reparent detach) */
     onExit: Set<(parent: SceneTree.Node) => void>;
 
-    /** authority-only: fired when a client joins the room */
+    /** authority-only */
     onJoin: Set<(args: JoinArgs) => void>;
 
-    /** authority-only: fired when a client leaves the room */
+    /** authority-only */
     onLeave: Set<(args: LeaveArgs) => void>;
 
-    /** fired before the physics step */
     onPrePhysicsStep: Set<(args: TickArgs) => void>;
 
-    /** fired after the physics step */
     onPostPhysicsStep: Set<(args: TickArgs) => void>;
 
     /** fired after animator sampling, before world-matrix recompute. */
     onPostAnimate: Set<(args: TickArgs) => void>;
 
-    /** fired during physics step when a contact is added or persisted */
     onPhysicsContactAdded: Set<(args: PhysicsContactArgs) => void>;
 
-    /** fired during physics step when a contact persists from the previous step */
     onPhysicsContactPersisted: Set<(args: PhysicsContactArgs) => void>;
 
-    /** fired during broadphase to validate body pairs, return false to reject collision */
+    /** return false to reject the collision */
     onPhysicsBodyPairValidate: Set<(bodyA: RigidBody, bodyB: RigidBody) => boolean>;
 
-    /** swaps out state on module reload */
     onSwap: { ser: () => unknown; des: (data: unknown) => void } | null;
 
-    /** queries acquired via `query(ctx, ...)`. released on dispose so unused
-     *  queries are evicted from the scene tree's query map. */
+    /** queries acquired via `query(ctx, ...)`; released on dispose so unused queries are evicted from the scene tree's query map. */
     queries: Set<SceneTree.Query<any>>;
 
-    /** query membership handlers owned by this instance. each record is the
-     *  data needed to take the entry back off the query: which query, which
-     *  half, and the wrapper actually registered on the topic.
-     *  disposeScriptInstance walks this and calls off*, which is what fires
-     *  the closing exit for every node still matching. same data-driven shape
-     *  as `netListeners`, no closure-based unsubscribes stored anywhere. */
+    /** query membership handlers owned by this instance; disposeScriptInstance walks this to fire the closing exit for every matching node. */
     queryHooks: Array<{ q: SceneTree.Query<any>; kind: 'enter' | 'exit'; fn: (...args: any[]) => void }>;
 
-    /** rpc listener registrations owned by this instance, each record is
-     *  the data needed to remove the entry from `runtime.rpc.listeners`:
-     *  the commandId it's keyed under, and the ListenerEntry reference
-     *  returned by `Rpc.listen`. disposeScriptInstance walks this array
-     *  and calls `Rpc.unlisten` per record. data-driven cleanup, no
-     *  closure-based unsubscribes stored anywhere. */
+    /** rpc listener registrations owned by this instance, walked by disposeScriptInstance to call `Rpc.unlisten`. */
     netListeners: Array<{ commandId: string; entry: Rpc.ListenerEntry }>;
 
-    /** runtime env for this instance */
     _runtime: SceneTreeContext;
 
     /** context passed to the factory, held until initScriptInstance runs the factory, then cleared */
@@ -377,42 +235,24 @@ export type ScriptInstance = {
 
 export type ScriptFactory<T extends TraitBase = TraitBase> = (ctx: ScriptContext<T>) => void;
 
-/** body passed by the user to `script()`. just the factory + opts. */
 export type ScriptBody = {
     factory: ScriptFactory;
-    /** if true, this script's hooks register in edit mode too. default false. */
+    /** if true, this script's hooks register in edit mode too, default false. */
     editor: boolean;
 };
 
-/**
- * stored ScriptDef. body + `{ traitId, scriptId, key, dependency }`.
- * `key` is the composed `${traitId}.${scriptId}`, used as the instance
- * Map key, DepGraph dependency id, and log label. don't parse it apart;
- * read `traitId` / `scriptId` directly.
- */
+/** stored ScriptDef; `key` is the composed `${traitId}.${scriptId}`, don't parse it apart, read `traitId`/`scriptId` directly. */
 export type ScriptDef = ScriptBody & {
     traitId: string;
     scriptId: string;
     key: string;
-    /** DepGraph dependency, see SceneHandle.dependency. lets the AST
-     *  rewrite wrap `script(...)` calls with `__addDeps(h, [...])`. */
+    /** lets the AST rewrite wrap `script(...)` calls with `__addDeps(h, [...])`. */
     dependency: { registry: 'scripts'; id: string };
 };
 
-
-/* helpers */
-
 const noop: Unsubscribe = () => {};
 
-/* queries */
-
-/**
- * register (or reuse) a live query tied to this script instance's lifetime.
- * the returned `Query` is the same handle for any caller with identical
- * conditions; calling twice on the same instance dedups to one refcount.
- * the query is released when the script instance disposes, do not hold
- * references across `onSwap` boundaries.
- */
+/** register (or reuse) a live query tied to this script instance's lifetime; released when the instance disposes. */
 export function query<const Args extends ConditionArgs[]>(
     ctx: ScriptContext,
     conditions: Args,
@@ -426,34 +266,7 @@ export function query<const Args extends ConditionArgs[]>(
     return q;
 }
 
-/**
- * react to a node **starting** to match `q`.
- *
- * `q` must come from `query(ctx, ...)`, so this instance holds it. the handler
- * receives the same trait tuple `q.matches` yields, spread.
- *
- * **subscribing is itself an enter**: the handler fires straight away for every
- * node already matching. a system registered after the scene loaded (the normal
- * case, and every case after a hot reload) therefore sees the whole set, with no
- * hand-written backfill loop over `q.matches`.
- *
- * fires once the node is fully live: its subtree is registered and its own
- * scripts have run `onInit`. paired with `onQueryExit`, exactly one exit follows
- * every enter, so a per-node resource opened here cannot leak.
- *
- * @example
- * ```ts
- * system('spawn-markers', (ctx) => {
- *     const q = query(ctx, [SpawnPointTrait, TransformTrait]);
- *     const markers = new Map<SpawnPointTrait, Marker>();
- *     onQueryEnter(ctx, q, (spawn, transform) => markers.set(spawn, addMarker(transform)));
- *     onQueryExit(ctx, q, (spawn) => {
- *         removeMarker(markers.get(spawn)!);
- *         markers.delete(spawn);
- *     });
- * });
- * ```
- */
+/** react to a node starting to match `q`; fires immediately for every node already matching. paired with `onQueryExit`. */
 export function onQueryEnter<Conditions extends Condition[]>(
     ctx: ScriptContext,
     q: SceneTree.Query<Conditions>,
@@ -462,14 +275,7 @@ export function onQueryEnter<Conditions extends Condition[]>(
     return addQueryHook(ctx, q, 'enter', fn);
 }
 
-/**
- * react to a node **stopping** matching `q`. mirror of {@link onQueryEnter}.
- *
- * **unsubscribing is itself an exit**: when the returned function is called, or
- * when this script instance disposes, the handler fires one last time for every
- * node still matching. that is what makes teardown and hot reload safe, the
- * instance going away closes everything it opened.
- */
+/** react to a node stopping matching `q`; fires once more, for every still-matching node, when unsubscribed or disposed. */
 export function onQueryExit<Conditions extends Condition[]>(
     ctx: ScriptContext,
     q: SceneTree.Query<Conditions>,
@@ -490,8 +296,7 @@ function addQueryHook<Conditions extends Condition[]>(
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
 
-    // wrapped once here so a throwing handler is reported with the script's own
-    // identity, and never escapes into the scene-tree mutation that fired it.
+    // wrapped so a throwing handler is reported with the script's own identity and never escapes into the scene-tree mutation.
     const wrapped = (...args: unknown[]): void => {
         try {
             (fn as (...a: unknown[]) => void)(...args);
@@ -514,8 +319,7 @@ function addQueryHook<Conditions extends Condition[]>(
     };
 }
 
-/** take one hook back off its query. for an exit hook this is what drains the
- *  closing exits, see `SceneTree.offQueryExit`. */
+/** take one hook back off its query; for an exit hook this drains the closing exits. */
 function releaseQueryHook(record: ScriptInstance['queryHooks'][number]): void {
     if (record.kind === 'enter') SceneTree.offQueryEnter(record.q, record.fn);
     else SceneTree.offQueryExit(record.q, record.fn);
@@ -531,12 +335,8 @@ export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandl
     return node[0];
 }
 
-/* ── hook functions ────────────────────────────────────────────────── */
-
-/** true when this runtime owns the room simulation, i.e. a real server room
- *  or a client-only local/standalone room where the client IS the server.
- *  server-authority hooks (onJoin/onLeave/onBlock*) gate on this rather than
- *  on `env.server` or client-context presence, so they fire in local rooms. */
+/** true when this runtime owns the room simulation: a real server room, or a
+ *  client-only local/standalone room where the client IS the server. */
 function isRoomAuthority(ctx: ScriptContext): boolean {
     return ctx._runtime?.authority ?? false;
 }
@@ -561,17 +361,11 @@ export function onTick(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubs
 
 export type UpdateArgs = { delta: number };
 
-/**
- * register a callback that fires once per frame, before the fixed-timestep tick
- * loop. use this for input polling and camera updates, reads fresh input state
- * and drives the camera before any physics/kcc ticks run that frame.
- * client-only, no-op on the server.
- */
+/** fires once per frame, before the fixed-timestep tick loop; client-only, no-op on the server. */
 export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
-    // server has no client context, onUpdate is client-only
     if (!ctx.client) return noop;
     instance.onUpdate.add(fn);
     return () => instance.onUpdate.delete(fn);
@@ -587,20 +381,11 @@ export function onFrame(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsu
     return () => instance.onFrame.delete(fn);
 }
 
-/**
- * register a callback that fires at the very start of each frame, before
- * onUpdate / onTick / onFrame. intended for input pre-processing, e.g. an
- * editor consuming mouse deltas before player controllers read them.
- *
- * iteration order matches onFrame (flat over runtime.instances). consumers
- * relying on "X runs before Y" should rely on script registration order.
- * client-only, no-op on the server.
- */
+/** fires at the very start of each frame, before onUpdate/onTick/onFrame; iteration order matches onFrame. client-only. */
 export function onInput(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
-    // client-only, server has no local input
     if (!ctx.client) return noop;
     instance.onInput.add(fn);
     return () => instance.onInput.delete(fn);
@@ -614,10 +399,7 @@ export function onDispose(ctx: ScriptContext, fn: () => void): Unsubscribe {
     return () => instance.onDispose.delete(fn);
 }
 
-/**
- * register a callback that fires when this script's node enters the scene tree.
- * fires on initial attach and on every reparent (after the new parent is set).
- */
+/** fires when this script's node enters the scene tree: initial attach and every reparent, after the new parent is set. */
 export function onEnter(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -626,10 +408,7 @@ export function onEnter(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void
     return () => instance.onEnter.delete(fn);
 }
 
-/**
- * register a callback that fires when this script's node exits the scene tree.
- * fires on detach and before every reparent detach.
- */
+/** fires when this script's node exits the scene tree: detach and before every reparent detach. */
 export function onExit(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -638,17 +417,12 @@ export function onExit(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void)
     return () => instance.onExit.delete(fn);
 }
 
-/** join-data key carrying the editor's viewpoint when a session is launched
- *  via the editor "play" button. absent for normal (production) joins, so a
- *  game reading it degrades to its usual spawn. games opt in for "play from
- *  here" — read it with `editorPlayData()`. */
+/** join-data key carrying the editor's viewpoint when a session is launched via the editor "play" button; absent for normal joins. */
 export const EDITOR_JOIN_KEY = '__editor';
 
 /** editor viewpoint pose passed under `EDITOR_JOIN_KEY` in join data. */
 export type EditorPlayData = {
-    /** editor camera world position at play time. */
     position: [number, number, number];
-    /** editor camera world orientation at play time. */
     quaternion: [number, number, number, number];
 };
 
@@ -657,64 +431,42 @@ export type JoinArgs = {
     playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
-    /** the mode the player joined in: 'edit' for an editor (including one
-     *  inspecting a play room), 'play' otherwise. */
+    /** 'edit' for an editor (including one inspecting a play room), 'play' otherwise. */
     mode: PlayerMode;
-    /** Model id the player renders with, resolved upstream (matchmaker /
-     *  builtin) and already stamped onto `playerNode`'s CharacterTrait
-     *  before this fires. */
+    /** already stamped onto `playerNode`'s CharacterTrait before this fires. */
     characterModelId: string;
-    /** Rig contract of that model, e.g. `RIG_TYPE_6BONE`, lets onJoin
-     *  branch on rig family without reaching for the trait. */
+    /** e.g. `RIG_TYPE_6BONE`; lets onJoin branch on rig family without reaching for the trait. */
     rigType: string;
 };
 
-/**
- * register a callback that fires when a client joins the room.
- * authority-only: runs on the server room, or on a client-only
- * local/standalone room; a no-op on a client connected to a remote server.
- */
+/** fires when a client joins the room; authority-only, no-op on a client connected to a remote server. */
 export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubscribe {
     const instance = ctx._instance;
-    // only meaningful on the authority (server room, or a local/standalone room)
     if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     instance.onJoin.add(fn);
     return () => instance.onJoin.delete(fn);
 }
 
-/** args passed to onLeave callbacks */
 export type LeaveArgs = {
     client: ClientId;
     playerNode: SceneTree.Node;
 };
 
-/**
- * register a callback that fires when a client leaves the room.
- * authority-only: runs on the server room, or on a client-only
- * local/standalone room; a no-op on a client connected to a remote server.
- */
+/** fires when a client leaves the room; authority-only, no-op on a client connected to a remote server. */
 export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsubscribe {
     const instance = ctx._instance;
-    // only meaningful on the authority (server room, or a local/standalone room)
     if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     instance.onLeave.add(fn);
     return () => instance.onLeave.delete(fn);
 }
 
-/* ── block event hooks ───────────────────────────────────────────── */
-
-/**
- * register a callback that fires when a block of `block`'s type is built
- * (placed where air or a different block was). authority-only (server room
- * or local/standalone room). handler receives the world coords + new state id; close over
- * `ctx` for scene/room access (e.g. spawn an item, play a sound).
- */
+/** fires when a block of `block`'s type is built (placed where air or a different block was); authority-only. */
 export function onBlockBuild(
     ctx: ScriptContext,
     block: import('../voxels/blocks').BlockHandle,
-    fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void,
+    fn: (event: import('../voxels/blocks').BlockChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
     if (!instance || !isRoomAuthority(ctx)) return noop;
@@ -735,15 +487,11 @@ export function onBlockBuild(
     };
 }
 
-/**
- * register a callback that fires when a block of `block`'s type is broken
- * (replaced with air or a different block). authority-only (server room or
- * local/standalone room).
- */
+/** fires when a block of `block`'s type is broken (replaced with air or a different block); authority-only. */
 export function onBlockBreak(
     ctx: ScriptContext,
     block: import('../voxels/blocks').BlockHandle,
-    fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void,
+    fn: (event: import('../voxels/blocks').BlockChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
     if (!instance || !isRoomAuthority(ctx)) return noop;
@@ -764,16 +512,11 @@ export function onBlockBreak(
     };
 }
 
-/**
- * register a callback that fires when a block of `block`'s type changes
- * state in place (same block-type, different stateId). authority-only (server
- * room or local/standalone room).
- * handler receives both old and new state ids on the event payload.
- */
+/** fires when a block of `block`'s type changes state in place (same block-type, different stateId); authority-only. */
 export function onBlockStateChange(
     ctx: ScriptContext,
     block: import('../voxels/blocks').BlockHandle,
-    fn: (ev: import('../voxels/blocks').BlockStateChangeCtx) => void,
+    fn: (event: import('../voxels/blocks').BlockStateChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
     if (!instance || !isRoomAuthority(ctx)) return noop;
@@ -794,11 +537,7 @@ export function onBlockStateChange(
     };
 }
 
-/**
- * register a callback that fires before each physics step.
- * use this to apply forces, set velocities, or prepare body state
- * before the physics world is stepped.
- */
+/** fires before each physics step; use to apply forces, set velocities, or prepare body state. */
 export function onPrePhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -807,11 +546,7 @@ export function onPrePhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => voi
     return () => instance.onPrePhysicsStep.delete(fn);
 }
 
-/**
- * register a callback that fires after each physics step.
- * use this to read collision results, updated positions/velocities,
- * or react to physics simulation output.
- */
+/** fires after each physics step; use to read collision results and updated positions/velocities. */
 export function onPostPhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -820,12 +555,7 @@ export function onPostPhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => vo
     return () => instance.onPostPhysicsStep.delete(fn);
 }
 
-/**
- * register a callback that fires after animator sampling, before world-matrix
- * recompute. ideal for procedural post-processing, head-look at the camera,
- * springs/dampers driven by parent motion, simple constraint clamps. local
- * TRS values are set; world matrices for this tick haven't been recomputed yet.
- */
+/** fires after animator sampling, before world-matrix recompute; good for head-look, springs/dampers, and constraint clamps. */
 export function onPostAnimate(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -842,11 +572,7 @@ export type PhysicsContactArgs = {
     settings: ContactSettings;
 };
 
-/**
- * register a callback that fires during the physics step when a contact is detected.
- * receives raw crashcat body/manifold/settings, you can modify settings to customize
- * contact behavior (e.g. zero friction for ice surfaces, set isSensor).
- */
+/** fires during the physics step when a contact is added or persists; modify `settings` to customize contact behavior. */
 export function onPhysicsContact(
     ctx: ScriptContext,
     event: 'added' | 'persisted',
@@ -860,11 +586,7 @@ export function onPhysicsContact(
     return () => set.delete(fn);
 }
 
-/**
- * register a callback that fires during broadphase to validate body pairs.
- * return false to reject collision detection for this pair.
- * if any registered callback returns false, the pair is rejected.
- */
+/** fires during broadphase to validate body pairs; rejected if any registered callback returns false. */
 export function onPhysicsBodyPairValidate(ctx: ScriptContext, fn: (bodyA: RigidBody, bodyB: RigidBody) => boolean): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -879,19 +601,12 @@ export function onSwap(ctx: ScriptContext, ser: () => unknown, des: (data: unkno
     instance.onSwap = { ser, des };
 }
 
-/* ── ownership query ─────────────────────────────────────────────── */
-
-/** returns true if the caller has write authority over `node`:
- *  - on a client, true iff the active Player in this script's room is the node's owner.
- *  - on the server, true iff the node has no client owner (server is the implicit
- *    owner of unowned nodes, so server-driven NPCs / props tick from the server side). */
+/** true if the caller has write authority over `node`: on a client the active Player owns it, on the server it has no client owner. */
 export function isOwner(ctx: ScriptContext, node: SceneTree.Node): boolean {
     if (env.server) return node.owner == null;
     const playerId = ctx.client?.room?.playerId;
     return playerId != null && node.owner === playerId;
 }
-
-/* ── rpc functions ────────────────────────────────────────────────── */
 
 export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirection>(
     ctx: ScriptContext,
@@ -944,8 +659,6 @@ export function listen(
     };
 }
 
-/* ── script instance creation ───────────────────────────────────── */
-
 export function createScriptInstance(
     def: ScriptDef,
     trait: TraitBase,
@@ -981,12 +694,7 @@ export function createScriptInstance(
         _ctx: undefined as unknown as ScriptContext, // set below
     };
 
-    // ctx.client is the live, shared per-room client context. The engine
-    // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
-    // instantiate (the room object doesn't exist yet at this point), so hold
-    // the reference directly, a copy here would freeze those fields as
-    // `undefined` forever, breaking isOwner / playMono / getSubject for
-    // editor:true world systems.
+    // ctx.client is the live, shared per-room client context; the engine wires .room/.state/.camera onto it after scripts instantiate.
     const client = runtime.client;
 
     instance._ctx = {
@@ -1007,14 +715,7 @@ export function createScriptInstance(
     return instance;
 }
 
-/* ── script instance lifecycle ───────────────────────────────────── */
-
-/**
- * run the factory body, registers onInit/onSwap/onTick/listen handlers via
- * ctx hooks. split out from `initScriptInstance` so the swap path can run
- * the factory, restore snapshot via `onSwap.des`, then fire onInit (so
- * onInit hooks see rehydrated state, not factory defaults).
- */
+/** runs the factory body; split out from `initScriptInstance` so the swap path can restore a snapshot before firing onInit. */
 function runFactory(instance: ScriptInstance): void {
     if (instance.initialized) return;
     instance.initialized = true;
@@ -1049,17 +750,12 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
     const id = instance.def.key;
     const nodeId = instance.node.id;
 
-    // query membership hooks FIRST: each exit hook fires once more for every
-    // node still matching, so anything this instance opened per node is closed
-    // before its own onDispose runs (and before releaseQuery can evict the
-    // query out from under the drain). this is the half that makes a hot
-    // reload leak-free, the rebuilt instance re-enters the same set.
+    // query membership hooks first: each exit hook fires once more for every node still matching, before onDispose runs.
     for (const record of instance.queryHooks) {
         releaseQueryHook(record);
     }
     instance.queryHooks.length = 0;
 
-    // onDispose hook
     for (const fn of instance.onDispose) {
         try {
             fn();
@@ -1068,7 +764,6 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
         }
     }
 
-    // release queries
     if (instance.node.scene) {
         for (const q of instance.queries) {
             SceneTree.releaseQuery(instance.node.scene, q);
@@ -1076,8 +771,6 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
     }
     instance.queries.clear();
 
-    // release net listeners by walking the registration data and
-    // unlistening per record, no stored closures, just data.
     for (const { commandId, entry } of instance.netListeners) {
         Rpc.unlisten(instance._runtime.rpc, commandId, entry);
     }
@@ -1124,10 +817,7 @@ export function inputScriptInstance(instance: ScriptInstance, args: FrameArgs): 
     }
 }
 
-/**
- * fire join hooks on all script instances in a scene graph.
- * called by the server after a client joins a room.
- */
+/** fire join hooks on all script instances in a scene graph */
 export function fireJoinHooks(
     runtime: SceneTreeContext,
     client: ClientId,
@@ -1159,10 +849,7 @@ export function fireJoinHooks(
     }
 }
 
-/**
- * fire leave hooks on all script instances in a scene graph.
- * called by the server before a client leaves a room.
- */
+/** fire leave hooks on all script instances in a scene graph */
 export function fireLeaveHooks(runtime: SceneTreeContext, client: ClientId, playerNode: SceneTree.Node): void {
     const args: LeaveArgs = { client, playerNode };
     for (const nodeInstances of runtime.instances.values()) {
@@ -1215,11 +902,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
     }
     disposeScriptInstance(oldInstance);
     const newInstance = createScriptInstance(newDef, oldInstance.trait, oldInstance.node, runtime);
-    // factory runs first so the new instance registers its onSwap + onInit
-    // handlers. then des() rehydrates factory-scope state from the prior
-    // instance. only THEN fire onInit, so init code sees restored state
-    // rather than factory defaults, e.g. spawning UI per restored entry,
-    // attaching listeners by restored id, etc.
+    // factory runs first to register onSwap/onInit, then des() rehydrates state before onInit fires.
     runFactory(newInstance);
     if (snapshot !== undefined && newInstance.onSwap) {
         newInstance.onSwap.des(snapshot);
@@ -1228,55 +911,17 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
     return newInstance;
 }
 
-/**
- * re-run every live script factory against the current `traitsRegistry`
- * so edits to script bodies (handlers, init code, constants) take effect
- * on HMR. factory-closure locals are reset by design, `onSwap` is the
- * opt-in for preserving state across reloads.
- *
- * called from `applyRegistryChanges*` per-room. removed defs are disposed
- * here; newly-added defs get picked up by the subsequent `initSceneTree`
- * pass via `instantiateTraitScripts`.
- *
- * `dirtyScriptIds` narrows the swap to a known-affected subset (DepGraph
- * propagation from a producer change reaching `scripts:<id>` consumers via
- * the per-script `setDeps` wiring). pass `null` for the trait-body-edit
- * path that needs every instance re-run, even unchanged scripts can become
- * structurally invalid if a trait field they depend on moved indices.
- */
-/**
- * Mirror a `registry.scripts` removal into the owning trait def. `script()`
- * only ever upserts into a trait's `scripts[]`/`scriptsById`, so a `script()`
- * call deleted from source has no effect on a trait def that outlives the
- * edit, a built-in trait (def in an engine module) or any trait defined in a
- * *different* file than the removed `script()`. The registry detects the
- * deletion (drops the key on the owning module's reload) and emits a
- * `{ kind: 'removed' }` change; dispatch drains that change and calls this so
- * the def stops listing the orphan. With the def corrected, the normal
- * `applyTraitSwap` lookup disposes the live instance and
- * `instantiateTraitScripts` won't re-create it. `scripts[]` slots are
- * positional, so rebuild + reindex from the surviving entries.
- */
-/**
- * Scripts are the second kind the HMR module boundary diffs. A script's key is
- * its binding identity (instance-map key and registry id), so an unchanged key
- * SET means only factory bodies moved — swapped in place via the flush path —
- * while an added, removed or renamed key is a shape change that must invalidate,
- * which is what disposes a script the user deleted even on a built-in trait def.
- * Presence is the whole shape, hence the constant.
- */
-
+/** drops an orphaned `script()` call from its owning trait def; `applyTraitSwap` then disposes the live instance. */
 export function pruneRemovedScript(def: ScriptDef): void {
     const traitHandle = traitStore.handles.get(def.traitId);
     if (!traitHandle) return;
     const scripts = traitHandle.def.scripts;
-    const at = scripts.findIndex((s) => s.scriptId === def.scriptId);
-    if (at === -1) return;
-    // the def's array is the one record; the by-id view is derived from it and
-    // re-derives itself, so there is no second structure to keep in step.
-    scripts.splice(at, 1);
+    const scriptIndex = scripts.findIndex((script) => script.scriptId === def.scriptId);
+    if (scriptIndex === -1) return;
+    scripts.splice(scriptIndex, 1);
 }
 
+/** re-runs every live script factory so HMR edits take effect; pass `dirtyScriptIds` null to re-run every instance. */
 export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
     for (const [nodeId, nodeInstances] of runtime.instances) {
         for (const [instanceKey, oldInstance] of nodeInstances) {

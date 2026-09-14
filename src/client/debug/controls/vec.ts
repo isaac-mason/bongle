@@ -3,12 +3,12 @@ import { decimalsForStep, el, on, snap } from '../dom';
 import { openPopover, tooltip } from '../popover';
 import { scrub } from '../scrub';
 
-// feather-style "link" icon, drawn with currentColor so it follows the button state
+// Drawn with currentColor so it follows the button state.
 const LINK_ICON =
     '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 
 export type VecOptions = {
-    /** override the per-component axis labels (also sets the arity). */
+    /** Overrides the per-component axis labels; also sets the arity. */
     axes?: readonly string[];
     min?: number;
     max?: number;
@@ -17,12 +17,7 @@ export type VecOptions = {
     hint?: string;
 };
 
-/**
- * an n-component numeric tuple control — the backbone for math shapes stored
- * as plain arrays: vec2 `[x,y]`, vec3 `[x,y,z]`, vec4 `[x,y,z,w]`, spherical
- * `[r,θ,φ]`. the bound array is mutated in place so shared references stay valid.
- * vec2/vec3 also get a 2D joystick pad; a link toggle moves all components together.
- */
+/** An n-component numeric tuple control for math shapes stored as plain arrays. The bound array is mutated in place so shared references stay valid. */
 function vecControl(defaultAxes: readonly string[], enablePad: boolean) {
     return (opts: VecOptions = {}): Control<number[]> =>
         (ctx, prop) => {
@@ -73,7 +68,7 @@ function vecControl(defaultAxes: readonly string[], enablePad: boolean) {
             });
             b.controlEl.append(grid);
 
-            // 2D joystick pad (vec2 only — a 2D pad maps cleanly to a 2-component value)
+            // 2D joystick pad, vec2 only.
             if (enablePad && axes.length === 2) {
                 const padBtn = el('button', 'dc-vec-tool', { type: 'button', textContent: '⌖' });
                 b.onDispose(tooltip(padBtn, '<b>joystick</b> — drag the pad to set x and y together', ctx.layer));
@@ -135,7 +130,7 @@ function vecControl(defaultAxes: readonly string[], enablePad: boolean) {
                 b.onDispose(() => closePad?.());
             }
 
-            // link toggle — move all components together by the same delta
+            // Link toggle: moves all components together by the same delta.
             const lockBtn = el('button', 'dc-vec-tool', { type: 'button' });
             lockBtn.innerHTML = LINK_ICON;
             on(lockBtn, 'click', () => {

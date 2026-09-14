@@ -1,16 +1,3 @@
-// In-process StorageServerDriver. Used by `lib/runtime` standalone
-// (bongle dev) and the editor, anywhere there is no
-// bongle service to talk to. Persists for the lifetime of the
-// process; restarting the dev server wipes it.
-//
-// Semantics match the HTTP service:
-//   - `version` is a fresh uuid on every successful set.
-//   - `ifVersion` is CAS, mismatch returns `{ ok: false, code: 'version_conflict' }`.
-//   - list returns sorted keys, paginated by cursor (key > cursor).
-//   - prefix filter is exact prefix match; null prefix → all.
-// Rate-limit / cap codes are unreachable here, there's no I/O to
-// bound and no shared quota to enforce.
-
 import type {
     JsonValue,
     ServerDriver,
@@ -31,8 +18,7 @@ function listFromMap(map: Map<string, Row>, opts: StorageListOpts | undefined): 
     const cursor = opts?.cursor ?? '';
     const limit = Math.min(opts?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
-    // Sort keys so cursor pagination is deterministic, matches the
-    // service's `order by key` over a B-tree index.
+    // sorted so cursor pagination is deterministic.
     const keys = [...map.keys()].filter((k) => (prefix === '' || k.startsWith(prefix)) && k > cursor).sort();
 
     const page = keys.slice(0, limit);
@@ -47,8 +33,7 @@ function listFromMap(map: Map<string, Row>, opts: StorageListOpts | undefined): 
 
 export function createInMemoryStorageDriver(): ServerDriver['storage'] {
     const project = new Map<string, Row>();
-    // user storage keyed by userId so cross-user listing is constrained
-    // to one Map per user (matches the service's per-user PK).
+    // one Map per userId so cross-user listing stays constrained.
     const userByUserId = new Map<string, Map<string, Row>>();
 
     function getUserMap(userId: string): Map<string, Row> {

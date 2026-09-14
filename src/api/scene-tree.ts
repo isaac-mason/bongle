@@ -30,35 +30,19 @@ export function cloneNode(node: Node): Node {
 }
 
 /**
- * Clone a node intended for the **visual scene**, same as `cloneNode`, plus a
- * `ModelTrait` (a lighting group, one shared voxel-light value for every mesh
- * under the clone) installed on the clone root. Reserve `cloneNode` for
- * non-visual subtree duplication (e.g. detached prefab data), or for meshes you
- * want lit individually — a mesh outside any group renders fine and samples at
- * its own AABB centre.
+ * Clone a node for the visual scene: same as `cloneNode`, plus a `ModelTrait`
+ * (a lighting group sharing one voxel-light value across every mesh under the
+ * clone) on the clone root. Reserve `cloneNode` for non-visual duplication or
+ * meshes you want lit individually. Leaves an existing `ModelTrait` in place.
  *
- * Typical usage:
- * ```ts
+ * `lightOffset` is seeded to the centre of the clone's mesh AABBs so light
+ * samples from inside the model's body rather than at its origin. The clone
+ * root is also guaranteed a `TransformTrait`, since `ModelLighting` samples
+ * the `[ModelTrait, TransformTrait]` pair each frame.
+ *
+ * @example
  * const instance = cloneModel(wizard.scene);
- * // or for a sub-mesh:
  * const hat = cloneModel(wizard.nodes.HatA);
- * ```
- *
- * Frustum culling is per-mesh and derived automatically by the renderer from
- * each mesh's own geometry, so there's nothing cull-related for the caller to
- * supply or maintain. If the source already has a `ModelTrait`, the existing
- * one is left in place.
- *
- * The new `ModelTrait`'s `lightOffset` is seeded to the centre of the clone's
- * own mesh AABBs, so voxel light samples from inside the model's body rather
- * than at its origin (which for a model authored standing on y=0 is the floor
- * block it sits on). Assign `lightOffset` afterwards to override it.
- *
- * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
- * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
- * TransformTrait]` pair each frame, so without one the group would silently
- * never be lit (stuck full-bright, `lightOffset` dead). An added identity
- * transform is faithful, that's exactly the TRS the bake elided.
  */
 export function cloneModel(node: Node): Node {
     const clone = SceneTree.cloneNode(node);
@@ -74,14 +58,13 @@ export function cloneModel(node: Node): Node {
 }
 
 /**
- * create a new **detached** node, no parent, no scripts fired, not in queries.
+ * create a detached node (no parent, no scripts fired, not in queries).
  * attach with `addChild(parent, node)` to make it live; an id is allocated at
  * attach time (negative on the client, positive on the server).
  *
- * `realm` controls which side(s) the node lives on (default `'inherit'`, which
- * resolves to the nearest ancestor's realm, i.e. `'shared'` under the scene
- * root). Use `'server'` for server-only nodes that must never replicate, or
- * `'client'` for purely local client-side nodes.
+ * `realm` controls which side(s) the node lives on (default `'inherit'`,
+ * resolving to the nearest ancestor's realm). Use `'server'` for nodes that
+ * must never replicate, or `'client'` for purely local nodes.
  */
 export function createNode(options?: { name?: string; persist?: boolean; realm?: Realm }): Node {
     return SceneTree.createNode({ name: options?.name, persist: options?.persist, realm: options?.realm });

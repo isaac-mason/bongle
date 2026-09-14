@@ -1,15 +1,3 @@
-// Per-room environment CONFIG — client-side CPU state.
-//
-// This is the client half of the environment: the time-of-day + sky/sun/moon/
-// star/cloud config a room holds, mutated by scripts through `setTime` /
-// `setEnvironment` (see api/environment). It touches NO GPU state and NO backend
-// resources. The renderer READS this each frame and owns all the env RENDER
-// state (sky/cloud meshes, the GPU flush) in `render/common/environment` — see
-// its `EnvVisuals` + `updateForCamera`.
-//
-// `_config` / `_sky` are the CPU shadows in the shape the renderer's env UBOs
-// consume (plain numbers, no GPU types); the renderer pushes them on dirty.
-
 import type { Vec2, Vec3 } from 'math';
 import type { EnvironmentConfig, SkyPreset, SkyStop } from '../api/environment';
 
@@ -27,8 +15,7 @@ export type ResolvedEnvironment = {
     fog: { enabled: boolean; color: Vec3 | 'sky'; end: number | 'view'; start: number; opacity: number };
 };
 
-/** the rarely-changing config as a plain `Infer<EnvConfig>`-shaped object (the
- *  numeric shape the renderer's `envConfig` UBO consumes). */
+/** rarely-changing config, numeric shape the renderer's `envConfig` UBO consumes. */
 export type EnvConfigValue = {
     enabled: number;
     sunEnabled: number;
@@ -47,33 +34,27 @@ export type EnvConfigValue = {
 };
 
 /**
- * Per-room environment CONFIG — pure client CPU state. Scripts mutate it via
+ * Per-room environment config, pure client CPU state. Scripts mutate it via
  * `applyTime`/`applyConfig`; the renderer reads it each frame and flushes the
- * `_config`/`_sky` shadows into its engine-global env UBOs. Constructed with NO
- * backend resources — the render half is `EnvVisuals`, owned by the renderer.
+ * `_config`/`_sky` shadows into its engine-global env UBOs.
  */
 export type Environment = {
     /** time-of-day driver, wraps in [0,1). 0=midnight, 0.25=sunrise, 0.5=noon. */
     time: number;
-    /** resolved CPU shadow, every field concrete, no optionals. */
     config: ResolvedEnvironment;
 
-    /** per-room CPU shadow of the rarely-changing config; the active room flushes
-     *  it to the engine-global `envConfig` UBO on dirty. time-of-day lives in
-     *  `time` (flushed to the separate `envTime` UBO every frame), not here. */
+    /** CPU shadow of the rarely-changing config, flushed to the `envConfig` UBO by the active room on dirty. */
     _config: EnvConfigValue;
-    /** per-room CPU shadow of the sky LUT (12 vec3). active-room flush copies it
-     *  to the `envSky` UBO on dirty. */
+    /** CPU shadow of the sky LUT (12 vec3), flushed to the `envSky` UBO on dirty. */
     _sky: [number, number, number][];
     /** epoch for `wallTime`, `performance.now()` at room creation. */
     _wallStartMs: number;
-    /** dirty flags: only the active room writes to GPU. flushed on tick. */
+    /** dirty flags: only the active room writes to GPU, flushed on tick. */
     _configDirty: boolean;
     _skyDirty: boolean;
 };
 
-/** the rarely-changing config as an `Infer<EnvConfig>`-shaped object. Exported so
- *  the renderer can seed its env UBOs from the initial config on construction. */
+/** exported so the renderer can seed its env UBOs from the initial config on construction. */
 export function buildConfigObject(config: ResolvedEnvironment): EnvConfigValue {
     return {
         enabled: config.enabled ? 1 : 0,
@@ -93,8 +74,7 @@ export function buildConfigObject(config: ResolvedEnvironment): EnvConfigValue {
     };
 }
 
-/** the sky LUT as 12 vec3 (4 stops × zenith/horizon/nadir), padded to 4 stops.
- *  gpucat rounds each element to the backend's uniform stride (16 bytes) at pack. */
+/** sky LUT as 12 vec3 (4 stops x zenith/horizon/nadir); gpucat rounds each to the 16-byte uniform stride at pack. */
 export function buildSkyValue(stops: SkyStop[]): [number, number, number][] {
     const out: [number, number, number][] = [];
     for (let i = 0; i < SKY_STOPS; i++) {
@@ -106,39 +86,27 @@ export function buildSkyValue(stops: SkyStop[]): [number, number, number][] {
     return out;
 }
 
-/**
- * Build a room's env CONFIG (pure CPU, no backend resources). The client owns
- * this on `room.environment`; scripts mutate it and the renderer reads it.
- */
+/** builds a room's env config, pure CPU with no backend resources; `room.environment` owns it. */
 export function createEnvironment(initial: ResolvedEnvironment): Environment {
     return {
-        // per-room CPU shadow, every script-driven mutation lands here. 0.6 (past
-        // midday) seeds an off-axis sun so faces differentiate via N·L the moment
-        // a room boots.
+        // 0.6 (past midday) seeds an off-axis sun so faces differentiate via N.L on boot.
         time: 0.6,
         config: cloneConfig(initial),
         _config: buildConfigObject(initial),
         _sky: buildSkyValue(initial.sky.stops),
         _wallStartMs: performance.now(),
-        // fresh rooms need an initial push to GPU on first activation.
         _configDirty: true,
         _skyDirty: true,
     };
 }
 
-/* ── writes ───────────────────────────────────────────────────────── */
-
-/** hot path, patch time-of-day in the CPU shadow. NO GPU write here: background
- *  rooms must not touch the engine-global buffer; the active room flushes its own
- *  shadow each frame via the renderer's `updateForCamera`. */
+/** hot path; no GPU write here, background rooms must not touch the engine-global buffer. */
 export function applyTime(env: Environment, t: number): void {
-    // wrap to [0,1), accepts unwrapped game time too. time is per-frame (flushed to
-    // the envTime UBO every tick), so just update the shadow — no dirty flag.
+    // time is flushed to the envTime UBO every tick regardless, so no dirty flag needed.
     env.time = ((t % 1) + 1) % 1;
 }
 
-/** slow path, shallow-merge config groups, repack per-room CPU shadow(s), mark
- *  dirty. CPU only; GPU flush happens on the active room's tick. */
+/** slow path: shallow-merges config groups and repacks the CPU shadows; GPU flush happens on the active room's tick. */
 export function applyConfig(env: Environment, input: EnvironmentConfig, presets: Record<SkyPreset, SkyStop[]>): void {
     const cfg = env.config;
 
@@ -176,9 +144,8 @@ export function applyConfig(env: Environment, input: EnvironmentConfig, presets:
         if (input.fog.opacity !== undefined) cfg.fog.opacity = input.fog.opacity;
     }
 
-    // master `enabled` also toggles sky/cloud MESH visibility, but those are render
-    // state (EnvVisuals); the renderer syncs them from `config.enabled` each frame.
-    // Here we only touch the CPU config.
+    // sky/cloud mesh visibility (EnvVisuals) is render state; the renderer syncs it
+    // from `config.enabled` each frame, so only the CPU config is touched here.
     env._config = buildConfigObject(cfg);
     env._configDirty = true;
 

@@ -1,22 +1,3 @@
-/**
- * Shared asset-pipeline pass. Two call sites:
- *
- *   - dev: the bongle:pipeline realm (cli/realms/pipeline + editor pipeline-worker),
- *     fired on every settled HMR cascade. Pulls the typed registries off
- *     the server env via `env.runner.import('bongle/internal')`.
- *
- *   - prod: build.ts's `runAssetPipelineInProcess`, fired once before
- *     the Vite bundle. Pulls them off the same process via plain
- *     `await import('bongle/internal')` (the node bin runs the bake in-process, so
- *     dynamic TS imports of the user module are native).
- *
- * Both call sites materialize a partial ProjectModule view (only the
- * fields atlas + models read) from the typed registries and dispatch to
- * `buildTileAtlas` / `buildModels`. The config the bundle
- * manifest needs is exposed via `state.config`, the `build.ts` caller
- * reads it directly off pipeline state after the pass.
- */
-
 import type { Filesystem } from '../../../os/interface';
 import { type Config, DEFAULT_CONFIG, isStandalone } from '../../core/config';
 import type { ModelDef } from '../../core/models/handle';
@@ -35,9 +16,7 @@ import { buildScenes } from './scenes';
 import { buildSpriteAtlas } from './sprite-atlas';
 import { buildTileAtlas } from './tile-atlas';
 
-/** Shape of the `bongle/internal` exports the pipeline pass consumes.
- *  Captured as a struct so each call site can adapt its own import
- *  result (env.runner.import vs await import) into the same parameter. */
+/** captured as a struct so each call site can adapt its own import result into the same parameter. */
 export type PipelineInternal = {
     registry: Registry;
     createBlockRegistry: () => Blocks;
@@ -71,40 +50,29 @@ export type PipelineOpts = {
 };
 
 /**
- * Per-flush state for the dev pipeline handler. Tracks the last-seen
- * `revision` of each consumed registry so a flush whose registries are
- * unchanged short-circuits before any disk write. Without this the
- * pipeline writes generated barrels on every flush, the writes wake
- * Vite's watcher, the watcher's HMR re-fires the flush handler via the
- * bongle-capture postlude, and we infini-loop.
- *
- * `-1` as the cold-start sentinel matches the registries' initial
- * `revision: 0`, so the first pass treats everything as "changed" and
- * emits a full set.
+ * tracks the last-seen `revision` of each consumed registry so a flush whose registries are
+ * unchanged short-circuits before any disk write; without this, generated-barrel writes would
+ * wake Vite's watcher, whose HMR re-fires the flush handler, infini-looping. `-1` as the
+ * cold-start sentinel matches the registries' initial `revision: 0`, so the first pass treats
+ * everything as changed.
  */
 export type PipelineState = {
     blocks: number;
     tiles: number;
     models: number;
     scenes: number;
-    /** last-seen config-store revision (named apart from `config` below, which
-     *  holds the value; the other kinds only track a revision so reuse the
-     *  store name directly). */
+    /** named apart from `config` below (which holds the value) since the other kinds only track a revision. */
     configRev: number;
     sounds: number;
     sprites: number;
-    /** last-seen textures-store revision. Both atlases consume textures, so a
-     *  texture edit must dirty them even though neither consumer's own
-     *  revision moved — a consumer holds frame REFERENCES, so its hash covers
+    /** both atlases consume textures, so a texture edit must dirty them even though neither
+     *  consumer's own revision moved: a consumer holds frame references, so its hash covers
      *  which textures it uses, not their pixels. */
     textures: number;
-    /** Latest observed config, refreshed every pass. `build.ts` reads this
-     *  after the pass to seed the bundle manifest; the pass also compares
-     *  against it to detect a standalone flip. */
+    /** refreshed every pass; `build.ts` reads this after the pass to seed the bundle manifest,
+     *  and the pass compares against it to detect a standalone flip. */
     config: Config | null;
-    /** Per-id incremental cache for the models builder, replaces the
-     *  former `.bongle/cache/models-build.json` disk sidecar. Lives for
-     *  the lifetime of the process; cold starts re-pack every model. */
+    /** per-id incremental cache for the models builder; lives for the process lifetime, cold starts re-pack every model. */
     modelsCache: Map<string, ModelsCacheEntry>;
 };
 
@@ -123,31 +91,18 @@ export function createPipelineState(): PipelineState {
     };
 }
 
-/**
- * Run one asset-pipeline pass. Each builder runs only if its source
- * registries' revisions have advanced since the last pass. Registries
- * are expected to already be settled (Project.load /
- * EngineServer.applyRegistryChanges in dev; user-module evaluation in
- * prod) before this is called.
- *
- * Pass a fresh `state` for prod (one-shot, everything runs); reuse the
- * same `state` across dev flushes so subsequent no-op flushes skip all
- * writes.
- */
+// pass a fresh `state` for prod (one-shot, everything runs); reuse the same `state` across dev
+// flushes so subsequent no-op flushes skip all writes.
 export type RunPassOptions = {
-    /** Force every builder dirty regardless of registry revision. Used when
-     *  an external asset source file changed on disk, registries didn't
-     *  move, but the bytes the builders read did. Each builder's content-hash
-     *  gate still no-ops if nothing actually changed; this just bypasses
-     *  the revision short-circuit at the top of the pass. */
+    /** forces every builder dirty regardless of registry revision, for when an external asset
+     *  source file changed on disk but registries didn't move. each builder's content-hash gate
+     *  still no-ops if nothing actually changed; this just bypasses the revision short-circuit. */
     forceAll?: boolean;
 };
 
-/** Per-builder wall-clock (ms) for one pass, keyed by display label
- *  ('draw', 'block-atlas', 'sprite-atlas', 'models', 'scenes', 'audio').
- *  Builders run concurrently, so these overlap and won't sum to the pass
- *  total, read them as the long pole. An absent key means the builder was
- *  skipped (nothing dirty). */
+/** per-builder wall-clock (ms), keyed by display label. builders run concurrently, so these
+ *  overlap and won't sum to the pass total, read them as the long pole. an absent key means the
+ *  builder was skipped. */
 export type PipelinePassTimings = Record<string, number>;
 
 export async function runAssetPipelinePass(
@@ -177,18 +132,13 @@ export async function runAssetPipelinePass(
     const spritesRev = registry.sprites.revision;
     const texturesRev = registry.textures.revision;
 
-    // The scene SET (all authored scenes vs `scene()`-declared only) and the
-    // model bake (whether the server bin is emitted) both branch on `standalone`,
-    // so a pure config() edit that flips it must re-bake them even though no
-    // scene/model registry rev changed. Compare against the last-baked config.
+    // the scene set and the model bake's server-bin emission both branch on `standalone`, so a
+    // pure config() edit that flips it must re-bake them even though no scene/model rev changed.
     const cfg = resolveConfig(registry);
     const standalone = isStandalone(cfg);
     const prevStandalone = isStandalone(state.config ?? DEFAULT_CONFIG);
     const standaloneChanged = standalone !== prevStandalone;
 
-    // Atlas reads blocks (for the atlas-layer derivation) and tiles (which
-    // textures each layer samples). Either bumping is grounds for rebuild, as is
-    // a texture edit, which moves neither.
     const atlasDirty = forceAll || blocksRev !== state.blocks || tilesRev !== state.tiles || texturesRev !== state.textures;
     const modelsDirty = forceAll || modelsRev !== state.models || standaloneChanged;
     const scenesDirty = forceAll || scenesRev !== state.scenes || standaloneChanged;
@@ -198,13 +148,9 @@ export async function runAssetPipelinePass(
 
     if (!atlasDirty && !modelsDirty && !scenesDirty && !configDirty && !soundsDirty && !spritesDirty) return timings;
 
-    // Build the block registry first when blocks/models/scenes are dirty.
-    // `buildBlockRegistry` evaluates each block's default model and, for
-    // cube blocks, calls `deriveBlockDust`, which registers a computed
-    // `<id>:particle{0..N-1}` TEXTURE per variant plus the sprite wrapping it.
-    // Those must be in `registry.textures` BEFORE `bakeTextures` walks it,
-    // otherwise they never get baked and the sprite atlas falls back to
-    // magenta placeholders.
+    // buildBlockRegistry's deriveBlockDust registers a computed `<id>:particle{0..N-1}` texture
+    // per cube-block variant; those must be in `registry.textures` before `bakeTextures` walks
+    // it, or the sprite atlas falls back to magenta placeholders.
     let moduleView: ModuleVersion | null = null;
     if (atlasDirty || modelsDirty || scenesDirty) {
         const defs = new Map<string, BlockDef>();
@@ -226,15 +172,9 @@ export async function runAssetPipelinePass(
         moduleView = { blocks, tiles, models, scenes };
     }
 
-    // Bake computed textures after block-registry derivation so dust textures are present. Atlas
-    // builders read the resulting `BakedTextures` map to replace magenta placeholders with rendered
-    // pixels. The bake walks the texture store unconditionally; per-builder gates downstream still
-    // apply.
-    //
-    // NOT awaited here: only the two ATLASES consume it. Audio, models and scenes read none of it,
-    // and awaiting up front put all three behind a bake they don't need — audio worst of all,
-    // since it is the longest phase and depends on nothing but `registry.sounds`. Started as a
-    // promise, the atlases chain off it and everything else runs alongside.
+    // not awaited here: only the two atlases consume it. audio, models and scenes read none of
+    // it, and awaiting up front would put them behind a bake they don't need (audio worst of
+    // all, the longest phase and dependent on nothing but registry.sounds).
     const bakedTextures: Promise<BakedTextures> =
         atlasDirty || spritesDirty
             ? timed('draw', bakeTextures(registry.textures, { loader, raster }))
@@ -253,31 +193,24 @@ export async function runAssetPipelinePass(
                     .then(() => undefined),
             );
         }
-        // `standalone` is computed once up top (also drives modelsDirty/scenesDirty).
         if (modelsDirty) {
-            // standalone → don't emit the server-side model bin (resources/server/models).
+            // standalone -> don't emit the server-side model bin.
             tasks.push(
                 timed('models', buildModels(moduleView, { cache: state.modelsCache, loader, fs, emitServer: !standalone })).then(
                     () => undefined,
                 ),
             );
         }
-        // standalone → bake EVERY authored scene into the client (no server serves them).
+        // standalone -> bake every authored scene into the client (no server serves them).
         if (scenesDirty) tasks.push(timed('scenes', buildScenes(moduleView, { mode, standalone, fs })).then(() => undefined));
     }
 
     if (soundsDirty) {
-        // buildAudio reads the sounds store directly (independent surface
-        // from the partial view above, sounds aren't part of any
-        // cross-domain composition like blocks/textures/models).
         tasks.push(timed('audio', buildAudio(registry.sounds, { fs, loader, decodeAudio })).then(() => undefined));
     }
 
     if (spritesDirty) {
-        // buildSpriteAtlas reads the sprites store directly, independent of
-        // the block/model view above. `bakedTextures` is the in-memory output
-        // of the texture bake above; missing map entries fall back to magenta
-        // inside the builder.
+        // `bakedTextures` is the in-memory output of the texture bake above; missing map entries fall back to magenta inside the builder.
         tasks.push(
             bakedTextures
                 .then((baked) =>
@@ -299,9 +232,7 @@ export async function runAssetPipelinePass(
 
     await Promise.all(tasks);
 
-    // Stash the current launch config on pipeline state: the build caller reads it,
-    // and the next pass compares against it to detect a standalone flip. Set
-    // unconditionally (cheap) so `prevStandalone` is always the last-baked value.
+    // set unconditionally (cheap) so `prevStandalone` is always the last-baked value.
     state.config = cfg;
 
     state.blocks = blocksRev;

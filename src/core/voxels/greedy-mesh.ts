@@ -1,20 +1,3 @@
-// binary greedy mesher for uniform-type voxel occupancy.
-//
-// 6 face passes; within each pass sweep slices along the normal axis.
-// for each slice, build a uint32 bitmask row per v-row of exposed faces
-// (voxel present, neighbour in normal direction absent). then greedy-merge:
-// for each unvisited bit in a row, extend the run along u (consecutive set
-// bits), then extend along v (next rows must contain the same run mask).
-// emit one quad per merged rectangle.
-//
-// callers supply:
-//   - occ(x,y,z): a callback returning true if a voxel exists there.
-//     called in tight loops, prefer a closed dense-array lookup.
-//   - min/max: inclusive AABB in occupancy-space coords to mesh.
-//   - emitNormals: write a per-vertex normals buffer. true for shaded meshes
-//     (clouds, voxel models); false for flat-colour (editor selection) saves
-//     12 bytes/vertex and the allocation.
-
 import { createIndexBuffer, createVertexBuffer, d, Geometry } from 'gpucat';
 
 export type Occ = (x: number, y: number, z: number) => boolean;
@@ -32,11 +15,8 @@ export type GreedyMesh = {
 //   vAxis: second tangent (rows)
 //   nDir:  sign of the outward normal (+1 or -1)
 //
-// uAxis/vAxis are chosen so cross(u,v) = +nAxis in a right-handed frame,
-// keeps emitted quads front-facing under cullMode:'back'. for X faces:
-// Y×Z=+X. for Z faces: X×Y=+Z. for Y faces we must use uAxis=Z, vAxis=X
-// (Z×X=+Y), using X×Z would emit -Y normals and back-face-cull the
-// top/bottom of meshed shapes.
+// uAxis/vAxis are chosen so cross(u,v) = +nAxis in a right-handed frame, keeping emitted quads front-facing under
+// cullMode:'back'. Y faces need uAxis=Z, vAxis=X (Z x X=+Y); X x Z would emit -Y normals and back-face-cull them.
 const FACE_AXES: readonly (readonly [number, number, number, number])[] = [
     [0, 1, 2, +1], // +X
     [0, 1, 2, -1], // -X
@@ -109,6 +89,12 @@ function emitQuad(
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
+/**
+ * Binary greedy mesher for uniform-type voxel occupancy: 6 face passes, each sweeping slices along the normal axis.
+ * Builds a bitmask row per v-row of exposed faces (voxel present, neighbour in the normal direction absent), then
+ * greedy-merges runs along u and matching rows along v into one quad per merged rectangle.
+ * `occ` is called in tight loops; prefer a closed dense-array lookup. `emitNormals` costs 12 bytes/vertex.
+ */
 export function meshOccupancy(opts: {
     occ: Occ;
     min: readonly [number, number, number];
@@ -237,8 +223,7 @@ export function meshOccupancy(opts: {
     };
 }
 
-// build a gpu.Geometry from a mesh result. `normal` buffer is only attached
-// when normals were emitted, saves the slot for flat-colour materials.
+/** `normal` buffer is only attached when normals were emitted, saving the slot for flat-colour materials. */
 export function meshToGeometry(mesh: GreedyMesh): Geometry {
     const geo = new Geometry();
     geo.setBuffer('position', createVertexBuffer(d.vec3f, mesh.positions));

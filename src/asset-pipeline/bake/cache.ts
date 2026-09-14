@@ -1,16 +1,6 @@
-// Artifact-cache helpers.
-//
-// Convention: each generated artifact has a sidecar JSON (e.g.
-// resources/client/voxels-atlas.json) that carries a `hash` field over
-// its inputs. A rebuild is gated by `readArtifactHash(fs, sidecar) ===
-// computedHash`. The artifact JSON IS the cache marker, no separate
-// cache file. Cold-start wipes simply delete the artifact files.
-
 import type { Filesystem } from '../../../os/interface';
 
-/** Read the `hash` field from an artifact's sidecar JSON (project-relative
- *  path). Returns null if the file is missing, unreadable, or has no
- *  string hash field. */
+/** null if the file is missing, unreadable, or has no string hash field. */
 export async function readArtifactHash(fs: Filesystem, filePath: string): Promise<string | null> {
     try {
         const json = JSON.parse(await fs.readText(filePath)) as { hash?: unknown };

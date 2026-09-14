@@ -1,27 +1,9 @@
-/**
- * Screen-center crosshair HUD, four thin `<div>` ticks driven from a
- * `CrosshairConfig`. It stays DOM (not the gpucat overlay pass) because it
- * must paint above HtmlTrait world overlays, which are DOM, and a
- * canvas-rendered layer can never sit above DOM.
- *
- * Each `Crosshair` owns its DOM + animation state. Presence is explicit:
- * `addCrosshair` mounts it, `removeCrosshair` unmounts it, and
- * `updateCrosshair` only drives it (lerp + style writes; no-op while
- * removed). The update lerps the three source scalars
- * (spread/length/thickness, CSS px) toward the config and only rewrites
- * the tick styles when a scalar drifts past an epsilon or the color
- * changes, so a stable crosshair is free. Animating transform/size on
- * four tiny elements is far cheaper than a full-viewport canvas
- * clear+repaint.
- */
-
 import type { ScriptContext } from '../api/scripts';
 import { UILayer } from './ui/util/ui-layers';
 
 export type CrosshairConfig = {
-    /** show the four-tick crosshair HUD. controllers map this to
-     *  `addCrosshair`/`removeCrosshair` (`PlayerControllerTrait` removes
-     *  while false); the widget itself doesn't read it. */
+    /** controllers map this to `addCrosshair`/`removeCrosshair`; the widget
+     *  itself doesn't read it. */
     enabled: boolean;
     /** distance from screen center to inner edge of each tick (CSS px). */
     spread: number;
@@ -52,15 +34,13 @@ export function defaultCrosshairConfig(): CrosshairConfig {
  *  CSS px, so a stable crosshair costs nothing per frame. */
 const REWRITE_EPS = 0.25;
 
-/** rgba tuple (0..1) → CSS color string for a tick's background. */
+/** rgba tuple (0..1) to a CSS color string for a tick's background. */
 function cssRgba(c: [number, number, number, number]): string {
     return `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
 }
 
 /** position + size one tick via transform (compositor) + width/height (crisp),
- *  relative to the 0×0 root anchored at screen center. background is written
- *  separately (only when the color changes), so geometry animation doesn't
- *  re-set an unchanged color and a color flash doesn't re-set geometry. */
+ *  relative to the 0x0 root anchored at screen center; background is set separately. */
 function applyTickGeometry(el: HTMLDivElement, w: number, h: number, x: number, y: number): void {
     el.style.width = `${w}px`;
     el.style.height = `${h}px`;
@@ -69,7 +49,7 @@ function applyTickGeometry(el: HTMLDivElement, w: number, h: number, x: number, 
 
 export type Crosshair = {
     ctx: ScriptContext;
-    /** 0×0 anchor div at screen center; null while removed. */
+    /** 0x0 anchor div at screen center; null while removed. */
     root: HTMLDivElement | null;
     /** the four tick divs (top, bottom, left, right) parented to `root`. */
     ticks: HTMLDivElement[];
@@ -78,15 +58,13 @@ export type Crosshair = {
     length: number;
     thickness: number;
     /** false until the first update after (re)adding, so geometry snaps to
-     *  config rather than lerping in from stale values. */
+     *  config instead of lerping in from stale values. */
     lerpInit: boolean;
     /** last-written geometry, gating style rewrites via `REWRITE_EPS`. */
     lastSpread: number;
     lastLength: number;
     lastThickness: number;
-    /** last-applied color components; the CSS string is rebuilt only when a
-     *  component changes, so steady-state frames compare numbers and
-     *  allocate nothing. */
+    /** last-applied color components; the CSS string is rebuilt only when one changes. */
     lastColor: [number, number, number, number];
 };
 
@@ -106,17 +84,13 @@ export function createCrosshairImpl(ctx: ScriptContext): Crosshair {
     };
 }
 
-/**
- * mount the crosshair's DOM under the client viewport. a fresh `Crosshair`
- * starts removed, so nothing shows until the first add. idempotent, and a
- * no-op until the client viewport exists, so it's safe to call per frame.
- * geometry snaps to config on the first update after adding.
- */
+/** mount the crosshair's DOM under the client viewport. idempotent, and a
+ *  no-op until the client viewport exists, so it's safe to call per frame. */
 export function addCrosshair(crosshair: Crosshair): void {
     const viewport = crosshair.ctx.client?.viewport;
     if (!viewport) return;
     if (crosshair.root) return;
-    // a 0×0 anchor at screen center; ticks position relative to its origin.
+    // a 0x0 anchor at screen center; ticks position relative to its origin.
     const anchor = document.createElement('div');
     anchor.style.cssText = [
         'position: absolute',
@@ -143,11 +117,9 @@ export function addCrosshair(crosshair: Crosshair): void {
     crosshair.lastColor[0] = -1;
 }
 
-/**
- * unmount the crosshair's DOM and reset the lerp so geometry snaps
- * (rather than crawls) from config when it's next added. idempotent;
- * `addCrosshair` re-adds. call on POV loss and from `onDispose`.
- */
+/** unmount the crosshair's DOM and reset the lerp so geometry snaps (rather
+ *  than crawls) from config when next added. idempotent; call on POV loss
+ *  and from `onDispose`. */
 export function removeCrosshair(crosshair: Crosshair): void {
     if (crosshair.root) {
         crosshair.root.remove();
@@ -157,12 +129,8 @@ export function removeCrosshair(crosshair: Crosshair): void {
     crosshair.lerpInit = false;
 }
 
-/**
- * drive the crosshair from `cfg` for this frame: lerp geometry toward the
- * config and rewrite the tick styles that changed. no-op while the
- * crosshair isn't added. call once per frame while this controller holds
- * the POV.
- */
+/** drive the crosshair from `cfg` for this frame: lerp geometry toward the
+ *  config and rewrite the tick styles that changed. no-op while not added. */
 export function updateCrosshair(crosshair: Crosshair, cfg: CrosshairConfig, dt: number): void {
     if (!crosshair.root) return;
 

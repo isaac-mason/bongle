@@ -1,14 +1,3 @@
-/**
- * binary scene tree packing / unpacking for network transfer.
- *
- * packSceneTree(sceneTree) → Uint8Array, full scene tree to binary
- * unpackSceneTree(sceneTree, data), binary to scene tree (clears + rebuilds)
- * applySceneSyncUpdate(sceneTree, update), apply a single incremental scene_sync update
- *
- * all trait field data is packcat-encoded. the receiver uses traitId to
- * look up the per-trait serdes for unpacking.
- */
-
 import type { BinaryField, BinaryTrait, PackedNode, RoomMode, SceneSyncUpdate } from '../protocol';
 import { packPackedSceneTree, unpackPackedSceneTree } from '../protocol';
 import { registry, resolveTraitWireRef, type InboundProtocol } from '../registry';
@@ -35,26 +24,18 @@ import {
 import { disposeScriptInstance, type SceneTreeContext } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitHandle } from './traits';
 
-/* ── pack ── */
-
 /**
- * pack a scene tree into a binary Uint8Array for network transfer.
- * includes all nodes regardless of persist flag. trait control data is
- * packcat-encoded per-control via getControlCodecs.
- *
- * root is the first node in the list with parentId: 0.
- *
- * mode: 'edit' includes node.prefab in packed data. 'play' omits it,
- * play mode instantiates children server-side, clients just see normal nodes.
+ * Packs a scene tree into a binary Uint8Array for network transfer. Includes all nodes
+ * regardless of persist flag; the root is the first node in the list with parentId: 0.
+ * `mode: 'edit'` includes node.prefab in packed data; `'play'` omits it since play mode
+ * instantiates children server-side and clients just see normal nodes.
  */
 export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (node: Node) => boolean): Uint8Array {
     const root = sceneTree.root;
     const wireIndex = registry.protocol.traits;
 
-    // pack all nodes in parent-first order (root first). in play mode prunes
-    // non-shared subtrees, those are server- or client-local and never
-    // replicated. edit mode includes everything for the editor. `prune` (AOI join)
-    // additionally omits chunk-streamed transform-root subtrees.
+    // Parent-first order (root first). Play mode prunes non-shared subtrees; edit mode
+    // includes everything. `prune` (AOI join) additionally omits chunk-streamed transform-root subtrees.
     const nodes: PackedNode[] = [];
     walkReplicable(
         root,
@@ -78,9 +59,7 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
                     syncs: packAllSyncs(handle, instance, node),
                 });
             }
-            // include unresolved traits (round-trip preservation, no field data).
-            // these never have a wire index (no local def), so always emit the
-            // string id fallback.
+            // Include unresolved traits for round-trip preservation, no field data. These never have a wire index, so always emit the string id fallback.
             for (const [id] of node.unresolved ?? EMPTY_UNRESOLVED) {
                 traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
             }
@@ -102,19 +81,12 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (nod
     return packPackedSceneTree({ nodes });
 }
 
-/* ── unpack ── */
-
 /**
- * unpack a binary scene tree into an existing scene tree.
- * clears existing children/traits/scripts on root, then rebuilds
- * the full tree from the packed data.
- *
- * the first node in the list is the root (parentId: 0).
- *
- * `traitWireIndex` is the INBOUND wire-index table for the peer that
- * packed `data`, the receiver maintains it from `wire_table` messages
- * and passes it here. callers without a peer (in-process pack/unpack in
- * tests) omit it and the runtime's local table is used.
+ * Unpacks a binary scene tree into an existing scene tree: clears existing
+ * children/traits/scripts on root, then rebuilds the full tree from the packed data.
+ * The first node in the list is the root (parentId: 0). `inbound` is the wire-index table
+ * for the peer that packed `data`; callers without a peer (in-process pack/unpack in tests)
+ * omit it and the runtime's local table is used.
  */
 export function unpackSceneTree(
     sceneTree: SceneTree,
@@ -126,13 +98,12 @@ export function unpackSceneTree(
     const root = sceneTree.root;
     const wireIndex = inbound?.traits ?? registry.protocol.traits;
 
-    // clear existing children
     const existingChildren = root.children.slice();
     for (const child of existingChildren) {
         destroyNode(sceneTree, child);
     }
 
-    // clear existing root traits + script instances (scripts re-instantiate from traits)
+    // Scripts re-instantiate from traits.
     if (runtime?.instances) {
         const rootInstances = runtime.instances.get(root.id);
         if (rootInstances) {
@@ -143,11 +114,9 @@ export function unpackSceneTree(
     root.traits.length = 0;
     root.unresolved = null;
 
-    // first node is root
     const rootPacked = unpacked.nodes[0];
     if (!rootPacked) return;
 
-    // restore root id to match the server's
     sceneTree.idToNode.delete(root.id);
     root.id = rootPacked.id;
     sceneTree.idToNode.set(root.id, root);
@@ -155,16 +124,10 @@ export function unpackSceneTree(
         sceneTree.nextServerId = root.id + 1;
     }
 
-    // restore root name
     root.name = rootPacked.name;
-
-    // restore root owner
     setOwner(sceneTree, root, rootPacked.owner ?? null);
-
-    // restore root prefab config
     setPrefab(root, decodePrefabConfig(rootPacked.prefab) ?? null);
 
-    // restore root traits
     for (const bt of rootPacked.traits) {
         const traitId = resolveTraitWireRef(wireIndex, bt.netIndex, bt.id);
         if (traitId === undefined) continue;
@@ -184,24 +147,17 @@ export function unpackSceneTree(
         root.traits[handle.slot] = instance;
     }
 
-    // root script instances re-instantiate from the trait list at initSceneTree time
-
-    // create remaining nodes in parent-first order
+    // Root script instances re-instantiate from the trait list at initSceneTree time.
     for (let i = 1; i < unpacked.nodes.length; i++) {
         const pn = unpacked.nodes[i];
         applyNodeCreated(sceneTree, runtime, pn, inbound);
     }
 }
 
-/* ── apply a single scene_sync update to a client scene graph ── */
-
 /**
- * apply a single incremental scene_sync update to a scene tree.
- * used by the client to process server discovery updates.
- *
- * `traitWireIndex` is the INBOUND wire-index table for the peer that
- * packed the update (the server, when called from the client inbox).
- * absent → runtime's local table is used (in-process tests).
+ * Applies a single incremental scene_sync update to a scene tree, used by the client to
+ * process server discovery updates. `inbound` is the wire-index table for the peer that
+ * packed the update; absent means the runtime's local table is used (in-process tests).
  */
 export function applySceneSyncUpdate(
     sceneTree: SceneTree,
@@ -325,15 +281,11 @@ export function applySceneSyncUpdate(
     }
 }
 
-/* ── internal helpers ── */
-
 /**
- * walk a node tree in parent-first (pre-order) order. in play mode prunes
- * subtrees whose effective realm isn't `'shared'`. `inheritedRealm` is the
- * effective realm of the parent (root callers pass `'shared'`); `'inherit'`
- * nodes resolve to that value. `prune`, if given, skips a node + its subtree
- * (used by the AOI-aware join to omit chunk-streamed transform-root subtrees).
- * iterative, no recursion, no stack growth on deep trees.
+ * Walks a node tree in parent-first (pre-order) order. Play mode prunes subtrees whose
+ * effective realm isn't `'shared'`. `inheritedRealm` is the effective realm of the parent
+ * (root callers pass `'shared'`); `'inherit'` nodes resolve to that value. `prune`, if
+ * given, skips a node and its subtree. Iterative, no recursion, no stack growth on deep trees.
  */
 function walkReplicable(
     node: Node,
@@ -349,17 +301,14 @@ function walkReplicable(
         if (mode === 'play' && effective !== 'shared') continue;
         if (prune?.(cur)) continue;
         callback(cur);
-        // push children in reverse so they pop in original order
+        // Push children in reverse so they pop in original order.
         for (let i = cur.children.length - 1; i >= 0; i--) {
             stack.push({ node: cur.children[i], inherited: effective });
         }
     }
 }
 
-/**
- * create a node from packed data and add it to the scene tree.
- * shared between unpackSceneTree and applySceneSyncUpdate('node_created').
- */
+/** Creates a node from packed data and adds it to the scene tree. Shared between unpackSceneTree and applySceneSyncUpdate('node_created'). */
 function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: PackedNode, inbound?: InboundProtocol): void {
     const traitWireIndex = inbound?.traits ?? registry.protocol.traits;
     const parent = getNodeById(sceneTree, pn.parentId);
@@ -392,17 +341,11 @@ function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: 
         if (instance) applySyncFields(handle, bt.syncs, instance, inbound?.syncRemap.get(traitId));
     }
 
-    // scripts ride on traits, addTraitBySlot above creates instances in the live runtime
-
-    // move to correct index
+    // Scripts ride on traits; addTraitBySlot above creates instances in the live runtime.
     reorderChild(parent, node, pn.index);
 }
 
-/**
- * pack all controls of a trait instance to BinaryField entries (positional,
- * the wire `index` is the control's position in `def.controls`). used by
- * packSceneTree for full scene serialization.
- */
+/** Packs all controls of a trait instance to BinaryField entries; the wire `index` is the control's position in `def.controls`. */
 function packAllControls(handle: TraitHandle, instance: TraitBase, node: Node): BinaryField[] {
     const codecs = getControlCodecs(handle);
     if (!codecs) return [];
@@ -414,12 +357,7 @@ function packAllControls(handle: TraitHandle, instance: TraitBase, node: Node): 
     return entries;
 }
 
-/**
- * pack all sync slices of a trait instance to BinaryField entries (positional,
- * the wire `index` is the sync's position in `def.syncDefs`). seeds initial
- * replicated state on the receiver so 'dirty'-rate syncs reach the client at
- * join time and non-dirty syncs are aligned with the server's snapshot.
- */
+/** Packs all sync slices of a trait instance to BinaryField entries; seeds initial replicated state on the receiver so 'dirty'-rate syncs reach the client at join time. */
 function packAllSyncs(handle: TraitHandle, instance: TraitBase, node: Node): BinaryField[] {
     const codecs = getSyncCodecs(handle);
     if (!codecs) return [];
@@ -431,10 +369,7 @@ function packAllSyncs(handle: TraitHandle, instance: TraitBase, node: Node): Bin
     return entries;
 }
 
-/**
- * unpack BinaryField entries into a props object keyed by control id.
- * returns null if there are no fields to unpack.
- */
+/** Unpacks BinaryField entries into a props object keyed by control id. Returns null if there are no fields to unpack. */
 function unpackFields(
     handle: TraitHandle,
     fields: BinaryField[],
@@ -462,11 +397,7 @@ function unpackFields(
     return Object.keys(props).length > 0 ? props : null;
 }
 
-/**
- * apply control-shaped BinaryField entries to a trait instance.
- * used for full-state events (node_trait_added) where each entry is a
- * single control value indexed by control position.
- */
+/** Applies control-shaped BinaryField entries to a trait instance, for full-state events (node_trait_added) where each entry is a single control value indexed by control position. */
 function applyControlFields(
     handle: TraitHandle,
     fields: BinaryField[],
@@ -485,11 +416,7 @@ function applyControlFields(
     }
 }
 
-/**
- * apply sync-shaped BinaryField entries to a trait instance.
- * used for incremental sync updates (node_trait_fields) where each entry
- * is a sync slice indexed by sync position.
- */
+/** Applies sync-shaped BinaryField entries to a trait instance, for incremental sync updates (node_trait_fields) where each entry is a sync slice indexed by sync position. */
 function applySyncFields(handle: TraitHandle, fields: BinaryField[], instance: TraitBase, remap?: (number | undefined)[]): void {
     const codecs = getSyncCodecs(handle);
     if (!codecs) return;

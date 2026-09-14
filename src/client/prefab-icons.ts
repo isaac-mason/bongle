@@ -1,13 +1,3 @@
-// In-browser prefab-icon render.
-//
-// Same shape as block icons — build a headless `RenderRoom`, populate, render
-// into a `RenderTarget` at the room's arena index, tear it down — but the
-// subject is a prefab: it's instantiated into `room.scene` and ticked to a
-// fixpoint (which stamps its voxels into `room.voxels` and spawns its model
-// nodes), then models are preloaded/uploaded, the scene is framed by an
-// isometric ortho camera fit to its AABB, and rendered. One prefab → one tile;
-// the caller caches by id and invalidates on registry change.
-
 import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { MeshTrait } from '../builtins/mesh';
@@ -40,15 +30,12 @@ const MAX_PREFAB_TICKS = 16;
 
 export type PrefabIcon = { pixels: Uint8Array; pxSize: number };
 
-/** resources/client-relative path a prefab's baked icon is written to (and read
- *  back from). `encodeURIComponent` keeps any prefab id filename-safe; the single
- *  source of truth so the pipeline writer and the editor reader can't drift. */
+/** resources-relative path a prefab's baked icon is written to and read back from. */
 export function prefabIconRelPath(prefabId: string): string {
     return `prefab-icons/${encodeURIComponent(prefabId)}.png`;
 }
 
-/** Render one prefab into an RGBA8 icon tile, in-browser. Returns null when the
- *  prefab id is unknown or the instantiated content is empty (nothing to draw). */
+/** renders one prefab into an RGBA8 icon tile; returns null if unknown or empty. */
 export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): Promise<PrefabIcon | null> {
     const def = engineRegistry.prefabs.byId.get(prefabId);
     if (!def) return null;
@@ -58,8 +45,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     const room = createRenderRoom(deps);
     applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
     Environment.flushActive(room.environment, deps.environmentResources);
-    // hide the sky/cloud meshes (config.enabled=false) — no per-frame
-    // updateForCamera on the offline icon path, so sync visibility directly.
+    // no per-frame updateForCamera on the offline icon path, so sync visibility directly.
     Environment.syncEnvVisibility(room.envVisuals, room.environment);
 
     const target = new RenderTarget(ICON_PX, ICON_PX, {
@@ -69,7 +55,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     });
 
     try {
-        // ── instantiate the prefab + drain nested prefabs to a fixpoint ──
+        // instantiate the prefab and drain nested prefabs to a fixpoint.
         const anchor = createNode({ name: `prefab-icon:${prefabId}`, persist: false });
         addChild(room.scene.root, anchor);
         setPrefab(anchor, createPrefabConfig(prefabId));
@@ -78,7 +64,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
             Prefab.tick(room.scene, room.context, deps.resources, room.voxels, 'client');
         } while (room.scene.prefabs.dirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
 
-        // ── preload referenced models + upload to the GPU pools ──
+        // preload referenced models and upload to the GPU pools.
         const modelIds = new Set<string>();
         const meshKeys = new Set<string>();
         for (const [meshTrait] of query(room.scene, [MeshTrait, TransformTrait])) {
@@ -98,21 +84,19 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
                 for (const k of meshKeys) if (meshInfoIndexOf(deps.modelResources.meshInfo, k) === null) return false;
                 return true;
             });
-            // wait for each model's textures to actually land in the atlas (decode
-            // + blit + UV patch) before rendering, or the icon captures the
-            // placeholder full-UV that `update` wrote synchronously.
+            // wait for each model's textures to land in the atlas before rendering, or the
+            // icon captures the placeholder full-UV that `update` wrote synchronously.
             await Promise.all([...modelIds].map((id) => MeshResources.modelTexturesReady(deps.modelResources, id)));
         }
 
-        // ── world transforms (via interpolation, held at alpha=1) ──
+        // world transforms via interpolation, held at alpha=1.
         Interpolation.snapshot(room.scene);
         computeWorldTransforms(room.scene);
         Interpolation.interpolate(room.scene, RENDER_ROOM_PLAYER_ID, 1.0, 0);
-        // roots only above; this composes the subtrees the mesh renderer reads. Nothing
-        // writes a bone local in between here, so both passes sit together.
+        // concatenate must run after interpolate composes the subtrees it reads.
         Interpolation.concatenate(room.scene);
 
-        // ── full-bright voxels, meshed synchronously into the arena at our index ──
+        // full-bright voxels, meshed synchronously into the arena at our index.
         const meshOutput = createMeshOutput();
         for (const chunk of room.voxels.chunks.values()) {
             chunkLight(chunk).fill(0xffff);
@@ -128,11 +112,10 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
             vmTrait.unlit = true;
         }
 
-        // model + voxel-mesh visuals (register cull entries; offline pass draws all).
+        // registers cull entries; the offline pass draws all of them regardless.
         MeshVisuals.update(room.modelVisuals, deps.modelResources.batch, deps.modelResources, deps.resources, room.visibility);
         VoxelMeshVisuals.update(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
 
-        // ── frame + render ──
         const aabb = computeSceneAabb(room, deps);
         if (!aabb) return null;
         const camera = fitOrthoIsometric(aabb);
@@ -151,14 +134,10 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     }
 }
 
-/* ── framing ─────────────────────────────────────────────────────── */
-
 type Aabb = [number, number, number, number, number, number];
 
-/** Isometric ortho camera framing an AABB *exactly*: orient the camera, project
- *  the 8 AABB corners into view space, and size the (square) ortho frustum to the
- *  max corner spread around the look-at point. Robust for any prefab shape/size —
- *  no heuristic fudge factor. */
+/** frames an AABB exactly: orients the camera, projects the 8 corners into view
+ *  space, and sizes the square ortho frustum to the max corner spread. */
 function fitOrthoIsometric(aabb: Aabb): OrthographicCamera {
     const cx = (aabb[0] + aabb[3]) / 2;
     const cy = (aabb[1] + aabb[4]) / 2;
@@ -166,14 +145,14 @@ function fitOrthoIsometric(aabb: Aabb): OrthographicCamera {
     const elev = Math.PI / 6;
     const azim = Math.PI / 4;
 
-    // position + orient first — the frustum doesn't affect the view matrix.
+    // position and orient first, the frustum doesn't affect the view matrix.
     const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, CAM_DIST * 2);
     camera.position[0] = cx + Math.sin(azim) * Math.cos(elev) * CAM_DIST;
     camera.position[1] = cy + Math.sin(elev) * CAM_DIST;
     camera.position[2] = cz + Math.cos(azim) * Math.cos(elev) * CAM_DIST;
     camera.lookAt([cx, cy, cz]);
     camera.updateWorldMatrix();
-    camera.updateViewMatrix(); // matrixWorldInverse (the view matrix) is now current
+    camera.updateViewMatrix();
 
     // the look-at point projects to view-space (0, 0); the 8 corners spread
     // around it. the tight square half-extent is the max |x|,|y| over corners.
@@ -197,8 +176,7 @@ function fitOrthoIsometric(aabb: Aabb): OrthographicCamera {
     return camera;
 }
 
-/** Union AABB of the room's renderable content: non-air voxels + MeshTrait
- *  world bounds. Returns null when there's nothing to render. */
+/** union AABB of non-air voxels + MeshTrait world bounds; null when nothing renders. */
 function computeSceneAabb(room: RenderRoom, deps: RenderRoomDeps): Aabb | null {
     let minX = Infinity;
     let minY = Infinity;
@@ -262,8 +240,6 @@ function computeSceneAabb(room: RenderRoom, deps: RenderRoomDeps): Aabb | null {
     if (!any) return null;
     return [minX, minY, minZ, maxX, maxY, maxZ];
 }
-
-/* ── async helpers ───────────────────────────────────────────────── */
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 

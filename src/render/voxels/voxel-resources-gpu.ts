@@ -1,16 +1,3 @@
-// voxel-resources-gpu.ts — WebGPU-only voxel frame producer (compute cull/emit +
-// translucent sort).
-//
-// Owns the GPU compute chain (cull → finalize → emit → translucent radix sort), the
-// per-pass render scratch (visibleQuads + indirect) + geometries, this backend's
-// arena (section tables + residency/eviction packer + GPU cull buffers), and the
-// `VoxelResources` handle + init/load/dispose + the per-frame graph (updateCull /
-// cullDispatches). The backend-neutral leaf tools (structs, SegmentArena, cull-view
-// math, budgets) live in ./voxel-arena.
-//
-// Value-imported ONLY by render/webgpu/* + the offline icon paths. WebGL never
-// imports this file (it has its own producer); shared voxel files may `import
-// type` from here but must not value-import it.
 import type { Camera, ComputeDispatch, Material, WebGPURenderer } from 'gpucat';
 import {
     abs,
@@ -108,69 +95,16 @@ import {
     type VoxelTextures,
 } from './voxel-textures';
 
-// ── translucent global stable radix sort ────────────────────────────
-//
-// The translucent pass draws back-to-front. A stable 4-pass (8 bits/pass) LSD
-// radix sort turns every visible translucent quad's key into the `visibleQuads`
-// draw permutation, gated to re-run only when the order can change (see
-// `updateTranslucentSortGate`).
-//
-// key = [ cellL1:10 ][ intraDist:20 ][ facing:1 ]  (31 bits; ascending ⇒ far first)
-//
-//   cellL1    = 1023 − Manhattan distance of the quad's OWNER cell from the
-//               camera's cell. Exact and load-bearing: a quad never leaves its
-//               owner cube, and along any ray cell L1 strictly increases (per-
-//               axis monotonicity), so a farther cell's quad can never be hit
-//               before a nearer one's. This orders every cross-cell pair per-
-//               pixel-correctly — including coincident interface faces, as
-//               "nearer cell on top" — with no tiebreak convention and no
-//               quantisation bands; the order only changes when the camera
-//               crosses a cell boundary. Same-L1 cells can't occlude (same
-//               proof) so need no refinement. 1023 ⇒ ≤21-chunk view ceiling.
-//   intraDist = within-cell refinement (per-section-normalised nearest-point
-//               distance, far first). Exact for a convex cell's own faces,
-//               best-effort for multi-quad models. Cross-cell pairs never reach
-//               it, so its quantisation can't reintroduce tie-band flicker.
-//   facing    = camera-facing ⇒ drawn last; splits crossed same-cell model
-//               quads (unorderable per-quad, but kept deterministic).
-//
-// Residual exact ties keep expand order (the sort is STABLE) = within-section
-// arena order — fixed and view-independent, Sodium's `onPlaneQuads` semantics.
-//
-// Stable multi-pass (not single-pass counting sort): WebGPU has no forward-
-// progress guarantee, so the scatter is stable via a deterministic per-block
-// rank (zero rank atomics) built with reduce-then-scan — no decoupled-lookback
-// spin, no subgroups.
-//
-// Chain (11 dispatches): expand → prep → count₀ → [scan → scatter]×4. Passes
-// shuffle (key, index) A→B→A→B (8 B/item, not the payload); the last scatter
-// gathers the payload into `visibleQuads`. Each non-last scatter fused-counts
-// the next pass's digit in-register, so only pass 0 needs a standalone count.
-// The two histograms ping-pong (counts for digit p in hist[p%2]); scan p reads
-// hist[p%2] into bases AND zeroes hist[(p+1)%2] up to `zeroTo` = max(this,
-// previous fire's block count) for the fused count. Rows use a FIXED maxBlocks
-// stride so cross-fire staleness stays addressable.
-const RADIX_WG = 256; // threads per radix workgroup
-const RADIX_ITEMS = 4; // items per thread in count/scatter
-const RADIX_BLOCK = RADIX_WG * RADIX_ITEMS; // 1024 items per workgroup-block
-const RADIX_DIGITS = 256; // 8-bit digit ⇒ 4 LSD passes
-const TSORT_EXPAND_WG = 256; // expand threads/section
-const TSORT_CELL_LEVELS = 1024; // 10-bit owner-cell L1 (≈21-chunk view ceiling)
-const TSORT_DIST_LEVELS = 1 << 20; // 20-bit within-cell distance refinement
+// Translucent quads draw back-to-front via a stable 4-pass LSD radix sort over key = [cellL1:10][intraDist:20][facing:1], gated by updateTranslucentSortGate to skip when the order can't change; key-ordering correctness is verified in tst/unit/render/voxels/tsort-radix-model.test.ts.
+const RADIX_WG = 256;
+const RADIX_ITEMS = 4;
+const RADIX_BLOCK = RADIX_WG * RADIX_ITEMS;
+const RADIX_DIGITS = 256;
+const TSORT_EXPAND_WG = 256;
+const TSORT_CELL_LEVELS = 1024; // 10-bit owner-cell L1
+const TSORT_DIST_LEVELS = 1 << 20; // 20-bit within-cell distance
 
-// ── GPU cull ────────────────────────────────────────────────────────
-//
-// Per-frame camera state the cull compute reads. Everything is expressed
-// so the frustum test runs in a small, f32-exact domain regardless of how
-// far the camera is from the world origin (Minecraft-scale coords):
-//   - camMeta.xyz = camera chunk coords (integers, f32-exact well past MC range)
-//   - camMeta.w   = live record count (cull dispatch bound)
-//   - camFrac.xyz = camera offset within its chunk [0, CHUNK_SIZE)
-//   - camFrac.w   = squared view-radius cutoff (camera-relative distance²)
-//   - plane0..4   = 5 frustum planes (far plane dropped; view radius bounds it),
-//                   camera-relative with the section half-extent folded into .w
-//                   (Sodium's trick), so the test is `dot(plane.xyz, rel) + plane.w >= 0`.
-
+// camMeta = (camChunkX, camChunkY, camChunkZ, liveRecordCount); camFrac = (subChunkOffset.xyz, viewRadiusSq); plane0..4 are camera-relative frustum planes (far plane dropped) with the section half-extent folded into .w, so the test is dot(plane.xyz, rel) + plane.w >= 0.
 export const CullView = /* @__PURE__ */ struct('VoxelCullView', {
     plane0: d.vec4f,
     plane1: d.vec4f,
@@ -185,26 +119,16 @@ export const CULL_VIEW_STRIDE = /* @__PURE__ */ layoutStrideOf(CullView);
 
 export const CULL_WG_SIZE = 64;
 
-// one thread per resident ChunkCullRecord; frustum + distance test once per
-// chunk, compact survivors into `visibleChunks`. Uses workgroup-local
-// compaction: survivors bump a shared counter, then lane 0 reserves the whole
-// workgroup's output range with ONE global atomic into `emitArgs[0]` (instead
-// of one global atomic per surviving chunk — the contention that dominated the
-// pass). `emitArgs` is pre-seeded `[0, 7, 1]`, so after the pass it *is* the
-// per-facing emit dispatch `[visibleChunkCount, 7, 1]`.
+// One thread per resident chunk: frustum/distance test, then workgroup-local compaction of survivors (one global atomic per workgroup, not per chunk) into visibleChunks and the emit dispatch args.
 function createCullCompute(): ComputeNode {
-    const wgCount = WorkgroupVar('wgCount', d.atomic(d.u32)); // workgroup survivor count
-    const wgBase = WorkgroupVar('wgBase', d.u32); // this workgroup's global output base
+    const wgCount = WorkgroupVar('wgCount', d.atomic(d.u32));
+    const wgBase = WorkgroupVar('wgBase', d.u32);
     return Fn(() => {
         const records = storage('cullRecords', d.array(ChunkCullRecord), 'read');
         const view = storage('cullView', d.array(CullView), 'read');
         const visible = storage('visibleChunks', d.array(VisibleChunk), 'read_write');
         const emitArgs = storage('emitArgs', d.array(d.atomic(d.u32)), 'read_write');
-        // fused count (opaque/transparent only): a surviving chunk's per-facing
-        // quad counts go straight into `bucketQuads` here — no separate [1,1,1]
-        // count pass. The translucent pass is ordered by the global counting sort
-        // instead of Level-A buckets, so it isn't tallied here. Layout mirrors the
-        // 2 SectionTable metaBuffers (indexed by pass) + the shared bucket tally.
+        // Fused count for opaque/transparent only; translucent is ordered by the global sort instead.
         const metas = [storage('opaqueMeta', d.array(d.u32), 'read'), storage('transparentMeta', d.array(d.u32), 'read')];
         const bucketQuads = storage('bucketQuads', d.array(d.atomic(d.u32)), 'read_write');
 
@@ -220,8 +144,7 @@ function createCullCompute(): ComputeNode {
 
         const i = globalId.x;
         const rec = records.element(i);
-        // camera-relative section center: (chunk − camChunk)·CHUNK_SIZE stays in
-        // int-exact range, + (half − frac) puts the origin near the camera.
+        // Camera-relative section center stays int-exact: (chunk - camChunk) * CHUNK_SIZE + (half - frac).
         const half = f32(CHUNK_SIZE * 0.5);
         const relX = sub(rec.field('cx').toF32(), camMeta.x).mul(f32(CHUNK_SIZE)).add(sub(half, camFrac.x));
         const relY = sub(rec.field('cy').toF32(), camMeta.y).mul(f32(CHUNK_SIZE)).add(sub(half, camFrac.y));
@@ -233,10 +156,7 @@ function createCullCompute(): ComputeNode {
         const p2 = vw.field('plane2');
         const p3 = vw.field('plane3');
         const p4 = vw.field('plane4');
-        // single `survive` bool — no early return, so every lane reaches the
-        // barriers below. `i >= recordCount` tail threads fail `inRange`; their
-        // out-of-bounds record read is clamped-safe (WebGPU robustness) and
-        // discarded by the AND.
+        // No early return (every lane must reach the barriers below); out-of-range tail threads are discarded by the and() chain.
         const distSq = dot(rel, rel).toVar('distSq');
         const survive = and(
             and(
@@ -255,7 +175,6 @@ function createCullCompute(): ComputeNode {
             distSq.lessThanEqual(camFrac.w),
         ).toVar('survive');
 
-        // workgroup-local slot for survivors.
         const localSlot = u32(0).toVar('localSlot');
         If(survive, () => {
             localSlot.assign(atomicAdd(wgCount, u32(1)).toU32());
@@ -269,12 +188,7 @@ function createCullCompute(): ComputeNode {
         workgroupBarrier();
 
         If(survive, () => {
-            // L1 (Manhattan) chunk-cell distance bucket. If section A occludes B
-            // along any ray, per-axis betweenness gives L1(A) < L1(B) by ≥1 whole
-            // cell — so sections in the SAME bucket can never occlude each other,
-            // making the same-bucket atomic-reservation order provably invisible
-            // (kills the radial-quantization flicker). Integer, no sqrt. Max L1 =
-            // 3·viewChunkRadius, clamped to K-1.
+            // L1 (Manhattan) distance bucket: same-bucket sections can never occlude each other.
             const dcx = abs(sub(rec.field('cx').toF32(), camMeta.x));
             const dcy = abs(sub(rec.field('cy').toF32(), camMeta.y));
             const dcz = abs(sub(rec.field('cz').toF32(), camMeta.z));
@@ -288,14 +202,7 @@ function createCullCompute(): ComputeNode {
             out.bucket.assign(bucket);
             out.relCenter.assign(vec4f(rel.x, rel.y, rel.z, f32(0)));
 
-            // ── fused count (opaque/transparent) ─────────────────────────
-            // Tally each visible facing's quads into its distance bucket, so
-            // `finalize` can prefix-sum them into instance bases. Replaces the
-            // separate [1,1,1] count pass. Back-face cone-cull matches the emit
-            // (same `rel` = section center), so counts == emitted (gap-free).
-            // +axis (even f) visible when rel.axis < +half; -axis when > -half.
-            // The translucent pass is ordered by the global counting sort, not
-            // Level-A buckets, so it is not tallied here.
+            // Tally each visible facing's quads into its distance bucket so finalize can prefix-sum instance bases; back-face cull here matches emit so counts equal emitted quads.
             const cHalf = f32(CHUNK_SIZE * 0.5);
             const cNegHalf = f32(-CHUNK_SIZE * 0.5);
             const slotFields = ['opaqueSlot', 'transparentSlot'] as const;
@@ -326,19 +233,9 @@ function createCullCompute(): ComputeNode {
 
 export const EMIT_WG_SIZE = 64;
 
-// per-facing emit for the OPAQUE / TRANSPARENT passes (translucent uses the
-// whole-section emit below). dispatched per pass over `visibleChunks` with a 2D
-// shape [visibleChunkCount, 7, 1]: workgroupId.x = visible-chunk index, .y =
-// facing (0..5 cardinal, 6 UNASSIGNED). Reads this pass's section slot from the
-// record (3-way select on emitConfig.pass), back-face cone-culls cardinal
-// facings, then the lanes stride-write the facing's quads straight into
-// `visibleQuads` at their distance bucket's base.
-//
-// emitConfig: [0] = pass (0 opaque, 1 transparent, 2 translucent), [1] = 1 to
-// back-face cull (opaque/transparent), 0 to emit every facing (translucent).
+// Per-facing emit for opaque/transparent, dispatched [visibleChunkCount, 7, 1] (workgroupId.x = chunk, .y = facing 0..5 cardinal, 6 unassigned); back-face cone-culls cardinal facings then stride-writes quads into visibleQuads.
+// emitConfig: [0] = pass (0 opaque, 1 transparent, 2 translucent), [1] = 1 to back-face cull, 0 to emit every facing.
 function createEmitCompute(): ComputeNode {
-    // workgroup-shared base index for this facing's instance range, reserved
-    // once (by lane 0) so the atomicAdd isn't run per-lane.
     const emitBase = WorkgroupVar('emitBase', d.u32);
     return Fn(() => {
         const visible = storage('visibleChunks', d.array(VisibleChunk), 'read');
@@ -353,7 +250,7 @@ function createEmitCompute(): ComputeNode {
         const vc = visible.element(chunkIdx);
         const passN = index(cfg, u32(0)).toVar('pass');
 
-        // 3-way slot select: pass 0→opaque, 1→transparent, 2→translucent.
+        // 3-way slot select: pass 0 is opaque, 1 transparent, 2 translucent.
         const slotI = select(
             vc.field('opaqueSlot'),
             select(vc.field('transparentSlot'), vc.field('translucentSlot'), passN.equal(u32(2))),
@@ -372,10 +269,7 @@ function createEmitCompute(): ComputeNode {
         });
         const faceOffset = index(meta, add(metaBase, facing)).toVar('faceOffset');
 
-        // back-face cone-cull: cardinal facing f visible iff its outward face
-        // is toward the camera. Uses the camera-relative center; +face (even f)
-        // visible when axis < +half, −face (odd f) when axis > −half. Skipped
-        // when emitConfig[1] == 0 (translucent) or facing == 6 (UNASSIGNED).
+        // Back-face cull: +face (even f) visible when axis < +half, -face (odd f) when axis > -half; skipped for translucent or facing 6.
         const doCull = and(index(cfg, u32(1)).notEqual(u32(0)), facing.lessThan(u32(6)));
         const rel = vc.field('relCenter');
         const half = f32(CHUNK_SIZE * 0.5);
@@ -387,12 +281,7 @@ function createEmitCompute(): ComputeNode {
             Return();
         });
 
-        // reserve this facing's instance range ONCE per workgroup (lane 0): its
-        // distance bucket's base plus a running within-bucket cursor bump. This
-        // places the quads in bucket order (front-to-back, or back-to-front for
-        // translucent via the reversed bucket index — matching the count pass).
-        // Per-lane would inflate the count ~64× and scatter the writes. The
-        // early-outs above are workgroup-uniform, so every lane reaches the barrier.
+        // Reserve this facing's instance range once per workgroup (lane 0): bucket base plus a running within-bucket cursor bump.
         If(localId.x.equal(u32(0)), () => {
             const b = vc.field('bucket');
             const bIdx = select(b, sub(u32(BUCKET_COUNT - 1), b), passN.equal(u32(2)));
@@ -411,12 +300,7 @@ function createEmitCompute(): ComputeNode {
     }).compute({ workgroupSize: [EMIT_WG_SIZE, 1, 1], name: 'voxel-emit' });
 }
 
-// ── translucent global stable-radix kernels ─────────────────────────
-
-// expand: one workgroup per visible translucent section (dispatched on the
-// shared [visibleChunkCount, 7, 1] emitArgs; only workgroupId.y == 0 works).
-// Lane 0 reserves the section's flat range with one atomic; lanes stride-write
-// each quad's key (see the key description above), payload, and identity index.
+// One workgroup per visible translucent section (dispatched on [visibleChunkCount, 7, 1]; only workgroupId.y == 0 runs); lane 0 reserves the flat range, lanes write each quad's key/payload/index.
 export function createTranslucentExpandCompute(): ComputeNode {
     const wgBase = WorkgroupVar('wgBase', d.u32);
     return Fn(() => {
@@ -458,9 +342,7 @@ export function createTranslucentExpandCompute(): ComputeNode {
         const farC = max(abs(relOrigin), abs(maxCorner)).toVar('farC');
         const farDist = length(farC).toVar('farDist');
         const distSpan = max(sub(farDist, nearDist), f32(1e-4)).toVar('distSpan');
-        // camera's cell in section-local coords (camera sits at −relOrigin);
-        // camera-relative integers ⇒ f32-exact at MC scale, consistent across
-        // sections.
+        // Camera's cell in section-local coords (camera sits at -relOrigin); stays f32-exact at world scale.
         const camCellX = floor(sub(f32(0), relOrigin.x)).toVar('camCellX');
         const camCellY = floor(sub(f32(0), relOrigin.y)).toVar('camCellY');
         const camCellZ = floor(sub(f32(0), relOrigin.z)).toVar('camCellZ');
@@ -474,11 +356,9 @@ export function createTranslucentExpandCompute(): ComputeNode {
         const qi = localId.x.toVar('qi');
         While(qi.lessThan(dataCount), () => {
             const realQuadId = add(arenaBase, qi).toVar('realQuadId');
-            // word 6 packs both the oct16 normal (low 16) and the owner block's
-            // chunk-local cell (bits 16..27) - one load feeds cellL1 and facing.
-            // Word 6, not 3: positions widened to u16 and now occupy 0..5.
+            // Word 6 packs the oct16 normal (low 16 bits) and the owner cell (bits 16..27); one load feeds cellL1 and facing.
             const w3 = index(quads, add(realQuadId.mul(u32(QUAD_STRIDE_U32S)), u32(6))).toVar('w3');
-            // cellL1 = |owner cell − camera cell|₁ (the exact cross-cell term).
+            // cellL1 = L1 distance between owner cell and camera cell (the exact cross-cell term).
             const ownDx = abs(w3.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toF32().sub(camCellX)).toVar('ownDx');
             const ownDy = abs(w3.shiftRight(u32(20)).bitwiseAnd(u32(0xf)).toF32().sub(camCellY)).toVar('ownDy');
             const ownDz = abs(w3.shiftRight(u32(24)).bitwiseAnd(u32(0xf)).toF32().sub(camCellZ)).toVar('ownDz');
@@ -494,8 +374,7 @@ export function createTranslucentExpandCompute(): ComputeNode {
             const norm = clamp(div(sub(dist, nearDist), distSpan), f32(0), f32(1)).toVar('norm');
             const distLevel = min(floor(norm.mul(f32(TSORT_DIST_LEVELS))).toU32(), u32(TSORT_DIST_LEVELS - 1)).toVar('distLevel');
             const distKey = sub(u32(TSORT_DIST_LEVELS - 1), distLevel).toVar('distKey');
-            // facing: camera-facing ⇒ drawn last (camRel is on the quad's plane
-            // for axis-aligned faces, so the sign is exact).
+            // Facing: camera-facing is drawn last (camRel lies on the quad's plane for axis-aligned faces, so the sign is exact).
             const normal = decodeOct16(w3.bitwiseAnd(u32(0xffff))).toVar('nrm');
             const facing = select(u32(1), u32(0), dot(normal, camRel).greaterThanEqual(f32(0))).toVar('facing');
             const key = shiftLeft(cellKey, u32(21))
@@ -514,16 +393,7 @@ export function createTranslucentExpandCompute(): ComputeNode {
     }).compute({ workgroupSize: [TSORT_EXPAND_WG, 1, 1], name: 'voxel-tsort-expand' });
 }
 
-// prep: single thread. Turns the expand's atomic count N into the radix
-// count/scatter indirect dispatch args:
-//   [0..2] = [numBlocks, 1, 1]     block-grid size, ceil(N/RADIX_BLOCK)
-//   [3]    = N                     for per-item tail-masking
-//   [4]    = numBlocks (persisted) the PREVIOUS fire's block count next time
-//   [5]    = zeroTo = max(numBlocks, previous fire's numBlocks) — the exact
-//            per-digit-row bound the scans must zero in the OTHER histogram so
-//            fused counts land on clean cells (covers cross-fire staleness).
-// The buffer is INDIRECT|STORAGE so the radix kernels also bind it as storage.
-// Also writes the translucent draw's instanceCount and self-resets `sortCount`.
+// Single thread: turns the expand's atomic count N into the radix indirect dispatch args [numBlocks,1,1,N,prevNumBlocks,zeroTo], writes the translucent draw's instanceCount, and self-resets sortCount.
 export function createTranslucentPrepCompute(): ComputeNode {
     return Fn(() => {
         // atomic storage buffers must be read_write in WGSL even for a load.
@@ -550,14 +420,7 @@ export function createTranslucentPrepCompute(): ComputeNode {
     }).compute({ workgroupSize: [1, 1, 1], name: 'voxel-tsort-prep' });
 }
 
-// radix count (per pass): workgroup b histograms its RADIX_BLOCK items' current
-// 8-bit digit into `radixHist[digit * numBlocks + b]` (digit-major, so the scan's
-// flat prefix-sum yields exactly "where block b's run of digit d starts").
-// Device atomics, but each block only touches its own 256 cells — the cells are
-// zeroed by this same workgroup first (storage+workgroup barrier between), so no
-// separate clear pass and no cross-fire staleness. Only PASS 0 uses this kernel
-// (digit shift hardcoded 0); later passes' counts are fused into the scatters.
-// Histogram rows use the FIXED `maxBlocks` stride.
+// Workgroup b histograms its block's items into radixHist[digit * maxBlocks + b] (digit-major), zeroing its own columns first; only pass 0 uses this kernel, later passes fuse counts into the scatter.
 export function createRadixCountCompute(maxBlocks: number): ComputeNode {
     return Fn(() => {
         const args = storage('sortIndirectArgs', d.array(d.u32), 'read');
@@ -583,12 +446,7 @@ export function createRadixCountCompute(maxBlocks: number): ComputeNode {
     }).compute({ workgroupSize: [RADIX_WG, 1, 1], name: 'voxel-tsort-count' });
 }
 
-// radix scan (per pass): ONE workgroup. Exclusive prefix-sum of the digit-major
-// `radixHist[256 × maxBlocks]` IN PLACE — after it, hist[d*MB + b] = global
-// position where block b's run of digit d starts. Thread t owns digit t's row
-// (numBlocks live entries, serial), then thread 0 scans the 256 row totals.
-// ALSO zeroes its row in the OTHER histogram (up to `zeroTo` = args[5]) so the
-// following scatter's fused next-digit count lands on clean cells.
+// One workgroup: exclusive prefix-sums radixHist in place so hist[d*maxBlocks+b] becomes the global start of block b's digit-d run, and zeroes the other histogram's row up to zeroTo for the next fused count.
 export function createRadixScanCompute(maxBlocks: number): ComputeNode {
     const partial = WorkgroupVar('scanPartial', d.sizedArray(d.u32, RADIX_WG));
     return Fn(() => {
@@ -600,16 +458,14 @@ export function createRadixScanCompute(maxBlocks: number): ComputeNode {
         const zeroTo = index(args, u32(5)).toVar('zeroTo');
         const rowBase0 = t.mul(u32(maxBlocks)).toVar('rowBase0');
 
-        // phase 0: zero this digit-row in the OTHER histogram for the fused
-        // count that follows. `zeroTo` covers this AND the previous fire's
-        // dirty cells (counts or dead bases), so no clear pass is ever needed.
+        // Zero this digit-row in the other histogram; zeroTo covers this and the previous fire's dirty cells, so no separate clear pass is needed.
         const iz = u32(0).toVar('rowIz');
         While(iz.lessThan(zeroTo), () => {
             atomicStore(index(histNext, add(rowBase0, iz)), u32(0));
             iz.addAssign(u32(1));
         });
 
-        // phase 1: exclusive-scan own digit row in place; partial[t] = row total.
+        // Exclusive-scan own digit row in place; partial[t] ends up holding the row total.
         const running = u32(0).toVar('rowRun');
         const i = u32(0).toVar('rowI');
         While(i.lessThan(nb), () => {
@@ -622,7 +478,7 @@ export function createRadixScanCompute(maxBlocks: number): ComputeNode {
         partial.element(t).assign(running);
         workgroupBarrier();
 
-        // phase 2: thread 0 exclusive-scans the 256 row totals in place.
+        // Thread 0 exclusive-scans the 256 row totals in place.
         If(t.equal(u32(0)), () => {
             const acc = u32(0).toVar('rowAcc');
             Loop({ start: 0, end: RADIX_WG, type: d.u32 }, ({ i: j }) => {
@@ -633,7 +489,7 @@ export function createRadixScanCompute(maxBlocks: number): ComputeNode {
         });
         workgroupBarrier();
 
-        // phase 3: add the digit-row base onto the row's per-block prefixes.
+        // Add the digit-row base onto the row's per-block prefixes.
         const rowBase = partial.element(t).toVar('rowBase');
         const i2 = u32(0).toVar('rowI2');
         While(i2.lessThan(nb), () => {
@@ -644,28 +500,10 @@ export function createRadixScanCompute(maxBlocks: number): ComputeNode {
     }).compute({ workgroupSize: [RADIX_WG, 1, 1], name: 'voxel-tsort-scan' });
 }
 
-// radix scatter (per pass): the STABLE reorder. Workgroup b stable-sorts its
-// RADIX_BLOCK items by the pass digit entirely in workgroup memory (4 rounds of
-// 2-bit split — counters packed as 2×16-bit fields across two words, since a
-// block total reaches 1024 and would overflow 8-bit fields; one Hillis-Steele
-// scan per round), then writes each item to `hist[digit*nb + b] +
-// rankInBlockDigitRun`. ZERO atomics → fully deterministic: the same camera
-// state always produces the same order.
-// Tail items beyond N get digit 0xFF and (by stability, being last in input
-// order) sink to the end of the local ordering, past any real 0xFF items — they
-// tally into local bin 255 harmlessly and are skipped at write-out.
-// The integer math is mirrored + property-tested against a reference stable
-// sort in tst/unit/render/voxels/tsort-radix-model.test.ts — keep them in sync.
-//
-// Two compiled variants (`last`):
-//   - regular (passes 0..2): shuffles (key, idx) src→dst AND fused-counts the
-//     NEXT pass's digit into `radixHistNext` while the key is in-register —
-//     this replaces the standalone count kernel for passes 1..3.
-//   - last (pass 3): no key/idx/histogram writes at all — gathers
-//     `sortPayload[idx]` straight into the translucent `visibleQuads`.
+// Workgroup b stable-sorts its block by the pass digit in workgroup memory (4 rounds of 2-bit split via Hillis-Steele scan), then writes each item to hist[digit*maxBlocks+b] + rankInBlockDigitRun; zero atomics keeps it fully deterministic. Mirrored and property-tested in tst/unit/render/voxels/tsort-radix-model.test.ts.
+// last=false (passes 0..2) shuffles (key, idx) and fused-counts the next digit into radixHistNext; last=true (pass 3) instead gathers sortPayload[idx] straight into visibleQuads.
 export function createRadixScatterCompute(maxBlocks: number, last: boolean): ComputeNode {
-    // 4 digits packed per u32, indexed by local item >> 2 (thread t owns items
-    // t*4..t*4+3, so it writes wgDigits[t] alone — no races).
+    // 4 digits packed per u32, indexed by item>>2; thread t owns items t*4..t*4+3 so it writes wgDigits[t] alone, no races.
     const wgDigits = WorkgroupVar('wgDigits', d.sizedArray(d.u32, RADIX_WG));
     const wgIdxA = WorkgroupVar('wgIdxA', d.sizedArray(d.u32, RADIX_BLOCK));
     const wgIdxB = WorkgroupVar('wgIdxB', d.sizedArray(d.u32, RADIX_BLOCK));
@@ -679,9 +517,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
         const srcIdx = storage('srcIdx', d.array(d.u32), 'read');
         const hist = storage('radixHist', d.array(d.atomic(d.u32)), 'read_write');
         const cfg = storage('radixPassConfig', d.array(d.u32), 'read');
-        // variant-specific bindings (declared inside the graph builder, so each
-        // compiled variant only binds what it uses — regular sits exactly at the
-        // 8-storage-buffer floor, last at 7).
+        // Variant-specific bindings: regular sits at the 8-storage-buffer floor, last at 7.
         const histNext = last ? null : storage('radixHistNext', d.array(d.atomic(d.u32)), 'read_write');
         const dstKeys = last ? null : storage('dstKeys', d.array(d.u32), 'read_write');
         const dstIdx = last ? null : storage('dstIdx', d.array(d.u32), 'read_write');
@@ -692,11 +528,10 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
         const n = index(args, u32(3)).toVar('n');
         const shift = index(cfg, u32(0)).toVar('shift');
         const blockBase = b.mul(u32(RADIX_BLOCK)).toVar('blockBase');
-        // b < nb ⇒ blockBase < n, so this never underflows.
+        // b < nb implies blockBase < n, so this never underflows.
         const blockCount = min(u32(RADIX_BLOCK), sub(n, blockBase)).toVar('blockCount');
 
-        // load: pack this thread's 4 item digits (pads ⇒ 0xFF) + identity perm.
-        // OOB srcKeys reads for pads are robustness-clamped and select-discarded.
+        // Pack this thread's 4 item digits (pads become 0xFF) plus identity perm; OOB pad reads are robustness-clamped and select-discarded.
         const packed = u32(0).toVar('packed');
         for (let k = 0; k < RADIX_ITEMS; k++) {
             const li = add(t.mul(u32(RADIX_ITEMS)), u32(k)).toVar(`li${k}`);
@@ -718,11 +553,11 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
                 .shiftRight(item.bitwiseAnd(u32(3)).mul(u32(8)))
                 .bitwiseAnd(u32(255));
 
-        // 4 rounds of stable 2-bit split, ping-pong A→B→A→B→A.
+        // 4 rounds of stable 2-bit split, ping-pong A-B-A-B-A.
         for (let r = 0; r < 4; r++) {
             const cur = r % 2 === 0 ? wgIdxA : wgIdxB;
             const nxt = r % 2 === 0 ? wgIdxB : wgIdxA;
-            // count this thread's 4 slots into 2×16-bit fields per word.
+            // count this thread's 4 slots into 2x16-bit fields per word.
             const cntLo = u32(0).toVar(`cntLo${r}`);
             const cntHi = u32(0).toVar(`cntHi${r}`);
             for (let k = 0; k < RADIX_ITEMS; k++) {
@@ -731,7 +566,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
                     .shiftRight(u32(2 * r))
                     .bitwiseAnd(u32(3))
                     .toVar(`cv${r}_${k}`);
-                // v<2 → lo word (field v), v≥2 → hi word (field v−2).
+                // v<2 goes to the lo word (field v), v>=2 to the hi word (field v-2).
                 const field = shiftLeft(u32(1), v.bitwiseAnd(u32(1)).mul(u32(16)));
                 cntLo.addAssign(select(u32(0), field, v.lessThan(u32(2))));
                 cntHi.addAssign(select(field, u32(0), v.lessThan(u32(2))));
@@ -769,7 +604,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
             const s1 = add(base1, exclLo.shiftRight(u32(16))).toVar(`s1_${r}`);
             const s2 = add(base2, exclHi.bitwiseAnd(u32(0xffff))).toVar(`s2_${r}`);
             const s3 = add(base3, exclHi.shiftRight(u32(16))).toVar(`s3_${r}`);
-            // place own 4 items in order (sequential per thread ⇒ stable).
+            // place own 4 items in order (sequential per thread, so stable).
             for (let k = 0; k < RADIX_ITEMS; k++) {
                 const slot = add(t.mul(u32(RADIX_ITEMS)), u32(k));
                 const item = cur.element(slot).toU32().toVar(`pi${r}_${k}`);
@@ -786,10 +621,9 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
             }
             workgroupBarrier();
         }
-        // final stable-by-digit ordering is in wgIdxA (4 swaps: A→B→A→B→A).
+        // final stable-by-digit ordering is in wgIdxA (4 swaps: A-B-A-B-A).
 
-        // run starts: sorted position j begins digit d's run iff j==0 or the
-        // digit changes. unique writer per cell ⇒ plain stores.
+        // Sorted position j begins digit d's run iff j==0 or the digit changes; unique writer per cell, so plain stores.
         for (let k = 0; k < RADIX_ITEMS; k++) {
             const j = add(t.mul(u32(RADIX_ITEMS)), u32(k)).toVar(`rj${k}`);
             const dig = digitOf(wgIdxA.element(j).toU32()).toVar(`rd${k}`);
@@ -801,8 +635,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
         }
         workgroupBarrier();
 
-        // write-out: dst = hist[dig*MB + b] (block's global run base, from the
-        // scan) + (j − runStart) (stable rank within the block's digit run).
+        // Write-out: dst = hist[dig*maxBlocks+b] (block's global run base) + (j - runStart) (stable rank within the run).
         for (let k = 0; k < RADIX_ITEMS; k++) {
             const j = add(t.mul(u32(RADIX_ITEMS)), u32(k)).toVar(`wj${k}`);
             const item = wgIdxA.element(j).toU32().toVar(`wi${k}`);
@@ -814,8 +647,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
                 const rank = sub(j, wgStart.element(dig).toU32());
                 const dstPos = add(atomicLoad(index(hist, add(dig.mul(u32(maxBlocks)), b))).toU32(), rank).toVar(`wp${k}`);
                 if (last) {
-                    // final pass: gather the payload by original index straight
-                    // into the sorted draw buffer; keys/idx are dead now.
+                    // Final pass: gather the payload by original index straight into the sorted draw buffer; keys/idx are dead now.
                     const sp = sortPayload!.element(idx0);
                     const dp = visibleQuads!.element(dstPos).fields();
                     dp.slot.assign(sp.field('slot'));
@@ -823,9 +655,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
                 } else {
                     dstKeys!.element(dstPos).assign(key);
                     dstIdx!.element(dstPos).assign(idx0);
-                    // fused count for the NEXT pass: tally the next digit into
-                    // the destination block's column of the OTHER histogram
-                    // (zeroed by the scan that just ran).
+                    // Fused count for the next pass: tally the next digit into the destination block's column of the other histogram, already zeroed by the scan.
                     const dig1 = key.shiftRight(add(shift, u32(8))).bitwiseAnd(u32(255));
                     atomicAdd(index(histNext!, add(dig1.mul(u32(maxBlocks)), dstPos.shiftRight(u32(10)))), u32(1));
                 }
@@ -837,20 +667,7 @@ export function createRadixScatterCompute(maxBlocks: number, last: boolean): Com
     });
 }
 
-// Level-A section ordering (opaque/transparent): fused count → finalize → bucketed
-// emit. `bucketQuads`/`bucketBase`/`bucketCursor` are laid out
-// `[pass*BUCKET_COUNT + b]`, front-to-back (near→far) for early-Z. The translucent
-// pass is ordered by the global counting sort instead, so finalize skips it (and
-// must NOT write drawTranslucent — that instanceCount is owned by the sort's prep
-// and persists between gated re-runs).
-
-// (The per-bucket quad tally that used to be a separate `count` pass is now fused
-// into `createCullCompute` — each surviving section tallies its visible facings'
-// quad counts into `bucketQuads` directly, avoiding the [1,1,1] count launch storm.)
-
-/** finalize pass (single thread): exclusive prefix-sum the opaque/transparent
- *  buckets into `bucketBase`, reset `bucketCursor`, and write each pass's draw
- *  instanceCount (bucket total). Runs after the cull's fused tally, before emit. */
+// Section ordering for opaque/transparent: bucketQuads/bucketBase/bucketCursor are [pass*BUCKET_COUNT+b], front-to-back for early-Z; finalize skips translucent since its instanceCount is owned by the sort's prep.
 function createFinalizeCompute(): ComputeNode {
     return Fn(() => {
         const bucketQuads = storage('bucketQuads', d.array(d.atomic(d.u32)), 'read_write');
@@ -874,39 +691,27 @@ function createFinalizeCompute(): ComputeNode {
     }).compute({ workgroupSize: [1, 1, 1], name: 'voxel-finalize' });
 }
 
-// ── GPU-owned arena (residency + eviction + GPU cull buffers) ────────
-//
-// This backend owns its arena end to end: the quad SegmentArena (a shared leaf
-// tool), a per-pass section table carrying the ChunkInfo GPU side-table + the GPU
-// cull metaBuffer (no CPU face mirrors — the compute chain reads only the device
-// buffers), and the residency/eviction packer with the GPU cull-record buffer + the
-// translucent sort gate folded in. The WebGL producer holds the mirror image (CPU
-// face mirrors, no GPU cull buffers); the residency + eviction code is intentionally
-// duplicated across the two rather than shared, so neither carries the other's buffers.
-
+// This backend owns its arena end to end (quad arena, per-pass section tables, residency/eviction packer with cull-record buffer + sort gate); residency/eviction code is duplicated in the WebGL backend rather than shared.
 const CHUNK_CULL_RECORD_U32S = layoutStrideOf(ChunkCullRecord) / 4;
 
-// Plain State; `sectionAllocSlot`/`sectionFreeSlot`/`sectionWriteEntry`/
-// `sectionDispose` are standalone fns over it (the SegmentArena convention).
+// Plain state; sectionAllocSlot/sectionFreeSlot/sectionWriteEntry/sectionDispose are standalone fns over it.
 type GpuSectionTable = {
     readonly slotCount: number;
-    /** ChunkInfo {origin, arenaBase}, bound as 'chunkInfo' on each pass geometry. */
+    // ChunkInfo {origin, arenaBase}, bound as 'chunkInfo' on each pass geometry.
     readonly buffer: GpuBuffer;
-    /** u32 view over `buffer.array`, for packing/zeroing entries in place. */
+    // u32 view over buffer.array, for packing/zeroing entries in place.
     readonly dataU32: Uint32Array;
     readonly entryU32s: number;
-    /** GPU mirror of the face offsets/counts (SECTION_META_U32S per slot), read by
-     *  the cull/emit/expand computes; never touched by the draw-time VS. */
+    // GPU mirror of face offsets/counts (SECTION_META_U32S per slot), read by cull/emit/expand.
     readonly metaBuffer: GpuBuffer;
-    /** u32 view over `metaBuffer.array`, for the bit-exact face writes. */
+    // u32 view over metaBuffer.array, for bit-exact face writes.
     readonly metaU32: Uint32Array;
-    /** free slot indices (LIFO); a slot is live iff it's not on the stack. */
+    // free slot indices (LIFO); a slot is live iff it's not on the stack.
     readonly freeStack: number[];
 };
 
 function createGpuSectionTable(slotCount: number): GpuSectionTable {
-    // GPU side-table (16B/entry): origin + arenaBase. The face offsets/counts the
-    // cull compute needs live in the metaBuffer below; AABB lives on ChunkAlloc.
+    // GPU side-table (16B/entry): origin + arenaBase; face offsets/counts live in metaBuffer below, AABB lives on ChunkAlloc.
     const buffer = new GpuBuffer(d.array(ChunkInfo), {
         count: slotCount,
         usage: 'storage',
@@ -915,9 +720,7 @@ function createGpuSectionTable(slotCount: number): GpuSectionTable {
     const arrF32 = buffer.array as Float32Array;
     const dataU32 = new Uint32Array(arrF32.buffer, arrF32.byteOffset, arrF32.length);
 
-    // GPU mirror of the face offsets/counts (14 u32/slot) for the cull compute.
-    // Explicit `data:` (not `count:`) so the backing store is a Uint32Array,
-    // keeping u32 writes bit-exact (the `count:` path would pick Float32Array).
+    // Face offsets/counts (14 u32/slot) for the cull compute; explicit data: (not count:) keeps the backing store a Uint32Array for bit-exact writes.
     const metaBuffer = new GpuBuffer(d.array(d.u32), {
         data: new Uint32Array(slotCount * SECTION_META_U32S),
         usage: 'storage',
@@ -975,35 +778,28 @@ function sectionDispose(t: GpuSectionTable): void {
     t.metaBuffer.dispose();
 }
 
-// The arena is its own residency manager: the `packer*` fns below are the residency
-// layer (chunk upsert/evict + GPU cull-record mirror + sort gate) over the raw slab
-// (`quadArena`) + section tables.
+// The arena is its own residency manager: the packer* fns below are the residency layer over the raw quadArena slab + section tables.
 type GpuVoxelArena = {
     quadArena: QuadArena;
     tables: Record<VoxelPass, GpuSectionTable>;
-    /** keyed by bare chunk coord key (arena holds one world at a time). */
+    // keyed by bare chunk coord key (arena holds one world at a time).
     allocs: Map<string, ChunkAlloc>;
     residentKeys: Set<string>;
-    /** dense list of held ChunkAllocs, kept in lockstep with `cullRecordsBuffer` by
-     *  array index (the cull compute dispatches over `chunks.length`). */
+    // dense list of held ChunkAllocs, kept in lockstep with cullRecordsBuffer by array index.
     chunks: ChunkAlloc[];
-    /** per-chunk worldspace min corner; consumed by OOM eviction (farthest-first). */
+    // per-chunk worldspace min corner; consumed by OOM eviction (farthest-first).
     origins: Map<string, [number, number, number]>;
-    /** camera position, so eviction measures distance in world space. null offline. */
+    // camera position, so eviction measures distance in world space; null offline.
     camera: Vec3 | null;
-    /** chunk keys evicted under memory pressure this frame → self-heal re-dirty. */
+    // chunk keys evicted under memory pressure this frame; self-heal re-dirties them.
     evicted: Set<string>;
-    /** GPU cull input, one `ChunkCullRecord` per resident chunk, mirroring `chunks`
-     *  1:1 by array index (push/swap-pop mirror below). */
+    // GPU cull input, one ChunkCullRecord per resident chunk, mirroring chunks 1:1 by index.
     cullRecordsBuffer: GpuBuffer;
-    /** u32 view over `cullRecordsBuffer.array` for bit-exact int writes. */
+    // u32 view over cullRecordsBuffer.array for bit-exact int writes.
     cullRecordsU32: Uint32Array;
-    /** true if translucent geometry mutated since the sort last ran; forces the
-     *  gated radix sort to re-run so its persisted permutation can't dangle onto
-     *  reallocated arena data. Read + cleared by `updateTranslucentSortGate`. */
+    // true if translucent geometry mutated since the sort last ran, forcing a re-sort; read/cleared by updateTranslucentSortGate.
     translucentDirty: boolean;
-    /** translucent sort re-run gate baseline (camera pos + forward). `valid` false
-     *  forces the first run (e.g. after a room swap cleared the arena). */
+    // translucent sort re-run gate baseline (camera pos + forward); valid=false forces the first run.
     tsortGate: { valid: boolean; camX: number; camY: number; camZ: number; fwdX: number; fwdY: number; fwdZ: number };
 };
 
@@ -1014,8 +810,7 @@ function createGpuVoxelArena(budget: VoxelArenaBudget): GpuVoxelArena {
         transparent: createGpuSectionTable(budget.maxSections),
         translucent: createGpuSectionTable(budget.maxSections),
     };
-    // a chunk occupies >= 1 section slot across the 3 tables, so the live chunk
-    // count is bounded by the sum of table capacities.
+    // A chunk occupies >= 1 section slot across the 3 tables, so live chunk count is bounded by the sum of table capacities.
     const maxChunks = tables.opaque.slotCount + tables.transparent.slotCount + tables.translucent.slotCount;
     const cullRecordsBuffer = new GpuBuffer(d.array(ChunkCullRecord), {
         count: maxChunks,
@@ -1039,9 +834,7 @@ function createGpuVoxelArena(budget: VoxelArenaBudget): GpuVoxelArena {
     };
 }
 
-/** Write the cull record for the chunk currently at `index` in `packer.chunks`
- *  (records mirror that array 1:1). Signed slots (-1 = pass absent) round-trip
- *  through the u32 view bit-exactly. */
+// Writes the cull record for the chunk at packer.chunks[index]; records mirror that array 1:1, and signed slots (-1 = pass absent) round-trip bit-exactly through the u32 view.
 function writeChunkCullRecord(packer: GpuVoxelArena, index: number, origin: [number, number, number], alloc: ChunkAlloc): void {
     const base = index * CHUNK_CULL_RECORD_U32S;
     const u = packer.cullRecordsU32;
@@ -1054,7 +847,7 @@ function writeChunkCullRecord(packer: GpuVoxelArena, index: number, origin: [num
     packer.cullRecordsBuffer.addUpdateRange(base, CHUNK_CULL_RECORD_U32S);
 }
 
-/** Copy the cull record at `from` to `to` (mirrors a swap-pop in `chunks`). */
+// Copies the cull record at from to to (mirrors a swap-pop in chunks).
 function moveChunkCullRecord(packer: GpuVoxelArena, from: number, to: number): void {
     const u = packer.cullRecordsU32;
     const fromBase = from * CHUNK_CULL_RECORD_U32S;
@@ -1069,9 +862,7 @@ function packerFreePass(packer: GpuVoxelArena, pass: VoxelPass, a: { sectionSlot
     sectionFreeSlot(packer.tables[pass], a.sectionSlot);
 }
 
-/** Swap-pop the chunk at `idx` out of `packer.chunks` and mirror the move in the
- *  cull-record buffer. The last chunk backfills the hole (its `chunkIndex` +
- *  record follow). O(1). */
+// Swap-pop the chunk at idx out of packer.chunks and mirror the move in the cull-record buffer; O(1).
 function removeChunkAt(packer: GpuVoxelArena, idx: number): void {
     if (idx < 0) return;
     const last = packer.chunks.pop()!;
@@ -1126,7 +917,7 @@ function packerUpsertChunk(packer: GpuVoxelArena, key: string, origin: [number, 
         // free cur's prior quad range up front (re-upsert reallocates it below).
         if (cur) arenaFree(packer.quadArena, cur.dataStart);
         const dataStart = packerAllocWithEviction(packer, key, needQuads);
-        // graceful degrade: arena full and nothing evictable → drop this pass.
+        // graceful degrade: arena full and nothing evictable, drop this pass.
         if (dataStart < 0) {
             if (cur) {
                 sectionFreeSlot(packer.tables[pass], cur.sectionSlot);
@@ -1155,8 +946,7 @@ function packerUpsertChunk(packer: GpuVoxelArena, key: string, origin: [number, 
             faceCounts: passMesh.faceCounts,
             flags: 1, // bit 0 = occupied
         });
-        // a fresh translucent mesh reallocates arena data → the persisted sort
-        // permutation is stale; flag it so the gate forces a re-sort.
+        // A fresh translucent mesh reallocates arena data, staling the persisted sort permutation; flag it so the gate forces a re-sort.
         if (pass === 'translucent') packer.translucentDirty = true;
         next[pass] = { sectionSlot, dataStart, dataCount: needQuads };
     }
@@ -1191,8 +981,7 @@ function packerClearAll(packer: GpuVoxelArena): void {
     packer.origins.clear();
     packer.residentKeys.clear();
     packer.chunks.length = 0;
-    // hard reset: the persisted translucent permutation is now stale, so invalidate
-    // the sort gate to force a re-sort.
+    // Hard reset: the persisted translucent permutation is now stale, so invalidate the sort gate to force a re-sort.
     packer.translucentDirty = false;
     packer.tsortGate.valid = false;
     packer.evicted.clear();
@@ -1215,10 +1004,7 @@ function packerHas(packer: GpuVoxelArena, key: string): boolean {
     return packer.allocs.has(key);
 }
 
-// ── OOM eviction (evict farthest-from-camera, then retry) ────────────
-
-/** Pick the chunk farthest from the camera to evict (excluding the one being
- *  upserted). Returns null when nothing else is resident → graceful degrade. */
+// Picks the chunk farthest from the camera to evict (excluding the one being upserted); returns null when nothing else is resident.
 function evictionVictim(packer: GpuVoxelArena, excludeKey: string): string | null {
     const cam = packer.camera;
     let bestKey: string | null = null;
@@ -1229,7 +1015,7 @@ function evictionVictim(packer: GpuVoxelArena, excludeKey: string): string | nul
             ? (origin[0] + CHUNK_SIZE * 0.5 - cam[0]) ** 2 +
               (origin[1] + CHUNK_SIZE * 0.5 - cam[1]) ** 2 +
               (origin[2] + CHUNK_SIZE * 0.5 - cam[2]) ** 2
-            : Number.POSITIVE_INFINITY; // no camera (offline) → evict-first
+            : Number.POSITIVE_INFINITY; // no camera (offline): evict first
         if (distSq > bestDistSq) {
             bestDistSq = distSq;
             bestKey = key;
@@ -1238,8 +1024,7 @@ function evictionVictim(packer: GpuVoxelArena, excludeKey: string): string | nul
     return bestKey;
 }
 
-/** Queue a pressure-evicted chunk to re-mesh next frame. Only the forced-eviction
- *  path records here; deliberate evicts (reconcile, clearAll) must NOT self-heal. */
+// Queues a pressure-evicted chunk to re-mesh next frame; only forced eviction records here, not deliberate evicts.
 function recordEviction(packer: GpuVoxelArena, key: string): void {
     if (packer.allocs.has(key)) packer.evicted.add(key);
 }
@@ -1270,31 +1055,22 @@ function packerAllocSlotWithEviction(packer: GpuVoxelArena, upsertKey: string, p
     }
 }
 
-// ── PassRender ──────────────────────────────────────────────────────
-//
-// per-pass render-side resources rebuilt each frame by `cullCPU` and
-// consumed by the expansion compute + draw. one engine-global instance
-// per pass, populated by whichever room is active.
-
+// Per-pass render-side resources rebuilt each frame by cullDispatches; one engine-global instance per pass.
 export type PassRender = {
-    /** GPU emit output. one entry per visible quad; instance i of the draw
-     *  reads visibleQuads[i]. sized to a worst-case bound. */
+    // GPU emit output, one entry per visible quad; instance i of the draw reads visibleQuads[i].
     visibleQuadsBuffer: GpuBuffer;
-    /** single-entry indirect: vertexCount=6, instanceCount written by the
-     *  emit compute's atomicAdd (reset to 0 each frame by `updateCull`). */
+    // single-entry indirect: vertexCount=6, instanceCount written by the emit compute's atomicAdd (reset each frame by updateCull).
     indirectBuffer: GpuBuffer;
     indirectData: Uint32Array;
 };
 
 function createPassRender(arenas: GpuVoxelArena): Record<VoxelPass, PassRender> {
-    // worst-case per-pass visible-quad cap. each quad in the arena belongs to
-    // exactly one (chunk, pass), so per-pass total visible ≤ arena.slotCount.
+    // Worst-case per-pass visible-quad cap: each quad belongs to exactly one (chunk, pass), so per-pass total visible is <= arena.slotCount.
     const visibleQuadCap = arenas.quadArena.slotCount;
 
     const out = {} as Record<VoxelPass, PassRender>;
     for (const pass of PASSES) {
-        // compute-written, never CPU-touched: skip MANUAL lifecycle so
-        // gpucat auto-allocates on first use.
+        // Compute-written, never CPU-touched: skip MANUAL lifecycle so gpucat auto-allocates on first use.
         const visibleQuadsBuffer = new GpuBuffer(d.array(VisibleQuad), {
             data: new Uint32Array(visibleQuadCap * (VISIBLE_QUAD_STRIDE / 4)),
             usage: 'storage',
@@ -1320,128 +1096,84 @@ function createGeometries(
         const g = new Geometry();
         // shared quadArena bound by name, same buffers across all 3 passes.
         g.setBuffer('quads', arenas.quadArena.buffers.quads);
-        // engine-global GPU-built visible-quad table; VS reads
-        // visibleQuads[instanceIndex] → (slot, localIdx).
+        // engine-global visible-quad table; VS reads visibleQuads[instanceIndex] to get (slot, localIdx).
         g.setBuffer('visibleQuads', passRender[pass].visibleQuadsBuffer);
-        // ChunkInfo: per-slot {origin, arenaBase}. VS uses chunkInfo[slot]
-        // to resolve worldspace origin and the arena base for realQuadId.
+        // ChunkInfo per-slot {origin, arenaBase}; VS uses chunkInfo[slot] to resolve worldspace origin + arena base.
         g.setBuffer('chunkInfo', arenas.tables[pass].buffer);
         // per-chunk light tiles + residency grid, sampled per corner in the VS.
         routeLightVolumeBuffers(g, lightVolume);
-        // env (envConfig) bound by name so the engine-global material
-        // resolves the engine-global env config (the active room's
-        // shadow is flushed into this buffer by Environment.tick).
         g.indirect = passRender[pass].indirectBuffer;
         out[pass] = g;
     }
     return out;
 }
 
-// ── VoxelResources ──────────────────────────────────────────────────
-
-/**
- * The WebGPU voxel resource handle: atlas + arena + mesher + per-pass geometries/
- * materials (WebGPU-flavored contents), plus this backend's GPU compute frame
- * (cull/emit/finalize + translucent radix sort + their buffers). A flat, standalone
- * type — no shared base with the WebGL handle, so the two are free to diverge.
- */
+// WebGPU voxel resource handle: atlas, arena, mesher, per-pass geometries/materials, plus this backend's GPU compute frame; flat and standalone, no shared base with the WebGL handle.
 export type VoxelResources = {
-    /** block texture array + texture-animation metadata + atlas load lifecycle. */
     textures: VoxelTextures;
-    /** unified per-pass quad materials, bound on each per-room `Mesh` alongside `geometries`. */
+    // unified per-pass quad materials, bound on each per-room Mesh alongside geometries.
     quadMaterials: Record<VoxelPass, Material>;
-    /** engine-global per-pass geometry (WebGPU binds indirect + visibleQuads). */
+    // engine-global per-pass geometry (WebGPU binds indirect + visibleQuads).
     geometries: Record<VoxelPass, Geometry>;
-    /** this backend's owned arena: quadArena + per-pass GPU section tables (ChunkInfo
-     *  + metaBuffer) + residency/eviction packer (cull-record buffer + sort gate). */
+    // this backend's owned arena: quadArena + per-pass GPU section tables + residency/eviction packer.
     arenas: GpuVoxelArena;
-    /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
+    // off-thread mesh worker pool; null on asset-pipeline paths (workerCount=0).
     meshDispatcher: Mesher | null;
-    /** GPU-resident per-chunk light tiles + residency grid. Light is the ROOT
-     *  residency fact: a chunk may be lit without a mesh, never meshed without
-     *  light. So it is NOT released when the mesh is evicted (`packerEvictChunk`,
-     *  `toForget`) - only when the CHUNK itself is gone from `voxels.chunks`.
-     *  The `toForget` case matters: those are all-air chunks, exactly where
-     *  entities stand and still need lighting. */
+    // GPU-resident per-chunk light tiles + residency grid; light is the root residency fact, released only when the chunk is gone from voxels.chunks, not when the mesh is evicted.
     lightVolume: LightVolume;
 
-    /** engine-global GPU cull compute. one node dispatched once per frame over
-     *  `packer.cullRecordsBuffer`; compacts visible chunks into `visibleChunks`
-     *  and produces the per-facing emit dispatch args. */
+    // GPU cull compute: dispatched once per frame over cullRecordsBuffer, compacts visible chunks into visibleChunks, produces the emit dispatch args.
     cull: ComputeNode;
-    /** engine-global GPU emit compute. dispatched once per pass (indirect,
-     *  [visibleChunkCount, 7, 1]) with per-pass meta/quads/drawIndirect/config
-     *  bound by name; back-face-culls facings and writes visibleQuads. */
+    // GPU emit compute: dispatched per pass (indirect, [visibleChunkCount,7,1]); back-face-culls facings and writes visibleQuads.
     emit: ComputeNode;
-    /** Level-A finalize compute: prefix-sums opaque/transparent buckets → base +
-     *  draw counts. Does NOT touch the translucent draw (owned by `tsortPrep`). */
+    // prefix-sums opaque/transparent buckets into base + draw counts; does not touch the translucent draw, owned by tsortPrep.
     finalize: ComputeNode;
-    /** translucent global stable-radix sort chain. Runs (gated) as
-     *  expand → prep → count₀ → 4 × (scan → scatter); the last scatter is the
-     *  dedicated payload-gather variant. See the `RADIX_*` description above. */
+    // translucent global stable-radix sort chain: expand, prep, count0, then 4x(scan,scatter); the last scatter gathers the payload.
     tsortExpand: ComputeNode;
     tsortPrep: ComputeNode;
     radixCount: ComputeNode;
     radixScan: ComputeNode;
     radixScatter: ComputeNode;
     radixScatterLast: ComputeNode;
-    /** flat per-quad (key, ORIGINAL-INDEX) ping-pong pairs for the radix passes
-     *  (A→B→A→B) + the single payload buffer the last scatter gathers from.
-     *  Sized to the worst case (all quads translucent) = quadArena.slotCount. */
+    // flat per-quad (key, original-index) ping-pong pairs for the radix passes, plus the payload buffer the last scatter gathers from; sized to the worst case (quadArena.slotCount).
     sortKeys: GpuBuffer;
     sortKeysAlt: GpuBuffer;
     sortIdx: GpuBuffer;
     sortIdxAlt: GpuBuffer;
     sortPayload: GpuBuffer;
-    /** digit-major radix histogram/base tables `[digit * maxBlocks + block]`
-     *  (FIXED stride), 256 × maxBlocks each. Ping-pong: counts for digit p live
-     *  in hist[p%2] (count₀ / the fused scatter counts), scan p consumes them
-     *  into bases in place and zeroes the other buffer for the next fused
-     *  count. No CPU clears. */
+    // digit-major radix histogram tables [digit*maxBlocks+block]; ping-pong, scan consumes one into bases while zeroing the other for the next fused count.
     radixHist: GpuBuffer;
     radixHistAlt: GpuBuffer;
-    /** per-pass digit shift `[0] / [8] / [16] / [24]`, bound per dispatch. */
+    // per-pass digit shift [0]/[8]/[16]/[24], bound per dispatch.
     radixPassConfig: GpuBuffer[];
-    /** atomic append counter (= N visible translucent quads); self-reset by prep. */
+    // atomic append counter (N visible translucent quads); self-reset by prep.
     sortCount: GpuBuffer;
-    /** radix count/scatter indirect dispatch args
-     *  `[numBlocks, 1, 1, N, prevNumBlocks, zeroTo]`; written by prep (word 4
-     *  persists across fires to bound the scans' zeroing exactly). */
+    // radix indirect dispatch args [numBlocks,1,1,N,prevNumBlocks,zeroTo], written by prep.
     sortIndirectArgs: GpuBuffer;
-    /** set by `updateCull` each frame; read by `cullDispatches` to enqueue the
-     *  translucent sort chain (or skip it and reuse last frame's permutation). */
+    // set by updateCull each frame; read by cullDispatches to decide whether to enqueue the sort chain.
     runTranslucentSort: boolean;
-    /** per-bucket quad tallies `[pass*BUCKET_COUNT + b]` (atomic); CPU-zeroed
-     *  each frame, written by the cull's fused count, read by `finalize`. */
+    // per-bucket quad tallies [pass*BUCKET_COUNT+b] (atomic); CPU-zeroed each frame, written by cull's fused count, read by finalize.
     bucketQuads: GpuBuffer;
     bucketQuadsData: Uint32Array;
-    /** exclusive prefix (instance base) per bucket; written by `finalize`. */
+    // exclusive prefix (instance base) per bucket; written by finalize.
     bucketBase: GpuBuffer;
-    /** running within-bucket offset (atomic); reset by `finalize`, bumped by emit. */
+    // running within-bucket offset (atomic); reset by finalize, bumped by emit.
     bucketCursor: GpuBuffer;
-    /** per-frame camera view for the cull compute (5 pre-shifted planes +
-     *  camera chunk/frac). CPU-written each frame from the active camera. */
+    // per-frame camera view for the cull compute (5 pre-shifted planes + camera chunk/frac); CPU-written each frame.
     cullView: GpuBuffer;
     cullViewData: Float32Array;
-    /** cull output: compacted visible chunks (GPU-written, emit-read). */
+    // cull output: compacted visible chunks (GPU-written, emit-read).
     visibleChunks: GpuBuffer;
-    /** emit dispatch args `[visibleChunkCount, 7, 1]` (indirect). The cull's
-     *  atomic append counter lives in element 0; CPU resets it to 0 each frame. */
+    // emit dispatch args [visibleChunkCount,7,1] (indirect); cull's atomic append counter lives in element 0, CPU-reset each frame.
     emitArgs: GpuBuffer;
     emitArgsData: Uint32Array;
-    /** per-pass static emit config `[passIndex, backFaceCull]`. */
+    // per-pass static emit config [passIndex, backFaceCull].
     emitConfig: Record<VoxelPass, GpuBuffer>;
-    /** engine-global per-frame cull/expand scratch + indirect buffers
-     *  (visibleQuads + DrawIndirect per pass); the `geometries` above bind these
-     *  by name. */
+    // per-frame cull/expand scratch + indirect buffers (visibleQuads + DrawIndirect per pass), bound by name in geometries above.
     passRender: Record<VoxelPass, PassRender>;
-    /** resolves when the cull/emit/finalize (+ translucent-sort) compute
-     *  pipelines have finished compiling. `state.voxelResources` is assigned at
-     *  `init()` — before `load()` compiles these — so anything that dispatches
-     *  the voxel computes off the main render loop (offline icon renders) must
-     *  await this first, or `setPipeline` binds a still-null cached pipeline. */
+    // resolves once the cull/emit/finalize/sort pipelines finish compiling; anything dispatching voxel computes off the main render loop must await this first.
     computeReady: Promise<void>;
-    /** @internal, settled by VoxelResources.load() once the compute pipelines compile. */
+    // @internal, settled once the compute pipelines compile.
     _resolveComputeReady: () => void;
 };
 
@@ -1459,8 +1191,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         translucent: createGpuQuadMaterial({ textures, pass: 'translucent', elapsedTime, env }),
     };
 
-    // arenas first: the radix kernels bake the histogram row stride (maxBlocks,
-    // derived from the arena's slot capacity) into their compiled graphs.
+    // Arenas first: the radix kernels bake the histogram row stride (maxBlocks, derived from arena slot capacity) into their compiled graphs.
     const arenas = createGpuVoxelArena(budget);
     const passRender = createPassRender(arenas);
     // built before the geometries: they bind its buffers by name.
@@ -1480,8 +1211,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     const radixScatter = createRadixScatterCompute(maxRadixBlocks, false);
     const radixScatterLast = createRadixScatterCompute(maxRadixBlocks, true);
 
-    // GPU-cull scratch. `visibleChunks` is bounded by the resident chunk count,
-    // itself bounded by the sum of the 3 section tables' capacities.
+    // GPU-cull scratch; visibleChunks is bounded by resident chunk count, itself bounded by the sum of the 3 section tables' capacities.
     const maxChunks = budget.maxSections * 3;
     const cullViewData = new Float32Array(CULL_VIEW_STRIDE / 4);
     const cullView = new GpuBuffer(d.array(CullView), {
@@ -1490,8 +1220,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         lifecycle: BufferLifecycle.MANUAL,
     });
     const visibleChunks = new GpuBuffer(d.array(VisibleChunk), { count: maxChunks, usage: 'storage' });
-    // indirect emit dispatch args; element 0 is the cull's atomic append counter,
-    // reset to 0 each frame. [_, 7, 1] = the 7 facings.
+    // indirect emit dispatch args; element 0 is the cull's atomic append counter (reset each frame), [_,7,1] = the 7 facings.
     const emitArgsData = new Uint32Array([0, 7, 1]);
     const emitArgs = new GpuBuffer(d.array(d.u32), {
         data: emitArgsData,
@@ -1517,9 +1246,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         }),
     };
 
-    // Level-A bucket scratch: 3 passes × BUCKET_COUNT (the translucent slice is
-    // unused — that pass sorts globally — but the layout stays pass-indexed).
-    // `bucketQuads` is CPU-zeroed each frame; base/cursor are GPU-managed by finalize.
+    // Bucket scratch: 3 passes x BUCKET_COUNT (translucent slice unused since it sorts globally); bucketQuads is CPU-zeroed each frame, base/cursor are GPU-managed by finalize.
     const bucketCount3 = 3 * BUCKET_COUNT;
     const bucketQuadsData = new Uint32Array(bucketCount3);
     const bucketQuads = new GpuBuffer(d.array(d.atomic(d.u32)), {
@@ -1530,11 +1257,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     const bucketBase = new GpuBuffer(d.array(d.u32), { data: new Uint32Array(bucketCount3), usage: 'storage' });
     const bucketCursor = new GpuBuffer(d.array(d.atomic(d.u32)), { data: new Uint32Array(bucketCount3), usage: 'storage' });
 
-    // translucent global stable-radix scratch. (key, idx) ping-pong pairs +
-    // single payload buffer, sized to the worst case (every quad translucent) =
-    // quadArena.slotCount — standalone flat buffers indexed by global sort
-    // position (NOT part of the arena). Histograms are compute-managed (count₀
-    // self-zeroes its columns; the scans zero the other buffer up to `zeroTo`).
+    // Radix scratch: (key,idx) ping-pong pairs + payload buffer, sized to the worst case (quadArena.slotCount); flat buffers indexed by global sort position, not part of the arena. Histograms self-zero: count0 zeroes its columns, scans zero the other buffer up to zeroTo.
     const sortKeys = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
     const sortKeysAlt = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
     const sortIdx = new GpuBuffer(d.array(d.u32), { count: sortCap, usage: 'storage' });
@@ -1551,9 +1274,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
             }),
     );
     const sortCount = new GpuBuffer(d.array(d.atomic(d.u32)), { count: 1, usage: 'storage' });
-    // indirect args [numBlocks, 1, 1, N, prevNumBlocks, zeroTo]; prep writes
-    // them, the radix kernels dispatch from + bind them as storage (gpucat gives
-    // indirect buffers INDIRECT|STORAGE).
+    // indirect args [numBlocks,1,1,N,prevNumBlocks,zeroTo]; prep writes them, radix kernels dispatch from + bind as storage (gpucat gives indirect buffers INDIRECT|STORAGE).
     const sortIndirectArgs = new GpuBuffer(d.array(d.u32), {
         data: new Uint32Array([0, 1, 1, 0, 0, 0]),
         usage: 'indirect',
@@ -1603,11 +1324,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     };
 }
 
-/** Async side of construction: pre-warms the expansion compute pipeline,
- *  fetches the atlas manifest, kicks off the atlas pixel upload (settles
- *  `res.textures.ready`), and spawns the mesh worker pool. `meta` may be passed
- *  in by `refresh` (which already fetched it to compare hashes); otherwise
- *  `load` fetches it itself. Mutates `res` in place. */
+// Async side of construction: fetches the atlas, kicks off its pixel upload, compiles the compute pipelines, and spawns the mesh worker pool; mutates res in place.
 export async function load(
     res: VoxelResources,
     registry: Blocks,
@@ -1617,16 +1334,7 @@ export async function load(
     renderer?: WebGPURenderer,
     meta?: TileAtlasMetadata | null,
 ): Promise<void> {
-    // Compile the cull compute pipeline (awaited at the end so the first render
-    // never binds a still-null cached pipeline). Timing relative to the atlas
-    // load differs by environment:
-    //  - client (no `decodeImage`): kick it up front and let the atlas
-    //    fetch+canvas run fire-and-forget alongside it, non-blocking, unchanged.
-    //  - asset pipeline (`decodeImage` present): the atlas decode is sharp
-    //    (libvips) native work that segfaults if it overlaps a Dawn pipeline
-    //    compile, so await the atlas FIRST, then compile. The pipeline isn't
-    //    latency-sensitive, so serial is fine.
-    // Either way consumers gate on `res.textures.ready`.
+    // On the asset pipeline (decodeImage present) the atlas decode is native libvips work that segfaults if it overlaps a Dawn pipeline compile, so await the atlas first there; on the client the two run concurrently.
     const serializeAtlasBeforeCompute = resources.loader.decodeImage != null;
 
     let computeReady: Promise<void> = Promise.resolve();
@@ -1646,7 +1354,7 @@ export async function load(
 
     await loadVoxelTextures(res.textures, registry, resources.loader, meta, serializeAtlasBeforeCompute);
 
-    // pipeline: now safe to compile, the atlas sharp decode has finished.
+    // Now safe to compile, the atlas decode has finished.
     if (serializeAtlasBeforeCompute && renderer) {
         computeReady = Promise.all([
             renderer.compileCompute(res.cull),
@@ -1662,9 +1370,7 @@ export async function load(
     }
 
     if (workerCount > 0 && typeof Worker !== 'undefined') {
-        // loadMeshWorker() pulls the `?worker&inline` bundle via a dynamic import, so runtimes that
-        // never spawn workers (the asset pipeline; node/happy-dom harnesses, guarded by `Worker`) never
-        // resolve the Vite query and fall through to inline meshing.
+        // loadMeshWorker() dynamic-imports the worker bundle; runtimes that never spawn workers (guarded by typeof Worker) never resolve that import and fall through to inline meshing.
         await loadMeshWorker();
         const meshDispatcher = createMesher({ workerCount, queueDepth: workerQueueDepth });
         setMeshRegistry(meshDispatcher, registry);
@@ -1675,8 +1381,7 @@ export async function load(
     res._resolveComputeReady();
 }
 
-/** Build new resources, or reuse `prev` if the atlas + animation metadata
- *  are unchanged. */
+// Build new resources, or reuse prev if the atlas + animation metadata are unchanged.
 export async function refresh(
     prev: VoxelResources | null,
     registry: Blocks,
@@ -1696,21 +1401,11 @@ export async function refresh(
         meta.hash === prev.textures.hash &&
         f32Equal(prev.textures.texAnimData, registry.texAnimData)
     ) {
-        // atlas + texAnim unchanged → reuse. But the BlockRegistry itself
-        // may have been rebuilt (block tables, shape ids, ...), so push
-        // the new registry to the workers; existing in-flight jobs will
-        // finish with the old registry and get gen-dropped by callers.
+        // Atlas + texAnim unchanged, so reuse; push the new registry to the workers since BlockRegistry may have been rebuilt (in-flight jobs finish with the old one and get gen-dropped by callers).
         if (prev.meshDispatcher) setMeshRegistry(prev.meshDispatcher, registry);
         return { resources: prev, changed: false };
     }
-    // Build + load the replacement BEFORE disposing `prev`. The caller keeps
-    // rendering `prev` (via `state.voxelResources` + each room's voxelVisuals)
-    // across `load`'s async gap; disposing `prev` up front would destroy the GPU
-    // buffers those in-flight RAF frames still submit against ("Buffer used in
-    // submit while destroyed"). `prev` and `built` coexist for the load window —
-    // a transient VRAM cost for a safe swap. The caller re-points every reference
-    // synchronously once we return, so there's no render frame between this
-    // dispose and the swap.
+    // Build and load the replacement before disposing prev: the caller keeps rendering prev across load's async gap, and prev/built coexist transiently in VRAM for a safe swap.
     const built = init(registry, env, budget, time);
     await load(built, registry, workerCount, workerQueueDepth, resources, renderer, meta);
     if (prev) dispose(prev);
@@ -1758,30 +1453,13 @@ export function dispose(state: VoxelResources): void {
     if (state.meshDispatcher) disposeMesher(state.meshDispatcher);
 }
 
-// ── per-frame GPU frame graph ───────────────────────────────────────
-//
-// These drive the engine-global compute resources above each frame. They read
-// and mutate only `VoxelResources` (no per-room state), so they live here next
-// to the kernels + buffers they wire — a pipeline change touches one file.
-// The active room calls `updateCull` then `cullDispatches` each frame (see
-// voxel-visuals' per-room `update` for the remesh half).
+// These drive the engine-global compute resources above each frame; the active room calls updateCull then cullDispatches each frame.
 
 const _cullFrustum = frustum.create();
 
-/** Write the per-frame camera view (5 pre-shifted, camera-relative frustum
- *  planes + camera chunk/frac) into `cullView`, and reset the GPU cull/emit
- *  counters. The visibility test + slice emission run on the GPU via
- *  `cullDispatches`; this just prepares their per-frame inputs. Must run before
- *  those dispatches.
- *
- *  Planes are expressed camera-relative and the world coords go in as integer
- *  chunk coords + sub-chunk frac, so the whole cull stays f32-exact at
- *  Minecraft world scale. `viewChunkRadius` is read live from settings, so a
- *  tier flip applies next frame. */
+// Writes the per-frame camera view into cullView and resets the GPU cull/emit counters; must run before cullDispatches, which does the actual GPU work.
 export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
-    // 5 camera-relative frustum planes + camMeta/camFrac (shared math). The live
-    // record count (data[23]) is the cull dispatch bound — WebGPU-specific, so
-    // buildCullView leaves it to us.
+    // buildCullView fills the shared plane/camMeta/camFrac math; the live record count (data[23]) is WebGPU-specific, so we write it here.
     const data = voxelResources.cullViewData;
     buildCullView(data, camera, viewChunkRadius);
     data[23] = voxelResources.arenas.chunks.length;
@@ -1793,17 +1471,11 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     voxelResources.emitArgs.addUpdateRange(0, voxelResources.emitArgsData.length);
     voxelResources.emitArgs.needsUpdate = true;
 
-    // zero the per-bucket quad tallies for this frame's count pass (the CPU
-    // mirror stays all-zero; re-uploading it clears the GPU buffer). On a normal
-    // frame the draw instanceCounts are (re)written by the finalize/prep passes.
+    // Zero the per-bucket quad tallies for this frame's count pass by re-uploading the all-zero CPU mirror.
     voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
     voxelResources.bucketQuads.needsUpdate = true;
 
-    // Empty arena (recordCount 0, e.g. right after a room swap cleared it):
-    // `cullDispatches` returns no dispatches, so finalize/prep never run and the
-    // previous room's draw instanceCounts + visibleQuads would keep drawing
-    // stale quads. Zero the per-pass draw instanceCounts on the CPU so the
-    // indirect draws render nothing until the arena refills.
+    // Empty arena: cullDispatches returns no dispatches, so zero the per-pass draw instanceCounts on the CPU or stale quads from the previous room would keep drawing.
     if (voxelResources.arenas.chunks.length === 0) {
         for (const pass of PASSES) {
             const pr = voxelResources.passRender[pass];
@@ -1812,16 +1484,7 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
         }
     }
 
-    // translucent sort gate: the radix output persists across frames and only
-    // re-runs when the back-to-front order can change. The owner-cell key is
-    // rotation-invariant, so orbiting in place needs no re-sort — but the visible
-    // SET changes on rotation, and a translucent arena mutation would leave the
-    // persisted `{slot, localIdx}` dangling. Gate = translation ∨ rotation ∨
-    // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
-    // count stand. The forward normal is the near plane (frustum[4], inward
-    // normal), the same plane buildCullView derives; rebuild it here for the gate.
-    // pass the clip-space convention so the near plane matches the backend (this is
-    // the WebGPU voxel path, so it's WebGPU here, but keep it explicit + correct).
+    // Translucent sort gate re-runs on translation, rotation, arena mutation, or first-run (see updateTranslucentSortGate); otherwise last frame's permutation and draw count stand.
     frustum.setFromViewProjectionMatrix(
         _cullFrustum,
         camera.projectionMatrix,
@@ -1837,17 +1500,12 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     );
 }
 
-// distance the camera must move before the translucent sort re-runs. Tight: a
-// small translation reorders near geometry (e.g. diving through a water surface),
-// and the whole sort is one cheap flat pass, so we only truly skip when static.
+// Distance the camera must move before the sort re-runs; tight since a small translation can reorder near geometry and the sort is cheap.
 const TSORT_MOVE_TRIGGER_SQ = 0.1 * 0.1; // 0.1 block
-// re-run once the camera forward turns past this (cos of the angle). The visible
-// set shifts on rotation, so newly-entered translucent sections must be sorted in.
-const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
+// Re-run once camera forward turns past this cosine; the visible set shifts on rotation.
+const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ~1.1 degrees
 
-/** Decide whether the translucent radix sort re-runs this frame, and refresh the
- *  gate baseline when it does. `fwd` is the camera-forward (near-plane inward
- *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
+// Decides whether the translucent radix sort re-runs this frame and refreshes the gate baseline when it does; sets runTranslucentSort for cullDispatches.
 function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
     const packer = voxelResources.arenas;
     const gate = packer.tsortGate;
@@ -1875,30 +1533,12 @@ function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number,
     voxelResources.runTranslucentSort = run;
 }
 
-/** GPU cull + Level-A ordered emit + translucent radix dispatch chain. gpucat
- *  runs each dispatch in its own compute pass, so the data dependencies hold.
- *  Push into the renderer's dispatch list before `renderer.compute(...)`. Empty
- *  when no chunks are resident.
- *
- *  1. cull: one thread per resident chunk; frustum-test, compact survivors into
- *     `visibleChunks` (+ distance bucket), write the emit dispatch args, AND tally
- *     each survivor's visible opaque/transparent facings into `bucketQuads`.
- *  2. finalize: prefix-sum opaque/transparent buckets → instance bases + draw counts.
- *  3. emit (opaque/transparent): back-face-cull facings, write `visibleQuads`
- *     front-to-back at the bucket base.
- *  4. translucent global stable radix sort (gated — see `runTranslucentSort`):
- *     expand → prep → count₀ → 4 × (scan → scatter), producing the back-to-front
- *     translucent `visibleQuads` permutation + its draw count. Skipped when the
- *     camera is static and the arena unchanged; last frame's result persists. */
+// GPU cull -> finalize -> emit (opaque/transparent) -> translucent radix sort (gated) dispatch chain; push into the renderer's dispatch list before renderer.compute(); empty when no chunks are resident.
 export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
     const packer = voxelResources.arenas;
     const recordCount = packer.chunks.length;
     const out: ComputeDispatch[] = [];
-    // Empty arena (recordCount 0, e.g. right after a room swap cleared it): skip
-    // the whole chain. Dispatching it would only produce record-scaled
-    // zero-workgroup no-ops (which Dawn warns about), and `updateCull` has
-    // already CPU-zeroed the per-pass draw instanceCounts so the indirect draws
-    // render nothing this frame.
+    // Empty arena: skip the whole chain (a dispatch would be zero-workgroup no-ops Dawn warns about); updateCull already zeroed the draw instanceCounts.
     if (recordCount === 0) return out;
     const tables = voxelResources.arenas.tables;
     const passRender = voxelResources.passRender;
@@ -1945,14 +1585,7 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
         });
     }
 
-    // translucent global stable radix sort (gated). Reads this frame's
-    // `visibleChunks` (cull, above); output persists when skipped.
-    // Chain: expand → prep → count₀ → 4 × (scan → scatter). The passes shuffle
-    // (key, index) pairs A→B→A→B; each non-last scatter also fused-counts the
-    // NEXT pass's digit into the other histogram (which the scan just zeroed),
-    // so only pass 0 needs the standalone count. The last scatter gathers
-    // `sortPayload[idx]` straight into the translucent `visibleQuads`.
-    // Histograms ping-pong hist[pass % 2] (counts) ↔ hist[(pass+1) % 2] (next).
+    // Translucent radix sort (gated): reads this frame's visibleChunks, chain is expand, prep, count0, then 4x(scan,scatter); the last scatter gathers sortPayload[idx] straight into visibleQuads.
     if (voxelResources.runTranslucentSort) {
         const quads = voxelResources.arenas.quadArena.buffers.quads;
         const translucent = passRender.translucent;
@@ -2039,15 +1672,7 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
     return out;
 }
 
-// ── consumption (own the arena) ─────────────────────────────────────
-//
-// Drain the mesher's staged results into this backend's arena, evict what the AOI
-// forgot + what the server dropped, and self-heal pressure-evictions. Runs after the
-// AOI has scheduled this frame's meshes and before the GPU frame graph
-// (`updateCull`/`cullDispatches`) reads the arena.
-
-/** upsert a mesh result into this backend's arena (or evict if the chunk is all-air
- *  / has no geometry). */
+// Upserts a mesh result into this backend's arena, or evicts if the chunk is all-air / has no geometry.
 export function upsertChunk(res: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
     const packer = res.arenas;
     if (mesh === null || chunk.nonAirCount === 0 || mesh.aabb === null) {
@@ -2057,27 +1682,14 @@ export function upsertChunk(res: VoxelResources, key: string, chunk: Chunk, mesh
     packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
 }
 
-/**
- * Remove a chunk from this backend's arena, and release its light tile with it.
- *
- * ONE residency decision. The light pool used to outlive the mesh, on the theory
- * that light can exist without a mesh (an all-air chunk is where entities stand).
- * In practice that made the pool a SECOND residency system with a different
- * working set from the AOI's: it filled with chunks nothing renders, hit
- * capacity, and then evicted by distance while the AOI immediately re-requested
- * what it had just dropped. Tying the two together bounds the pool by the mesh
- * budget, which is what that budget was sized for.
- */
+// Removes a chunk from this backend's arena and releases its light tile with it, so the light pool stays bounded by the mesh budget.
 export function removeChunk(res: VoxelResources, key: string): void {
     const packer = res.arenas;
     if (packerHas(packer, key)) packerEvictChunk(packer, key);
     evictChunkLightByKey(res.lightVolume, key);
 }
 
-/** Synchronously mesh a chunk (unless all-air or fully occluded) and place it in
- *  this backend's arena at its own key/origin. The main-thread path used by the
- *  offline icon bakers through the WebGPU backend. `meshOutput` is caller-owned
- *  scratch, reused across chunks. Returns the mesh (or null when skipped/evicted). */
+// Synchronously meshes a chunk (unless all-air or fully occluded) and places it in this backend's arena; the main-thread path used by offline icon bakers. Returns null when skipped/evicted.
 export function remeshChunkInto(
     res: VoxelResources,
     voxels: Voxels,
@@ -2093,20 +1705,12 @@ export function remeshChunkInto(
     return mesh;
 }
 
-/**
- * Drain the mesher's staged results into this backend's arena and reconcile
- * residency. Runs each frame after the AOI has scheduled dirty chunks and staged
- * `toForget`, and before the GPU frame graph reads the arena. Hands the packer the
- * camera; drains `mesher.results` into `upsertChunk` (dropping stale-gen results);
- * evicts `toForget`, server-dropped, and no-longer-present keys; self-heals
- * pressure-evictions.
- */
+// Drains the mesher's staged results into this backend's arena, reconciles residency (evicts toForget/server-dropped/gone keys), and self-heals pressure-evictions; runs each frame before the GPU frame graph reads the arena.
 export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cameraPos: Vec3, toForget: string[]): void {
     const packer = res.arenas;
     packer.camera = cameraPos;
 
-    // drain worker results from last frame; drop stale-gen ones (the chunk mutated
-    // since dispatch and is back in dirty.blocks for a fresh mesh).
+    // Drain worker results from last frame; drop stale-gen ones (the chunk mutated since dispatch and is back in dirty.blocks for a fresh mesh).
     if (mesher.results.length > 0) {
         const results = mesher.results;
         for (let i = 0; i < results.length; i++) {
@@ -2149,9 +1753,7 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
     }
 }
 
-/** Clear the active world from this backend's arena + mesh worker cache. The voxel
- *  DATA survives (`voxels.chunks`), so a later `mountRoom` simply remeshes it. Call
- *  on a room swap or teardown (the arena/worker hold one world at a time). */
+// Clears the active world from this backend's arena and mesh worker cache; voxel data survives in voxels.chunks so a later mountRoom simply remeshes it.
 export function unmountRoom(res: VoxelResources, mesher: Mesher | null): void {
     packerClearAll(res.arenas);
     // the mesh worker holds one world at a time; drop its cache + queued results.

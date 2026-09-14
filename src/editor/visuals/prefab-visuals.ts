@@ -1,14 +1,3 @@
-// editor/prefab-visuals.ts, ghost voxel rendering for prefab nodes.
-//
-// in edit mode, prefab nodes whose def produces voxels get a transient
-// child node that shows a tinted ghost of the prefab's voxel data.
-// the ghost updates whenever the source scene's resource version advances.
-//
-// ownership: this module owns the ghost entirely. prefab.ts has no
-// rendering concern and is not modified.
-//
-// usage: import * as PrefabVisuals from './prefab-visuals'
-
 import { type Quat, quat } from 'math';
 import { markTransformDirty, TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait, VoxelModel } from '../../builtins/voxel-mesh';
@@ -19,17 +8,11 @@ import type { SceneTreeContext } from '../../core/scene/scripts';
 import type { Blocks } from '../../core/voxels/block-registry';
 import { rotateVoxelsByQuat } from '../../core/voxels/voxel-rotate';
 
-// ── sentinel name ─────────────────────────────────────────────────
-
 const GHOST_NAME = '\0prefab-voxels';
 
-// ── state ─────────────────────────────────────────────────────────
-
 export type PrefabVisuals = {
-    // maps each prefab node → cache key of the last bake.
-    // key = `${generation}|${qx},${qy},${qz},${qw}`, the prefab's
-    // generation counter is the source of truth for "content changed" (any
-    // dep version bump rebuilds), and rotation invalidates the ghost since
+    // maps each prefab node to the cache key of its last bake:
+    // `${generation}|${qx},${qy},${qz},${qw}`. rotation is included since
     // voxels are pre-rotated into world axes.
     builtKeys: Map<Node, string>;
 };
@@ -42,15 +25,13 @@ export function dispose(state: PrefabVisuals): void {
     state.builtKeys.clear();
 }
 
-// ── per-frame update ──────────────────────────────────────────────
-
 export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: SceneTreeContext, registry: Blocks): void {
     if (runtime.roomMode !== 'edit') return;
 
     for (const node of sceneTree.nodes) {
         const config = node.prefab;
 
-        // clean up: ghost child whose parent no longer wants voxels
+        // ghost child whose parent no longer wants voxels
         if (node.name === GHOST_NAME) {
             const parentConfig = node.parent?.prefab;
             const parentDef = parentConfig ? kindRegistry.prefabs.byId.get(parentConfig.prefabId) : null;
@@ -70,7 +51,6 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         const q: Quat = parentTransform ? ([...parentTransform.quaternion] as Quat) : [0, 0, 0, 1];
         const builtKey = `${generation}|${q[0]},${q[1]},${q[2]},${q[3]}`;
 
-        // find or create ghost child
         let ghost = node.children.find((c) => c.name === GHOST_NAME) ?? null;
 
         if (!ghost) {
@@ -78,15 +58,13 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
             addChild(node, ghost);
             addTrait(ghost, TransformTrait);
             addTrait(ghost, VoxelMeshTrait, { unlit: true });
-            // force rebuild on creation
             state.builtKeys.delete(node);
         }
 
         if (state.builtKeys.get(node) === builtKey) continue;
 
-        // read post-apply voxels cached on the prefab node by the runtime
-        // tick (reconcilePrefabNode). reconcile runs before this in tick
-        // order, so the cache is fresh on the same generation bump.
+        // reconcilePrefabNode runs before this in tick order and caches
+        // post-apply voxels on the prefab node, so this read is fresh.
         const vmt = getTrait(ghost, VoxelMeshTrait);
         if (!vmt) continue;
 
@@ -101,14 +79,9 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         const rotated = rotateVoxelsByQuat(prepared, q, registry);
 
         const model = new VoxelModel(rotated);
-        // voxels are pre-rotated (block-state aware) so they reflect the
-        // exact stamp play mode will produce. but the ghost is a child of
-        // the prefab node, so without cancelling, it inherits the parent's
-        // rotation a second time → double-rotation. set ghost.localQuat =
-        // inverse(parent.quat) so its world rotation under the parent is
-        // identity, and origin=0 so vertices render at raw local coords +
-        // parent.position. matches play mode (prefab.ts stamps rotated
-        // voxels at +Math.round(t.position)).
+        // voxels are pre-rotated, and the ghost is a child of the prefab
+        // node, so its local quaternion is set to the inverse of the
+        // parent's below to cancel the double rotation.
         model.origin = [0, 0, 0];
         vmt.model = model;
         vmt.flash = [0.5, 0.6, 0.75, 0.4];

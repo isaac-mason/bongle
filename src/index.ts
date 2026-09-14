@@ -1,14 +1,3 @@
-// public engine surface, what user scripts import as `bongle`.
-//
-// re-exports the two project-facing layers:
-//   - `./api/*`, helper modules (transforms, scene-tree, rpc, ...)
-//   - `./builtins/*`, engine-shipped traits (TransformTrait, CameraTrait, ...)
-//
-// engine internals must NOT import from this file. they reach into
-// `./api/<helper>` or `./builtins/<trait>` directly. this rule keeps the
-// graph acyclic: builtins depend on api helpers, this file depends on both,
-// but neither depends on this file.
-
 export * from './api/animation';
 export * from './api/asset';
 export * from './api/audio';

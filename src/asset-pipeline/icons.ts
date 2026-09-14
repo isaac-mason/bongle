@@ -1,18 +1,3 @@
-// Icon baking for the pipeline worker. The bake is a pure data step; icons
-// are a GPU render step that runs after it, in the same realm, so it draws
-// against the registry the user code populated. Grouped here (not in the bake)
-// because both are the pipeline's concern once it owns a headless renderer.
-//
-// The heavy lifting lives in client/: `createHeadlessRenderContext` +
-// `buildRenderDeps` stand up a canvas-less render stack, and the same
-// `renderBlockIconAtlas` / `renderPrefabIcon` the live client uses draw the
-// icons through the shared `RenderRoomDeps` seam.
-//
-// Both hosts (browser pipeline realm, node CLI) drive the same two steps:
-// `planIconBake` decides what is stale — pure fs + hashing, no GPU — and
-// `runIconBake` renders exactly that. Standing up the device is the caller's
-// business, so a no-op pass never pays for a handshake.
-
 import type { Filesystem } from '../../os/interface';
 import { ICON_PX as BLOCK_ICON_PX, renderableBlockStates, renderBlockIconAtlas } from '../client/block-icons';
 import { prefabIconRelPath, renderPrefabIcon } from '../client/prefab-icons';
@@ -36,13 +21,13 @@ const ICON_BAKE_VERSION = 'icons/v1';
 const BLOCK_ICON_PNG = 'resources/client/voxels-icons.png';
 const BLOCK_ICON_JSON = 'resources/client/voxels-icons.json';
 /** prefab-icon freshness manifest: the block atlas it was baked against, plus
- *  id -> def hash. Per-file artifacts, so freshness is per id — this is the one
+ *  id -> def hash. Per-file artifacts, so freshness is per id, the one
  *  icon artifact that can't ride a single sidecar hash. */
 const PREFAB_ICON_MANIFEST = 'resources/client/prefab-icons.json';
 /** directory the per-prefab icon pngs live in (`prefabIconRelPath`'s parent). */
 const PREFAB_ICON_DIR = 'resources/client/prefab-icons';
 
-/** FNV-1a string hash → base36, for the prefab-icon freshness manifest. */
+/** FNV-1a string hash to base36, for the prefab-icon freshness manifest. */
 function fnv1a(s: string): string {
     let h = 2166136261 >>> 0;
     for (let i = 0; i < s.length; i++) {
@@ -76,7 +61,7 @@ export type IconBakePlan = {
     blockAtlasStale: boolean;
     /** content hash over the block-icon render inputs; written into the sidecar,
      *  and the identity this pass leaves on disk for consumers to compare against
-     *  (`BakedArtifacts.blockIcons`). Null when nothing is renderable — there is
+     *  (`BakedArtifacts.blockIcons`). Null when nothing is renderable, there is
      *  no atlas to read, so a consumer must not go looking for one. */
     blockIconsHash: string | null;
     /** prefab ids whose icon needs a (re)render. */
@@ -89,7 +74,7 @@ export type IconBakePlan = {
 
 export type PlanOpts = {
     /** content hash of the baked tile atlas (`AssetPipeline.run`'s
-     *  `atlasHash`) — block AND prefab icons draw with it, so it's part of both
+     *  `atlasHash`); both block and prefab icons draw with it, so it's part of both
      *  cache keys. Null when no atlas has been baked. */
     atlasHash: string | null;
     /** consult the on-disk hashes and skip fresh work. False (the one-shot node
@@ -106,7 +91,7 @@ function bytesOf(a: { buffer: ArrayBufferLike; byteOffset: number; byteLength: n
 /**
  * Content hash over everything the block-icon render reads: which states get a
  * tile, the per-state data the mesher emits from, and the atlas they sample.
- * Hashing the DERIVED arrays (not the source defs) is deliberate — a def edit
+ * Hashing the derived arrays (not the source defs) is deliberate: a def edit
  * that doesn't change the rendered result shouldn't churn the icons. The atlas
  * hash alone wouldn't do: a block joining the set while wearing an
  * already-referenced texture adds no atlas layer, but does need a tile.
@@ -142,16 +127,14 @@ async function hashBlockIconInputs(blocks: Blocks, states: number[], atlasHash: 
  * prefab's def hash against the manifest. Callers skip the whole render (device
  * handshake, atlas upload and all) when `iconBakeIsNoop`.
  *
- * Reads the DERIVED `registry.blockRegistry`, so the caller must have reindexed
- * since the last declaration flush. This runs ahead of `buildRenderDeps` (whose
- * own reindex used to be what covered this), and the pipeline worker never calls
- * `engine-client.load()`, so neither one can be relied on here.
+ * Reads the derived `registry.blockRegistry`, so the caller must have reindexed since the last
+ * declaration flush; the pipeline worker never calls `engine-client.load()` itself.
  */
 export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<IconBakePlan> {
     const { atlasHash, cache } = opts;
     const blocks = registry.blockRegistry;
     const states = renderableBlockStates(blocks);
-    // nothing renderable → no atlas to draw, and the render would bail on an empty
+    // nothing renderable means no atlas to draw, and the render would bail on an empty
     // grid anyway. Saying so here is what keeps a block-less project off the GPU.
     const blockIconsHash = states.length > 0 ? await hashBlockIconInputs(blocks, states, atlasHash) : null;
     const blockAtlasStale =
@@ -163,7 +146,7 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
         const parsed = JSON.parse(await fs.readText(PREFAB_ICON_MANIFEST)) as Partial<PrefabIconManifest>;
         if (parsed.icons) prev = { atlas: typeof parsed.atlas === 'string' ? parsed.atlas : '', icons: parsed.icons };
     } catch {
-        // no manifest yet (first bake) — everything is fresh work.
+        // no manifest yet (first bake), everything is fresh work.
     }
     // one listing, not an exists() per prefab: a guest realm reaches the project
     // disk over the relay, where every call is a round trip (os/remote-fs).
@@ -176,7 +159,7 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
     const icons: Record<string, string> = {};
     const stalePrefabs: string[] = [];
     for (const [id, def] of registry.prefabs.byId) {
-        // empty hash (unserializable def) → can't detect changes, so always re-render.
+        // empty hash (unserializable def) means we can't detect changes, so always re-render.
         let hash = '';
         try {
             hash = fnv1a(JSON.stringify(def));
@@ -196,7 +179,7 @@ export async function planIconBake(fs: Filesystem, opts: PlanOpts): Promise<Icon
     };
 }
 
-/** True when the plan has nothing to render or prune — the caller can return
+/** True when the plan has nothing to render or prune, the caller can return
  *  before standing up a render context. */
 export function iconBakeIsNoop(plan: IconBakePlan): boolean {
     return !plan.blockAtlasStale && plan.stalePrefabs.length === 0 && plan.removedPrefabs.length === 0;
@@ -205,7 +188,7 @@ export function iconBakeIsNoop(plan: IconBakePlan): boolean {
 export type IconBakeResult = {
     /** the block-icon atlas was re-rendered (false = skipped or empty). */
     blockAtlas: boolean;
-    /** prefab ids whose icon file actually MOVED this pass — rewritten with new
+    /** prefab ids whose icon file actually moved this pass, rewritten with new
      *  bytes, or pruned. Not the ids the plan considered: a re-render that
      *  reproduces identical bytes invalidates nothing, and this list is announced
      *  to consumers as the set to drop. */
@@ -216,10 +199,10 @@ export type IconBakeResult = {
  * Render exactly the work `planIconBake` found stale, writing the icon artifacts
  * into `resources/client/`: the block atlas (`voxels-icons.{png,json}`) and one
  * png per prefab, plus the freshness manifest. Shared by the browser pipeline
- * realm and the node CLI — only `encodePng` differs (OffscreenCanvas vs
+ * realm and the node CLI, only `encodePng` differs (OffscreenCanvas vs
  * skia-canvas). Every write goes through `writeIfChanged`, so a bake that
  * reproduces identical bytes wakes no fs watcher. Never throws for a single
- * prefab — a failed render is skipped.
+ * prefab, a failed render is skipped.
  */
 export async function runIconBake(
     deps: RenderRoomDeps,

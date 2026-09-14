@@ -48,9 +48,6 @@ function BlockIcon({ stateKey, size = 24 }: { stateKey: string; size?: number })
     );
 }
 
-/**
- * shows the currently selected block + its available state variants.
- */
 export function ActiveBlockPane() {
     const room = useEditor((s) => s.room);
     const hotbar = useEditor((s) => s.hotbar);

@@ -1,9 +1,3 @@
-// editor/server.ts, the server half of the editor module: the room-level editor
-// system (a WorldTrait script, so it instantiates on every room root without the
-// runtime knowing it exists) that owns the authoritative scene + voxel mutation
-// listeners, the /relight command, and the per-player EditorTrait seed. Imported
-// only by engine-server-editor.
-
 import type { Client } from 'bongle/interface';
 import * as chat from '../api/chat';
 import { WorldTrait } from '../builtins/world';
@@ -62,10 +56,8 @@ import * as Blueprints from './persist/blueprints';
 import * as Persist from './persist/save';
 import * as Scenes from './persist/scenes';
 
-// the room-level editor system. hosted on WorldTrait like any other system, so it
-// runs once per room root on both sides; the client-side instance early-returns.
-// holds the authoritative voxel/scene mutation listeners and the /relight command,
-// seeds the per-player EditorTrait on join, and owns persistence for edit rooms.
+// hosted on WorldTrait like any other system, so it runs once per room root on both sides;
+// the client-side instance early-returns.
 script(
     WorldTrait,
     'editor',
@@ -73,31 +65,21 @@ script(
         if (!env.server) return;
         const { state, room } = ctx.server!;
 
-        // persistence, edit rooms only: play rooms never write scene files. opened
-        // here, after the runtime loaded the scene; the autosave clock rides onTick;
-        // an editor leaving persists what they did (covers stop_room and the last
-        // editor leaving, both of which destroy the room next, and disconnects); the
-        // shutdown flush is engine-server-editor's `dispose`.
+        // edit rooms only: play rooms never write scene files. the autosave clock rides onTick;
+        // an editor leaving persists what they did; the shutdown flush is engine-server-editor's `dispose`.
         const persist = ctx.mode === 'edit' ? Persist.open(state, room, (message) => chat.message(ctx, message)) : null;
         if (persist) {
             onTick(ctx, ({ delta }) => Persist.tick(persist, delta));
             onLeave(ctx, () => Persist.flush(persist));
         }
 
-        // per-player editor activation follows the player's mode, not the room's:
-        // an edit-mode player gets EditorTrait on its player node (also when
-        // inspecting a play room), and replication delivers it to the owning
-        // client, whose script runs there. play-mode players use a client-local
+        // follows the player's mode, not the room's: play-mode players use a client-local
         // lens instead (lens.ts), so nothing is seeded for them.
         onJoin(ctx, ({ playerNode, mode }) => {
             if (mode === 'edit') addTrait(playerNode, EditorTrait);
         });
 
-        // //relight, full recompute of sky + rgb light for the room. only
-        // the server has authoritative light state, so the listener lives
-        // here. clients without the editor enabled never see the spec; play
-        // clients with /relight typed fall through to plain-chat, which the
-        // server ignores for slash inputs.
+        // only the server has authoritative light state, so the listener lives here.
         const relightCmd = chat.command(ctx, {
             name: '/relight',
             description: 'recompute all light propagation in this room',
@@ -111,12 +93,9 @@ script(
             chat.message(ctx, `light repropagated in ${ms}ms`);
         });
 
-        // capability gate, does this client have permission to mutate scene
-        // state in this room? Today the only signal is `env.editor` (dev builds
-        // grant edit to any connected client; prod builds grant to no one).
-        // Future: real auth, project owner, role, etc. Decoupled from player
-        // mode so a play-mode client with editor toggled on can still issue
-        // edit RPCs.
+        // today the only signal is `env.editor` (dev builds grant edit to any connected client;
+        // prod builds grant to no one). decoupled from player mode so a play-mode client with
+        // editor toggled on can still issue edit RPCs.
         const canEdit = (_client: Client) => env.editor;
         const editGated =
             <T>(fn: (args: T, client: Client) => void) =>
@@ -125,17 +104,14 @@ script(
                 fn(args, client);
             };
 
-        // editGated; on a body that actually mutated (returns true, guard
-        // early-returns don't), flag the room dirty for the autosave. wraps the
-        // mutating listeners below.
+        // flags the room dirty for autosave when the body actually mutated (returns true; guard early-returns don't).
         const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
             editGated<T>((args, client) => {
                 if (!fn(args, client)) return;
                 if (persist) Persist.markDirty(persist);
             });
 
-        // explicit save (Ctrl+S, the tab menu): this room. the client names the
-        // scene it meant; a mismatch is dropped rather than saving the wrong room.
+        // the client names the scene it meant; a mismatch is dropped rather than saving the wrong room.
         listen(
             ctx,
             SaveSceneCommand,
@@ -144,12 +120,8 @@ script(
             }),
         );
 
-        // scene verbs. open: the edit room for a scene is found or created (edit
-        // rooms share the 'editor' namespace) and the sender joins it as an editor;
-        // the runtime's activate_room makes it their focused room. rename/delete
-        // write through persist/scenes, which keeps live rooms consistent via the
-        // runtime's room helpers (room.sceneId follows a rename; a delete stops the
-        // rooms). a failed write is reported here, in the room's chat.
+        // rename/delete write through persist/scenes, which keeps live rooms consistent via the
+        // runtime's room helpers (room.sceneId follows a rename; a delete stops the rooms).
         listen(
             ctx,
             OpenSceneCommand,
@@ -178,14 +150,11 @@ script(
             }),
         );
 
-        // voxel edit ops from clients
         listen(
             ctx,
             VoxelEditCommand,
             editMutate(({ ops }) => {
-                // BULK: authoring edits settle their block-def hooks inline (each
-                // write drains only its own op + chained recomputes) but fire no
-                // script observers. no explicit end-of-brush drain needed.
+                // BULK: settles block-def hooks inline per op but fires no script observers, no explicit end-of-brush drain needed.
                 for (const op of ops) {
                     setBlock(ctx.voxels, op.wx, op.wy, op.wz, op.key, SetBlockFlags.BULK);
                 }
@@ -193,10 +162,8 @@ script(
             }),
         );
 
-        // save-as-blueprint, client extracts the ScenePayload from its
-        // local selection and ships it here as JSON; server validates the
-        // name (or allocates one), then writes a scene file under
-        // `content/scenes/blueprints/<name>.scene.json`.
+        // client ships the ScenePayload extracted from its local selection as JSON; server
+        // validates the name (or allocates one) and writes it under content/scenes/blueprints/<name>.scene.json.
         listen(
             ctx,
             SaveBlueprintCommand,
@@ -217,8 +184,7 @@ script(
                 result.written?.catch((err) =>
                     chat.message(ctx, `[blueprint] ${result.sceneId} did not reach disk: ${Scenes.errorMessage(err)}`),
                 );
-                // disk write → the `bongle:scenes` file watcher fires →
-                // `bongle:scene-list` emission catches up the editor.
+                // disk write triggers the bongle:scenes file watcher, whose bongle:scene-list emission catches up the editor.
                 chat.message(
                     ctx,
                     result.overwritten ? `[blueprint] overwrote ${result.sceneId}` : `[blueprint] saved ${result.sceneId}`,
@@ -226,7 +192,6 @@ script(
             }),
         );
 
-        // scene mutation handlers
         listen(
             ctx,
             CreateNodeCommand,
@@ -298,8 +263,7 @@ script(
                 const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 if (node === room.scene.root) return;
-                // setRealm marks the affected subtree dirty so discovery re-evaluates
-                // descendants' visibility (matters for play viewers in mixed rooms).
+                // marks the affected subtree dirty so discovery re-evaluates descendants' visibility (mixed rooms).
                 setRealm(node, args.realm as Realm);
                 Discovery.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
                 return true;

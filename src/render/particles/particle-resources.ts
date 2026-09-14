@@ -1,15 +1,3 @@
-// ParticleResources, engine-global particle material.
-//
-// One instance per `EngineClient`, shared across rooms. The atlas Texture
-// is owned by `SpriteResources`, this struct holds a TextureNode bound at
-// build time and exposes `rebindAtlas()` so the registry-dispatch atlas
-// swap can retarget it without rebuilding the compiled pipeline.
-//
-// Material binds per-instance + env buffers by name (`instancePose`,
-// `instanceMaterial`, `env`). Each per-room ParticleVisuals routes its
-// buffers to those names via `geometry.setBuffer(name, buf)` and sets
-// `mesh.count = pool.count` each frame to drive instanced draw.
-
 import {
     add,
     attribute,
@@ -45,10 +33,7 @@ import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 
-// ── shared gpu structs ──────────────────────────────────────────────
-//
 // Exported so per-room ParticleVisuals can pack into the matching layout.
-
 export const InstancePose = struct('ParticleInstancePose', {
     posWorld: d.vec3f,
     width: d.f32,
@@ -65,23 +50,18 @@ export const InstanceMaterial = struct('ParticleInstanceMaterial', {
 export const INSTANCE_POSE_STRIDE = layoutStrideOf(InstancePose);
 export const INSTANCE_MATERIAL_STRIDE = layoutStrideOf(InstanceMaterial);
 
-// sky-brightness curve, must match voxel-material + voxel-mesh-visuals
-// so particles shade the same as the world they hang in.
+// Must match voxel-material + voxel-mesh-visuals so particles shade the same as the world.
 const NIGHT_SKY_BRIGHTNESS = 0.05;
 const DAY_SKY_BRIGHTNESS = 0.9;
 const DISABLED_SKY_BRIGHTNESS = 1.0;
 
-// ── instance batch (client-global, persistent GPU allocation) ───────
-// The plane geometry + per-instance pose/material buffers + their Mesh live
-// here, NOT on per-room visuals. One room renders at a time, so a room swap
-// REUSES this allocation (reset `mesh.count` + re-add the Mesh) instead of
-// freeing + reallocating it. The pool is dense `[0, count)`, drawn as a single
-// `drawIndexed(6, count, 0)`; capacity is fixed (no grow).
+// The plane geometry, per-instance pose/material buffers, and their Mesh live here rather
+// than on per-room visuals: one room renders at a time, so a room swap reuses this
+// allocation (reset `mesh.count`, re-add the Mesh) instead of reallocating. Dense
+// `[0, count)`, drawn as a single `drawIndexed(6, count, 0)`, fixed capacity.
 
-/** instance capacity, must match `POOL_CAPACITY` in particles.ts. kept here
- *  rather than imported so the pool module stays free of any GPU ref; if these
- *  drift, instance buffers run short of the pool, leaving the tail invisible,
- *  caught by a single render check rather than a runtime assert. */
+/** Must match `POOL_CAPACITY` in particles.ts; kept separate so the pool module stays free
+ *  of any GPU ref. A drift here leaves the pool's tail undrawn. */
 const INSTANCE_CAPACITY = 8192;
 
 type GpuBufferType = GpuBuffer<any>;
@@ -98,9 +78,9 @@ export type ParticleBatch = {
     instanceCapacity: number;
 };
 
-/** Build the client-global instance batch: a shared 1×1 plane with per-instance
- *  pose/material vertex buffers, wrapped in a Mesh with the engine-global
- *  material. Not added to any scene until a room `init`s. */
+/** Builds the client-global instance batch: a shared 1x1 plane with per-instance
+ *  pose/material vertex buffers, wrapped in a Mesh with the engine-global material. Not
+ *  added to any scene until a room inits. */
 function createParticleBatch(material: Material): ParticleBatch {
     const instanceCapacity = INSTANCE_CAPACITY;
 
@@ -125,20 +105,17 @@ function createParticleBatch(material: Material): ParticleBatch {
     return { mesh, geometry, instancePoseBuf, instanceMaterialBuf, instanceCapacity };
 }
 
-/** Ready the batch for a fresh room: draw nothing until the first update refills
- *  it from the new room's pool. Buffers are NOT touched. */
+/** Readies the batch for a fresh room: draws nothing until the first update refills it. */
 export function resetParticleBatch(batch: ParticleBatch): void {
     batch.mesh.count = 0;
 }
 
+/** Called once at client shutdown, never on room swap. */
 function disposeParticleBatch(batch: ParticleBatch): void {
-    // Called once at client shutdown, never on room swap.
     batch.geometry.dispose();
     batch.instancePoseBuf.dispose();
     batch.instanceMaterialBuf.dispose();
 }
-
-// ── public type ─────────────────────────────────────────────────────
 
 export type ParticleResources = {
     /** engine-global particle material, binds per-instance + env buffers
@@ -153,16 +130,13 @@ export type ParticleResources = {
     batch: ParticleBatch;
 };
 
-// ── public api ──────────────────────────────────────────────────────
-
 export function init(atlas: Texture, env: EnvironmentResources): ParticleResources {
     const { material, atlasTexNode } = createParticleMaterial(atlas, env);
     const batch = createParticleBatch(material);
     return { material, atlasTexNode, batch };
 }
 
-/** Retarget the material's atlas TextureNode at a freshly-allocated
- *  atlas. Called from registry-dispatch after SpriteResources swaps. */
+/** Retargets the material's atlas TextureNode at a freshly-allocated atlas. */
 export function rebindAtlas(res: ParticleResources, atlas: Texture): void {
     res.atlasTexNode.bindingNode.value = atlas._gpuTexture;
     res.atlasTexNode.samplerNode!.value = atlas._gpuSampler;
@@ -173,23 +147,18 @@ export function dispose(res: ParticleResources): void {
     res.material.dispose();
 }
 
-// ── internals ───────────────────────────────────────────────────────
-
 function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { material: Material; atlasTexNode: TextureNode } {
     const aPosition = attribute('position', d.vec3f);
     const aUv = attribute('uv', d.vec2f);
 
-    // per-instance pose + material via instanced vertex attributes (both backends;
-    // the per-room ParticleVisuals provides the `instancePose`/`instanceMaterial`
-    // buffers by name, usage: 'vertex'). single dense draw, so instanceIndex indexes
-    // the buffers directly. std430 field offsets below.
+    // per-room ParticleVisuals provides the instancePose/instanceMaterial buffers by name;
+    // offsets below are std430 field offsets into those buffers.
     const posWorld = attribute('instancePose', d.vec3f, { instanced: true, stride: INSTANCE_POSE_STRIDE, offset: 0 }).toVar(
         'pvPos',
     );
     const width = attribute('instancePose', d.f32, { instanced: true, stride: INSTANCE_POSE_STRIDE, offset: 12 }).toVar('pvW');
     const height = attribute('instancePose', d.f32, { instanced: true, stride: INSTANCE_POSE_STRIDE, offset: 28 }).toVar('pvH');
 
-    // billboard basis from cameraViewMatrix.
     const view = cameraViewMatrix;
     const viewCol0 = view.element(u32(0)).toVar('pvViewCol0');
     const viewCol1 = view.element(u32(1)).toVar('pvViewCol1');
@@ -197,7 +166,7 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const right = vec3f(viewCol0.x, viewCol1.x, viewCol2.x).toVar('pvRight');
     const up = vec3f(viewCol0.y, viewCol1.y, viewCol2.y).toVar('pvUp');
 
-    // centered quad: aPosition in [-0.5..0.5] × width/height.
+    // centered quad: aPosition in [-0.5, 0.5] times width/height.
     const localX = mul(aPosition.x, width).toVar('pvLocalX');
     const localY = mul(aPosition.y, height).toVar('pvLocalY');
 
@@ -209,10 +178,7 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const tint = attribute('instanceMaterial', d.vec4f, { instanced: true, stride: S, offset: 16 }).toVar('pvTint');
     const glow = attribute('instanceMaterial', d.f32, { instanced: true, stride: S, offset: 32 }).toVar('pvGlow');
 
-    // light is sampled from the GPU light volume at the particle's CENTRE, one
-    // value for the whole billboard. That is where the CPU used to sample it
-    // (`posX/Y/Z` in particle-visuals), so the look is unchanged; what goes away
-    // is a per-particle CPU voxel walk and a vec4 per instance every frame.
+    // sampled from the GPU light volume at the particle's center, one value for the billboard.
     const instLight = sampleWorldLight(bindLightVolume(env), posWorld).toVar('pvInstLight');
 
     const sampledU = add(uvRect.x, mul(aUv.x, uvRect.z)).toVar('pvSampledU');
@@ -241,24 +207,20 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const skyContribParticle = vec3f(skySkyScalar, skySkyScalar, skySkyScalar).toVar('pvSkyContrib');
     const blockLightParticle = vInstLight.yzw.toVar('pvBlockLight');
     const voxelLight = max(blockLightParticle, skyContribParticle).toVar('pvVoxelLight');
-    // glow raises the lighting floor, a script-driven self-illumination
-    // knob that lights the particle in its OWN colour (glow=1 → fully
-    // lit, shadow-free) rather than blending lit↔raw. matches mesh /
-    // sprite `glow`.
+    // glow raises the lighting floor: a script-driven self-illumination knob (glow=1 = fully
+    // lit, shadow-free), matching mesh/sprite glow.
     const glowFloor = vec3f(vGlow, vGlow, vGlow).toVar('pvGlowFloor');
     const light = max(voxelLight, glowFloor).toVar('pvLight');
     const shaded = mul(sampled.rgb, light).toVar('pvShaded');
     const tintedRgb = mul(shaded, vTint.rgb).toVar('pvTintedRgb');
     const foggedRgb = applyFog(env, tintedRgb, fogDistance(worldPos3, 'pvFogDist'));
-    // overall opacity = texture alpha × tint alpha (the lifetime fade knob).
+    // opacity = texture alpha times tint alpha (the lifetime fade knob).
     const finalAlpha = mul(sampled.a, vTint.w).toVar('pvFinalAlpha');
     const color = vec4f(foggedRgb, finalAlpha).toVar('pvColor');
 
-    // dithered opacity, not blended: the full transparency drives an
-    // interleaved screen-door so coverage tracks the old blend alpha exactly,
-    // just pixelly. no hard cutout (alpha=1 disables the DSL's 0.5 cliff) —
-    // empty padding still drops out since fade -> 1 there. keeps particles in
-    // the opaque, depth-writing pipeline: no sort, no blend.
+    // dithered opacity rather than blended: keeps particles in the opaque, depth-writing
+    // pipeline with no sort and no blend, at the cost of screen-door coverage instead of a
+    // smooth alpha.
     const fade = sub(f32(1), finalAlpha).toVar('pvFade');
     const fragment = ditherDiscard(color, f32(1), fade).toVar('pvFragment');
 

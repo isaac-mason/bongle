@@ -6,9 +6,7 @@ import { Viewport } from './viewport';
 
 import './editor.css';
 
-// the debug dashboard is plain DOM mounted straight to the document (see
-// client/ui/dashboard.ts), toggled by backtick via the `debugOpen` store bit.
-// nothing to render in the React tree here.
+// the debug dashboard is plain DOM mounted straight to the document (see client/ui/dashboard.ts); nothing to render here.
 
 function isInputFocused(): boolean {
     const el = document.activeElement;
@@ -18,15 +16,11 @@ function isInputFocused(): boolean {
 }
 
 function PlayUI() {
-    // apps embedding the engine as a pure display surface call
-    // `chat.setEnabled(ctx, false)`; drop the panel and its keyboard openers.
+    // embedding apps can call chat.setEnabled(ctx, false) to drop the panel and its keyboard openers.
     const chatEnabled = useChatEnabled();
 
-    // `t` / `Enter` open chat (no seed); `/` opens chat seeded with a slash so
-    // the user can immediately type a command. mirrors the edit-ui handler but
-    // without the editor-enabled gate (edit mode uses Enter only, no `t`).
-    // backtick toggles the debug panel, the editor's backtick chord lives in its
-    // own input loop, which doesn't run in play, so play mode owns this here.
+    // mirrors the edit-ui handler but without the editor-enabled gate; play mode also owns the
+    // backtick debug toggle since the editor's input loop doesn't run here.
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (isInputFocused()) return;
@@ -52,11 +46,7 @@ function PlayUI() {
     );
 }
 
-/**
- * Mount the play-mode UI shell into `container`. No editor chrome, just the
- * viewport. Re-exported from `bongle/engine-client`; the play-mode boot
- * template calls it directly between init and load.
- */
+// re-exported from bongle/engine-client; the play-mode boot template calls it directly between init and load.
 export function mountPlayUI(container: HTMLElement): Root {
     const root = createRoot(container);
     root.render(<PlayUI />);

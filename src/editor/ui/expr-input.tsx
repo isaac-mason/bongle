@@ -1,17 +1,3 @@
-/**
- * <ExprInput>, small text input with grammar-aware autocomplete.
- *
- * shape mirrors the chat panel's completion UX: dropdown below the input,
- * arrow keys cycle, Tab/Enter accepts, Esc dismisses. used by the tool
- * panels for `pattern` / `mask` fields so users don't need to memorise the
- * grammar (block ids, `$active`, `#existing`, `!`/`,` operators, etc).
- *
- * grammar-specific knowledge lives in the suggest fn (see
- * `pattern.ts:suggestPattern` / `mask.ts:suggestMask`); this component is
- * pure UX, it doesn't know about block ids, weights, or operators. that
- * keeps it reusable for any future grammar-typed field (e.g. selectors).
- */
-
 import { Popover } from '@base-ui/react/popover';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { registry } from '../../core/registry';
@@ -41,9 +27,7 @@ type Props = {
     error?: string | null;
 };
 
-// snapshot the global block-def list once per render. registry mutations
-// during a session are rare (room load); a fresh useMemo per parent render
-// keeps it correct without an explicit subscription.
+// a fresh useMemo per parent render keeps this correct without an explicit registry subscription.
 function useBlockIds(): ReadonlyArray<{ id: string; name?: string }> {
     return useMemo(() => registry.blockRegistry.defs.filter((d) => d.id !== 'air').map((d) => ({ id: d.id, name: d.name })), []);
 }
@@ -148,9 +132,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                 open={popoverOpen}
                 onOpenChange={(next, details) => {
                     if (next) return;
-                    // ignore outside-pointer-down only when it lands in our own
-                    // input so the input keeps focus while we type; clicks
-                    // elsewhere should close.
+                    // ignore an outside-press that landed in our own input, so typing doesn't close it.
                     if (details.reason === 'outside-press' && details.event.target === inputRef.current) {
                         details.cancel();
                         return;
@@ -167,8 +149,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                         sideOffset={2}
                     >
                         <Popover.Popup
-                            // keep focus in the input, the popup otherwise grabs
-                            // focus on open and steals the caret.
+                            // the popup otherwise grabs focus on open and steals the caret.
                             initialFocus={false}
                             finalFocus={false}
                             className="z-50 max-h-48 overflow-y-auto bg-surface border border-border text-[10px] font-mono shadow-lg"
@@ -182,8 +163,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                         i === selectedIndex ? 'bg-accent text-on-accent' : 'text-fg hover:bg-surface-muted'
                                     }`}
                                     onMouseDown={(e) => {
-                                        // mousedown (not click) so the input keeps focus
-                                        // and the accept happens before blur fires.
+                                        // mousedown (not click) so accept happens before the input's blur fires.
                                         e.preventDefault();
                                         accept(sug);
                                     }}

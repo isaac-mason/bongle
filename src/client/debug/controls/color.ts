@@ -3,11 +3,7 @@ import { clamp, el, on } from '../dom';
 import { openPopover } from '../popover';
 
 export type ColorOptions = {
-    /**
-     * how the bound `[r,g,b]` array is stored.
-     * - `linear` (default): linear sRGB in 0..1 — math's `Color` layout.
-     * - `srgb`: gamma-encoded sRGB in 0..1.
-     */
+    /** How the bound `[r,g,b]` array is stored: `linear` (default, math's `Color` layout) or gamma-encoded `srgb`, both 0..1. */
     space?: 'linear' | 'srgb';
     label?: string;
     hint?: string;
@@ -63,7 +59,7 @@ function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
     return [r + m, g + m, b + m];
 }
 
-/** an rgb color control: a swatch that opens a custom picker, plus a hex field. math-linear by default. */
+/** An rgb color control: a swatch that opens a custom picker, plus a hex field. Math-linear by default. */
 export function color(opts: ColorOptions = {}): Control<number[]> {
     return (ctx, prop) => {
         const linear = (opts.space ?? 'linear') === 'linear';

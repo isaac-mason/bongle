@@ -1,62 +1,30 @@
-// cloud-shapes.ts
-//
-// the N deterministic cloud "puff" voxel grids the cloud system instances.
-// each shape's occupancy is `inside(union of K random ellipsoid blobs)`:
-// one big primary blob anchors the body and K-1 smaller satellites are
-// scattered around it within an upper-biased region. voxel is "on" iff
-// it falls inside any blob; an edge-erosion pass roughens the surface
-// stochastically so the silhouette reads as fractal-grained, not stamped.
-// this gives the classic clustered-marshmallow cumulus look with ~8
-// cheap squared-distance tests per voxel (no fbm, no trilerp).
-//
-// all shapes are generated once at init then greedy-meshed into one
-// shared uber geometry (rebased indices so a single index buffer + flat
-// baseVertex=0 indirect draws work uniformly). per-shape metadata
-// records the index range + half-extents so the cull compute can build
-// draw-indirect entries and reject out-of-frustum slots.
-
 import * as gpu from 'gpucat';
 import { meshOccupancy } from '../../../core/voxels/greedy-mesh';
 
-// 24 unique puffs masks repetition at typical instance counts (~400).
+// masks repetition at typical instance counts (~400).
 export const N_CLOUD_SHAPES = 24;
 
-// per-shape voxel grid dims. small enough to mesh fast, large enough
-// for ~3-4 visible lobes per side at the chosen blob radii.
 export const CLOUD_DIM_X = 24;
 export const CLOUD_DIM_Y = 10;
 export const CLOUD_DIM_Z = 24;
 
-// world units per voxel, bumps the visual block size without producing
-// more polygons. higher = chunkier, more minecraft-y. effective cloud
-// world-extent is CLOUD_DIM_* × CLOUD_VOXEL_SCALE.
+// world units per voxel; effective cloud world-extent is CLOUD_DIM_* * CLOUD_VOXEL_SCALE.
 const CLOUD_VOXEL_SCALE = 4;
 
-// hierarchical blob counts:
-//   1 primary anchor blob
-// + N_SATELLITES medium blobs offset from the centre
-// + N_SATELLITES × N_MICROS_PER_SATELLITE small "bumps" on each
-//   satellite's surface
-// the micros are what give clouds their cauliflower silhouette, each
-// satellite gets a few smaller bumps clustered on its outside, so the
-// union surface has detail at two scales instead of one.
+// 1 primary anchor blob + N_SATELLITES medium blobs + micro bumps on each satellite's
+// surface, giving the union surface detail at two scales (the cauliflower silhouette).
 const N_SATELLITES = 7;
 const N_MICROS_PER_SATELLITE = 3;
 const BLOBS_PER_SHAPE = 1 + N_SATELLITES + N_SATELLITES * N_MICROS_PER_SATELLITE;
 
-// per-voxel stochastic erosion at the boundary: voxels just inside the
-// surface get a small random chance of dropping out. roughens edges so
-// cloud silhouettes look fractal-grained, not like a sphere union.
-// expressed as a band of squared-distance ∈ [1 - EDGE_NOISE, 1] where
-// erosion can fire (1 = surface, 0 = core).
+// band of squared-distance in [1 - EDGE_NOISE, 1] where stochastic erosion can fire
+// (1 = surface, 0 = core), roughening the silhouette instead of a smooth sphere union.
 const EDGE_NOISE = 0.18;
 
-// upper-bias for satellite Y placement (fraction up the grid). clouds
-// have flat bottoms and domed tops, so satellites cluster above middle.
+// upper-bias for satellite Y placement (fraction up the grid): flat bottom, domed top.
 const Y_BODY_CENTER = 0.55;
 
-// integer 3D hash → [0,1). mulberry-ish; cheap and good enough for a
-// one-shot init-time fill.
+// integer 3D hash to [0,1), cheap and good enough for a one-shot init-time fill.
 function hash3i(x: number, y: number, z: number, seed: number): number {
     let n =
         Math.imul(x | 0, 374761393) +
@@ -73,11 +41,9 @@ function shapeIndex(x: number, y: number, z: number): number {
     return x + y * CLOUD_DIM_X + z * CLOUD_DIM_X * CLOUD_DIM_Y;
 }
 
-// place hierarchical ellipsoid blobs deterministically from shapeIdx.
-// data layout per blob is 9 floats: [cx, cy, cz, rx, ry, rz, invRx,
-// invRy, invRz]. rx/ry/rz drive a cheap AABB pre-reject (most voxels
-// are outside the AABB of any given micro-blob); invR* are reused in
-// the squared-distance test for blobs that survive the reject.
+// data layout per blob is 9 floats: [cx, cy, cz, rx, ry, rz, invRx, invRy, invRz].
+// rx/ry/rz drive a cheap AABB pre-reject; invR* feed the squared-distance test for
+// blobs that survive it.
 type BlobField = {
     n: number;
     data: Float32Array;
@@ -111,8 +77,7 @@ function generateBlobs(shapeIdx: number): BlobField {
     const data = new Float32Array(BLOBS_PER_SHAPE * BLOB_STRIDE);
     let cursor = 0;
 
-    // primary central blob, anchors the body, big enough to overlap
-    // all satellites so the union reads as one cloud not many.
+    // big enough to overlap all satellites so the union reads as one cloud, not many.
     writeBlob(
         data,
         cursor++,
@@ -124,9 +89,7 @@ function generateBlobs(shapeIdx: number): BlobField {
         CLOUD_DIM_Z * 0.32,
     );
 
-    // satellites, wide xy-range, narrow y-range so they stay in the
-    // body band. each gets a few micro-blobs jittered around its
-    // surface for the cauliflower silhouette.
+    // wide xy-range, narrow y-range so satellites stay in the body band.
     for (let i = 0; i < N_SATELLITES; i++) {
         const s = seed + (i + 1) * 31;
         const ox = (hash3i(s, 1, 0, 0) * 2 - 1) * 0.42;
@@ -142,10 +105,8 @@ function generateBlobs(shapeIdx: number): BlobField {
         const srz = CLOUD_DIM_Z * r;
         writeBlob(data, cursor++, scx, scy, scz, srx, sry, srz);
 
-        // micros, small bumps placed near the parent's surface. each
-        // is 30..55% of the parent's radii and offset by ~1 parent
-        // radius in a random direction (slight upward bias keeps the
-        // silhouette domed rather than spiky on all sides).
+        // 30..55% of the parent's radii, offset ~1 parent radius with a slight
+        // upward bias so the silhouette stays domed rather than spiky.
         for (let m = 0; m < N_MICROS_PER_SATELLITE; m++) {
             const ms = s + (m + 1) * 13;
             const dx = hash3i(ms, 5, 0, 0) * 2 - 1;
@@ -160,10 +121,8 @@ function generateBlobs(shapeIdx: number): BlobField {
     return { n: BLOBS_PER_SHAPE, data };
 }
 
-// generate one shape's occupancy from the blob-union. for each voxel,
-// find the minimum normalised squared distance to any blob centre. <1
-// means we're inside at least one ellipsoid; the headroom (1 - minD2)
-// drives the stochastic edge erosion that gives the surface its grain.
+// minimum normalised squared distance to any blob centre; <1 means inside at least one
+// ellipsoid, and the headroom (1 - minD2) drives the stochastic edge erosion.
 function generateOccupancy(shapeIdx: number): Uint8Array {
     const grid = new Uint8Array(CLOUD_DIM_X * CLOUD_DIM_Y * CLOUD_DIM_Z);
     const seed = shapeIdx * 17 + 1;
@@ -178,10 +137,8 @@ function generateOccupancy(shapeIdx: number): Uint8Array {
             for (let x = 0; x < CLOUD_DIM_X; x++) {
                 const px = x + 0.5;
 
-                // find the minimum normalised squared distance to any
-                // blob centre. AABB pre-reject skips the squared-distance
-                // test for blobs whose extents don't enclose the voxel,
-                // critical for micros (~21 of the ~29 blobs are tiny).
+                // AABB pre-reject skips the squared-distance test for blobs whose
+                // extents don't enclose the voxel, critical since most blobs are tiny.
                 let minD2 = Infinity;
                 for (let b = 0; b < bn; b++) {
                     const o = b * BLOB_STRIDE;
@@ -202,10 +159,8 @@ function generateOccupancy(shapeIdx: number): Uint8Array {
                 }
                 if (minD2 >= 1) continue;
 
-                // edge erosion: surface voxels (headroom near 0) get a
-                // high chance of dropping out; deep-core voxels (headroom
-                // near EDGE_NOISE) almost never do. this is what turns a
-                // smooth sphere-union into a grainy cumulus silhouette.
+                // surface voxels (headroom near 0) get a high chance of dropping out;
+                // deep-core voxels (headroom near EDGE_NOISE) almost never do.
                 const headroom = 1 - minD2;
                 if (headroom < EDGE_NOISE && hash3i(x, y, z, seed + 999) > headroom / EDGE_NOISE) continue;
 
@@ -219,9 +174,7 @@ function generateOccupancy(shapeIdx: number): Uint8Array {
 export type CloudShapeMeta = {
     indexStart: number;
     indexCount: number;
-    // half-extents of the cloud shape's centred AABB in world units (1
-    // voxel = 1 world unit at the shape's authoring scale; instance
-    // transforms scale the cloud at render time if needed).
+    /** half-extents of the cloud shape's centred AABB in world units. */
     halfExtentX: number;
     halfExtentY: number;
     halfExtentZ: number;
@@ -230,24 +183,19 @@ export type CloudShapeMeta = {
 export type CloudUberGeometry = {
     geometry: gpu.Geometry;
     shapes: CloudShapeMeta[];
-    // packed [indexStart, indexCount, halfX, halfY, halfZ, _pad, _pad, _pad]
-    // for upload to a storage buffer the cull compute reads. 8 floats per
-    // shape keeps the struct 32-byte aligned for std430.
+    /** packed [indexStart, indexCount, halfX, halfY, halfZ, _pad, _pad, _pad] for a storage
+     *  buffer the cull compute reads; 8 floats per shape keeps std430 32-byte alignment. */
     shapeMetaPacked: Float32Array;
-    // raw arrays exposed for storage-buffer uploads (vertex-pull path).
     positions: Float32Array;
     normals: Float32Array;
-    // index array is padded to `lastShapeIndexStart + maxIndexCount` so any
-    // (shape.indexStart + vertexIndex) read in the VS stays in-bounds; pad
-    // values are 0 (the VS short-circuits past shape.indexCount anyway).
+    /** padded to `lastShapeIndexStart + maxIndexCount` so any (shape.indexStart +
+     *  vertexIndex) read in the VS stays in-bounds; pad values are 0. */
     indices: Uint32Array;
     maxIndexCount: number;
 };
 
-// CPU-side build product, renderer-agnostic, so we cache this at module
-// scope and rebuild the cheap gpu.Geometry wrapper per call. fbm +
-// greedy-mesh is the expensive part (hundreds of ms); GPU buffer
-// construction is microseconds.
+// cached at module scope: fbm + greedy-mesh is the expensive part (hundreds of ms), the
+// gpu.Geometry wrapper is cheap and rebuilt per call.
 type CloudCpuBuild = {
     positions: Float32Array;
     normals: Float32Array;
@@ -280,9 +228,8 @@ function buildCloudCpu(): CloudCpuBuild {
             emitNormals: true,
         });
 
-        // pathological case: a shape's hash gated everything out. unlikely
-        // with current params but cheap to handle, emit an empty range so
-        // its slots draw nothing (instanceCount=0 in the indirect entry).
+        // a shape's hash gated everything out; emit an empty range so its slots draw
+        // nothing (instanceCount=0 in the indirect entry).
         if (!mesh?.normals) {
             shapes.push({
                 indexStart: indexOffset,
@@ -294,11 +241,8 @@ function buildCloudCpu(): CloudCpuBuild {
             continue;
         }
 
-        // anchor positions: X and Z centred on the shape origin so wind
-        // and placement transforms feel symmetric; Y base-anchored at 0
-        // so the cloud sits ABOVE its world anchor. this gives
-        // cloudsAltitude the meaning "cloud floor altitude", a bigger
-        // cloud reaches higher into the sky, never down into the world.
+        // X/Z centred on the shape origin; Y base-anchored at 0 so the cloud sits above
+        // its world anchor, giving cloudsAltitude the meaning "cloud floor altitude".
         const cx = CLOUD_DIM_X * 0.5;
         const cz = CLOUD_DIM_Z * 0.5;
         const centred = new Float32Array(mesh.positions.length);
@@ -308,8 +252,7 @@ function buildCloudCpu(): CloudCpuBuild {
             centred[i + 2] = (mesh.positions[i + 2]! - cz) * CLOUD_VOXEL_SCALE;
         }
 
-        // rebase indices: add the running vertexOffset so all shapes share
-        // one flat index buffer and indirect draws can baseVertex=0.
+        // shares one flat index buffer so indirect draws can baseVertex=0.
         const rebased = new Uint32Array(mesh.indices.length);
         for (let i = 0; i < mesh.indices.length; i++) {
             rebased[i] = mesh.indices[i]! + vertexOffset;
@@ -344,22 +287,19 @@ function buildCloudCpu(): CloudCpuBuild {
         shapeMetaPacked[base + 2] = s.halfExtentX;
         shapeMetaPacked[base + 3] = s.halfExtentY;
         shapeMetaPacked[base + 4] = s.halfExtentZ;
-        // [5..7] reserved padding.
+        // [5..7] reserved padding
     }
 
     return { positions, normals, indices, shapes, shapeMetaPacked };
 }
 
-// build the shared uber geometry. lazily computes CPU data the first
-// time and reuses it across rooms; the gpu.Geometry wrapper is rebuilt
-// per call so each renderer/room owns its own GPU buffers.
+// lazily computes CPU data the first time and reuses it across rooms; the gpu.Geometry
+// wrapper is rebuilt per call so each renderer/room owns its own GPU buffers.
 //
-// vertex-pull path: the returned geometry has NO vertex attributes and
-// NO index buffer. The cloud material reads positions/normals/indices
-// from storage buffers via vertexIndex + per-instance shape lookup, so
-// gpucat issues a single non-indexed `drawIndirect` against the empty
-// geometry. The raw arrays come back on the result for the caller to
-// wrap in storage buffers.
+// vertex-pull path: the returned geometry has no vertex attributes and no index buffer.
+// the cloud material reads positions/normals/indices from storage buffers via vertexIndex
+// plus a per-instance shape lookup, so gpucat issues a single non-indexed `drawIndirect`
+// against the empty geometry.
 export function buildCloudUberGeometry(): CloudUberGeometry {
     if (!cachedCpu) cachedCpu = buildCloudCpu();
     const { positions, normals, indices, shapes, shapeMetaPacked } = cachedCpu;
@@ -367,11 +307,8 @@ export function buildCloudUberGeometry(): CloudUberGeometry {
     let maxIndexCount = 0;
     for (const s of shapes) if (s.indexCount > maxIndexCount) maxIndexCount = s.indexCount;
 
-    // pad index array so any (shape.indexStart + vertexIndex) read with
-    // vertexIndex < maxIndexCount stays in-bounds, even for the last
-    // shape. WebGPU clamps out-of-bounds storage reads, but a clean pad
-    // makes the bound explicit. Pad with 0; the VS discards past
-    // shape.indexCount.
+    // pads so any (shape.indexStart + vertexIndex) with vertexIndex < maxIndexCount stays
+    // in-bounds, even for the last shape; the VS discards past shape.indexCount anyway.
     const lastShape = shapes[shapes.length - 1]!;
     const requiredIndexLen = lastShape.indexStart + maxIndexCount;
     const paddedIndices =

@@ -12,16 +12,12 @@ export { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
 export { block, model, tile } from '../core/registry';
 export type { AABB, BlockShape, BlockShapeAabbs, BlockShapeCube } from '../core/voxels/block-collider';
 export * as blockShape from '../core/voxels/block-collider';
-// bulk write flag: setBlock(..., SetBlockFlags.BULK) / setChunkBlock(..., BULK) defer
-// lighting to a scoped whole-chunk relight + skip inline hooks. for worldgen, paste,
-// prefab stamping. plain setBlock (DEFAULT) stays per-block incremental.
+// SetBlockFlags.BULK defers lighting to a scoped whole-chunk relight and skips
+// inline hooks, for worldgen/paste/prefab stamping; DEFAULT stays per-block incremental.
 export { SetBlockFlags } from '../core/voxels/block-flags';
 export * as blockModel from '../core/voxels/block-model';
-// directional placement utils, for user-defined directional blocks' `place`.
 export * as blockPlace from '../core/voxels/block-place';
 export * as blockPreset from '../core/voxels/block-presets';
-// door and lantern operations (also reachable via blockPreset.*), top-level
-// since they're operations on a placed block, not preset factories.
 export { getDoorOpen, getLanternLit, setDoorOpen, setLanternLit } from '../core/voxels/block-presets';
 export type { Blocks as BlockRegistryData } from '../core/voxels/block-registry';
 export {

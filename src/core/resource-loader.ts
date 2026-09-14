@@ -1,35 +1,8 @@
-/**
- * src/core/resource-loader.ts, the engine's environment resource-I/O capability.
- *
- * Injected into the engine and carried on `Resources` (passed to the texture
- * loaders). Each environment supplies its own:
- *   - client: `loadBytes` = fetch(assetUrl); NO `decodeImage`, the client uses
- *     its DOM image path (createImageBitmap / canvas) inline, unchanged.
- *   - asset pipeline (src/asset-pipeline): `loadBytes` = disk read; `decodeImage`
- *     = sharp.
- *
- * Keeping the sharp implementation behind this injected type is what keeps it
- * out of the client bundle: shared/client code only ever imports the TYPE, and
- * the decode impl lives in the Node-only asset-pipeline entry. There is no
- * conditional `import('sharp')` for a bundler to mis-resolve.
- */
-
 export type ResourceLoader = {
-    /** Load an asset's raw bytes by relative url/path (side-picked in `ensureModel`). */
+    /** Loads an asset's raw bytes by relative url/path. */
     loadBytes(url: string): Promise<Uint8Array>;
-    /**
-     * Decode encoded image bytes → RGBA + dimensions. Present ONLY where the
-     * environment has no DOM image APIs, i.e. the asset pipeline. When present,
-     * the texture loaders take their pipeline branch (loadBytes + decodeImage);
-     * when absent (the client), they use the browser DOM path unchanged.
-     */
+    /** Decodes encoded image bytes into RGBA + dimensions. Present only where the environment has no DOM image APIs (the asset pipeline). */
     decodeImage?(bytes: Uint8Array, mime: string): Promise<{ width: number; height: number; rgba: Uint8Array }>;
-    /**
-     * Start loading `url` now so the matching `loadBytes` resolves from the
-     * in-flight request instead of opening a later one. Present only where
-     * loading has real latency to hide, i.e. the browser's fetch loader; the
-     * disk and vfs loaders have nothing to gain and leave it undefined.
-     * Advisory: every caller must work unchanged when it is absent.
-     */
+    /** Starts loading `url` now so the matching `loadBytes` resolves from the in-flight request. Advisory: every caller must work unchanged when it is absent. */
     prefetch?(url: string): void;
 };

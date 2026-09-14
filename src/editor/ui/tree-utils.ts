@@ -1,38 +1,25 @@
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 
-/* ── Flattened item for dnd-kit sortable ────────────────────────── */
-
 export type FlattenedNode = {
-    /** node.id as string (dnd-kit uses string identifiers) */
+    /** node.id as string, dnd-kit uses string identifiers */
     id: string;
-    /** original numeric node id */
     nodeId: number;
-    /** reference to the actual scene tree node */
     node: Node;
     /** parent's id as string, null for root children */
     parentId: string | null;
     depth: number;
-    /** index within the flat list (used by useSortable) */
+    /** index within the flat list, used by useSortable */
     index: number;
     childCount: number;
     collapsed: boolean;
-    /** false if this node OR any ancestor is non-persistent, used for gray/italic styling */
+    /** false if this node or any ancestor is non-persistent, drives gray/italic styling */
     effectivePersist: boolean;
 };
 
-/* ── Flatten scene tree for dnd-kit ────────────────────────────── */
-
-/**
- * Flatten a scene tree's root children into a flat list suitable for
- * dnd-kit sortable. The root node itself is NOT included, it's always
- * the implicit parent. Only its descendants are flattened.
- *
- * Collapsed nodes' children are excluded from the flat list.
- */
+/** Flattens a scene tree, including the root, into a flat list for dnd-kit sortable. Collapsed nodes' children are excluded. */
 export function flattenSceneTree(sceneTree: SceneTree, collapsedIds: Set<number>): FlattenedNode[] {
     const result: FlattenedNode[] = [];
 
-    // include root node itself
     const rootEffectivePersist = sceneTree.root.persist;
     const rootCollapsed = collapsedIds.has(sceneTree.root.id);
     result.push({
@@ -42,20 +29,16 @@ export function flattenSceneTree(sceneTree: SceneTree, collapsedIds: Set<number>
         parentId: null,
         depth: 0,
         index: 0,
-        // childCount only used to render the collapsed-badge in tree-item.tsx,
-        // skip the recursive count for expanded nodes. for the typical large
-        // tree where most nodes are expanded this avoids O(N²) cost.
+        // only counted for collapsed nodes (renders the collapsed-badge); skipping expanded nodes avoids O(N^2) cost on large trees
         childCount: rootCollapsed ? countDescendants(sceneTree.root) : 0,
         collapsed: rootCollapsed,
         effectivePersist: rootEffectivePersist,
     });
 
-    // then its children
     if (!rootCollapsed) {
         flattenChildren(sceneTree.root, String(sceneTree.root.id), 1, rootEffectivePersist, collapsedIds, result);
     }
 
-    // Assign sequential indices for useSortable
     for (let i = 0; i < result.length; i++) {
         result[i].index = i;
     }
@@ -82,7 +65,7 @@ function flattenChildren(
             node: child,
             parentId,
             depth,
-            index: 0, // will be assigned after flattening
+            index: 0, // assigned after flattening
             childCount: collapsed ? countDescendants(child) : 0,
             collapsed,
             effectivePersist,
@@ -103,18 +86,14 @@ function countDescendants(node: Node): number {
 }
 
 /**
- * Flatten only nodes whose name matches `query` (case-insensitive substring),
- * along with all their ancestors so the tree path stays visible. The collapsed
- * state is ignored, every ancestor of a match is shown.
- *
- * Used when the hierarchy filter input is non-empty.
+ * Flattens only nodes whose name matches `query` (case-insensitive substring), plus their
+ * ancestors so the tree path stays visible. Collapsed state is ignored.
  */
 export function flattenSceneTreeFiltered(sceneTree: SceneTree, query: string): FlattenedNode[] {
     const q = query.trim().toLowerCase();
     if (q.length === 0) return [];
 
-    // walk once to mark every node that should be visible: any node that
-    // matches itself, plus every ancestor of such a node.
+    // marks every node that matches itself, plus every ancestor of such a node
     const visible = new Set<number>();
     function walk(node: Node): boolean {
         let anyVisible = false;
@@ -156,17 +135,11 @@ export function flattenSceneTreeFiltered(sceneTree: SceneTree, query: string): F
     return result;
 }
 
-/* ── Projection: determine depth + parent from drag offset ──────── */
-
 export function getDragDepth(offset: number, indentationWidth: number): number {
     return Math.round(offset / indentationWidth);
 }
 
-/**
- * Given the current flat list, the target item position, and the
- * projected depth (initial depth + drag horizontal offset), compute
- * the actual clamped depth and new parentId.
- */
+/** Computes the clamped depth and new parentId for a drag, from the target item and the projected depth (initial depth + drag horizontal offset). */
 export function getProjection(
     items: FlattenedNode[],
     targetId: string | number,
@@ -193,7 +166,7 @@ export function getProjection(
         if (depth === previousItem.depth) return previousItem.parentId;
         if (depth > previousItem.depth) return previousItem.id;
 
-        // Walk backwards to find the ancestor at this depth
+        // walk backwards to find the ancestor at this depth
         const ancestor = items
             .slice(0, targetIndex)
             .reverse()
@@ -212,8 +185,6 @@ function getMinDepth(nextItem: FlattenedNode | undefined): number {
     return nextItem ? nextItem.depth : 0;
 }
 
-/* ── Get descendants of an item in the flat list ────────────────── */
-
 export function getDescendantIds(items: FlattenedNode[], parentId: string | number): Set<string> {
     const parentIdStr = String(parentId);
     const directChildren = items.filter((item) => item.parentId === parentIdStr);
@@ -227,27 +198,13 @@ export function getDescendantIds(items: FlattenedNode[], parentId: string | numb
     }, new Set<string>());
 }
 
-/* ── Apply flat list result back to the scene tree ─────────────── */
-
-/**
- * Given the final flattened list after a drag operation (with updated
- * parentId/depth), apply reparenting and reordering to the actual
- * scene tree nodes.
- *
- * This is the key function: it reads the flat list's order and parentId
- * assignments and mutates the real scene tree to match.
- */
+/** Applies the final flattened list after a drag operation (with updated parentId/depth) to the actual scene tree, reparenting and reordering nodes to match. */
 export function applyFlattenedOrder(sceneTree: SceneTree, flatItems: FlattenedNode[], removedItems: FlattenedNode[]): void {
-    // Merge removed items (descendants of dragged node) back in.
-    // They keep their original parentId relative to the dragged node,
-    // so they just need to be re-inserted after the dragged node.
+    // removed items (descendants of the dragged node) keep their parentId relative to it,
+    // so re-insert them right after the dragged node
     const allItems = [...flatItems];
 
     if (removedItems.length > 0) {
-        // Find the dragged item (the one whose children were removed)
-        // The removed items' original parent structure is preserved
-        // relative to each other, just splice them back in after
-        // the dragged node.
         const draggedId = removedItems[0].parentId;
         const draggedIndex = allItems.findIndex((item) => item.id === draggedId);
         if (draggedIndex !== -1) {
@@ -255,7 +212,6 @@ export function applyFlattenedOrder(sceneTree: SceneTree, flatItems: FlattenedNo
         }
     }
 
-    // Build a map of parentId -> ordered children
     const childrenMap = new Map<string | null, FlattenedNode[]>();
     for (const item of allItems) {
         const pid = item.parentId;
@@ -263,7 +219,6 @@ export function applyFlattenedOrder(sceneTree: SceneTree, flatItems: FlattenedNo
         childrenMap.get(pid)!.push(item);
     }
 
-    // Apply to scene tree: for each parent, reorder its children array
     // parentId null means children of root
     applyChildren(sceneTree.root, null, childrenMap, sceneTree);
 }
@@ -277,23 +232,18 @@ function applyChildren(
     const orderedChildren = childrenMap.get(parentFlatId);
     if (!orderedChildren) return;
 
-    // Detach all current children (without destroying them)
     const existingChildren = new Map<number, Node>();
     for (const child of parent.children) {
         existingChildren.set(child.id, child);
     }
 
-    // Clear parent's children array
     parent.children = [];
 
-    // Re-attach in the new order, reparenting as needed
     for (const flatItem of orderedChildren) {
         const node = sceneTree.idToNode.get(flatItem.nodeId);
         if (!node) continue;
 
-        // If node's current parent is different, reparent
         if (node.parent !== parent) {
-            // Remove from old parent's children array
             if (node.parent) {
                 const oldChildren = node.parent.children;
                 const idx = oldChildren.indexOf(node);
@@ -304,29 +254,22 @@ function applyChildren(
 
         parent.children.push(node);
 
-        // Recurse into this node's children
         applyChildren(node, flatItem.id, childrenMap, sceneTree);
     }
 }
-
-/* ── Compute reparent/reorder instructions from flat list ───────── */
 
 /** instruction emitted when a node needs to move to a new parent/index */
 export type ReparentInstruction = { nodeId: number; parentId: number; index: number };
 
 /**
- * given the final flattened list after a drag operation, compute the
- * reparent instructions needed to make the scene tree match. this does NOT
- * mutate the scene tree, pass each instruction to reparentAction/reorderAction.
- *
- * parentId in FlattenedNode is String(node.id). null means child of root.
+ * Computes the reparent instructions needed to make the scene tree match the final flattened
+ * list after a drag. Does not mutate the scene tree; pass each instruction to reparentAction/reorderAction.
  */
 export function computeReorderOps(
     sceneTree: SceneTree,
     flatItems: FlattenedNode[],
     removedItems: FlattenedNode[],
 ): ReparentInstruction[] {
-    // merge removed items (dragged node's descendants) back in
     const allItems = [...flatItems];
 
     if (removedItems.length > 0) {
@@ -337,8 +280,7 @@ export function computeReorderOps(
         }
     }
 
-    // build desired parent → ordered children map
-    // parentId null → root's children
+    // parentId null maps to root's children
     const childrenMap = new Map<string | null, FlattenedNode[]>();
     for (const item of allItems) {
         const pid = item.parentId;
@@ -346,7 +288,6 @@ export function computeReorderOps(
         childrenMap.get(pid)!.push(item);
     }
 
-    // walk the desired tree and emit reparent instructions for nodes that moved
     const ops: ReparentInstruction[] = [];
     collectReorderOps(sceneTree.root, null, childrenMap, sceneTree, ops);
     return ops;
@@ -370,12 +311,10 @@ function collectReorderOps(
         const currentParent = node.parent;
         const currentIndex = currentParent ? currentParent.children.indexOf(node) : -1;
 
-        // emit instruction if parent changed or index changed
         if (currentParent !== parent || currentIndex !== i) {
             ops.push({ nodeId: node.id, parentId: parent.id, index: i });
         }
 
-        // recurse
         collectReorderOps(node, flatItem.id, childrenMap, sceneTree, ops);
     }
 }

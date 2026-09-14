@@ -157,11 +157,10 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
 // biome-ignore format: readability
 export type SchemaType<S extends Schema> =
-    // guard: when S is still the bare `Schema` constraint (nothing inferred yet —
-    // e.g. signature help while typing `prefab(`), don't expand the mapping. The
-    // full union distributed recursively is a combinatorial blow-up that OOMs the
-    // TS worker; short-circuit to `any` (matching the old depth-limit fallback).
-    // A concrete inferred schema never matches this and gets its precise type below.
+    // guard: when S is still the bare `Schema` constraint (nothing inferred yet, e.g. signature help while
+    // typing `prefab(`), don't expand the mapping. The full union distributed recursively is a combinatorial
+    // blow-up that OOMs the TS worker, so short-circuit to `any`. A concrete inferred schema never matches
+    // this and gets its precise type below.
     [Schema] extends [S] ? any :
     S extends BooleanSchema ? boolean :
     S extends StringSchema ? string :

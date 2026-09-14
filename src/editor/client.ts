@@ -1,10 +1,3 @@
-// editor/client.ts, the client half of the editor module: the per-player editor
-// script (EditorTrait). The script orchestrates; each concern below owns its state
-// with an init / update / dispose triple, composed into one `Session`. Icons live
-// in icons.ts, the room-session verbs in session.ts, the lens in lens.ts, the UI
-// mount in ui/edit-ui.tsx. The server half is editor/server.ts; nothing here
-// reaches server modules.
-
 import { type PerspectiveCamera, type Scene, unproject } from 'gpucat';
 import type { Quat, Spherical, Vec3 } from 'math';
 import { spherical, vec3 } from 'math';
@@ -91,8 +84,6 @@ import {
 
 type TimeResources = EngineClient['renderer']['time'];
 
-/* ── scratch ── */
-
 const MAX_RAY_DIST = 1024;
 const _hoverRayResult = createVoxelRaycastResult();
 const _nearWorld: Vec3 = [0, 0, 0];
@@ -105,47 +96,29 @@ const _seedBodyPos: Vec3 = [0, 0, 0];
 const _seedBackward: Vec3 = [0, 0, 0];
 const _seedSph: Spherical = [0, 0, 0];
 
-/* ── the script ── */
-
-// per-player editor activation. EditorTrait attaches to:
-//   - a player's server-owned `room.playerNode` in an edit room (server-
-//     seeded on join, replicated to the owning client)
-//   - the client-local lens node (lens.ts) spawned by Shift+`
-//     into a play room (enterLocalEditorView)
-//
-// the trait's *presence* is the on/off switch, no parallel reactive flag,
-// no imperative reconcile. attach → script body runs → editor is alive.
-// detach (via RemoveTraitCommand on the player node, or destruction of the
-// lens node) → onDispose tears it down. env.client gates server-side
-// replicas to no-op.
+// EditorTrait attaches to a player's server-owned room.playerNode in an edit room, or the
+// client-local lens node (lens.ts, Shift+`) in a play room. presence is the on/off switch:
+// attach runs the script body, detach (RemoveTraitCommand or lens node destruction) tears it
+// down via onDispose. env.client gates server-side replicas to no-op.
 script(
     EditorTrait,
     'editor',
     (ctx) => {
         if (!env.client) return;
-        // server-attached EditorTrait on a player node replicates to *every*
-        // client in the room (not just the owner). Gate on ownership so the
-        // script only activates on the client that actually owns this node,
-        // otherwise inspect-server would spin up the editor on the play
-        // client too, registering under the wrong playerId. For lens-spawned
-        // EditorTrait (Shift+`), the lens node is client-local with no
-        // owner, so isOwner returns false; allow that path via the editor's
-        // lens for this player.
+        // an edit-room EditorTrait replicates to every client in the room, so gate on
+        // ownership; a lens-spawned EditorTrait is client-local with no owner, allow that path.
         const lensRoom = ctx.client?.room;
         const lensActivation = lensRoom !== undefined && lensOf(lensRoom)?.subject === ctx.node;
         if (!lensActivation && !isOwner(ctx, ctx.node)) return;
 
-        // wire up scene-list cold-fetch + HMR. idempotent, first room
-        // to reach here arms the subscriptions for the whole process.
+        // idempotent: first room to reach here arms the scene-list subscriptions for the whole process.
         initBlueprints();
 
         const s = openSession(ctx);
         const { client, room, store, transform } = s;
 
-        // grab body PD + transform writeback. PD runs before physics integrates;
-        // writeback runs after physics so Interpolation.snapshot+interpolate
-        // smooths the body's pose between fixed-step ticks for render-rate
-        // motion. no-op when grab isn't active.
+        // PD runs before physics integrates; writeback runs after so interpolation smooths
+        // the body's pose between fixed-step ticks. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
             if (!TransformTool.isInGrab(transform)) return;
             const camera = povCamera(s);
@@ -162,14 +135,11 @@ script(
             mirrorRuntimeState(s);
 
             const active = editorViewActive(room);
-            // tear down any armed placement the moment we're not actively placing
-            // in the transform tool with the editor view focused, so a play/POV swap
-            // mid placement can't leave the preview ghosts armed.
+            // avoids leaving preview ghosts armed after a play/POV swap mid placement.
             if (transform.placement && (!active || store.getState().activeTool !== 'transform')) {
                 TransformTool.cancelPlacement(transform, ctx);
             }
-            // backstop: reap orphaned ghost nodes if any path dropped the
-            // placement without a clean teardown. no-op in the common case.
+            // backstop for any path that dropped the placement without a clean teardown.
             TransformTool.reconcilePlacementGhosts(transform);
             if (!active) {
                 hideVisuals(s.visuals, transform);
@@ -177,10 +147,7 @@ script(
             }
             showVisuals(s.visuals, transform);
 
-            // the active POV camera, resolved once per frame: tools read it for
-            // raycasts, nudge basis and projection, and the gizmo is patched with it
-            // (TransformControls holds its own camera ref) so a POV swap shows
-            // without a rebuild.
+            // gizmo is patched with the resolved camera each frame so a POV swap shows without a rebuild.
             const camera = povCamera(s);
             if (!camera) return;
             transform.gizmo.camera = camera;
@@ -190,9 +157,7 @@ script(
             updateWorldVisuals(s.visuals, s);
             updateHover(client.input.mouseKeyboard, camera, ctx, store);
 
-            // force-release any active grab when we leave transform/grab. covers
-            // tool switches and transformMode flips between frames, when
-            // updateInspect won't fire to clean up.
+            // covers tool switches and transformMode flips between frames, when updateInspect won't fire to clean up.
             const { activeTool } = store.getState();
             if (TransformTool.isInGrab(transform) && (activeTool !== 'transform' || store.getState().transformMode !== 'grab')) {
                 TransformTool.exitGrab(transform, room.scene, room.physics, ctx);
@@ -227,15 +192,13 @@ script(
 
         onDispose(ctx, () => {
             closeSession(s);
-            // a lens whose node died under a scene rebuild (a resync) is gone with
-            // it; exitLocalEditorView already dropped it on the explicit path.
+            // exitLocalEditorView drops the lens on the explicit path; this covers a lens node
+            // that died under a scene rebuild (a resync).
             if (lensActivation) useEditor.getState().setLens(room.playerId, null);
         });
     },
     { editor: true },
 );
-
-/* ── session: everything the editor holds for one player's room ── */
 
 type Session = {
     ctx: ScriptContext;
@@ -345,8 +308,6 @@ function mirrorRuntimeState(s: Session): void {
     }
 }
 
-/* ── visuals: the editor's overlays in the room's render scene ── */
-
 type Visuals = {
     selection: SelectionMeshState;
     inspect: InspectMesh.InspectMeshState;
@@ -436,11 +397,7 @@ function disposeVisuals(v: Visuals, scene: Scene): void {
     PrefabVisuals.dispose(v.prefabs);
 }
 
-/* ── strokes: per-room state of the brush-family tools ── */
-
-// active flag, last centre, accumulating ops, preview keys. per room so two
-// joined edit rooms keep independent strokes. each tool owns its own state;
-// that brush / brush-select / smooth share a stroke harness is their detail.
+// per room so two joined edit rooms keep independent strokes.
 type Strokes = {
     brush: ReturnType<typeof createBrushState>;
     brushSelect: ReturnType<typeof createBrushSelectState>;
@@ -459,13 +416,8 @@ function initStrokes(): Strokes {
     };
 }
 
-/* ── hover: where the pointer's ray lands, published to the store each frame ── */
-
-/** always active regardless of tool. the cursor's ndc is pinned to (0,0)
- *  under pointer lock, so this implicitly fires from the crosshair. the hover
- *  AABB hugs the block's collider shape (slabs, stairs, fences) rather than the
- *  full cell; cube colliders and the synthesized air-mode hover use the unit
- *  cube. */
+/** the hover AABB hugs the block's collider shape (slabs, stairs, fences) rather than the full
+ *  cell; cube colliders and the synthesized air-mode hover use the unit cube. */
 function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: ScriptContext, store: EditRoomStoreApi): void {
     const cursor = getCursor(mk);
     unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
@@ -543,10 +495,8 @@ function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: Scr
     }));
 }
 
-/* ── shortcuts: the editor-only key / wheel bindings ── */
-
-// chord-prefix pattern (V/M/B categories): tap-alone commits on keyup; hold +
-// digit jumps to a slot and suppresses the keyup commit via `consumed`.
+// chord-prefix pattern (V/M/B categories): tap-alone commits on keyup; hold + digit jumps to a
+// slot and suppresses the keyup commit via `consumed`.
 type Shortcuts = {
     heldCategory: ToolCategoryId | null;
     consumed: boolean;
@@ -562,9 +512,8 @@ function updateShortcuts(
     store: EditRoomStoreApi,
     transform: TransformTool.TransformToolState,
 ): void {
-    // cmd/ctrl combos (undo/redo etc.) are handled at the DOM layer (edit-ui.tsx)
-    // so they fire while a tool-option input holds focus. swallow them here so a
-    // held modifier doesn't trigger letter-key tool shortcuts.
+    // cmd/ctrl combos are handled at the DOM layer (edit-ui.tsx) so they fire while a tool-option
+    // input holds focus; swallow here so a held modifier doesn't trigger letter-key shortcuts.
     if (isModDown(mk)) return;
 
     // tool category chord (V/M/B + digit jump, tap to cycle)
@@ -610,10 +559,8 @@ function updateShortcuts(
     // library toggle (E)
     if (isKeyJustDown(mk, LIBRARY_KEYS.toggleLibrary)) store.getState().toggleLibrary();
 
-    // hotbar 1..9 (suppressed while a chord prefix is held). binding a hovered
-    // library tile to a slot is the library's own DOM handler (ui/library.tsx);
-    // it stops the event before it reaches the engine, so a digit read here is
-    // always a plain slot select.
+    // suppressed while a chord prefix is held; library.tsx stops the event before it reaches
+    // here when binding a hovered tile to a slot, so a digit read here is always a plain select.
     if (sc.heldCategory === null) {
         for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
             if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
@@ -623,11 +570,8 @@ function updateShortcuts(
         }
     }
 
-    // wheel cycles the hotbar slot in build/brush tools. grab handles its own
-    // wheel inside transform; fly/orbit see only what we don't consume here.
-    // brush is included because the active slot resolves $active in patterns.
-    // skipped while a UI overlay (library, etc.) holds the pointer so a scroll
-    // inside an open panel scrolls it instead of cycling slots.
+    // brush is included because the active slot resolves $active in patterns; skipped while a
+    // UI overlay holds the pointer so a scroll inside an open panel scrolls it instead.
     const wheelTool = store.getState().activeTool;
     if (
         (wheelTool === 'build' || wheelTool === 'brush') &&
@@ -665,8 +609,6 @@ function updateGrabRotate(s: Session): void {
     }
 }
 
-/* ── the voxel tools and the keys that act on a selection ── */
-
 function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
     const { store, ctx, client, room, nodeBodies, transform, strokes } = s;
     const mk = client.input.mouseKeyboard;
@@ -686,9 +628,7 @@ function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
     if (activeTool === 'lasso-select') {
         updateLassoSelect(store, ctx, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.scene);
     }
-    // right-click context menu for dedicated selection tools. inspect handles its
-    // own inside updateInspect; build / paint / brush / smooth / elevation +
-    // transform use right-click for tool semantics (erase, place commit).
+    // other tools use right-click for their own semantics (erase, place commit); inspect handles its own.
     if (activeTool === 'box-select' || activeTool === 'magic-select' || activeTool === 'lasso-select') {
         openViewportContextMenu(store, client, room, ctx, nodeBodies, camera);
     }
@@ -716,8 +656,7 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
     const { store, client, transform } = s;
     const mk = client.input.mouseKeyboard;
 
-    // r = reset selection or cancel in-progress tool
-    // (skipped while grab is active, R drives free-rotate there)
+    // skipped while grab is active, R drives free-rotate there
     const sBefore = store.getState();
     const hasSelection = !Selection.isEmpty(sBefore.selection);
     const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
@@ -737,11 +676,9 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
         }
     }
 
-    // Escape: cascading cancel for selection tools
     if (!isInputFocused() && isKeyJustDown(mk, 'Escape')) {
         const sNow = store.getState();
         if (sNow.cursor || hasInProgressTool) {
-            // cancel keyboard cursor and/or any in-progress selection tool
             clearBoxSelect(store);
             clearLassoStroke(store);
         } else if (hasSelection) {
@@ -750,12 +687,10 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
         } else if (hasInspectedVoxel) {
             store.setState({ inspectedVoxel: null });
         } else {
-            // nothing active: fall back to the inspect tool
             store.setState({ activeTool: 'inspect' });
         }
     }
 
-    // action shortcuts
     if (!isInputFocused()) {
         const st = store.getState();
         const activeBlockKey = activeBlockKeyOf(useEditor.getState().hotbar, st.activeSlotIndex);
@@ -764,10 +699,8 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
         if (isKeyJustDown(mk, 'KeyF') && isShiftDown(mk) && activeBlockKey) st.replace(parsePattern(activeBlockKey));
     }
 
-    // p = pick
     if (!isInputFocused() && isKeyJustDown(mk, 'KeyP')) store.getState().pick();
 
-    // nudge the committed selection (any selection tool, when no keyboard cursor is active)
     const sNudge = store.getState();
     if (!sNudge.cursor && !sNudge.boxSelect && !Selection.isEmpty(sNudge.selection) && !isInputFocused()) {
         const nudge = readNudgeDelta(client.input, camera.quaternion);
@@ -780,11 +713,8 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
     }
 }
 
-/* ── brush preview: the hover / box-corner selection shown as the brush ── */
-
-// a cache of what the preview was last built from, so a new Selection.T is only
-// allocated when the hover or the box corners moved. per room: two joined edit
-// rooms must not clobber each other's cache.
+// cache of what the preview was last built from, so a new Selection.T is only allocated when
+// the hover or box corners moved.
 type BrushPreview = {
     hoverKey: string;
     cornerA: [number, number, number] | null;
@@ -875,24 +805,12 @@ function updateBrushPreview(p: BrushPreview, store: EditRoomStoreApi, activeTool
     }
 }
 
-/* ── controller: reconcile the attached controller trait with the chosen mode ── */
-
 const ORBIT_TAKEOVER_DISTANCE = 5;
 
-/** runs each tick. targets the lens node when a lens is up (Shift+` peek into a
- *  play room), else the player node (edit-mode flow).
- *
- *  controllers each own their own camera node (created in onInit, destroyed in
- *  onDispose). a naive swap snaps the pose back to whatever default the incoming
- *  controller seeds; we want the user's view preserved. snapshot the outgoing
- *  camera-node pose, swap, then:
- *    1. write the pose back onto the new camera node; fly's tick rebases off
- *       this, and player's edit-mode tick derives cc.look off it.
- *    2. seed any per-controller state that doesn't fall out of (1):
- *       - orbit: its focal point, `target = camPos + forward * 5`, so it orbits
- *         about a point in front of the camera instead of snapping to origin.
- *       - character: place the body at camera-pos - eyeHeight and snap interp
- *         so the body doesn't lerp from its prior location. */
+/** each controller owns its own camera node and would otherwise snap the pose to its default
+ *  on swap; this snapshots the outgoing pose and writes it onto the new controller's node, then
+ *  seeds any per-controller state that doesn't fall out of the pose alone (orbit's focal point,
+ *  character's body position under the eye height). */
 function reconcileController(room: ClientRoom, store: EditRoomStoreApi): void {
     const node = lensOf(room)?.subject ?? room.playerNode;
     const desiredMode = store.getState().controlMode;

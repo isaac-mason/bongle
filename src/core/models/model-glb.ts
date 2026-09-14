@@ -1,42 +1,10 @@
-// Minimal `.glb` parser, accepts the canonical-form subset our worker
-// emits, projects it onto the `ModelBin` shape used everywhere downstream.
-//
-// Scope, by design: ~5KB gzipped vs ~150KB for `@gltf-transform/core`.
-// The trick is that the worker (upload pipeline) does all the
-// canonicalization work server-side with the full lib, so the engine
-// only has to read a narrow subset:
-//
-//   - single-buffer `.glb` (one BIN chunk, embedded; no external URIs)
-//   - vertex attrs `POSITION`/`NORMAL`/`TEXCOORD_0` as `Float32` only
-//     (NORMAL/TEXCOORD_0 optional, defaults match `extractMesh` in the
-//      bongle pipeline so loose user uploads still render)
-//   - indices as `UNSIGNED_BYTE` / `UNSIGNED_SHORT` / `UNSIGNED_INT`
-//     (upcast to `Uint32Array` to match ModelBin's downstream shape)
-//   - one primitive per mesh after worker canonicalization, but we
-//     flatten N → 1 inline so the parser tolerates pre-canonical .glbs
-//     too (preview harness, dev iteration)
-//   - animation channels driving `translation`/`rotation`/`scale` on
-//     node TRS, with `LINEAR`/`STEP`/`CUBICSPLINE` interpolation;
-//     `weights` (morph targets) skipped
-//   - PBR baseColor texture only; images stored in BIN via `bufferView`
-//
-// Anything outside that subset is either silently ignored (extensions,
-// skinning, morph targets, vertex colors, tangents) or throws with a
-// clear message (sparse accessors, unexpected component types). The
-// worker fails fast on the same things and never emits them in the
-// first place, so engine-side throws should be rare in practice.
-
 import { mat4 } from 'math';
 import type { Box3 } from 'math/shapes';
 import type { Model, ModelChannel, ModelClip, ModelImage, ModelMesh, ModelNode } from './model';
 
-/* ── glb framing ── */
-
 const GLB_MAGIC = 0x46546c67; // 'glTF' LE
 const CHUNK_JSON = 0x4e4f534a; // 'JSON' LE
 const CHUNK_BIN = 0x004e4942; // 'BIN\0' LE
-
-/* ── gltf 2.0 JSON shape (only the bits we read) ── */
 
 type GltfNode = {
     name?: string;
@@ -71,10 +39,7 @@ type GltfBufferView = {
     buffer: number;
     byteOffset?: number;
     byteLength: number;
-    // Interleaved vertex layouts (e.g. POSITION/NORMAL/TEXCOORD_0 sharing
-    // one bufferView, each at a different byteOffset, stride = 32B per
-    // vertex), emitted by gltf-transform's writeBinary by default. We
-    // de-interleave in `readAccessor` when stride is non-tight.
+    /** interleaved vertex layouts (gltf-transform's writeBinary default) are de-interleaved in `readAccessor` when stride is non-tight. */
     byteStride?: number;
 };
 
@@ -118,8 +83,6 @@ type GltfRoot = {
     images?: GltfImage[];
 };
 
-/* ── gltf component types (constants from the spec) ── */
-
 const GL_BYTE = 5120;
 const GL_UNSIGNED_BYTE = 5121;
 const GL_SHORT = 5122;
@@ -146,21 +109,11 @@ const TYPE_COMPONENTS: Record<GltfAccessor['type'], number> = {
     MAT4: 16,
 };
 
-/* ── entry point ── */
-
 /**
- * Parse a `.glb` byte buffer into the engine's runtime `Model` shape.
- * Same shape that the .bin path produces via `toModel(unpack(bytes))`,
- * downstream consumers (`Resources`, the runtime handle hydrator) don't
- * care which source format produced it.
- *
- * Throws `Error` on malformed input or out-of-subset content with a
- * message indicating which constraint was violated. Pure function, no
- * I/O, no mutation of the input bytes. Safe in both browser and node.
- *
- * `modelId` is used to name a synthetic wrapper root when the source
- * glb has multiple top-level nodes, matches the bongle codegen barrel's
- * convention for declared models.
+ * Parses a `.glb` byte buffer into the engine's runtime `Model` shape, the same shape the .bin
+ * path produces via `toModel(unpack(bytes))`. Throws `Error` on malformed or out-of-subset input.
+ * Pure function, safe in both browser and node. `modelId` names a synthetic wrapper root when the
+ * source has multiple top-level nodes.
  */
 export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     const { json, bin } = looksLikeGlb(bytes) ? parseGlbContainer(bytes) : parseGltfJson(bytes);
@@ -176,10 +129,8 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     const textures = root.textures ?? [];
     const images = root.images ?? [];
 
-    // ── images: build ModelImage refs; map gltf image index → ModelImage ──
-    // Canonical .glb from the worker always uses bufferView. Raw .gltf
-    // exports often inline images as base64 `data:` URIs on `img.uri`
-    // instead, accept those too. External file URIs still throw.
+    // canonical .glb always uses bufferView; raw .gltf exports often inline images as base64
+    // `data:` URIs on `img.uri` instead, accept those too. External file URIs still throw.
     const outImages: ModelImage[] = [];
     const imageByGltfIdx = new Map<number, ModelImage>();
     for (let i = 0; i < images.length; i++) {
@@ -201,7 +152,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
         imageByGltfIdx.set(i, mi);
     }
 
-    /** Resolve a primitive's material → ModelImage ref, or null. */
+    /** Resolves a primitive's material to a ModelImage ref, or null. */
     const materialImage = (matIdx: number | undefined): ModelImage | null => {
         if (matIdx === undefined) return null;
         const tex = materials[matIdx]?.pbrMetallicRoughness?.baseColorTexture;
@@ -211,17 +162,14 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
         return imageByGltfIdx.get(src) ?? null;
     };
 
-    // ── meshes: extracted lazily during the scene walk so the first node
-    //          referencing an anonymous gltf mesh can name it after itself
-    //          (matches bongle's convention). dedup mesh names independently
-    //          of node names. ─────────────────────────────────────────
+    // meshes are extracted lazily during the scene walk so the first node referencing an
+    // anonymous gltf mesh can name it after itself; mesh names dedup independently of node names.
     const meshNameSet = new Set<string>();
     const meshesByName = new Map<string, ModelMesh>();
-    /** gltf mesh index → ModelMesh ref. populated lazily. */
+    /** gltf mesh index -> ModelMesh ref, populated lazily. */
     const meshByGltfIdx = new Map<number, ModelMesh>();
 
-    // ── scene walk: DFS, build ModelNode refs in place, wiring children
-    //          arrays as we recurse. parent ref is the recursion frame. ──
+    // DFS scene walk, building ModelNode refs in place and wiring children arrays while recursing
     const uniqueNodeNames = new Set<string>();
     const nodeNames: string[] = new Array(gltfNodes.length);
     const nodesByName = new Map<string, ModelNode>();
@@ -270,19 +218,15 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     for (const scene of root.scenes ?? []) {
         for (const ni of scene.nodes ?? []) flatten(ni, null);
     }
-    // orphan-node pass: gltf nodes not reachable via any scene root are
-    // still legal (animation targets sometimes). give them a unique name
-    // for animator channel lookup, but don't append them to the scene
-    // tree, they're not part of the rig hierarchy by definition.
+    // orphan nodes (not reachable via any scene root, e.g. animation-only targets) still get a
+    // unique name for animator channel lookup, but are not appended to the scene tree.
     for (let i = 0; i < gltfNodes.length; i++) {
         if (nodeNames[i] !== undefined) continue;
         const base = gltfNodes[i]!.name || `node_${i}`;
         nodeNames[i] = uniqueName(base, uniqueNodeNames);
     }
-    // mesh extraction pass: gltf meshes never referenced by any scene
-    // node still get a ModelMesh entry (downstream may still look them up
-    // by name via authored MeshTraits). naming falls back to the gltf
-    // mesh's own name or a synthetic `mesh_<i>`.
+    // gltf meshes never referenced by any scene node still get a ModelMesh entry, downstream
+    // code may look them up by name via authored MeshTraits.
     for (let mi = 0; mi < gltfMeshes.length; mi++) {
         if (meshByGltfIdx.has(mi)) continue;
         const m = gltfMeshes[mi]!;
@@ -293,8 +237,6 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
         meshesByName.set(finalName, mesh);
     }
 
-    // ── animations: walk each clip, build ModelChannel refs against the
-    //          ModelNode index by-name. ─────────────────────────────────
     const clipsByName = new Map<string, ModelClip>();
     const clipNameSet = new Set<string>();
     for (let ai = 0; ai < animations.length; ai++) {
@@ -303,14 +245,8 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
         clipsByName.set(name, extractClip(name, anim, accessors, bufferViews, bin, nodeNames, nodesByName));
     }
 
-    // ── model-level AABB: union of per-mesh AABBs transformed by each
-    //          owning node's accumulated world TRS. sceneNodesDFS is in
-    //          DFS order so a single forward pass with cached world
-    //          matrices keyed by node identity does the job. ───────────
     const aabb = computeModelAabb(sceneNodesDFS);
 
-    // ── scene root: single → use directly; multiple → wrap in synthetic
-    //          parent named after the modelId (matches codegen convention). ──
     const sceneRoot = pickOrSynthesizeRoot(modelId, roots);
 
     return {
@@ -341,18 +277,14 @@ function pickOrSynthesizeRoot(modelId: string, roots: ModelNode[]): ModelNode {
     return wrapper;
 }
 
-/* ── helpers ── */
-
 function looksLikeGlb(bytes: Uint8Array): boolean {
     if (bytes.byteLength < 4) return false;
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     return dv.getUint32(0, true) === GLB_MAGIC;
 }
 
-// .gltf JSON variant: same accepted subset as .glb, but the BIN payload
-// rides as an embedded base64 data: URI on buffers[0]. External URIs are
-// rejected, same constraint as `.glb` image bufferViews above (the
-// worker canonicalises everything to embedded before storing).
+// .gltf JSON variant: same accepted subset as .glb, but the BIN payload rides as an embedded
+// base64 data: URI on buffers[0]. External URIs are rejected, same as .glb image bufferViews.
 function parseGltfJson(bytes: Uint8Array): { json: string; bin: Uint8Array } {
     const json = new TextDecoder('utf-8').decode(bytes);
     let root: GltfRoot;
@@ -394,9 +326,7 @@ function parseGlbContainer(bytes: Uint8Array): { json: string; bin: Uint8Array }
     if (bytes.byteLength < 20) {
         throw new Error(`gltfUnpack: truncated .glb (${bytes.byteLength} bytes, need ≥20 for header)`);
     }
-    // dataview over the underlying buffer, offset accounting for
-    // possibly-sliced Uint8Array views (bytes.byteOffset !== 0 happens
-    // when the caller did `new Uint8Array(arrayBuffer, offset, length)`).
+    // offset accounts for possibly-sliced Uint8Array views (bytes.byteOffset !== 0)
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const magic = dv.getUint32(0, true);
     if (magic !== GLB_MAGIC) {
@@ -466,8 +396,7 @@ function sliceBufferView(views: GltfBufferView[], bin: Uint8Array, idx: number):
     return new Uint8Array(bin.buffer, bin.byteOffset + off, v.byteLength);
 }
 
-/** Resolve an accessor to a typed-array view over BIN. Asserts the
- *  accessor matches the expected gl component + element type. */
+/** Resolves an accessor to a typed-array view over BIN, asserting it matches the expected gl component + element type. */
 function readAccessor(
     accessors: GltfAccessor[],
     views: GltfBufferView[],
@@ -510,9 +439,7 @@ function readAccessor(
 
     let array: Float32Array | Uint8Array | Uint16Array | Uint32Array;
     if (interleaved) {
-        // Source bufferView packs other accessors' bytes between our
-        // elements (gltf-transform's default vertex layout). Walk the
-        // stride manually and copy each element's components out.
+        // the bufferView packs other accessors' bytes between our elements; walk the stride manually
         array = makeTypedArray(a.componentType, elementCount);
         const src = new DataView(view.buffer, view.byteOffset + offset, view.byteLength - offset);
         for (let i = 0; i < a.count; i++) {
@@ -588,8 +515,7 @@ function readFloat32Accessor(
     if (r.type !== expectedType) {
         throw new Error(`gltfUnpack: accessor[${idx}] type=${r.type}, expected ${expectedType}`);
     }
-    // copy out of the BIN view, downstream code mutates / retains
-    // beyond the lifetime of the input bytes.
+    // copy out of the BIN view since downstream code retains this beyond the input bytes' lifetime
     return new Float32Array(r.array as Float32Array);
 }
 
@@ -601,9 +527,7 @@ function extractMesh(
     bin: Uint8Array,
     resolveImage: (mat: number | undefined) => ModelImage | null,
 ): ModelMesh {
-    // Mirror bongle's `extractMesh` semantics: concat primitives end-to-end,
-    // rebase indices per primitive. With worker canonicalization this loop
-    // usually runs once.
+    // mirrors bongle's `extractMesh` semantics: concat primitives end-to-end, rebasing indices per primitive
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
@@ -743,10 +667,8 @@ function extractClip(
 }
 
 /**
- * Union every mesh AABB transformed by its owning node's accumulated
- * world TRS. Iterates parent-first (`sceneNodes` is DFS-ordered) so each
- * node's world matrix is just `parent.world * node.local`, looked up by
- * node identity. Returns `[0,0,0,0,0,0]` if no node carries a mesh.
+ * Unions every mesh AABB transformed by its owning node's accumulated world TRS. Iterates
+ * parent-first (`sceneNodes` is DFS-ordered) so each node's world matrix is `parent.world * node.local`.
  */
 function computeModelAabb(sceneNodes: ModelNode[]): Box3 {
     const worldByNode = new Map<ModelNode, ReturnType<typeof mat4.create>>();

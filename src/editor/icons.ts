@@ -1,10 +1,3 @@
-// editor/icons.ts, the pipeline-baked icon loaders: the block-icon atlas and the
-// per-prefab thumbnails, read through the engine resource loader and published to
-// the editor store for the inventory + inspector. `loadEditorAssets(state)` binds
-// the loader (mountEditUI calls it); the host calls the reload/invalidate entries
-// when the asset pipeline ANNOUNCES that an icon artifact moved. This module never
-// goes looking for an artifact on its own — no fs watching, no polling.
-
 import type { EngineClient } from '../client/client';
 import { prefabIconRelPath } from '../client/prefab-icons';
 import { useEditor } from './editor-store';
@@ -19,35 +12,24 @@ const prefabIconInFlight = new Set<string>();
  *  generation drops its result instead of publishing a url nothing revokes. */
 let prefabIconGeneration = 0;
 
-/**
- * Bind the engine resource loader the icon readers go through. The icons
- * THEMSELVES are not fetched here: the asset pipeline announces them (the host's
- * 'pipeline' subscription), and the host calls the reload entries below. Nothing
- * waits on the filesystem or polls for an artifact to appear.
- */
+/** binds the engine resource loader the icon readers go through; icons themselves are fetched
+ *  by the reload entries below, never here. */
 export function loadEditorAssets(state: EngineClient): void {
     useEditor.setState({ resources: state.resources });
 }
 
-/**
- * Re-read the pipeline-baked block-icon atlas into the store, for the inventory,
- * the hotbar and the inspector. Called by the host when the bake announces a new
- * one — never speculatively: the atlas is a png plus a coords sidecar written one
- * after the other, and the announcement is what guarantees both halves are the
- * same pass's.
- *
- * The block atlas is the only icon artifact held in the store: scene + prefab
- * icons are per-file PNGs the UI loads by direct URL.
- */
+/** called by the host when the bake announces a new atlas, never speculatively: the png and its
+ *  coords sidecar are written one after the other, and the announcement guarantees both halves
+ *  are the same pass's. the block atlas is the only icon artifact held in the store; scene +
+ *  prefab icons are per-file PNGs the UI loads by direct URL. */
 export function reloadBlockIconAtlas(): void {
     void loadBakedBlockIcons();
 }
 
-/** Wrap PNG bytes (a baked artifact) in a blob object URL for CSS/img use. */
+/** wraps PNG bytes (a baked artifact) in a blob object URL for CSS/img use. */
 function pngBytesToObjectUrl(bytes: Uint8Array): string {
-    // Blob rejects a SharedArrayBuffer-backed view on some engines, so those copy
-    // into a fresh ArrayBuffer — but the loader hands back plain views, and these
-    // are whole atlas PNGs, so don't pay for the copy on the common path.
+    // Blob rejects a SharedArrayBuffer-backed view on some engines, so those copy into a fresh
+    // ArrayBuffer; the loader hands back plain views for whole atlas PNGs, so skip the copy there.
     const blobSource: BlobPart = bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
     return URL.createObjectURL(new Blob([blobSource], { type: 'image/png' }));
 }
@@ -77,18 +59,13 @@ async function loadBakedBlockIcons(): Promise<void> {
             blockIconRows: meta.rows,
         });
     } catch (err) {
-        // the bake said the artifact was there, so a failure here is real, not a
-        // race with a write — say so rather than leaving an empty palette.
+        // the bake said the artifact was there, so a failure here is real, not a race with a write.
         console.error('[editor] block icon atlas failed to load', err);
     }
 }
 
-/**
- * Lazily load one prefab's pipeline-baked icon (`resources/client/prefab-icons/<id>.png`)
- * and publish its object URL to the store. Called by the inventory icon on first
- * display; cached until a registry change invalidates it. No-op if already loaded,
- * in flight, or not baked yet. Deduped per id.
- */
+/** called by the inventory icon on first display; cached until a registry change invalidates
+ *  it. no-op if already loaded, in flight, or not baked yet. deduped per id. */
 export async function ensurePrefabIcon(prefabId: string): Promise<void> {
     const resources = useEditor.getState().resources;
     if (!resources || !prefabId) return;
@@ -112,7 +89,7 @@ export async function ensurePrefabIcon(prefabId: string): Promise<void> {
             });
         }
     } catch {
-        // not baked yet — a later registry flush + re-display retries.
+        // not baked yet; a later registry flush + re-display retries.
     } finally {
         prefabIconInFlight.delete(prefabId);
     }
@@ -120,9 +97,8 @@ export async function ensurePrefabIcon(prefabId: string): Promise<void> {
     if (raced) await ensurePrefabIcon(prefabId);
 }
 
-/** Drop + revoke cached prefab icons so visible ones re-read their png on next
- *  display: the named ids, or all of them when called with none (a registry flush,
- *  where every prefab's appearance can have moved). */
+/** drops + revokes cached prefab icons so visible ones re-read their png on next display:
+ *  the named ids, or all of them when called with none (a registry flush). */
 export function invalidatePrefabIcons(ids?: readonly string[]): void {
     prefabIconGeneration++;
     const urls = useEditor.getState().prefabIconUrls;

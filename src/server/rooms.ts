@@ -37,8 +37,6 @@ import * as Discovery from './discovery';
 import * as Net from './net';
 import type { EngineServer } from './server';
 
-/* ── Errors ─────────────────────────────────────────────────────── */
-
 export class RoomNotFoundError extends Error {
     constructor(roomId: string) {
         super(`[bongle] room not found: ${roomId}`);
@@ -46,33 +44,28 @@ export class RoomNotFoundError extends Error {
     }
 }
 
-/* ── Room ───────────────────────────────────────────────────────── */
-
 export type { RoomMode as RoomKind } from '../core/protocol';
 
 export type Room = {
-    /** Unique runtime id (e.g. "room_1"). */
+    /** unique runtime id (e.g. "room_1"). */
     id: string;
 
-    /** Scene file path (e.g. "scenes/main.scene.json"). */
+    /** scene file path (e.g. "scenes/main.scene.json"). */
     sceneId: string;
 
-    /** The live scene tree. */
     scene: SceneTree;
 
-    /** Players (per (client, mode)) currently in this room. */
+    /** players (per (client, mode)) currently in this room. */
     players: Set<PlayerId>;
 
-    /** Room mode. */
     mode: RoomMode;
 
-    /** Play rooms: which edit room they were created from. */
+    /** play rooms: which edit room they were created from. */
     sourceRoomId: string | null;
 
-    /** Scene tree context */
     context: SceneTreeContext;
 
-    /** PlayerId → in-scene node bearing PlayerTrait. one body per Player. */
+    /** PlayerId -> in-scene node bearing PlayerTrait, one per Player. */
     playerNodes: Map<PlayerId, Node>;
 
     /** per-room voxel data. always present (may be empty). */
@@ -81,51 +74,29 @@ export type Room = {
     /** per-room physics world. always present. */
     physics: Physics.Physics;
 
-    /** per-room game clock (monotonic seconds). advanced once per server
-     *  tick; pauses when ticks don't fire. read via `ctx.clock.time`. */
+    /** per-room game clock (monotonic seconds), advanced once per server tick; read via `ctx.clock.time`. */
     clock: Clock.Clock;
 
-    /** per-room animation state, caches the [AnimatorTrait] query consumed by
-     *  `Animation.tick`. */
+    /** per-room animation state, caches the AnimatorTrait query consumed by `Animation.tick`. */
     animations: Animation.Animations;
 
     /** per-room server-side chat: command registry + broadcast transport. */
     chat: ChatServer;
 
-    /** this room's scope key in the server's one profiler (`room:<id>`). the
-     *  room's whole tick is a span under it, which is also the slice a panel in
-     *  this room receives. built once, the tick loop opens it every frame. */
+    /** this room's scope key in the server's one profiler (`room:<id>`); the whole tick is a span under it. */
     profileKey: string;
 
     /** per-room log buffer, script logs and tagged engine logs land here. */
     logs: Logs;
 
-    /** monotonically incrementing tick counter. incremented each update(). */
+    /** monotonically incrementing tick counter, incremented each update(). */
     tick: number;
 
-    /**
-     * Namespace this room belongs to. Authored scripts' rooms.* APIs are
-     * scoped to caller's namespace, so a play-session room cannot see/touch
-     * the editor's edit room. Defaults to 'main' (production); editor edit
-     * rooms use 'editor'; each play session allocates 'play-<uuid>'.
-     */
+    /** namespace this room belongs to; defaults to 'main', editor edit rooms use 'editor', each play session allocates 'play-<uuid>'. */
     namespace: string;
 };
 
-/* ── Player ─────────────────────────────────────────────────────── */
-
-/**
- * A `Player` is a client's specific instance of being in a room, a child
- * concept of `Client` (which is the connection itself). One Player exists
- * per (client, room, mode) triple, identified by a server-allocated
- * `PlayerId`. A single client may hold multiple Players in the same room
- * if their modes differ (e.g. an editor view + a play view of the same
- * room, each shown as a separate tab).
- *
- * Each Player owns one in-scene node bearing PlayerTrait, accessed via
- * `room.playerNodes.get(player.id)`, which is where world observation
- * (camera, input, physics ownership) is anchored.
- */
+/** a Player is a client's specific instance of being in a room, one per (client, room, mode) triple. */
 export type { PlayerId };
 
 export type Player = {
@@ -135,37 +106,17 @@ export type Player = {
     mode: PlayerMode;
 };
 
-/* ── Namespace ──────────────────────────────────────────────────── */
-
-/**
- * A namespace is the grouping concept that ties one matchmaking allocation
- * together. Every Room belongs to exactly one Namespace (Room.namespace
- * matches Namespace.id). Production = one 'main' namespace. Editor "Play" =
- * a fresh `play-<uuid>`. Game `client.matchmake({options})` keys a namespace
- * on `canonicalJson(opts)`. The namespace stores its own options so
- * scripts can read them back via `ctx.server.options` without the engine
- * needing a separate per-client cache.
- *
- * The 'main' and 'editor' ids are conventional roots that auto-cleanup
- * leaves alone (they live for the process lifetime).
- */
+/** a namespace ties one matchmaking allocation together; every Room belongs to exactly one. */
 export type Namespace = {
     id: string;
     options: Record<string, string | number | boolean>;
 };
 
-/**
- * Stable JSON serialisation with lexicographically sorted keys. Same shape
- * as the matchmaker's canonicalisation in `apps/service/src/matchmaking/core.ts`,
- * so namespaces minted by `client.matchmake` here key into the same bucket
- * the matchmaker would.
- */
+/** stable JSON serialisation with sorted keys, matching the matchmaker's canonicalisation. */
 export function canonicalJson(opts: Record<string, string | number | boolean>): string {
     const sorted = Object.fromEntries(Object.entries(opts).sort(([a], [b]) => a.localeCompare(b)));
     return JSON.stringify(sorted);
 }
-
-/* ── Rooms registry ─────────────────────────────────────────────── */
 
 export type Rooms = {
     rooms: Map<string, Room>;
@@ -177,12 +128,7 @@ export type Rooms = {
     activePlayer: Map<Client, PlayerId>;
     /** Room ids queued for stop, drained at the end of each tick. */
     pendingStops: Set<string>;
-    /**
-     * Namespaces registered with this server. Lives alongside rooms so the
-     * room module owns the namespace concept end-to-end. createRoom auto-
-     * registers on first reference; destroyRoom auto-removes when the last
-     * room in a non-root namespace ('main'/'editor' excluded) is destroyed.
-     */
+    /** createRoom auto-registers on first reference; destroyRoom auto-removes the last room in a non-root namespace. */
     namespaces: Map<string, Namespace>;
     _nextRoomId: number;
     _nextPlayerId: number;
@@ -201,14 +147,7 @@ export function init(): Rooms {
     };
 }
 
-/* ── Namespace CRUD ─────────────────────────────────────────────── */
-
-/**
- * Look up an existing namespace or create a fresh one. Idempotent on
- * options: if the namespace exists, `options` is ignored (use
- * `setNamespaceOptions` to overwrite). Called by `createRoom` so
- * every room is paired with a registered namespace.
- */
+/** looks up an existing namespace or creates one; `options` is ignored if the namespace already exists. */
 export function getOrCreateNamespace(state: Rooms, id: string, options?: Record<string, string | number | boolean>): Namespace {
     const existing = state.namespaces.get(id);
     if (existing) return existing;
@@ -221,11 +160,7 @@ export function getNamespace(state: Rooms, id: string): Namespace | undefined {
     return state.namespaces.get(id);
 }
 
-/**
- * Overwrite the options on an existing namespace (creates if absent).
- * Runtime calls this once at boot in deployed (game-room) to stamp the
- * matchmaking options onto the 'main' namespace so scripts can read it.
- */
+/** overwrites the options on an existing namespace, creating it if absent. */
 export function setNamespaceOptions(state: Rooms, id: string, options: Record<string, string | number | boolean>): void {
     const ns = state.namespaces.get(id);
     if (ns) {
@@ -239,27 +174,20 @@ export function deleteNamespace(state: Rooms, id: string): void {
     state.namespaces.delete(id);
 }
 
-/* ── Room lifecycle ─────────────────────────────────────────────── */
-
 export type CreateRoomOptions = {
     sceneId: string;
     kind: 'edit' | 'play';
     sourceRoomId?: string;
     rpc: SceneTreeContext['rpc'];
     resources: Resources.Resources;
-    /** Namespace for this room. Defaults to 'main'. */
+    /** namespace for this room, defaults to 'main'. */
     namespace?: string;
 };
 
-/**
- * Create a new room with a fresh scene graph.
- */
 export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     const id = `room_${state._nextRoomId++}`;
     const namespace = opts.namespace ?? 'main';
-    // ensure the namespace exists in the registry before the room references
-    // it. metadata (options) is set separately via setNamespaceOptions
-    // or by the `play` handler when an options-keyed namespace is born.
+    // metadata (options) is set separately via setNamespaceOptions or the `play` handler.
     getOrCreateNamespace(state, namespace);
 
     const sceneGraph = createSceneTree();
@@ -297,7 +225,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
             resources: opts.resources,
             client: undefined,
             server: undefined,
-            authority: true, // the server owns the simulation
+            authority: true, // the server owns the simulation here
             rpc: opts.rpc,
             voxels,
             physics,
@@ -314,21 +242,11 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
 
     state.rooms.set(id, room);
 
-    // NOTE: the WorldTrait (system host) is attached in initializeRoom, NOT
-    // here. Attaching it here fires its systems' onInit
-    // while context.server is still undefined (it's wired at the top of
-    // initializeRoom) — a system's onInit reaching for ctx.server would blow up.
-    // Every createRoom caller runs initializeRoom immediately after, so nothing
-    // observes the root without these traits. Attaching once there — after the
-    // server is wired and after loadSceneTree — makes onInit fire exactly once.
+    // WorldTrait attaches in initializeRoom, not here: context.server is still undefined at this point.
     return room;
 }
 
-/**
- * Destroy a room. Fires leave hooks for every Player, tears down player
- * nodes + scene graph + physics, removes every Player belonging to this
- * room (across all clients/modes), and deletes it from the registry.
- */
+/** fires leave hooks for every Player, tears down player nodes + scene graph + physics, and deletes the room. */
 export function destroyRoom(state: Rooms, roomId: string): void {
     const room = state.rooms.get(roomId);
     if (!room) return;
@@ -346,9 +264,7 @@ export function destroyRoom(state: Rooms, roomId: string): void {
         destroyNode(room.scene, child);
     }
 
-    // the root's systems dispose last, after the entities they iterate: the same
-    // order loadSceneTree uses when it replaces a scene. (the root node itself is
-    // permanent, so destroyNode never reaches these.)
+    // root systems dispose last, after the entities they iterate.
     const rootInstances = room.scene.context?.instances.get(room.scene.root.id);
     if (rootInstances) {
         for (const instance of rootInstances.values()) Scripts.disposeScriptInstance(instance);
@@ -375,21 +291,14 @@ export function destroyRoom(state: Rooms, roomId: string): void {
 
     state.rooms.delete(roomId);
 
-    // auto-cleanup empty namespaces (except 'main' and 'editor', these live
-    // for the process lifetime and are conventional roots). `play`-minted
-    // play-<uuid> namespaces vanish when their last room is destroyed.
+    // 'main' and 'editor' live for the process lifetime; play-<uuid> namespaces vanish with their last room.
     if (room.namespace !== 'main' && room.namespace !== 'editor') {
         const stillUsed = findRoomByNamespace(state, room.namespace);
         if (!stillUsed) state.namespaces.delete(room.namespace);
     }
 }
 
-/* ── Client membership ──────────────────────────────────────────── */
-
-/**
- * Find an existing Player for (client, roomId, mode). Linear scan over the
- * client's Player set; the cardinality is small (one Player per open tab).
- */
+/** finds an existing Player for (client, roomId, mode); linear scan, cardinality is small. */
 export function findPlayer(state: Rooms, client: Client, roomId: string, mode: PlayerMode): Player | undefined {
     const ids = state.playersByClient.get(client);
     if (!ids) return undefined;
@@ -400,13 +309,7 @@ export function findPlayer(state: Rooms, client: Client, roomId: string, mode: P
     return undefined;
 }
 
-/**
- * Allocate a Player for a (client, room, mode). Idempotent, returns the
- * existing Player if one already matches.
- *
- * Does NOT create the in-scene player node; that's `createPlayerNode`,
- * called from `addClientToRoom` / `buildUpRoomContent`.
- */
+/** allocates a Player for a (client, room, mode), idempotent; does not create the in-scene player node. */
 export function joinRoom(state: Rooms, client: Client, roomId: string, mode: PlayerMode): Player {
     const room = state.rooms.get(roomId);
     if (!room) throw new RoomNotFoundError(roomId);
@@ -430,11 +333,7 @@ export function joinRoom(state: Rooms, client: Client, roomId: string, mode: Pla
     return player;
 }
 
-/**
- * Remove a Player by id. Does NOT destroy the in-scene player node,
- * caller's job (typically through leaveClientFromRoom or stopRoomInner /
- * destroyRoom).
- */
+/** removes a Player by id; does not destroy the in-scene player node, that's the caller's job. */
 export function leaveRoom(state: Rooms, playerId: PlayerId): void {
     const player = state.players.get(playerId);
     if (!player) return;
@@ -455,9 +354,7 @@ export function leaveRoom(state: Rooms, playerId: PlayerId): void {
     }
 }
 
-/**
- * Remove every Player belonging to a client. Used on disconnect.
- */
+/** removes every Player belonging to a client. used on disconnect. */
 export function leaveAllRooms(state: Rooms, client: Client): void {
     const ids = state.playersByClient.get(client);
     if (!ids) return;
@@ -466,20 +363,12 @@ export function leaveAllRooms(state: Rooms, client: Client): void {
     }
 }
 
-/* ── Active Player (presence only) ──────────────────────────────── */
-
-/**
- * Set which Player the client has flagged as their active focus. Purely
- * informational, used for presence, not for command routing.
- */
+/** sets which Player the client has flagged as active focus; presence-only, not used for command routing. */
 export function setActivePlayer(state: Rooms, client: Client, playerId: PlayerId): void {
     if (!state.players.has(playerId)) return;
     state.activePlayer.set(client, playerId);
 }
 
-/**
- * The Player the client has flagged as their active focus, or undefined.
- */
 export function getActivePlayer(state: Rooms, client: Client): Player | undefined {
     const id = state.activePlayer.get(client);
     if (!id) return undefined;
@@ -490,8 +379,6 @@ export function getActivePlayerId(state: Rooms, client: Client): PlayerId | unde
     return state.activePlayer.get(client);
 }
 
-/* ── Queries ────────────────────────────────────────────────────── */
-
 export function getRoom(state: Rooms, roomId: string): Room | undefined {
     return state.rooms.get(roomId);
 }
@@ -500,10 +387,7 @@ export function getPlayer(state: Rooms, playerId: PlayerId): Player | undefined 
     return state.players.get(playerId);
 }
 
-/**
- * All Players for a client (may include multiple per roomId, with different
- * modes).
- */
+/** all Players for a client, may include multiple per roomId with different modes. */
 export function getPlayersForClient(state: Rooms, client: Client): Player[] {
     const ids = state.playersByClient.get(client);
     if (!ids) return [];
@@ -515,9 +399,7 @@ export function getPlayersForClient(state: Rooms, client: Client): Player[] {
     return out;
 }
 
-/**
- * Unique room ids a client has any Player in (deduped across modes).
- */
+/** unique room ids a client has any Player in, deduped across modes. */
 export function getRoomsForClient(state: Rooms, client: Client): Set<string> {
     const out = new Set<string>();
     for (const p of getPlayersForClient(state, client)) {
@@ -526,10 +408,7 @@ export function getRoomsForClient(state: Rooms, client: Client): Set<string> {
     return out;
 }
 
-/**
- * Distinct clients currently in a room, deduped across modes (a client
- * holding both an edit and a play Player in the same room counts once).
- */
+/** distinct clients currently in a room, deduped across modes. */
 export function getClientsInRoom(state: Rooms, room: Room): Set<Client> {
     const out = new Set<Client>();
     for (const id of room.players) {
@@ -539,9 +418,7 @@ export function getClientsInRoom(state: Rooms, room: Room): Set<Client> {
     return out;
 }
 
-/**
- * All Players currently in a room (every (client, mode) combination).
- */
+/** all Players currently in a room, every (client, mode) combination. */
 export function getPlayersInRoom(state: Rooms, room: Room): Player[] {
     const out: Player[] = [];
     for (const id of room.players) {
@@ -551,9 +428,6 @@ export function getPlayersInRoom(state: Rooms, room: Room): Player[] {
     return out;
 }
 
-/**
- * Find an existing edit room for a given scene file, if one exists.
- */
 export function findEditRoomBySceneId(state: Rooms, sceneId: string): Room | undefined {
     for (const room of state.rooms.values()) {
         if (room.mode === 'edit' && room.sceneId === sceneId) {
@@ -563,11 +437,7 @@ export function findEditRoomBySceneId(state: Rooms, sceneId: string): Room | und
     return undefined;
 }
 
-/**
- * All rooms that share the given namespace. Used by the play-session
- * lifecycle (e.g. cascading stops on a namespace-root room) and by the
- * authored rooms.* API to enforce namespace scoping on cross-room calls.
- */
+/** all rooms sharing the given namespace; used for cascading stops and namespace scoping. */
 export function findRoomsInNamespace(state: Rooms, namespace: string): Room[] {
     const out: Room[] = [];
     for (const room of state.rooms.values()) {
@@ -576,12 +446,7 @@ export function findRoomsInNamespace(state: Rooms, namespace: string): Room[] {
     return out;
 }
 
-/**
- * The (at most one) room currently occupying the given namespace. Used
- * by the matchmaking-style join flow to find-or-create a play room keyed
- * on canonicalJson(options). Returns the first match, namespaces
- * are unique per session, so there's only ever one root.
- */
+/** the at most one room occupying the given namespace. */
 export function findRoomByNamespace(state: Rooms, namespace: string): Room | undefined {
     for (const room of state.rooms.values()) {
         if (room.namespace === namespace) return room;
@@ -589,12 +454,9 @@ export function findRoomByNamespace(state: Rooms, namespace: string): Room | und
     return undefined;
 }
 
-/* ── higher-level room ops ─────────────────────────────────────── */
-
 export function initializeRoom(state: EngineServer, room: Room): void {
     const t0 = performance.now();
-    // wire server context before loading the scene so onInit handlers can
-    // safely access ctx.server.state and ctx.server.room
+    // wire server context before loading the scene so onInit handlers can safely access ctx.server.
     room.context.server = {
         state,
         room,
@@ -603,19 +465,12 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         },
     };
 
-    // dispose the placeholder physics from createRoom, re-init below.
-    // The Jolt world from createRoom isn't explicitly destroyed (no
-    // world-destroy fn exists today); WASM-side leak is one world per
-    // room boot.
+    // dispose the placeholder physics from createRoom; the Jolt world isn't explicitly destroyed, so this leaks one WASM-side world per room boot.
     const disposeT0 = performance.now();
     Physics.dispose(room.physics);
     const disposeMs = performance.now() - disposeT0;
 
-    // single scene file read covers both halves. load voxels BEFORE
-    // loading the scene graph: loadSceneTree fires script onInit hooks
-    // synchronously, and those hooks may call setBlock to author terrain.
-    // loadVoxels clears voxels.chunks, so it must run first or it will
-    // wipe whatever the scripts wrote.
+    // load voxels before the scene graph: loadSceneTree fires script onInit hooks that may call setBlock, which loadVoxels would wipe.
     let voxDeserMs = 0;
     let sceneParseMs = 0;
     const sceneLoadT0 = performance.now();
@@ -630,8 +485,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         const parseT0 = performance.now();
         loadSceneTree(room.scene, sceneFile.data.nodes);
         sceneParseMs = performance.now() - parseT0;
-        // seed dedupe cache so the first flush compares against real disk
-        // bytes, see saveScene / engine-server boot loop for context.
+        // seed the dedupe cache so the first flush compares against real disk bytes.
         ContentManager.putScene(state.contentManager, room.sceneId, sceneFile.raw);
     }
 
@@ -640,10 +494,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const physMs = performance.now() - physT0;
     room.context.physics = room.physics;
 
-    // Attach the WorldTrait (system host) HERE — the single point,
-    // reached after context.server is wired (top of this fn) and after
-    // loadSceneTree. So each system's factory + onInit fires exactly once, with
-    // ctx.server live. (loadSceneTree wouldn't carry these anyway: persist: false.)
+    // attached here, after context.server is wired and after loadSceneTree, so onInit fires with ctx.server live.
     attachWorldTrait(room.scene.root);
 
     Discovery.invalidateRoomList(state.discovery);
@@ -659,12 +510,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     );
 }
 
-/**
- * Attach a client to a room as a Player. Allocates a new Player if one does
- * not already exist for (client, room, mode). Creates an in-scene player
- * node + fires join hooks for the new Player, sets it active, invalidates
- * discovery. Returns the Player.
- */
+/** attaches a client to a room as a Player, allocating one if it doesn't already exist; creates the in-scene node and fires join hooks. */
 export function addClientToRoom(
     state: EngineServer,
     client: Client,
@@ -689,9 +535,7 @@ export function addClientToRoom(
     const playerNodeT0 = performance.now();
     const playerNode = createPlayerNode(state, room, player);
     const playerNodeMs = performance.now() - playerNodeT0;
-    // Stamp the resolved avatar onto the player's CharacterTrait BEFORE
-    // firing join hooks, so onJoin observes the right modelId/rigType and
-    // JoinArgs carries it.
+    // stamp the resolved avatar before firing join hooks, so onJoin observes the right modelId/rigType.
     const avatarT0 = performance.now();
     Avatars.enqueuePlayer(state, room, player);
     const avatarMs = performance.now() - avatarT0;
@@ -754,12 +598,7 @@ export function createPlayRoom(state: EngineServer, sceneId: string, sourceRoomI
     return room;
 }
 
-/**
- * Create + initialize a room in an explicit namespace. Used by editor
- * command handlers to mint play-session and editor namespaces. Authored
- * scripts cannot reach this, api/rooms.create inherits the caller's
- * namespace.
- */
+/** creates + initializes a room in an explicit namespace; authored scripts cannot reach this directly. */
 export function createRoomInNamespace(
     state: EngineServer,
     sceneId: string,
@@ -795,8 +634,7 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
     const fallbackId = room.mode === 'play' ? (room.sourceRoomId ?? state.defaultRoomId) : state.defaultRoomId;
     const fallback = fallbackId ? state.rooms.rooms.get(fallbackId) : undefined;
 
-    // snapshot Players before mutating room.players. each (client, mode)
-    // gets its own outbound room_left.
+    // snapshot Players before mutating room.players; each (client, mode) gets its own outbound room_left.
     const playerSnapshots: Array<{ id: PlayerId; client: Client; mode: PlayerMode }> = [];
     for (const id of room.players) {
         const p = state.rooms.players.get(id);
@@ -816,9 +654,7 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
 
     destroyRoom(state.rooms, roomId);
 
-    // route any client whose active Player was here to a fallback Player
-    // they already hold in the fallback room. We don't auto-mint Players in
-    // the fallback, leaveClientFromRoom handles that path explicitly.
+    // route to a fallback Player already held in the fallback room; we don't auto-mint Players there.
     if (fallback) {
         for (const client of affectedClients) {
             if (state.rooms.activePlayer.has(client)) continue;
@@ -830,22 +666,12 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
     Discovery.invalidateRoomList(state.discovery);
 }
 
-/* ── Deferred lifecycle (drained post-tick) ─────────────────────── */
-
-/**
- * Queue a stop to be applied after the current tick block. Use this
- * from any caller that may run inside a per-room tick (script hooks,
- * physics callbacks), direct stopRoom() during iteration would tear
- * down nodes mid-loop.
- */
+/** queues a stop to apply after the current tick block, so a caller running inside a per-room tick doesn't tear down nodes mid-loop. */
 export function queueStopRoom(state: Rooms, roomId: string): void {
     state.pendingStops.add(roomId);
 }
 
-/**
- * Apply queued stops. Called from engine-server.update once per tick
- * after every room has ticked.
- */
+/** applies queued stops; called from engine-server.update once per tick after every room has ticked. */
 export function drainPending(state: EngineServer): void {
     if (state.rooms.pendingStops.size > 0) {
         const ids = [...state.rooms.pendingStops];
@@ -854,11 +680,7 @@ export function drainPending(state: EngineServer): void {
     }
 }
 
-/**
- * Drop a single Player. Destroys its in-scene node, notifies the client
- * the room was left, and routes the client back to the default room if
- * they have no remaining active Player.
- */
+/** drops a single Player: destroys its in-scene node, notifies the client, and routes it back to the default room if needed. */
 export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): void {
     const player = state.rooms.players.get(playerId);
     if (!player) return;
@@ -933,29 +755,14 @@ export function stopScene(state: EngineServer, sceneId: string): void {
     Discovery.invalidateRoomList(state.discovery);
 }
 
-/**
- * Create the in-scene player node and attach the trait stack every
- * player wears (Transform + Player + Character). Does NOT fire join
- * hooks or drive the avatar lifecycle, both are owned by the caller
- * (`addClientToRoom` for fresh joins; the reseed branch of
- * `leaveClientFromRoom` for fallback Players).
- *
- * CharacterTrait is the engine's default visual; it boots with the
- * builtin baseAvatar `modelId` and converges to the user's resolved
- * avatar once the avatar subsystem stamps the real id onto it. Game
- * code can replace or remove the trait from `onJoin` if it wants a
- * different visual.
- */
+/** creates the in-scene player node and attaches the trait stack every player wears; does not fire join hooks or drive the avatar lifecycle. */
 export function createPlayerNode(state: EngineServer, room: Room, player: Player): Node {
     const sg = room.scene;
     const node = createNode({ name: `player:${player.id}`, persist: false });
     addChild(sg.root, node);
     setOwner(sg, node, player.id);
     const cs = state.clients.connected.get(player.client);
-    // shared with client-authoritative local rooms (see addPlayerTraits): Transform +
-    // Player + character rig, and default humanoid controls for play-mode players.
-    // edit rooms want a much larger streaming radius so editors can see/edit most of
-    // the world without the camera clipping the streaming frontier.
+    // edit rooms get a much larger streaming radius so editors can see/edit most of the world.
     addPlayerTraits(node, {
         playerId: player.id,
         clientId: player.client,
@@ -976,13 +783,7 @@ export function destroyPlayerNode(room: Room, playerId: PlayerId): void {
     destroyNode(room.scene, node);
 }
 
-/**
- * Handle a `play` message. Dual-purpose: the editor "Play" button (mints a fresh
- * `play-<uuid>` namespace each press) and game `client.matchmake({options})`
- * (keys the namespace on canonicalJson(options) so same-opts callers converge).
- * Finds-or-creates the room, drops any prior play membership elsewhere, joins,
- * and activates.
- */
+/** handles a `play` message: finds-or-creates the namespaced room, drops any prior play membership elsewhere, joins, and activates. */
 export function joinPlay(state: EngineServer, client: Client, message: Protocol.Play): void {
     const sceneId = message.sceneId ?? DEFAULT_SCENE_ID;
     const t0 = performance.now();
@@ -1008,8 +809,7 @@ export function joinPlay(state: EngineServer, client: Client, message: Protocol.
     }
     const createMs = performance.now() - createT0;
 
-    // drop any prior play-mode membership in a different room so a re-entry
-    // doesn't accumulate Players.
+    // drop any prior play-mode membership in a different room so a re-entry doesn't accumulate Players.
     const prior = findPlayer(state.rooms, client, room.id, 'play');
     if (!prior) {
         for (const p of getPlayersForClient(state.rooms, client)) {
@@ -1028,12 +828,7 @@ export function joinPlay(state: EngineServer, client: Client, message: Protocol.
     );
 }
 
-/**
- * Apply an owner client's `sync_update`: validate the sender owns the target
- * node in the named room, resolve the trait by the client's wire index, then
- * hand the fields to Discovery (which updates the diff snapshot + client
- * knowledge). Drops silently on any ownership / resolution mismatch.
- */
+/** applies an owner client's `sync_update`: validates ownership, resolves the trait, then hands the fields to Discovery. */
 export function applyOwnerSync(
     state: EngineServer,
     client: Client,

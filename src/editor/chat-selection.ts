@@ -1,22 +1,3 @@
-/**
- * WorldEdit-style selection slash commands.
- *
- * Shape brushes (`/shape box`, `/shape sphere`, …, `/shape chunk`) rasterise a
- * primitive centred on the hovered voxel (or the current selection's centre).
- * Coordinate selection (`/select box <from> <to>`) fills the explicit cuboid
- * between two `x,y,z` corners. Region modifiers (`/expand`, `/contract`,
- * `/shift`, `/outset`, `/inset`) transform the current voxel selection.
- * Introspection (`/size`, `/count`, `/distr`) reports state.
- *
- * Set-algebra composition via `--add` / `--sub` / `--int` (default replaces).
- * Voxel / node targeting via `--voxels` / `--no-voxels` / `--nodes` /
- * `--no-nodes`; defaults follow the store's sticky `selectTarget`.
- *
- * Nodes are recomputed after every voxel mutation via `rebuildNodeSelection`
- * (origin-in-region), so node selection automatically tracks the voxel set
- * across expand / contract / shift.
- */
-
 import type { ChatClient } from '../client/chat';
 import * as ClientChat from '../client/chat';
 import type { ArgType, CommandHandler, CommandSpec, Suggestion } from '../core/chat-commands';
@@ -33,8 +14,6 @@ import type { NodeBodies } from './node-bodies';
 import { type Mask, parseMask, testMask } from './scene/mask';
 import { rebuildNodeSelection } from './scene/node-selection';
 import { type BrushShape, buildShape } from './scene/shapes';
-
-// ── direction tokens ───────────────────────────────────────────────
 
 type DirectionVec = readonly [number, number, number];
 
@@ -82,13 +61,9 @@ const DirectionArg: ArgType<readonly DirectionVec[]> = {
     describe: () => 'up | down | n | s | e | w | all | vert',
 };
 
-// ── coordinate arg ─────────────────────────────────────────────────
-
 type Vec3 = readonly [number, number, number];
 
-// absolute integer voxel coordinate written `x,y,z` with no spaces, the
-// tokenizer splits on spaces, so a corner is a single token. relative `~`
-// forms are a later addition.
+// written `x,y,z` with no spaces since the tokenizer splits on spaces, so a corner is a single token.
 const Vec3Arg: ArgType<Vec3> = {
     name: 'coord',
     parse: (s) => {
@@ -112,8 +87,6 @@ const Vec3Arg: ArgType<Vec3> = {
 // allocate a runaway number of chunk bitsets. ~65k chunks covers any plausible
 // world; a real typo lands orders of magnitude above it.
 const MAX_BOX_CHUNK_SPAN = 1 << 16;
-
-// ── flag helpers ───────────────────────────────────────────────────
 
 type Target = { voxels: boolean; nodes: boolean };
 
@@ -140,12 +113,7 @@ const ALGEBRA_FLAGS = [
 
 const SHAPE_FLAGS = [...ALGEBRA_FLAGS, ...TARGET_FLAGS];
 
-/**
- * Combine the freshly-built `scratch` selection with `current` per the
- * `--add` / `--sub` / `--int` flags. Default (no flag) replaces.
- * Always returns a fresh Selection reference (callers rely on identity
- * change for reactivity).
- */
+/** default (no flag) replaces; always returns a fresh Selection reference (callers rely on identity change for reactivity). */
 function compose(
     current: Selection.Selection,
     scratch: Selection.Selection,
@@ -166,16 +134,11 @@ function compose(
         Selection.intersect(next, scratch);
         return next;
     }
-    // replace: use the scratch directly (already a fresh object).
     return scratch;
 }
 
-// ── mask arg (local) ───────────────────────────────────────────────
-// thin variant of chat-commands.ts's MaskArg, no in-selection ranking
-// because /count's mask is about classifying voxels, not contextual.
-// keep it simple; if we need cross-feature consistency later, lift the
-// shared closure-built version out of chat-commands.ts.
-
+// thin variant of chat-commands.ts's MaskArg, no in-selection ranking since /count's mask
+// classifies voxels rather than ranking contextually.
 const MaskArg: ArgType<Mask> = {
     name: 'mask',
     parse: (s) => {
@@ -196,8 +159,10 @@ const MaskArg: ArgType<Mask> = {
     describe: () => 'a mask (e.g. stone, !air, stone,dirt, #existing, %50)',
 };
 
-// ── install ────────────────────────────────────────────────────────
-
+/** set-algebra composition via `--add`/`--sub`/`--int` (default replaces); voxel/node targeting
+ *  via `--voxels`/`--no-voxels`/`--nodes`/`--no-nodes`, defaulting to the store's sticky
+ *  `selectTarget`. nodes are recomputed after every voxel mutation via `rebuildNodeSelection`,
+ *  so node selection tracks the voxel set across expand/contract/shift. */
 export function installSelectionChatCommands(
     chat: ChatClient,
     store: EditRoomStoreApi,
@@ -219,13 +184,9 @@ export function installSelectionChatCommands(
         ClientChat.appendLine(chat, { kind: 'system', text });
     }
 
-    /**
-     * The inspect / transform tools suppress the voxel-selection path — they
-     * wipe `selection.chunks` every frame — so a voxel selection committed
-     * from a chat command while one of them is active would vanish instantly.
-     * Switch to box-select first so the committed selection stays and renders.
-     * (All other tools keep the voxel selection, so leave them be.)
-     */
+    // the inspect/transform tools wipe selection.chunks every frame, so a voxel selection
+    // committed from a chat command while one is active would vanish instantly; switch to
+    // box-select first so it stays and renders.
     function ensureVoxelSelectionToolActive(): void {
         const s = store.getState();
         if (s.activeTool === 'inspect' || s.activeTool === 'transform') {
@@ -233,11 +194,6 @@ export function installSelectionChatCommands(
         }
     }
 
-    /**
-     * Finalise a freshly-built shape selection: query nodes if requested,
-     * gate voxels/nodes by the target filter, compose with current
-     * selection per the algebra flag, and commit.
-     */
     function commitShape(scratch: Selection.Selection, flags: Record<string, boolean>, target: Target): void {
         if (target.nodes) {
             rebuildNodeSelection(scratch, ctx, physics, nodeBodies);
@@ -251,11 +207,7 @@ export function installSelectionChatCommands(
         store.setState({ selection: next });
     }
 
-    /**
-     * Anchor point for a new shape selection: floored midpoint of the current
-     * selection's bounds if non-empty, otherwise the currently-hovered voxel.
-     * Returns `null` when neither is available (caller should bail with a hint).
-     */
+    /** floored midpoint of the current selection's bounds, or the hovered voxel; null if neither is available. */
     function anchorPoint(): [number, number, number] | null {
         const sel = store.getState().selection;
         const b = Selection.bounds(sel);
@@ -278,8 +230,6 @@ export function installSelectionChatCommands(
         if (n) parts.push(`${n} node${n === 1 ? '' : 's'}`);
         emit(parts.length ? `${verb}: ${parts.join(' + ')}` : `${verb}: nothing selected`);
     }
-
-    // ── shape selectors ────────────────────────────────────────────
 
     function installShape(label: string, shape: BrushShape, includeHeight: boolean): void {
         const args: CommandSpec['args'] = [{ name: 'size', type: 'number', optional: true }];
@@ -352,8 +302,6 @@ export function installSelectionChatCommands(
         },
     );
 
-    // ── coordinate selection ───────────────────────────────────────
-
     install(
         {
             name: '/select box',
@@ -396,14 +344,8 @@ export function installSelectionChatCommands(
         emit('selection cleared');
     });
 
-    // ── region modifiers ───────────────────────────────────────────
-
-    /**
-     * Expand the voxel selection by `n` voxels along each direction in `dirs`.
-     * Each axis is swept independently against the accumulated result, so
-     * `dirs=all` produces a `(2n+1)³` cuboid envelope (WE semantics), not the
-     * octahedron you'd get from iterating a 6-neighbour Minkowski dilation.
-     */
+    // each axis is swept independently against the accumulated result, so dirs=all produces a
+    // (2n+1)^3 cuboid envelope (WE semantics), not the octahedron of a 6-neighbour Minkowski dilation.
     function grow(sel: Selection.Selection, n: number, dirs: readonly DirectionVec[]): Selection.Selection {
         let current = sel;
         const scratch = Selection.create();
@@ -420,12 +362,8 @@ export function installSelectionChatCommands(
         return current;
     }
 
-    /**
-     * Inverse of `grow`: Minkowski erosion by the same per-axis line segment.
-     * A voxel `v` survives the sweep along `d` iff `v + d, v + 2d, … v + nd`
-     * are all in `current`. Equivalent to intersecting with the inverse-shifted
-     * copies; iterated per direction so `dirs=all` strips n layers off each face.
-     */
+    // inverse of grow: a voxel v survives iff v+d, v+2d, ... v+nd are all in current, so
+    // dirs=all strips n layers off each face.
     function shrink(sel: Selection.Selection, n: number, dirs: readonly DirectionVec[]): Selection.Selection {
         let current = sel;
         const scratch = Selection.create();
@@ -567,9 +505,6 @@ export function installSelectionChatCommands(
         },
         ({ args, flags }) => {
             const n = Math.floor((args.n as number | undefined) ?? 0);
-            // shift uses a single direction; collapse multi-axis dirs (all/vert)
-            // by summing their first component, practically callers will use a
-            // single-axis token. error if user passed a multi-axis one.
             const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS.up!;
             if (dirs.length !== 1) {
                 emit('shift requires a single-axis direction (use up/down/n/s/e/w)');
@@ -588,8 +523,6 @@ export function installSelectionChatCommands(
             emit(`shifted by ${n}`);
         },
     );
-
-    // ── introspection ──────────────────────────────────────────────
 
     install({ name: '/size', description: 'report the selection bounds + voxel/node counts', args: [] }, () => {
         const sel = store.getState().selection;

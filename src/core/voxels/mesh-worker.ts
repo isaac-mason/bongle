@@ -1,45 +1,3 @@
-// ── mesh worker entry ──────────────────────────────────────────────
-//
-// Web worker that meshes voxel chunks off the main thread. Worker holds:
-//   - one decoded BlockRegistry (re-installed on registry rebuild)
-//   - one persistent chunk cache (a real `Voxels`) kept current by packet
-//     set/delete; a single world is meshed at a time (the active room), reset on
-//     an active-room swap via `clearCache`.
-//   - module-scope slab scratch via chunk-mesher.ts's _slab/_blockLightSlab
-//     (each worker is a separate module instance, so each gets its own
-//      private scratch, no contention with main or other workers)
-//
-// Per batch: main transfers ONE packcat MeshTasks buffer (the batch's set/delete
-// cache deltas + K task chunks) plus K output quad triples (opaque/transparent/
-// translucent). The worker applies the deltas to its chunk cache, then for each
-// task rebuilds the neighbourhood from the cache and runs `buildSlabs` +
-// `meshChunk` — so the strided 18³ slab build happens here, off the main thread —
-// and posts back K PassMesh results + recycled buffers in one message. Batching
-// collapses K chunks' postMessage cost to a single round-trip; recycling lets
-// main return the buffers to its dispatcher pools with zero re-allocation.
-//
-// Protocol:
-//   main -> worker
-//     { cmd: 'initRegistry', version: number, buf: ArrayBuffer }
-//         [transfer: buf]
-//     { cmd: 'meshTasks', epoch: number, packetBuf: ArrayBuffer, outBufs: ArrayBuffer[] }
-//         [transfer: packetBuf + every outBufs entry]
-//         (outBufs[i*3 + {0,1,2}] = opaque/transparent/translucent for task i)
-//         (epoch = main's world epoch at post time, echoed on the result so a
-//          batch that outlives an active-room swap is dropped on arrival)
-//     { cmd: 'clearCache' }   // active-room swap: drop the chunk cache
-//   worker -> main
-//     { cmd: 'initRegistryAck', version: number }
-//     { cmd: 'result', epoch: number, results: MeshWorkerResult[], workUs,
-//       recycle: { packetBuf, outBufs } }
-//         [transfer: packetBuf + every outBufs entry; each result's PassMesh.quads
-//          views point into its outBufs triple, so transferring the underlying
-//          ArrayBuffers carries them too]
-//
-// The worker never references DOM, Voxels, or any main-thread-only
-// resource. It can be unit-tested by importing this module's `handleMessage`
-// directly with a stub `post` function, see mesher.test.ts.
-
 import type { Blocks } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
 import { buildMeshInput, type ChunkMeshResult, type MeshOutput, meshChunk } from './chunk-mesher';
@@ -52,14 +10,11 @@ export type MeshWorkerInMsg =
           cmd: 'meshTasks';
           /** main's world epoch when the batch was posted; echoed on the result. */
           epoch: number;
-          // packcat MeshTasks: the batch's set/delete + K tasks, one buffer
           packetBuf: ArrayBuffer;
-          // output quad buffers, flat: outBufs[i*3 + {0:opaque,1:transparent,2:translucent}]
-          // for tasks[i]. length === 3 × task count.
+          /** flat outBufs[i*3 + {0:opaque,1:transparent,2:translucent}] for tasks[i]; length === 3 * task count. */
           outBufs: ArrayBuffer[];
       }
-    // active-room swap on main: drop the chunk cache so the next batch reloads the
-    // newly-active world's neighbourhoods from scratch. fire-and-forget.
+    // active-room swap: drop the chunk cache so the next batch reloads from scratch. fire-and-forget.
     | { cmd: 'clearCache' };
 
 /** one meshed chunk in a result batch. */
@@ -73,21 +28,16 @@ export type MeshWorkerOutMsg =
           epoch: number;
           /** one entry per task in the batch, in the same order. */
           results: MeshWorkerResult[];
-          /** worker-side wall time for the whole batch (slab build + mesh), µs. */
+          /** worker-side wall time for the whole batch (slab build + mesh), in microseconds. */
           workUs: number;
           recycle: { packetBuf: ArrayBuffer; outBufs: ArrayBuffer[] };
       };
 
-/** state held by one worker instance. Module-scope so the worker entry
- *  can call into it after `self.onmessage` dispatches a message. Tests
- *  call `handleMessage` directly with a private `WorkerState`. */
+/** state held by one worker instance; tests call `handleMessage` directly with a private `WorkerState`. */
 export type WorkerState = {
     registry: Blocks | null;
     registryVersion: number;
-    /** persistent chunk cache the mesher reads — a real `Voxels`, kept current by
-     *  packet set/delete (`loadChunk`/`removeChunk`). null until the first
-     *  `initRegistry` (createVoxels needs the registry); rebuilt empty on
-     *  `clearCache` (active-room swap). Main tracks a matching per-worker model. */
+    /** chunk cache kept current by packet set/delete; null until the first `initRegistry`, rebuilt empty on `clearCache`. */
     voxels: Voxels | null;
 };
 
@@ -95,29 +45,19 @@ export function createWorkerState(): WorkerState {
     return { registry: null, registryVersion: -1, voxels: null };
 }
 
-/** main worker message handler. Returns the outbound message (or null
- *  for fire-and-forget). The real worker entry (`mesh-worker.entry.ts`)
- *  wraps this with `self.onmessage` + postMessage; tests call it
- *  directly with a stub `WorkerState`. */
+/** worker message handler; returns the outbound message or null for fire-and-forget. `mesh-worker.entry.ts` wraps this with postMessage. */
 export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWorkerOutMsg | null {
     if (msg.cmd === 'initRegistry') {
         const decoded = deserializeBlockRegistryForWorker(msg.buf);
-        // Cast: decoded is a Partial<BlockRegistry> populated with every
-        // table meshChunk reads. The mesher's destructure-then-read
-        // pattern at chunk-mesher.ts:1484 is the contract, unset fields
-        // (physics, handles) are never accessed.
+        // decoded is a Partial<BlockRegistry> with every field meshChunk reads; unset fields (physics, handles) are never accessed.
         state.registry = decoded as unknown as Blocks;
         state.registryVersion = msg.version;
-        // the cache is a real Voxels; createVoxels needs the registry, so it's
-        // built here on first init (kept across rebuilds so the cache survives).
+        // built on first init since createVoxels needs the registry; kept across rebuilds.
         if (state.voxels === null) state.voxels = createVoxels(state.registry);
         return { cmd: 'initRegistryAck', version: msg.version };
     }
     if (msg.cmd === 'clearCache') {
-        // active-room swap on the main thread: rebuild an empty cache so the next
-        // batch reloads the newly-active world's neighbourhoods from scratch. A
-        // chunk the new world lacks (but the old one had) must not linger as a
-        // phantom neighbour and corrupt boundary meshing. Registry is untouched.
+        // rebuild empty so a chunk the old world had doesn't linger as a phantom neighbour and corrupt boundary meshing.
         if (state.registry !== null) state.voxels = createVoxels(state.registry);
         return null;
     }
@@ -125,9 +65,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         const recycle = { packetBuf: msg.packetBuf, outBufs: msg.outBufs };
         const mt = unpackMeshTasks(new Uint8Array(msg.packetBuf));
         const voxels = state.voxels;
-        // apply the cache deltas FIRST — always, even on the drop path below — so
-        // the worker cache never diverges from main's model of it. loadChunk links
-        // new chunks / updates existing in place; removeChunk unlinks.
+        // deltas apply before meshing, even on the drop path below, so the cache never diverges from main's model.
         if (voxels !== null) {
             for (const s of mt.set) loadChunk(voxels, s.cx, s.cy, s.cz, s.version, s.data, s.light, s.palette);
             for (const d of mt.delete) removeChunk(voxels, d.cx, d.cy, d.cz);
@@ -146,8 +84,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
                     transparent: new Uint32Array(msg.outBufs[i * 3 + 1]!),
                     translucent: new Uint32Array(msg.outBufs[i * 3 + 2]!),
                 };
-                // build the 18³ slab from the worker's cache (off the main
-                // thread) — the neighbourhood is already loaded.
+                // builds the 18^3 slab from the worker's cache; the neighbourhood is already loaded.
                 const input = buildMeshInput(voxels, task.cx, task.cy, task.cz);
                 result = meshChunk(out, input, state.registry);
             }

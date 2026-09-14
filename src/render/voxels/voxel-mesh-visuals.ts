@@ -1,35 +1,3 @@
-// voxel mesh visuals, per-room HW-instanced rendering for VoxelMeshTrait
-// instances. mirrors mesh-visuals.ts: one non-indexed instanced draw
-// (`mesh.draws`) per (model × source-chunk) bucket, with instanceCount =
-// number of currently-visible traits referencing that model.
-//
-// architecture:
-//   - shared meshArena packs each VoxelModel's quads once (refcounted by
-//     model). bakeModel is the single writer; mutations to a baked model
-//     are dropped until `invalidateVoxelModel(visuals, model)` is called.
-//   - per-trait `VoxelMeshState` on `VoxelMeshTrait._state` holds the
-//     stable instanceData slot, the resolved modelEntry, this instance's
-//     own frustum-cull entry (`cull`, seeded from the model's local AABB
-//     and registered with the room culler), and the optional ModelTrait
-//     ancestor used for inherited visibility.
-//   - per frame: walk alive states, skip when `cull.visible` is false,
-//     write instanceData (transform + params), bucket by (modelEntry,
-//     sourceChunkIdx). then walk buckets, write slotMap entries (packed
-//     realSlot | bucketId<<24), write chunkInfoTable, emit one MeshDraw
-//     per bucket into `mesh.draws` (the renderer loops it). Both the storage
-//     buffers are read-only, so gpucat lowers their reads to buffer-texture
-//     fetches on WebGL2 automatically — one material source, both backends.
-//   - CPU cull only. Visibility writes `cull.visible` once per frame.
-//
-// the VS does:
-//   slotEntry  = slotMap[instanceIndex]
-//   realSlot   = slotEntry & SLOT_MASK
-//   bucketId   = slotEntry >> SLOT_BITS
-//   chunk      = chunkInfoTable[bucketId]   // subOrigin, quadStart
-//   instance   = instanceData[realSlot]     // worldMatrix, params
-//
-// no GPU cull compute, Visibility does the frustum work via DBVT.
-
 import type { Scene } from 'gpucat';
 import { packTo } from 'gpucat';
 import { vec3 } from 'math';
@@ -67,8 +35,6 @@ type VoxelMeshQuery = ReturnType<
     typeof query<[typeof VoxelMeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
 >;
 
-// ── per-trait state ─────────────────────────────────────────────────
-
 export type VoxelMeshState = {
     /** stable instanceData slot, indexes into the merged transform+params buffer. */
     slot: number;
@@ -77,9 +43,8 @@ export type VoxelMeshState = {
     modelRef: VoxelModel | null;
     /** resolved model entry (refcounted geometry). */
     modelEntry: ModelEntry | null;
-    /** this instance's own frustum-cull entry, registered with the shared
-     *  Visibility culler at alloc, seeded from the VoxelModel's local AABB.
-     *  The culler writes `cull.visible`. */
+    /** frustum-cull entry registered with the shared Visibility culler at alloc, seeded
+     *  from the VoxelModel's local AABB. The culler writes cull.visible. */
     cull: Visibility.CullState;
     /** optional ModelTrait ancestor, for inherited visibility. */
     model: ModelTrait | null;
@@ -88,8 +53,6 @@ export type VoxelMeshState = {
     /** TransformTrait._version observed at the most recent transform upload. */
     transformVersionAtUpload: number;
 };
-
-// ── visuals ────────────────────────────────────────────────────────
 
 export type VoxelMeshVisuals = {
     /** this room's live VoxelMesh instances (+ their cull entries); per-frame
@@ -103,16 +66,9 @@ export type VoxelMeshVisuals = {
     scene: Scene;
 };
 
-// ── init ────────────────────────────────────────────────────────────
-
-/**
- * Create per-room voxel-mesh visuals: ready the client-global instance batch
- * (reset its allocator + scratch + draws + model registry; buffers + arena
- * untouched) and mount its Mesh into this room's scene. The batch — Mesh,
- * Geometry, mesh arena, per-slot buffers, model registry — is owned by
- * `VoxelMeshResources` and survives room swaps; only this room's use of it
- * (alive-states, cull entries, scene-tree query) lives here.
- */
+/** Creates per-room voxel-mesh visuals: readies the client-global instance batch and mounts
+ *  its Mesh into this room's scene. The batch is owned by VoxelMeshResources and survives
+ *  room swaps; only this room's alive-states, cull entries, and scene-tree query live here. */
 export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree): VoxelMeshVisuals {
     resetVoxelMeshBatch(batch);
     scene.add(batch.mesh);
@@ -123,8 +79,6 @@ export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree):
         scene,
     };
 }
-
-// ── update ──────────────────────────────────────────────────────────
 
 export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibility: Visibility.Visibility): void {
     const q = visuals._query;
@@ -137,7 +91,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
     let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
     let dirtyMaxSlot = -1;
 
-    // ── phase 1: allocate / refresh states ──────────────────────────
     for (const [vmTrait, transformTrait, modelAncestor] of q) {
         let state = vmTrait._state;
         const model = vmTrait.model;
@@ -151,7 +104,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
             continue;
         }
 
-        // ── slow path ─────────────────────────────────────────────
         if (model === null) {
             if (state !== null) destroyInstance(visuals, batch, vmTrait, visibility);
             continue;
@@ -175,7 +127,7 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         }
 
         // register with a cull box from the VoxelModel's local AABB
-        // (boundsMin/Max − origin, the space the mesh is baked in).
+        // (boundsMin/Max minus origin, the space the mesh is baked in).
         const cull = Visibility.add(visibility, voxelLocalAabb(box3.create(), model), transformTrait);
 
         state = {
@@ -192,14 +144,12 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         visuals.aliveStates.push(state);
     }
 
-    // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
         if (state.lastSeenFrame !== frameId) destroyInstance(visuals, batch, state.trait, visibility);
     }
 
-    // ── phase 3: per-instance writes + bucket sort ──────────────────
     const buckets = batch._bucketScratch;
     const freeBuckets = batch._freeBuckets;
     for (const arr of buckets.values()) arr.length = 0;
@@ -220,7 +170,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         const slot = state.slot;
         const slotBase = slot * MODEL_INSTANCE_STRIDE_F32;
 
-        // ── transform upload, gated on TransformTrait._version ──
         const worldMatrix = getVisualWorldMatrix(transformTrait);
         const transformVersion = transformTrait._version;
         if (transformVersion !== state.transformVersionAtUpload) {
@@ -230,8 +179,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
             if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
         }
 
-        // ── lighting + params, written every visible frame ──
-        // per-corner light (`meshLight`, sampled in the VS) is the primary
         packTo(InstanceParams, instArr, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
             tint: trait.tint,
             flash: trait.flash,
@@ -243,7 +190,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         if (slot < dirtyMinSlot) dirtyMinSlot = slot;
         if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
 
-        // ── bucket by (model entry, source-chunk idx) ─────────────
         const chunkAllocs = entry.chunkAllocs;
         const entryId = entry.id;
         for (let c = 0; c < chunkAllocs.length; c++) {
@@ -257,7 +203,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         }
     }
 
-    // ── phase 4: pack slotMap + chunkInfoTable + drawIndirect ───────
     let activeBucketCount = 0;
     for (const arr of buckets.values()) {
         if (arr.length > 0) activeBucketCount++;
@@ -336,27 +281,18 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
     }
 }
 
-// ── dispose ─────────────────────────────────────────────────────────
-
-/**
- * Dispose per-room voxel-mesh visuals: tear down every instance this room holds
- * in the client-global batch (frees the allocator slot, unregisters cull, drops
- * the model refcount — which frees the model's arena ranges when it hits zero) and
- * detach the batch Mesh from this room's scene. The batch's GPU buffers + arena
- * are NOT freed — they survive for the next room's `init`.
- */
+/** Disposes per-room voxel-mesh visuals: tears down every instance this room holds and
+ *  detaches the batch Mesh from this room's scene. The batch's GPU buffers and arena are
+ *  not freed; they survive for the next room's init. */
 export function dispose(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibility: Visibility.Visibility): void {
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
     visuals.scene.remove(batch.mesh);
 }
 
-// ── invalidate ──────────────────────────────────────────────────────
-
-/** drop a VoxelModel's baked geometry so the next reference re-bakes.
- *  required after mutating the model's voxels, bakes are immutable
- *  otherwise. live instances referencing this model are torn down and
- *  rebuilt on the next update tick. */
+/** Drops a VoxelModel's baked geometry so the next reference re-bakes, since bakes are
+ *  immutable otherwise. Live instances referencing this model are torn down and rebuilt
+ *  on the next update tick. */
 export function invalidateVoxelModel(
     visuals: VoxelMeshVisuals,
     batch: VoxelMeshBatch,
@@ -378,8 +314,6 @@ export function invalidateVoxelModel(
     for (const ca of entry.chunkAllocs) arenaFree(batch.meshArena, ca.quadStart);
     batch.modelEntries.delete(model);
 }
-
-// ── instance lifecycle ──────────────────────────────────────────────
 
 function destroyInstance(
     visuals: VoxelMeshVisuals,
@@ -425,8 +359,6 @@ function destroyInstance(
     trait._state = null;
 }
 
-// ── geometry registration (refcounted) ──────────────────────────────
-
 function registerGeometry(batch: VoxelMeshBatch, model: VoxelModel): ModelEntry {
     let entry = batch.modelEntries.get(model);
     if (entry) {
@@ -453,21 +385,16 @@ function deregisterGeometry(batch: VoxelMeshBatch, model: VoxelModel): void {
 }
 
 function modelEntryById(batch: VoxelMeshBatch, id: number): ModelEntry | null {
-    // linear scan, modelEntries is typically tiny (one per unique
-    // VoxelModel in use this room). beats holding a parallel id→entry map.
+    // linear scan; modelEntries is typically tiny (one per unique model in use this room).
     for (const entry of batch.modelEntries.values()) {
         if (entry.id === id) return entry;
     }
     return null;
 }
 
-// ── bake ────────────────────────────────────────────────────────────
-
-/** mesh every non-empty source chunk of `model.voxels` and pack the
- *  opaque + transparent + translucent quads into the shared meshArena.
- *  translucent quads are baked into the same opaque stream, no per-quad
- *  depth sort across instances. acceptable for object-scale models; the
- *  chunk path still handles in-world translucents with proper ordering. */
+/** Meshes every non-empty source chunk of model.voxels and packs the opaque, transparent,
+ *  and translucent quads into the shared meshArena. Translucent quads are baked into the
+ *  same stream with no per-quad depth sort, acceptable for object-scale models. */
 function bakeModel(batch: VoxelMeshBatch, model: VoxelModel): SourceChunkAlloc[] {
     const voxels = model.voxels;
     const registry = voxels.registry;
@@ -506,10 +433,8 @@ function bakeModel(batch: VoxelMeshBatch, model: VoxelModel): SourceChunkAlloc[]
     return out;
 }
 
-// ── cull box helper ─────────────────────────────────────────────────
-
-/** write the VoxelModel's local AABB (boundsMin/Max − origin, the space the
- *  mesh is baked in) into `out` and return it. */
+/** Writes the VoxelModel's local AABB (boundsMin/Max minus origin, the space the mesh is
+ *  baked in) into out and returns it. */
 function voxelLocalAabb(out: Box3, model: VoxelModel): Box3 {
     const ox = model.origin[0];
     const oy = model.origin[1];

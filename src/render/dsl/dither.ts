@@ -1,20 +1,12 @@
 import { add, Discard, d, Fn, f32, fract, fragCoord, If, mul, type Node } from 'gpucat';
 import { ALPHA_REF } from '../../core/voxels/mip-levels';
 
-// ── alpha cutout + dither ───────────────────────────────────────────
 /**
- * Fragment discard shared by every albedo-based trait: a hard alpha cutout
- * (`alpha < 0.5`) plus an interleaved-gradient screen-door so partial
- * coverage fades pixelly instead of popping. Coverage is owned solely by the
- * `dither` knob:
- *
- *   fade = dither   // 0 = solid, 1 = gone
- *
- * Cheap (a few fracts) and stays in the opaque pipeline, no sort, no blend.
- * Returns `color`, or discards the fragment. `dither = 0` is a pure cutout
- * (the no-fade fast path). Tint never feeds this, it can't gate coverage.
+ * shared by every albedo-based trait: a hard alpha cutout plus an interleaved-gradient
+ * screen-door so partial coverage fades pixelly instead of popping. coverage is owned solely by
+ * `dither` (0 = solid, 1 = gone); tint never feeds this, it can't gate coverage. cheap and stays
+ * in the opaque pipeline, no sort, no blend. `dither = 0` is a pure cutout, the no-fade fast path.
  */
-
 export function ditherDiscard(color: Node<d.vec4f>, alpha: Node<d.f32>, dither: Node<d.f32>): Node<d.vec4f> {
     const discard = Fn(
         (c, a, fade, fragX, fragY) => {

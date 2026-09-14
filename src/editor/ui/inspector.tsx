@@ -22,8 +22,6 @@ function useTraitsBySlot(): Array<TraitHandle | undefined> {
     return registry.slotToTrait;
 }
 
-/* ── Schema-driven property editors ─────────────────────────────── */
-
 function NumberEditor({
     value,
     schema,
@@ -52,8 +50,6 @@ function StringEditor({ value, onChange }: { value: string; onChange: (v: string
 function BooleanEditor({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
     return <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} className="accent-accent" />;
 }
-
-/* ── Quaternion editor (Blender-style mode toggle) ──────────────── */
 
 import { loadInspectorRotationMode, type InspectorRotationMode as RotationMode, saveInspectorRotationMode } from '../preferences';
 
@@ -99,16 +95,9 @@ function QuaternionEditor({ value, onChange }: { value: number[]; onChange: (v: 
     );
 }
 
-/**
- * Three Euler-angle inputs (degrees). Draft is the source of truth while the
- * user is editing; we only commit (euler→quat→onChange) on blur or Enter.
- * That avoids round-tripping the canonical quat back through decode on every
- * keystroke, which would jitter the unfocused axes (especially near gimbal
- * lock) and fight the user's typing.
- *
- * Draft is held as strings so intermediate states like "" / "-" / "1." don't
- * coerce to NaN-or-zero mid-typing.
- */
+// draft is the source of truth while editing, held as strings (so "" / "-" / "1." don't
+// coerce to NaN mid-typing), and only committed to the canonical quat on blur or Enter, to
+// avoid jittering the unfocused axes near gimbal lock on every keystroke.
 function EulerInputs({ value, order, onChange }: { value: number[]; order: EulerOrder; onChange: (q: number[]) => void }) {
     const draftFromValue = (): [string, string, string] => {
         const e = quatToEulerDegrees(value, order);
@@ -355,8 +344,8 @@ function UnionEditor({
                         else if (s.type === 'vector3') next[k] = [0, 0, 0];
                         else if (s.type === 'vector4' || s.type === 'quaternion') next[k] = [0, 0, 0, 0];
                         else if (s.type === 'literal') next[k] = s.value;
-                        // other complex types (object, list, union…) left undefined,
-                        // the editor will render them with their own fallback defaults
+                        // other complex types (object, list, union) are left undefined; the editor
+                        // renders them with its own fallback defaults.
                     }
                     next[schema.key] = newDiscriminator;
                     onChange(next);
@@ -643,10 +632,6 @@ function RecordEditor({
     );
 }
 
-/**
- * Render an editor for a single property value based on its schema type.
- * Falls back to a JSON text display for complex/unrecognized schemas.
- */
 function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: unknown; onChange: (v: unknown) => void }) {
     switch (schema.type) {
         case 'number':
@@ -694,8 +679,6 @@ function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: un
     }
 }
 
-/* ── Trait section ──────────────────────────────────────────────── */
-
 function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const traitsBySlot = useTraitsBySlot();
     const removeTrait = useEditRoom((s) => s.removeTrait);
@@ -705,7 +688,6 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
 
     const instance = node.traits[traitSlot];
 
-    // collect controls for display
     const propertyEntries: Array<{ key: string; reg: ControlDef; value: unknown }> = [];
     for (const reg of handle.def.controls) {
         if (reg.hidden) continue;
@@ -756,8 +738,6 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     );
 }
 
-/* ── Unresolved trait section ───────────────────────────────────── */
-
 function UnresolvedTraitSection({
     node,
     traitId,
@@ -792,8 +772,6 @@ function UnresolvedTraitSection({
     );
 }
 
-/* ── Add Trait popover (renders inside section divider) ─────────── */
-
 function AddTraitAction({ node }: { node: Node }) {
     const room = useEditor((s) => s.room);
     const addTrait = useEditRoom((s) => s.addTrait);
@@ -817,13 +795,6 @@ function AddTraitAction({ node }: { node: Node }) {
     );
 }
 
-/* ── Section divider with inline label ─────────────────────────── */
-
-/**
- * Section header: uppercase label + thin rule + optional right-aligned action
- * slot. Used by every node-inspect section so the panel reads as a vertical
- * sequence of cleanly separated blocks.
- */
 function SectionDivider({ label, action }: { label: string; action?: ReactNode }) {
     return (
         <div className="flex items-center gap-1.5">
@@ -834,10 +805,6 @@ function SectionDivider({ label, action }: { label: string; action?: ReactNode }
     );
 }
 
-/**
- * "+" button used inside SectionDivider to host an add-popover trigger.
- * Bordered + 20px square so it reads as a real affordance against the rule.
- */
 const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
     <Button ref={ref} size="icon-sm" className={`shrink-0 ${className ?? ''}`} {...props}>
         <Icons.Plus size={12} />
@@ -845,13 +812,7 @@ const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>
 ));
 SectionAddButton.displayName = 'SectionAddButton';
 
-/* ── Prefab section ─────────────────────────────────────────────── */
-
-/**
- * Inline "+ Prefab" affordance shown in the Node section divider when no
- * prefab is set. Opens a popover listing available prefab defs; picking one
- * attaches a default config to the node.
- */
+// opens a popover listing available prefab defs; picking one attaches a default config to the node.
 const AddPrefabTriggerButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>(({ className, ...props }, ref) => (
     <Button ref={ref} size="xs" className={className ?? ''} {...props}>
         <Icons.Layers size={12} />
@@ -894,7 +855,6 @@ function AddPrefabAction({ node }: { node: Node }) {
     );
 }
 
-/** Full prefab section, only rendered when node.prefab is set. */
 function PrefabSection({ node }: { node: Node }) {
     const room = useEditor((s) => s.room);
     const setPrefab = useEditRoom((s) => s.setPrefab);
@@ -924,7 +884,6 @@ function PrefabSection({ node }: { node: Node }) {
                 }
             />
 
-            {/* prefab picker */}
             <div>
                 <span className="block text-[10px] font-mono text-fg mb-0.5">prefabId</span>
                 <SearchableSelect<string>
@@ -965,8 +924,6 @@ function PrefabSection({ node }: { node: Node }) {
     );
 }
 
-/* ── Inspector panel ────────────────────────────────────────────── */
-
 export function InspectorPanel() {
     const room = useEditor((s) => s.room);
     const selectedNodeIds = useEditRoom((s) => s.selection.nodes);
@@ -985,7 +942,6 @@ export function InspectorPanel() {
         return <div className="p-2 text-[10px] text-fg-muted font-mono">no scene loaded</div>;
     }
 
-    // ── voxel inspect ────────────────────────────────────────────────
     if (inspectedVoxel) {
         const { wx, wy, wz, key } = inspectedVoxel;
         const blockRegistry = registry.blockRegistry;
@@ -1036,12 +992,10 @@ export function InspectorPanel() {
                     }
                 />
 
-                {/* coords */}
                 <div className="text-[10px] font-mono text-fg-muted">
                     {wx}, {wy}, {wz}
                 </div>
 
-                {/* props */}
                 {propNames.length > 0 && (
                     <div className="space-y-1.5">
                         {propNames.map((propName) => {
@@ -1115,7 +1069,6 @@ export function InspectorPanel() {
         );
     }
 
-    // ── node inspect ─────────────────────────────────────────────────
     if (selectedNodeIds.size === 0 && voxelCount === 0) {
         return <div className="p-2 text-[10px] text-fg-muted font-mono italic">nothing selected</div>;
     }
@@ -1141,13 +1094,12 @@ export function InspectorPanel() {
     return (
         <div className="flex flex-col max-h-full">
             <div className="overflow-y-auto flex-1 p-2 space-y-4">
-                {/* ── node ──────────────────────────────────────────── */}
                 <div className="space-y-1.5">
                     <SectionDivider label="node" action={<AddPrefabAction node={node} />} />
 
                     <NameEditor node={node} />
 
-                    {/* realm, root is always 'shared', no editor */}
+                    {/* root is always 'shared' and has no realm editor */}
                     {node.parent && (
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] font-mono text-fg shrink-0 w-12">realm</span>
@@ -1161,10 +1113,8 @@ export function InspectorPanel() {
                     </div>
                 </div>
 
-                {/* ── prefab (only when set) ────────────────────────── */}
                 <PrefabSection node={node} />
 
-                {/* ── traits ────────────────────────────────────────── */}
                 <div className="space-y-1.5">
                     <SectionDivider label="traits" action={<AddTraitAction node={node} />} />
                     {traitSlots.length === 0 && (node.unresolved?.size ?? 0) === 0 ? (
@@ -1184,8 +1134,6 @@ export function InspectorPanel() {
         </div>
     );
 }
-
-/* ── Name editor ────────────────────────────────────────────────── */
 
 function NameEditor({ node }: { node: Node }) {
     const setName = useEditRoom((s) => s.setName);
@@ -1234,5 +1182,3 @@ function RealmEditor({ node }: { node: Node }) {
         </div>
     );
 }
-
-/* ── Name editor ────────────────────────────────────────────────── */

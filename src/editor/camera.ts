@@ -1,5 +1,3 @@
-// editor/camera.ts, camera math helpers and focus-node utility.
-
 import { mat4, type Quat, quat, type Vec3 } from 'math';
 import { box3 } from 'math/shapes';
 import { getVisualWorldMatrix, getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
@@ -13,15 +11,11 @@ import { getNodeById, getTrait } from '../core/scene/scene-tree';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { NUDGE_KEYS } from './editor-controls';
 
-// ── camera math ───────────────────────────────────────────────────────
-
 export function yawFromQuat(qx: number, qy: number, qz: number, qw: number): number {
     return Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qz * qz));
 }
 
-/** extract pitch (X-rotation) from a YXZ-order camera quaternion. radians;
- *  positive = looking up. clamped to ±π/2. matches the yaw/pitch composition
- *  used by fly-controller and character. */
+/** radians, positive = looking up, clamped to +-pi/2. matches the yaw/pitch composition used by fly-controller and character. */
 export function pitchFromQuat(qx: number, qy: number, qz: number, qw: number): number {
     const s = 2 * (qw * qx - qy * qz);
     return Math.asin(s < -1 ? -1 : s > 1 ? 1 : s);
@@ -37,10 +31,7 @@ export function snapCardinal(yaw: number): [number, number] {
     return fz >= 0 ? [0, 1] : [0, -1];
 }
 
-/**
- * camera-relative nudge delta from arrow keys + [ / ].
- * returns [dx, dy, dz] or null if no nudge key was pressed this frame.
- */
+/** camera-relative nudge delta from arrow keys + [ / ]; null if no nudge key was pressed this frame. */
 export function readNudgeDelta(input: Input, cameraQuat: Quat): [number, number, number] | null {
     const mk = input.mouseKeyboard;
     const yaw = yawFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]);
@@ -73,9 +64,6 @@ export function readNudgeDelta(input: Input, cameraQuat: Quat): [number, number,
     return dx !== 0 || dy !== 0 || dz !== 0 ? [dx, dy, dz] : null;
 }
 
-// ── focus node ────────────────────────────────────────────────────────
-
-// scratch for mesh aabb transform
 const _meshLocalAabb = box3.create();
 const _meshWorldAabb = box3.create();
 const _focusEye: Vec3 = [0, 0, 0];
@@ -85,19 +73,12 @@ const _focusMat = mat4.create();
 const _focusQuat: Quat = [0, 0, 0, 1];
 
 /**
- * teleport the camera to face the given scene node from a short distance,
- * then switch to fly controls.
+ * teleports the camera to face the given scene node from a short distance, then switches to fly
+ * controls. targets the world-space center of the mesh's bind-pose AABB when the node has a
+ * MeshTrait, otherwise the node's interpolated position. writes pose directly to the active
+ * camera node's TransformTrait (`client.camera`).
  *
- * if the node has a MeshTrait, target the world-space center of the mesh's
- * bind-pose AABB (transformed by the node's world matrix). otherwise, target
- * the node's interpolated position.
- *
- * writes pose directly to the active camera node's TransformTrait
- * (`client.camera`); the renderer composes the render camera from this
- * transform each frame.
- *
- * TODO(W3.x): walk descendant MeshTraits and union their AABBs for a tight
- * focus on multi-mesh model trees (matches the old ModelTrait behaviour).
+ * TODO(W3.x): walk descendant MeshTraits and union their AABBs for a tight focus on multi-mesh model trees.
  */
 export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Resources, nodeId: number): void {
     const node = getNodeById(room.scene, nodeId);

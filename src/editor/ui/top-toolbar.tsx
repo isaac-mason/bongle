@@ -11,8 +11,6 @@ import { type Lens, setEditorEnabledForRoom, setRoomView } from '../lens';
 import { joinRoom, leaveRoom, stopRoom, switchRoom } from '../session';
 import { useEngineClient } from './engine-client-context';
 
-/* ── Room tabs ──────────────────────────────────────────────────── */
-
 type TabContextMenu = {
     info: RoomInfo;
     tabMode: PlayerMode;
@@ -75,8 +73,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
     const playPlayer = joinedPlayers.find((p) => p.roomId === info.id && p.mode === 'play');
     const isJoinedPlay = !!playPlayer;
     const isMainEdit = tabMode === 'edit' && info.sceneId === 'main' && info.namespace === 'main';
-    // inspect modes only apply to play rooms (the user must have a play-mode
-    // player to inspect). edit-authoritative rooms don't expose these.
+    // inspect modes only apply to play rooms; edit-authoritative rooms don't expose these.
     const supportsDebug = info.roomMode === 'play' && isJoinedPlay;
     const inspectClientOn = playPlayer ? playerToView.has(playPlayer.playerId) : false;
     const inspectServerOn = isJoinedEdit;
@@ -146,18 +143,10 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
     );
 }
 
-/* ── Tab model ──────────────────────────────────────────────────── */
-
 type TabId = string;
 
-/**
- * One renderable tab. `room` is null for a ghost (server room known, no
- * ClientRoom joined yet); otherwise the tab is one POV on that room: the
- * player POV, or (`lens`) the editor POV layered on a play room.
- *
- * `info` is always populated. For ghosts it's the only source of metadata;
- * for joined rooms it mirrors what `room` already exposes.
- */
+// `room` is null for a ghost (server room known, no ClientRoom joined yet); otherwise the tab
+// is one POV on that room: the player POV, or (`lens`) the editor POV layered on a play room.
 type Tab = {
     id: TabId;
     room: ClientRoom | null;
@@ -166,10 +155,8 @@ type Tab = {
     /** the editor lens (Shift+backtick) layered on a play room. */
     lens: boolean;
     info: RoomInfo;
-    /** true when another tab in the same group is bound to the same underlying
-     *  ClientRoom, e.g. play POV + editor lens, or sibling edit ClientRoom on
-     *  a play session. drives the pill collapse; shared namespace alone (all
-     *  solo edit rooms share 'editor') does not count. */
+    /** true when another tab in the same group binds the same ClientRoom (e.g. play POV +
+     *  editor lens); drives the pill collapse. Shared namespace alone does not count. */
     hasRoomSibling: boolean;
 };
 
@@ -179,8 +166,6 @@ function orderRank(t: Tab): number {
     if (t.lens) return 1;
     return 2;
 }
-
-/* ── RoomTab ────────────────────────────────────────────────────── */
 
 function RoomTab({
     tab,
@@ -198,8 +183,7 @@ function RoomTab({
     const engine = useEngineClient();
 
     const isPlay = tabMode === 'play';
-    // a local (client-only, in-tab) room vs a server-backed remote room. local room
-    // ids are prefixed; see LOCAL_ROOM_PREFIX / startLocalRoom.
+    // a local (client-only, in-tab) room vs a server-backed remote room; local room ids are prefixed.
     const isLocal = info.id.startsWith(LOCAL_ROOM_PREFIX);
     const showAsPill = room !== null && tabMode === 'edit' && inGroup;
     const isMainEdit = !inGroup && tabMode === 'edit' && info.sceneId === 'main' && info.namespace === 'main';
@@ -213,10 +197,8 @@ function RoomTab({
         return activeMode === 'edit';
     })();
 
-    // close visibility:
-    //   solo main-edit → no close (the protected default edit room)
-    //   ghost          → stop (server-side teardown of the room)
-    //   joined         → leave (edit POV) or stop (play POV)
+    // no close on the protected default (solo main-edit); a ghost closes via server-side stop,
+    // a joined tab via leave (edit POV) or stop (play POV).
     const canClose = !isMainEdit;
 
     const onActivate = (): void => {
@@ -237,8 +219,8 @@ function RoomTab({
             if (room.roomId !== activeRoomId || activeMode !== 'play') {
                 switchRoom(engine, room.roomId, 'play');
             }
-            // if lens was up, swap POV back to player and hide editor (but
-            // keep the lens alive, full teardown lives on the lens pill's X).
+            // swaps POV back to player and hides editor, but keeps the lens alive; full
+            // teardown lives on the lens pill's X instead.
             if (playerToView.get(room.playerId) === 'edit') {
                 setRoomView(room, 'play');
             }
@@ -275,9 +257,7 @@ function RoomTab({
 
     const pillLabel = lensBacked ? 'inspect client' : 'inspect server';
 
-    // active background tracks the tab's role: red for play, blue for the
-    // editor lens (inspect client), near-black for any other edit POV
-    // (solo edit or sibling edit ClientRoom / inspect server).
+    // background tracks the tab's role: play, editor lens (inspect client), or any other edit POV.
     const activeBg = lensBacked
         ? 'bg-tab-lens text-white border-tab-lens'
         : isPlay
@@ -349,8 +329,6 @@ function RoomTab({
     );
 }
 
-/* ── RoomTabs ───────────────────────────────────────────────────── */
-
 type Pov = Pick<Tab, 'id' | 'room' | 'mode' | 'lens'>;
 
 function buildGroups(
@@ -358,9 +336,8 @@ function buildGroups(
     rooms: Iterable<ClientRoom>,
     lenses: ReadonlyMap<PlayerId, Lens>,
 ): { namespace: string; tabs: Tab[] }[] {
-    // one POV per ClientRoom, indexed by roomId so each RoomInfo joins against
-    // the POVs on the same room. a play room with the editor lens up yields a
-    // second POV for the editor.
+    // one POV per ClientRoom, indexed by roomId; a play room with the editor lens up
+    // yields a second POV for the editor.
     const povsByRoomId = new Map<string, Pov[]>();
     for (const room of rooms) {
         let list = povsByRoomId.get(room.roomId);
@@ -385,8 +362,7 @@ function buildGroups(
             out.push({ namespace: ns, tabs: bucket });
         }
         const povs = povsByRoomId.get(info.id);
-        // multi-POV rooms are the only source of room-siblings (play POV +
-        // editor lens, sibling edit ClientRoom). solo edit rooms share the
+        // multi-POV rooms are the only source of room-siblings; solo edit rooms share the
         // 'editor' namespace bucket but never share a roomId.
         const hasRoomSibling = (povs?.length ?? 0) > 1;
         if (!povs || povs.length === 0) {
@@ -429,8 +405,6 @@ function RoomTabs() {
     );
 }
 
-/* ── Play / Stop buttons ────────────────────────────────────────── */
-
 function PlaySection() {
     const roomMode = useEditor((s) => s.roomMode);
     const engine = useEngineClient();
@@ -438,9 +412,8 @@ function PlaySection() {
     const playPending = useEditor((s) => s.playPending);
     const play = useEditRoom((s) => s.play);
 
-    // Show Stop whenever the active room is a play session, regardless of
-    // the user's playerMode within it. A play room joined as edit is still
-    // a session that needs stopping, not a place to start a new one.
+    // Stop shows whenever the active room is a play session regardless of the user's playerMode
+    // within it: a play room joined as edit still needs stopping, not a place to start a new one.
     if (roomMode === 'play') {
         return (
             <Button
@@ -469,17 +442,13 @@ function PlaySection() {
     );
 }
 
-/* ── Top toolbar ────────────────────────────────────────────────── */
-
 export function TopToolbar() {
     return (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-surface border-b border-border">
-            {/* room tabs */}
             <div className="flex-1 flex items-center gap-2">
                 <RoomTabs />
             </div>
 
-            {/* play/stop. mode + editor UI visibility read off the room tabs. */}
             <PlaySection />
         </div>
     );

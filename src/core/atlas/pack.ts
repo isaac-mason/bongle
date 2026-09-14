@@ -1,10 +1,3 @@
-// rectangle packing for the bake-time atlases, over the skyline structure.
-//
-// One packer, two instances. The block atlas packs in `align`-texel cells so
-// every tile's origin and size stay whole texels at every mip level, which is
-// how Sodium's atlas avoids gutters (`Stitcher.smallestFittingMinTexel`); the
-// sprite atlas packs at align 1 with per-sprite padding and no mips.
-
 import { addSkylineLevel, emptySkyline, findBestFit, type Region } from './skyline';
 
 export type PackItem = {

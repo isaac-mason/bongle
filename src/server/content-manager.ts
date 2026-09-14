@@ -1,16 +1,3 @@
-// server/content-manager.ts, the in-memory scene store: sceneId -> raw scene json.
-//
-// The single source of truth the runtime boots rooms from, seeded from the project
-// fs at `load()` and from declared scene payloads. Held in memory so reads stay
-// SYNCHRONOUS (the engine reads it from the tick/dispatch path). The runtime only
-// reads and seeds; writing scenes back to disk is the editor's
-// (editor/persist/scenes.ts), which updates this store and then writes.
-//
-// scene ids are the path relative to `content/scenes/`, `.scene.json`
-// stripped, separators normalized to `/`:
-//   content/scenes/blueprints/foo.scene.json  ->  "blueprints/foo"
-//   content/scenes/main.scene.json            ->  "main"
-
 import type { ScenePayload } from '../core/content/scene-store';
 import type { SerializedSceneTree } from '../core/scene/scene-tree';
 import type { SavedChunk } from '../core/voxels/voxel-savefile';
@@ -53,8 +40,6 @@ export function init(): ContentManager {
     return { scenes: new Map() };
 }
 
-// ── on-disk <-> in-memory conversion ──────────────────────────────────
-
 function fileToPayload(file: SceneFile): ScenePayload {
     return { nodes: file.nodes, voxels: file.chunks ? { chunks: file.chunks } : null };
 }
@@ -70,8 +55,6 @@ function payloadToFile(payload: ScenePayload): SceneFile {
 export function serializeScenePayload(payload: ScenePayload): string {
     return JSON.stringify(payloadToFile(payload), null, 2);
 }
-
-// ── queries ────────────────────────────────────────────────────────────
 
 export function listScenes(state: ContentManager): SceneEntry[] {
     return [...state.scenes.keys()].sort().map((sceneId) => ({ sceneId }));
@@ -100,8 +83,6 @@ export function loadSceneRaw(state: ContentManager, sceneId: string): { data: Sc
     }
     return { data: fileToPayload(parsed), raw };
 }
-
-// ── the store ──────────────────────────────────────────────────────────
 
 /** put a scene's raw json in the store: a file read at load, a declared payload, or
  *  what the editor is about to write. */

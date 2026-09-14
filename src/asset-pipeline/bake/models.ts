@@ -1,31 +1,3 @@
-// model pipeline.
-//
-// for each `model('id', { src })` declared in user code:
-//   - reads the source gltf via gltf-transform
-//   - projects it onto the engine's ModelBin schema (meshes + clips + images)
-//   - packs twice, server bin (no images) + client bin (with images)
-//   - writes client bin to resources/client/models/<id>.<hash8>.client.bin
-//     (bongle serves resources/client/* in dev and copies it into dist/client/
-//     at build time; reachable at /models/...)
-//   - writes server bin to resources/server/models/<id>.<hash8>.server.bin
-//     (bongle's build copies project's resources/server/ into dist/server/resources/,
-//     so the server bin ships with the bundle and never leaks into the client output)
-// then writes a single barrel src/generated/models.ts with every model's
-// scene + handle constructed inline (each model wrapped in an IIFE so
-// per-model locals, _node_*, _clip_*, _scene, don't collide).
-//
-// single-file rationale: cold start writes one file instead of N+1,
-// eliminating HMR-wall noise when many models are declared. The barrel
-// also declaration-merges `ModelHandleMap` and seeds the registry via
-// `registerModel(id, handle)` imported from `bongle/internal`.
-//
-// incrementality: an in-memory `Map<id, ModelsCacheEntry>` owned by the
-// pipeline orchestrator (`PipelineState.modelsCache`) carries srcHash +
-// bin paths across calls within a session. cache hit + bins still on disk
-// → skip pack+write, reuse cached outputs; the barrel is always re-emitted
-// (cheap, keeps generated types in sync). cross-process warmth is
-// intentionally not preserved, every fresh process pays a cold pack.
-
 import { type Document, type Node as GltfNode, Logger, type Texture, WebIO } from '@gltf-transform/core';
 import { dedup, reorder, weld } from '@gltf-transform/functions';
 import { mat4 } from 'math';
@@ -43,11 +15,7 @@ import type { ResourceLoader } from '../../core/resource-loader';
 import type { ModuleVersion } from '../../internal';
 import { sha256Hex } from './raster';
 
-// ── paths ──────────────────────────────────────────────────────────
-
-// URL prefixes (bundle-relative, engine resolves via `assetUrl()` which
-// either prefixes the bundle's import.meta.url in prod or the dev origin
-// root in dev). Not filesystem paths.
+// URL prefixes (bundle-relative, resolved via `assetUrl()`), not filesystem paths.
 const CLIENT_URL_PREFIX = 'models';
 const SERVER_URL_PREFIX = 'models';
 
@@ -56,19 +24,12 @@ const CLIENT_BIN_DIR = 'resources/client/models';
 const SERVER_BIN_DIR = 'resources/server/models';
 const BARREL_PATH = 'src/generated/models.ts';
 
-// Model ids use a `namespace:name` convention, but ':' (and the rest of the
-// Windows-reserved set) isn't a valid FILENAME char: Chromium's File System Access
-// API rejects it ("Name is not allowed"), and it doesn't survive a real disk on
-// Windows. Map those chars to '_' for the bin filename only — the id itself is
-// unchanged (it stays in MODEL_ID / the barrel), and nothing parses it back out of
-// the filename, so this is purely a portable storage key. '_' (not %-encoding) keeps
-// the fetch URL a plain path segment with no decode round-trip. The content hash8 in
-// the filename makes name collisions impossible for distinct content.
+// model ids use a `namespace:name` convention, but ':' isn't a valid filename char on Windows
+// (Chromium's File System Access API rejects it too), so map Windows-reserved chars to '_' for
+// the bin filename only; the id itself is unchanged. the content hash8 in the filename makes
+// name collisions impossible for distinct content.
 const binSafeId = (id: string): string => id.replace(/[<>:"/\\|?*]/g, '_');
 
-/** per-id record of the last successful build for this model. Owned by
- *  the pipeline orchestrator (`PipelineState.modelsCache`) and threaded
- *  in via `BuildModelsOptions.cache`; this module mutates it in place. */
 import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
 
 export type ModelsCacheEntry = {
@@ -79,24 +40,16 @@ export type ModelsCacheEntry = {
 };
 
 export type BuildModelsOptions = {
-    /** session-scoped incremental cache, mutated in place per call. Owned
-     *  by `PipelineState`. Lost on process restart by design, cross-process
-     *  warm starts aren't supported. */
+    /** session-scoped incremental cache, mutated in place per call. lost on process restart by design. */
     cache: Map<string, ModelsCacheEntry>;
     /** bake-input byte loader (host-provided; see pipeline InitCtx). */
     loader: ResourceLoader;
-    /** the editor project filesystem bins + barrel write into
-     *  (host-provided; see pipeline InitCtx). */
+    /** the editor project filesystem bins + barrel write into (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
-    /** whether to write the server-side model bin (resources/server/models).
-     *  false for standalone (client-only) games: no server runs, so the server
-     *  bin is pure waste and the build never copies resources/server. The
-     *  barrel still carries a `bin.server` URL for the type parity story; it's
-     *  just never fetched. */
+    /** false for standalone (client-only) games: no server runs, so the bin is pure waste. the
+     *  barrel still carries a `bin.server` URL for type parity, it's just never fetched. */
     emitServer: boolean;
 };
-
-// ── types: per-model build outputs ─────────────────────────────────
 
 export type SceneNodeInfo = {
     /** unique within model (deduped via numeric suffix). */
@@ -150,8 +103,6 @@ export type BuildEntry = {
     payload: ModelPayload;
 };
 
-// ── public api ─────────────────────────────────────────────────────
-
 const io = new WebIO();
 
 export async function buildModels(module: ModuleVersion, opts: BuildModelsOptions): Promise<boolean> {
@@ -171,16 +122,13 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     const entries: BuildEntry[] = [];
     let anyFresh = false;
 
-    // Per-model and independent (gltf parse, meshopt, bin write). Order preserved so the emitted
-    // barrel stays deterministic; the per-model catch stays INSIDE the job so one bad model still
-    // only skips itself rather than rejecting the batch.
+    // order preserved so the emitted barrel stays deterministic; the per-model catch stays
+    // inside the job so one bad model only skips itself rather than rejecting the batch.
     const built = await mapConcurrent([...models], BAKE_CONCURRENCY, async ([id, def]) => {
         try {
             const built = await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
             return built && { ...built, name: def.name, tags: def.tags };
         } catch (err) {
-            // a single unparseable/unfetchable model must not fail the whole
-            // bake — warn and skip it (its barrel entry is just absent).
             console.warn(`[bongle] model "${id}" (${def.src}) failed to bake: ${(err as Error).message} — skipping`);
             return null;
         }
@@ -191,12 +139,10 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
         if (e.fresh) anyFresh = true;
     }
 
-    // single barrel, re-emit unconditionally so the typed signatures stay
-    // in sync with current handle metadata.
+    // re-emit unconditionally so the typed signatures stay in sync with current handle metadata.
     await projectFs.writeIfChanged(BARREL_PATH, renderBarrel(entries));
 
-    // rewrite cache in place to mirror the current build, drop ids no
-    // longer present, refresh entries for current ids.
+    // rewrite in place: drop ids no longer present, refresh entries for current ids.
     cache.clear();
     for (const e of entries) {
         cache.set(e.id, {
@@ -226,15 +172,10 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     return anyFresh;
 }
 
-// ── per-model processing ───────────────────────────────────────────
-
 /**
- * Read a gltf source and run the optimization passes used at every emit:
- * weld → dedup → reorder. Skip Draco (300KB decoder is overkill for our
- * tiny assets) and skip KTX2/BasisU on textures (would smear pixel atlases,
- * leave as PNG/JPEG). reorder uses 'performance' because we ship a custom
- * packcat bin (not GLB), so vertex cache locality is what matters; transmission
- * size is handled at the bin level.
+ * weld -> dedup -> reorder. skips Draco (300KB decoder is overkill for tiny assets) and
+ * KTX2/BasisU (would smear pixel atlases, leave as PNG/JPEG). reorder uses 'performance' since
+ * we ship a custom packcat bin, not GLB, so vertex cache locality matters, not transmission size.
  */
 async function loadAndOptimize(srcBytes: Uint8Array, srcRel: string, loader: ResourceLoader): Promise<Document> {
     const doc = isGlb(srcBytes) ? await io.readBinary(srcBytes) : await readGltfJson(srcBytes, srcRel, loader);
@@ -294,10 +235,8 @@ async function processModel(
     }
     const srcHash = await sha256Hex(srcBytes);
 
-    // cache hit path, skip pack + write, but still parse + optimize the doc
-    // to derive structural payload for the sidecar. transforms must run here
-    // too: dedup() can collapse identical meshes, so projecting the
-    // unoptimized doc would emit sidecar references the bin doesn't contain.
+    // still parse + optimize on a cache hit to derive the sidecar payload; dedup() can collapse
+    // identical meshes, so projecting the unoptimized doc would reference meshes the bin lacks.
     const cached = cache.get(id);
     if (cached && cached.srcHash === srcHash) {
         const clientBinPath = `${CLIENT_BIN_DIR}/${cached.clientBin.split('/').pop()!}`;
@@ -322,16 +261,12 @@ async function processModel(
         }
     }
 
-    // cold path, load + optimize, project, then pack + write.
     const doc = await loadAndOptimize(srcBytes, srcRel, loader);
     const { payload, meshes, clips, images } = await projectDocument(doc);
 
-    // share the scene-tree section across both bins. runtime models
-    // (.glb uploads) carry the same fields in their parsed ModelBin so
-    // the runtime hydrator works format-agnostically; declared models
-    // still source their authoritative handle from the codegen barrel
-    // (see `renderModelConstruction` below), these fields are the
-    // engine's fallback / parity story, not the primary path.
+    // shares the scene-tree section across both bins so runtime models (.glb uploads) hydrate
+    // format-agnostically; declared models still source their authoritative handle from the
+    // codegen barrel (renderModelConstruction below), these fields are the fallback path.
     const sceneNodes = payload.sceneNodes.map((sn) => ({
         name: sn.name,
         parent: sn.parent,
@@ -362,8 +297,7 @@ async function processModel(
     const serverBinPath = `${SERVER_BIN_DIR}/${serverFilename}`;
 
     await projectFs.write(clientBinPath, clientBytes);
-    // standalone (client-only) games run no server: skip the server bin (no
-    // images) entirely — the build never copies resources/server for them.
+    // standalone (client-only) games run no server: skip the server bin entirely.
     if (emitServer) {
         const serverBytes = packModelBin({ ...binCommon, images: undefined });
         await projectFs.write(serverBinPath, serverBytes);
@@ -383,8 +317,6 @@ async function processModel(
     };
 }
 
-// ── projection: gltf Document → bin payload + sidecar info ─────────
-
 type ProjectedDocument = {
     payload: ModelPayload;
     meshes: ModelBinMesh[];
@@ -395,19 +327,15 @@ type ProjectedDocument = {
 async function projectDocument(doc: Document): Promise<ProjectedDocument> {
     const root = doc.getRoot();
 
-    // ── images (must precede mesh extraction; meshes resolve their first
-    //          primitive's baseColorTexture via this map) ──────────────
+    // must precede mesh extraction: meshes resolve their first primitive's baseColorTexture via this map.
     const images: ModelBinImage[] = [];
-    /** texture object → index into `images`. multiple Textures sharing the
-     *  same image bytes collapse to one entry via hash dedup. */
+    /** multiple Textures sharing the same image bytes collapse to one `images` entry via hash dedup. */
     const imageIndexByTexture = new Map<Texture, number>();
     const imageIndexByHash = new Map<string, number>();
     for (const tex of root.listTextures()) {
         const data = tex.getImage();
         if (!data) continue;
-        // fast non-crypto dedup key over the image bytes (collision here only
-        // costs a wrongly-shared texture, so fnv1a is plenty; the stable
-        // content-addressed hashes elsewhere stay SHA-256).
+        // collision here only costs a wrongly-shared texture, so fnv1a is plenty (SHA-256 elsewhere is for stable content-addressing).
         const h = fnv1aHex(data);
         let idx = imageIndexByHash.get(h);
         if (idx === undefined) {
@@ -501,7 +429,6 @@ async function projectDocument(doc: Document): Promise<ProjectedDocument> {
         });
     }
 
-    // ── animations ──────────────────────────────────────────────────
     const clips: ModelBinClip[] = [];
     const usedClipNames = new Set<string>();
     function uniqueClipName(base: string): string {
@@ -603,13 +530,7 @@ async function projectDocument(doc: Document): Promise<ProjectedDocument> {
     };
 }
 
-// ── model AABB ─────────────────────────────────────────────────────
-
-/**
- * union every mesh AABB transformed by its node's accumulated world TRS.
- * iterates parent-first (sceneNodes is already DFS-ordered) so each node's
- * world matrix is just `parent.world * node.local`.
- */
+/** iterates parent-first (sceneNodes is already DFS-ordered) so each node's world matrix is just `parent.world * node.local`. */
 function computeModelAabb(sceneNodes: SceneNodeInfo[], meshes: Map<string, ModelBinMesh>): Box3 {
     const worldMats: ReturnType<typeof mat4.create>[] = [];
     let minX = Infinity,
@@ -746,8 +667,6 @@ function extractMesh(
     };
 }
 
-// ── codegen: single-file barrel ────────────────────────────────────
-
 /** @internal exported for the codegen barrel tests. */
 export function renderBarrel(entries: BuildEntry[]): string {
     if (entries.length === 0) return EMPTY_BARREL;
@@ -763,8 +682,6 @@ export function renderBarrel(entries: BuildEntry[]): string {
     lines.push(`import { registerModel } from 'bongle/internal';`);
     lines.push(``);
 
-    // each model wrapped in an IIFE so per-model locals (_node_*, _clip_*,
-    // _scene) don't collide across models in this shared module scope.
     for (const e of entries) {
         renderModelConstruction(e, lines);
         lines.push(``);
@@ -788,33 +705,25 @@ export function renderBarrel(entries: BuildEntry[]): string {
     return lines.join('\n');
 }
 
-/**
- * Emit `const <id> = (() => { ...; return handle; })();` for one model.
- * The IIFE scopes per-model locals (_node_…, _clip_…, _scene) so a
- * multi-model barrel doesn't collide on them.
- */
+/** emits `const <id> = (() => { ...; return handle; })();` for one model; the IIFE scopes
+ *  per-model locals (_node_, _clip_, _scene) so a multi-model barrel doesn't collide on them. */
 function renderModelConstruction(e: BuildEntry, lines: string[]): void {
     const { id, srcRel, payload, clientBinUrl, serverBinUrl } = e;
     const { sceneNodes, nodeNames, meshes, clipNames, animatedNodeNames } = payload;
 
     const constId = sanitizeIdent(id);
 
-    // variable names embed the gltf-derived name for grep-ability; the
-    // trailing index keeps emission deterministic when two names sanitize
-    // to the same identifier. user-facing lookup (`handle.nodes['Foo']`)
-    // uses the deduped human name, not these locals.
+    // variable names embed the gltf-derived name for grep-ability; the trailing index keeps
+    // emission deterministic when two names sanitize to the same identifier.
     const nodeVar = (i: number) => `_node_${sanitizeIdent(sceneNodes[i]!.name)}_${i}`;
     const clipVar = (i: number) => `_clip_${sanitizeIdent(clipNames[i]!)}_${i}`;
 
-    // gate for skipping `addTrait(_, TransformTrait, ...)` on nodes that
-    // contribute nothing to world composition: identity TRS, no mesh, and
-    // no animation channel targets them. the runtime's `parent transform`
-    // walk skips trait-less nodes so descendants compose correctly.
+    // skips addTrait(_, TransformTrait, ...) on nodes that contribute nothing to world
+    // composition (identity TRS, no mesh, unanimated); the runtime's parent-transform walk
+    // skips trait-less nodes so descendants still compose correctly.
     const animated = new Set(animatedNodeNames);
 
-    // type params: union of gltf-derived node names / mesh names / clip names.
-    // Empty unions become `never`. lifted into named aliases so the const
-    // declaration stays scannable when a model has dozens of nodes/clips.
+    // empty unions become `never`; lifted into named aliases so the const declaration stays scannable.
     const nodeUnion = nodeNames.length > 0 ? nodeNames.map((n) => JSON.stringify(n)).join(' | ') : 'never';
     const meshUnion = meshes.length > 0 ? meshes.map((m) => JSON.stringify(m.name)).join(' | ') : 'never';
     const clipUnion = clipNames.length > 0 ? clipNames.map((n) => JSON.stringify(n)).join(' | ') : 'never';
@@ -849,11 +758,9 @@ function renderModelConstruction(e: BuildEntry, lines: string[]): void {
         }
     }
 
-    // scene root: if the gltf has exactly one top-level node, use it
-    // directly; otherwise wrap multiple roots under a synthetic detached
-    // node named after the model id. The synthetic wrapper isn't added to
-    // `nodes` (no name to give it that wouldn't risk colliding with a
-    // real gltf node), user reaches it via `handle.scene`.
+    // a single top-level node is used directly; multiple roots wrap under a synthetic node named
+    // after the model id, not added to `nodes` (no name that wouldn't risk colliding with a real
+    // gltf node), reached via `handle.scene`.
     const rootIndices: number[] = [];
     for (let i = 0; i < sceneNodes.length; i++) {
         if (sceneNodes[i]!.parent < 0) rootIndices.push(i);
@@ -908,8 +815,6 @@ const EMPTY_BARREL = `// auto-generated by asset pipeline — do not edit
 export {};
 `;
 
-// ── GC ─────────────────────────────────────────────────────────────
-
 async function gcOrphanBins(projectFs: Filesystem, live: Set<string>): Promise<void> {
     for (const dir of [CLIENT_BIN_DIR, SERVER_BIN_DIR]) {
         for (const [name, kind] of await projectFs.readDir(dir)) {
@@ -919,8 +824,6 @@ async function gcOrphanBins(projectFs: Filesystem, live: Set<string>): Promise<v
         }
     }
 }
-
-// ── helpers ────────────────────────────────────────────────────────
 
 /** fast non-crypto 32-bit FNV-1a over bytes, hex. dedup keys only. */
 function fnv1aHex(bytes: Uint8Array): string {
@@ -933,12 +836,9 @@ function fnv1aHex(bytes: Uint8Array): string {
 }
 
 /**
- * Model ids must be unique AFTER `sanitizeIdent` because every id becomes
- * a top-level `const` name (plus `<id>Nodes`/`Meshes`/`Clips` type aliases)
- * in the generated barrel. Two ids that sanitize to the same identifier
- * (`'foo-bar'` and `'foo_bar'` → `foo_bar`) would silently produce
- * duplicate declarations and fail downstream with a cryptic TS error.
- * Surface the actual conflict here with the offending ids.
+ * ids must be unique after `sanitizeIdent`, since every id becomes a top-level `const` name in
+ * the generated barrel; two ids that sanitize to the same identifier (`'foo-bar'` and `'foo_bar'`)
+ * would silently produce duplicate declarations and fail downstream with a cryptic TS error.
  */
 function assertNoIdentCollisions(ids: string[]): void {
     const byIdent = new Map<string, string[]>();

@@ -1,26 +1,8 @@
-// ── aabb broadphase: mutable uniform spatial hash ───────────────────
-//
-// leaf data structure for the aabb physics subsystem. knows only about the
-// hash and body ids; the movement policy (when to reslot, wake cascades)
-// lives in `aabb-world.ts`, which drives these primitives.
-
 import type { BodyId } from './aabb-world';
 
-// **mutable**: bodies are inserted on create, removed on destroy, and the
-// cell-range is updated incrementally each tick via `moveInBroadphase`, no
-// teardown-and-rebuild on every step. each body caches its last cell range
-// (`_bpI*`), so "didn't move out of its cells" is an O(1) comparison and a
-// no-op. asleep bodies stay in the hash as obstacles; they pay nothing per
-// tick because the awake-set loop never visits them.
-//
-// one cellSize for the whole world. fine for the expected workload (items /
-// particles, halfExtents typically ≤ 1m). for wildly mixed sizes (e.g. 16m
-// sensors next to 0.1m particles), revisit with a two-level hash or DBVT,
-// don't pre-build that.
-
 // pack 3 signed 17-bit cell coords into a plain Number (51 bits used; JS safe-int is 53).
-// ±65536 cells × cellSize=2 = ±131k world units, way beyond any realistic voxel world.
-// BigInt was ~10× slower here and allocated per call; this is alloc-free.
+// +/-65536 cells * cellSize=2 = +/-131k world units, way beyond any realistic voxel world.
+// BigInt was about 10x slower here and allocated per call; this is alloc-free.
 const CELL_BITS = 17;
 const CELL_MASK = (1 << CELL_BITS) - 1; // 0x1ffff
 const CELL_MULT_Y = 1 << CELL_BITS; // 2^17

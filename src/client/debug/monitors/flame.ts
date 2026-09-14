@@ -3,15 +3,6 @@ import { el, on } from '../dom';
 import { fitCanvas } from './canvas';
 import { colorResolver, hashHue } from './shared';
 
-// ── flame graph ─────────────────────────────────────────────────────
-//
-// a FramePro/Tracy-style flame graph of one frame's span tree. unlike the
-// time-series widgets this is not sampled: the getter returns a whole frame's
-// spans (flattened preorder, depth-tagged) and the widget draws them as nested
-// bars (x = time within the frame, y = nesting depth). wheel zooms around the
-// cursor, drag pans, hover reads the span under the cursor. self-managed canvas
-// (not canvasMonitor) so it owns its pointer/wheel interaction.
-
 /** the minimal shape the flame needs. core/debug's `Frame` matches it. */
 export type FlameFrame = {
     /** number of valid spans. */
@@ -89,8 +80,7 @@ export function flame(opts: FlameOptions = {}): Control<FlameFrame | null> {
                 return;
             }
 
-            // a different frame under the cursor refits the window. span count +
-            // duration is a cheap stand-in for frame identity.
+            // span count + duration is a cheap stand-in for frame identity; a new frame refits the view window.
             const key = frame.count * 131071 + Math.round(frame.duration * 1000);
             if (key !== frameKey) {
                 frameKey = key;
@@ -163,7 +153,6 @@ export function flame(opts: FlameOptions = {}): Control<FlameFrame | null> {
             }
         };
 
-        // ── interaction ──────────────────────────────────────────────
         b.onDispose(
             on(
                 canvas,

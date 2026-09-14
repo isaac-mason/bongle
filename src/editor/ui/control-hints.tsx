@@ -1,9 +1,3 @@
-// Control indicator, bottom-right of the viewport. Shows the equipped camera
-// controller's input scheme as keycap rows (fly / orbit only — character has the
-// crosshair instead). Passive: pointer-events off, reads controlMode from the
-// edit-room store. Reuses the shared <Kbd> keycap for both keyboard keys and
-// mouse-button chips so every control indicator looks the same.
-
 import type { ReactNode } from 'react';
 import { useEditRoom } from '../edit-room-store';
 import { Kbd } from './kbd';

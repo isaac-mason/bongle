@@ -1,10 +1,3 @@
-// block hook dispatch. setChunkBlock settles a write inline via two functions,
-// one per flag bit:
-//   runBlockHooks  (BLOCK_HOOKS)  — block-def onNeighbourUpdate/onNeighbourChanged
-//   runBlockEvents (BLOCK_EVENTS) — script observers (onBlockBuild/Break/StateChange)
-// a recompute that changes a block chains a setBlock(BULK) that recurses back
-// into runBlockHooks; auth.hookDepth bounds the cascade.
-
 import { SetBlockFlags } from './block-flags';
 import { AIR } from './block-registry';
 import type { BlockChangeCtx, BlockStateChangeCtx } from './blocks';
@@ -39,9 +32,7 @@ const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
 
 const MAX_HOOK_DEPTH = 512;
 
-/** BLOCK_HOOKS: recompute this cell + its 6 neighbours (onNeighbourUpdate), then
- *  fire their onNeighbourChanged. runs for DEFAULT and BULK — bulk-authored
- *  fences still join. */
+/** BLOCK_HOOKS: recompute this cell + its 6 neighbours (onNeighbourUpdate), then fire their onNeighbourChanged. Runs for DEFAULT and BULK, so bulk-authored fences still join. */
 export function runBlockHooks(voxels: Voxels, wx: number, wy: number, wz: number): void {
     const auth = voxels.authority;
     if (!auth) return;
@@ -100,8 +91,7 @@ function recomputeAt(voxels: Voxels, wx: number, wy: number, wz: number): void {
     if (newId === undefined || newId === stateId) return;
     const newKey = stateToKey[newId];
     if (!newKey) return;
-    // structural change, not a gameplay action → BULK; recurses to settle its own
-    // neighbourhood.
+    // structural change, not a gameplay action, so BULK; recurses to settle its own neighbourhood.
     setBlock(voxels, wx, wy, wz, newKey, SetBlockFlags.BULK);
 }
 

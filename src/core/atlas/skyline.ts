@@ -1,13 +1,3 @@
-// skyline rectangle packer, pure data structure + algorithms.
-//
-// shared by `render/mesh/mesh-atlas.ts` (runtime gltf textures) and
-// `src/asset-pipeline/bake` sprite-atlas (bake-time sprite atlas).
-// no GPU state, no allocator harness, callers wrap this with their own
-// `regions` map + pixel buffer + texture handle.
-//
-// invariant: skyline nodes cover [0, size] contiguously, no gaps, no
-// overlaps. `addSkylineLevel` preserves it; `emptySkyline` establishes it.
-
 /** axis-aligned rectangle in atlas-pixel space. */
 export type Region = {
     /** pixel x within the atlas. */
@@ -36,7 +26,7 @@ export function emptySkyline(size: number): SkylineNode[] {
  * Best-fit-by-lowest-y across all candidate x-positions (each skyline
  * node's left edge is a candidate). Returns the chosen position + the
  * skyline node index where the new level should be inserted, or `null`
- * if no slot in the atlas fits `w × h`.
+ * if no slot in the atlas fits `w x h`.
  */
 export function findBestFit(
     skyline: SkylineNode[],

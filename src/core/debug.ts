@@ -1,38 +1,9 @@
-// ── debug ───────────────────────────────────────────────────────────
-//
-// engine debug primitives. owns two data types today:
-//   - Profiler: a ring of per-frame span trees + the scalars recorded
-//               alongside them (the instrumentation store)
-//   - Logs:     ring buffer of structured log entries from scripts and
-//               engine-internal console wraps
-//
-// both are pure collectors. nothing here knows about the dashboard, the
-// widgets, or the wire — the client reads the ring to draw it, the server
-// slices a room's subtree out of it to ship (see server/telemetry.ts).
-
-// ── profiler ────────────────────────────────────────────────────────
-//
-// one storage: a ring of recorded frames. three write verbs, all targeting
-// the frame in progress:
-//   - frameStart()/frameEnd() — frame boundary (seals the frame into the ring)
-//   - begin(key)/end(key?)    — a LIFO timing scope → a span
-//   - record(key, value)      — a scalar the read side can't re-derive
-//
-// self-time and inclusive-time are NOT stored, they are reductions over a
-// frame's spans, computed once on read and cached on the frame. charts read
-// their whole history back out of this ring (no private samplers, so the
-// x-axis is real frames) and the flame graph reads a whole retained frame.
-//
-// gated: while the debug panel is closed `enabled` is false, every write is
-// an immediate return and the ring is released — it costs nothing, and holds
-// no memory, in normal play.
-
 /** hard caps for the preallocated span columns (overflow dropped, warned once). */
 const MAX_SPANS = 8192;
 const MAX_DEPTH = 64;
 const MAX_COUNTERS = 512;
-/** retained recent frames. 120 ≈ 2s at 60Hz, and the ring costs
- *  120 × 8192 × 11B ≈ 11 MB while the panel is open, 0 while it is closed. */
+/** retained recent frames. 120 is ~2s at 60Hz; the ring costs ~11MB while
+ *  the panel is open, 0 while it is closed. */
 export const RING_FRAMES = 120;
 
 /** one recorded frame: a span tree flattened in enter (preorder) order, plus
@@ -56,7 +27,7 @@ export type Frame = {
      *  per-room counter ride along with its room's subtree. */
     counterSpan: Int16Array;
     counterValue: Float32Array;
-    /** derived once, cached lazily (name → ms / value); cleared when the slot is reused. */
+    /** derived once, cached lazily (name to ms / value); cleared when the slot is reused. */
     selfByName: Record<string, number> | null;
     inclByName: Record<string, number> | null;
     countersByName: Record<string, number> | null;
@@ -68,7 +39,7 @@ export type Profiler = {
     /** when true the ring stops advancing, so a frame can be read/scrubbed in peace. */
     frozen: boolean;
 
-    // key interning. per-profiler, NOT module-global: a mirror profiler holds
+    // key interning. per-profiler, not module-global: a mirror profiler holds
     // ids minted by the server that names its own table.
     keyToId: Map<string, number>;
     idToKey: string[];
@@ -159,8 +130,8 @@ function ensureRing(profiler: Profiler): void {
     for (let i = 0; i < RING_FRAMES; i++) profiler.ring.push(allocFrame());
 }
 
-/** enable/disable recording. disabling releases the ring — a closed panel holds
- *  no frames, and reopening starts from an empty history rather than a stale one. */
+/** enable/disable recording. disabling releases the ring, a closed panel
+ *  holds no frames, and reopening starts from an empty history. */
 export function setEnabled(profiler: Profiler, enabled: boolean): void {
     if (profiler.enabled === enabled) return;
     profiler.enabled = enabled;
@@ -186,8 +157,6 @@ export function intern(profiler: Profiler, key: string): number {
     }
     return id;
 }
-
-// ── write api ───────────────────────────────────────────────────────
 
 export function frameStart(profiler: Profiler): void {
     if (!profiler.enabled) return;
@@ -327,8 +296,6 @@ export function pushFrame(
     if (profiler.ringCount < RING_FRAMES) profiler.ringCount++;
 }
 
-// ── read api ────────────────────────────────────────────────────────
-
 const EMPTY: Readonly<Record<string, number>> = Object.freeze({});
 
 export function keyName(profiler: Profiler, id: number): string {
@@ -399,12 +366,9 @@ export function unitOf(profiler: Profiler, key: string): string {
     return id === undefined ? '' : (profiler.unitById[id] ?? '');
 }
 
-/**
- * names of the scopes directly inside `parent` in a frame, first-seen order.
- * `parent` null reads the frame's top level. this is how the charts discover
- * their phase lists — the stack of a loop's phases follows the loop rather
- * than a hardcoded list going stale next to it.
- */
+/** names of the scopes directly inside `parent` in a frame, first-seen order.
+ *  `parent` null reads the frame's top level. This is how the charts
+ *  discover their phase lists rather than a hardcoded list going stale. */
 export function childNames(profiler: Profiler, parent: string | null, offset = 0): string[] {
     const frame = getFrame(profiler, offset);
     if (!frame) return [];
@@ -433,13 +397,11 @@ export function childNames(profiler: Profiler, parent: string | null, offset = 0
     return out;
 }
 
-// ── slicing ─────────────────────────────────────────────────────────
-//
-// a span's subtree is the contiguous run of following spans deeper than it, so
-// dropping a whole subtree is one linear pass that leaves preorder and depths
-// intact. the server ships a frame this way: other rooms' subtrees dropped (a
-// client sees only the room it is in) and sub-`minMs` subtrees dropped (noise
-// the flame could not draw anyway, and the bulk of the bytes).
+// a span's subtree is the contiguous run of following spans deeper than it,
+// so dropping a whole subtree is one linear pass that leaves preorder and
+// depths intact. The server ships a frame this way: other rooms' subtrees
+// dropped (a client sees only the room it is in) and sub-`minMs` subtrees
+// dropped (noise the flame could not draw anyway, and the bulk of the bytes).
 
 export type FrameSlice = {
     duration: number;
@@ -468,8 +430,8 @@ export function createFrameSlice(): FrameSlice {
 }
 
 /** per-span slice marker: 0 = another room's, 1 = kept, 2 = too short to ship.
- *  the two drop reasons differ for counters — a counter recorded inside a
- *  0.01ms scope is still the number the panel wants, another room's is not. */
+ *  The two drop reasons differ for counters: one recorded inside a 0.01ms
+ *  scope is still the number the panel wants, another room's is not. */
 const SLICE_ALIEN = 0;
 const SLICE_KEPT = 1;
 const SLICE_TINY = 2;
@@ -546,8 +508,6 @@ function reduce(profiler: Profiler, frame: Frame): void {
     frame.inclByName = inclByName;
 }
 
-// ── logs ────────────────────────────────────────────────────────────
-
 export type LogLevel = 'log' | 'warn' | 'error';
 
 /**
@@ -589,12 +549,9 @@ export function pushLog(logs: Logs, entry: LogEntry): void {
     if (logs.entries.length > logs.cap) logs.entries.shift();
 }
 
-/**
- * read entries pushed after `cursor`. returns the entries and a fresh
- * cursor to pass next call. if `cursor < pushed - entries.length`,
- * caller missed entries that fell off the buffer, `dropped` indicates
- * how many. caller can show a "… N entries dropped" marker.
- */
+/** read entries pushed after `cursor`, returning the entries and a fresh
+ *  cursor to pass next call. If `cursor < pushed - entries.length`, the
+ *  caller missed entries that fell off the buffer; `dropped` says how many. */
 export function readDelta(
     logs: Logs,
     cursor: number,

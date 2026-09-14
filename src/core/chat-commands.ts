@@ -1,26 +1,7 @@
-/**
- * shared slash-command primitives: arg types, command specs, parser,
- * suggestion engine, listener registry, local dispatch. side-agnostic, both
- * client and server compose this into their own per-side chat module
- * (`client/chat.ts` ChatClient, `server/chat.ts` ChatServer) which add
- * transport + lines/UI as appropriate.
- *
- * scripts reach this indirectly via `api/chat.ts`. `chat.command(ctx, spec)`
- * registers a CommandSpec on whichever side runs (both for a shared script);
- * `chat.listen(ctx, handle, fn)` attaches a runtime handler on the side that
- * should execute.
- *
- * world-edit naming convention: a command whose name starts with '/' reads
- * as '//set' (one chat-opener '/' + the literal '/set' name). bare names
- * like 'help' read as '/help'.
- */
-
 import type { Client } from 'bongle/interface';
 import { registry } from './registry';
 import { fuzzyRank } from './utils/fuzzy';
 import { parseKey } from './voxels/block-registry';
-
-// ── arg types ───────────────────────────────────────────────────
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -42,9 +23,9 @@ export type ArgType<T> = {
 
 const argTypes = new Map<string, ArgType<unknown>>();
 
-export function defineArgType<T>(t: ArgType<T>): ArgType<T> {
-    argTypes.set(t.name, t as ArgType<unknown>);
-    return t;
+export function defineArgType<T>(argType: ArgType<T>): ArgType<T> {
+    argTypes.set(argType.name, argType as ArgType<unknown>);
+    return argType;
 }
 
 export function getArgType(name: string): ArgType<unknown> | undefined {
@@ -101,8 +82,6 @@ defineArgType<string>({
     describe: () => 'a block id (e.g. stone, oak_log)',
 });
 
-// ── command specs ───────────────────────────────────────────────
-
 export type ArgSpec =
     | { name: string; type: string; optional?: boolean }
     | { name: string; type: ArgType<unknown>; optional?: boolean };
@@ -132,12 +111,8 @@ export type CommandInvocation = {
 
 export type CommandHandler = (inv: CommandInvocation) => void | Promise<void>;
 
-// ── command registry ────────────────────────────────────────────
-
-/**
- * per-room command registry. lives on ChatClient.commands and
- * ChatServer.commands as a normal nested struct.
- */
+/** per-room command registry. lives on ChatClient.commands and
+ *  ChatServer.commands as a normal nested struct. */
 export type ChatCommands = {
     specs: Map<string, CommandSpec>;
     listeners: Map<string, Set<CommandHandler>>;
@@ -177,8 +152,6 @@ export function hasLocalListener(cmds: ChatCommands, name: string): boolean {
     const set = cmds.listeners.get(name);
     return !!set && set.size > 0;
 }
-
-// ── parser ──────────────────────────────────────────────────────
 
 export type Token = { value: string; start: number; end: number; isFlag: boolean };
 
@@ -302,19 +275,19 @@ export function parseLine(cmds: ChatCommands | null, input: string, cursor: numb
             const spec = cmd.args[i]!;
             const tok = argTokens[i];
             if (!tok) continue;
-            const ty = argTypeOf(spec);
-            if (!ty) {
+            const argType = argTypeOf(spec);
+            if (!argType) {
                 argErrors[spec.name] = `unknown arg type: ${typeof spec.type === 'string' ? spec.type : '(inline)'}`;
                 continue;
             }
-            const res = ty.parse(tok.value);
+            const res = argType.parse(tok.value);
             if (res.ok) argValues[spec.name] = res.value;
             else argErrors[spec.name] = res.error;
         }
     }
 
     // cursor on the second word of a compound-head command (whether or not
-    // the compound has fully resolved yet) → subcommand-suffix suggestion mode.
+    // the compound has fully resolved yet): subcommand-suffix suggestion mode.
     const cursorIsSubcommand = headIsCompound && cursorTokenIndex === 1 && !cursorTokenIsFlag;
 
     let activeArgIndex = -1;
@@ -387,15 +360,13 @@ export function suggestAt(cmds: ChatCommands | null, state: ParseState): Suggest
     }
     if (state.cmd && state.activeArgIndex >= 0 && state.activeArgIndex < state.cmd.args.length) {
         const spec = state.cmd.args[state.activeArgIndex]!;
-        const ty = argTypeOf(spec);
-        if (!ty?.suggest) return [];
+        const argType = argTypeOf(spec);
+        if (!argType?.suggest) return [];
         const partial = state.tokens.find((t) => t.start === state.cursorTokenStart)?.value ?? '';
-        return ty.suggest(partial);
+        return argType.suggest(partial);
     }
     return [];
 }
-
-// ── dispatch ────────────────────────────────────────────────────
 
 export type ParsedCommand = {
     cmd: CommandSpec;

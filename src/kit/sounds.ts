@@ -1,17 +1,4 @@
-/**
- * Starter pack sound clips. Most are Minetest-Game-derived (CC BY-SA 3.0); the
- * `itemPickup` coin blip is CC0 (wobbleboxx, via OpenGameArt). Per-file terms +
- * attribution in `assets/sounds/NOTICE.txt`.
- *
- * Each `sound()` here sources its clip via `asset('./assets/sounds/<file>.ogg',
- * import.meta.url)`, so the .ogg ships alongside this module and resolves
- * relative to it wherever the starter package is installed; the pipeline reads
- * the resolved path and bakes it into the audio atlas.
- *
- * IDs are namespaced `starter:*` so they don't collide with anything a
- * user game declares. Re-exported as the `sounds` namespace from the
- * package index, so consumers reach them as `sounds.chestOpen` etc.
- */
+// per-file license terms + attribution live in `assets/sounds/NOTICE.txt`.
 
 import { asset, sound } from 'bongle';
 

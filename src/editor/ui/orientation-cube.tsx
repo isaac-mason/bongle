@@ -17,8 +17,7 @@ type Face = {
     label: string;
     color: string;
     verts: [number, number, number][];
-    // face-local "right" and "up" axes in world space, used as a basis to
-    // transform the label so it sticks to the face surface.
+    // face-local "right"/"up" axes in world space, used as a basis to transform the label.
     rx: number;
     ry: number;
     rz: number;
@@ -315,10 +314,8 @@ function drawCube(
     };
     const drawn: Drawn[] = [];
     for (const f of FACES) {
-        // OpenGL view space: camera at origin looking down -Z (gpucat / math
-        // convention). a2,a5,a8 are the view-matrix back-axis row, so view-nz
-        // = dot(camera_back, world_normal). a face is camera-facing when its
-        // outward normal aligns with camera_back → nz > 0.
+        // a2,a5,a8 is the view-matrix back-axis row; a face is camera-facing when its outward
+        // normal aligns with camera_back, i.e. nz > 0.
         const nz = a2 * f.nx + a5 * f.ny + a8 * f.nz;
         if (nz <= 0) continue;
 
@@ -343,9 +340,7 @@ function drawCube(
         drawn.push({ face: f, pts, depth, lx, ly, rdx, rdy, udx, udy });
     }
 
-    // painter's algorithm: visible-face center z = H * nz > 0. higher z = more
-    // directly facing camera. sort ascending so the most-facing face is drawn
-    // last (on top), edges of side faces tuck under it.
+    // painter's algorithm: sort ascending so the most camera-facing face draws last, on top.
     drawn.sort((p, q) => p.depth - q.depth);
 
     ctx.lineWidth = 1;
@@ -360,17 +355,14 @@ function drawCube(
         ctx.fill();
         ctx.stroke();
 
-        // text transform: project the face's local right/up basis into screen
-        // space and use as the canvas transform basis, the label sits on the
-        // face surface and foreshortens with the cube rotation. canvas y grows
-        // downward, so flip the up basis.
+        // the label's canvas transform basis is the face's projected right/up axes, so it
+        // foreshortens with the cube rotation; the up basis is flipped since canvas y grows downward.
         ctx.save();
         ctx.transform(d.rdx, d.rdy, -d.udx, -d.udy, d.lx, d.ly);
         ctx.fillStyle = d.face.color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        // font size is in face-local units (cube edge = 1.0). transform
-        // basis has magnitude CUBE_SCALE, so 0.26 → ~11.4 head-on pixels.
+        // font size is in face-local units (cube edge = 1.0, transform basis magnitude = CUBE_SCALE).
         ctx.font = '600 0.26px Helvetica, Arial, sans-serif';
         ctx.fillText(d.face.label, 0, 0);
         ctx.restore();

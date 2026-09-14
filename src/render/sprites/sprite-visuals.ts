@@ -1,31 +1,3 @@
-// SpriteVisuals, per-room instanced renderer for SpriteTrait instances.
-//
-// Material lives engine-global on `SpriteResources`. This per-room struct
-// owns the geometry, per-instance pose+material buffers, and a compacting
-// slot allocator. Slots are dense `[0, head)`, invisible/freed slots are
-// swap-popped out so the draw is a single instanced `drawIndexed(6, head, 0)`
-// with no shader-side visibility gate. Buffers route to the engine-global
-// material by name via `geometry.setBuffer(name, buf)`.
-//
-// Quad orientation is built in-shader from per-instance `flags`:
-//   - 'world' (0): right/up are CPU-extracted basis vectors from the
-//     trait's TransformTrait world matrix
-//   - 'billboard' (1): right/up are extracted from `cameraViewMatrix`
-//     (world-space camera basis via the transposed upper-3×3)
-//   - 'y-billboard' (2): forward = normalize(cameraPos.xz − instPos.xz)
-//     then right = cross(world-up, forward)
-//
-// Per-trait state lives on `SpriteTrait._state` (fast-path lookup); an
-// aliveStates compact array drives stale-trait cleanup. Slots are ephemeral:
-// `state.slot === -1` when the trait is hidden (frustum-culled or
-// `trait.visible === false`); becoming visible re-allocates. The
-// `slotOwner` parallel array lets `freeSlot` reach back into the moved
-// state during swap-pop and rewrite its `state.slot`.
-//
-// Atlas-swap handling: `SpriteResources.refresh` rebinds the material's
-// atlas TextureNode in place, no per-room work needed. The compiled
-// pipeline survives across reloads.
-
 import { type Camera, packTo, type Scene } from 'gpucat';
 import type { Mat4 } from 'math';
 import { box3 } from 'math/shapes';
@@ -50,6 +22,10 @@ import {
 
 type SpriteQuery = ReturnType<typeof query<[typeof SpriteTrait, typeof TransformTrait]>>;
 
+// quad orientation is built in-shader from per-instance `flags`: 'world' (0) uses right/up extracted from the
+// trait's TransformTrait world matrix; 'billboard' (1) extracts right/up from cameraViewMatrix (transposed
+// upper-3x3 camera basis); 'y-billboard' (2) computes forward = normalize(cameraPos.xz - instPos.xz), then
+// right = cross(world-up, forward).
 function encodeFlags(mode: number, center: boolean): number {
     return mode | (center ? CENTER_BIT : 0);
 }
@@ -57,8 +33,6 @@ function encodeFlags(mode: number, center: boolean): number {
 function modeIndex(mode: 'world' | 'billboard' | 'y-billboard'): number {
     return mode === 'world' ? MODE_WORLD : mode === 'billboard' ? MODE_BILLBOARD : MODE_Y_BILLBOARD;
 }
-
-// ── types ───────────────────────────────────────────────────────────
 
 /** Renderer-owned per-instance state stored on `SpriteTrait._state`.
  *  Created on first sight, cleared (back to null on the trait) when the
@@ -97,12 +71,10 @@ export type SpriteVisuals = {
     scene: Scene;
 };
 
-// ── init ────────────────────────────────────────────────────────────
-
 /**
  * Create per-room sprite visuals: ready the client-global instance batch (reset
  * its dense head + slot ownership; buffers untouched) and mount its Mesh into
- * this room's scene. The batch — plane Mesh, per-instance buffers — is owned by
+ * this room's scene. The batch (plane Mesh, per-instance buffers) is owned by
  * `SpriteResources` and survives room swaps; only this room's use of it
  * (alive-states, cull entries, scene-tree query) lives here.
  */
@@ -116,8 +88,6 @@ export function init(batch: SpriteBatch, scene: Scene, sceneTree: SceneTree): Sp
         scene,
     };
 }
-
-// ── update ──────────────────────────────────────────────────────────
 
 const _scratchRight: [number, number, number] = [0, 0, 0];
 const _scratchUp: [number, number, number] = [0, 0, 0];
@@ -148,7 +118,7 @@ export function update(
     let poseDirty = false;
     let matDirty = false;
 
-    // ── phase 1: install/refresh state, alloc/free slots by visibility ──
+    // phase 1: install/refresh state, alloc/free slots by visibility
     for (const [trait, transform] of visuals._query) {
         const sprite = trait.sprite;
         if (!sprite) {
@@ -166,10 +136,9 @@ export function update(
         const existing = trait._state;
         if (existing === null || existing.spriteIdAtInstall !== sprite.def.spriteId) {
             if (existing !== null) destroyInstance(visuals, batch, trait, visibility);
-            // own frustum-cull entry. The quad can rotate freely (billboard
-            // modes) so the local box is a conservative diagonal that
-            // contains the quad in any orientation, in world units
-            // (width/height are source pixels → × worldScale).
+            // own frustum-cull entry; the quad can rotate freely (billboard modes) so the local box is a
+            // conservative diagonal that contains the quad in any orientation, in world units (width/height
+            // are source pixels times worldScale).
             const w0 = trait.width;
             const h0 = trait.height;
             const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5 * trait.worldScale;
@@ -212,7 +181,7 @@ export function update(
             batch.slotOwner[slot] = state;
         }
 
-        // ── pose write (per-frame) ──
+        // pose write (per-frame)
         const worldMat = getVisualWorldMatrix(transform);
         extractBasis(worldMat, _scratchRight, _scratchUp);
         const worldScale = trait.worldScale;
@@ -234,7 +203,7 @@ export function update(
         new Uint32Array(poseArr.buffer, poseArr.byteOffset, poseArr.length)[poseOff + 11] = flags;
         poseDirty = true;
 
-        // ── material write (per-frame; uvRect changes for flipbooks) ──
+        // material write (per-frame; uvRect changes for flipbooks)
         const frameCount = state.entry.frames.length;
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const frame = state.entry.frames[frameIdx]!;
@@ -252,7 +221,7 @@ export function update(
         matDirty = true;
     }
 
-    // ── phase 2: cleanup stale states (trait no longer in query) ──
+    // phase 2: cleanup stale states (trait no longer in query)
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
@@ -265,7 +234,7 @@ export function update(
 
     batch.mesh.count = batch.head;
 
-    // dense [0, head) pool — upload that prefix, not the whole capacity allocation.
+    // dense [0, head) pool; upload that prefix, not the whole capacity allocation.
     if (poseDirty) {
         batch.instancePoseBuf.addUpdateRange(0, batch.head * (INSTANCE_POSE_STRIDE / 4));
         batch.instancePoseBuf.needsUpdate = true;
@@ -279,16 +248,14 @@ export function update(
 /**
  * Dispose per-room sprite visuals: release every slot this room holds in the
  * client-global batch (swap-pop out, unregister cull, clear `trait._state`) and
- * detach the batch Mesh from this room's scene. The batch's GPU buffers are NOT
- * freed — they survive for the next room's `init`.
+ * detach the batch Mesh from this room's scene. The batch's GPU buffers are not
+ * freed; they survive for the next room's `init`.
  */
 export function dispose(visuals: SpriteVisuals, batch: SpriteBatch, visibility: Visibility.Visibility): void {
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
     visuals.scene.remove(batch.mesh);
 }
-
-// ── internals ───────────────────────────────────────────────────────
 
 function destroyInstance(
     visuals: SpriteVisuals,

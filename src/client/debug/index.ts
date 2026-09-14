@@ -1,20 +1,11 @@
-// a minimal gui for tweaking values and watching data — the widget toolkit the
-// client debug dashboard (client/ui/dashboard.ts) is built from.
-//
-// vendored from dashcat (https://github.com/isaac-mason/dashcat, MIT) at
-// 303478b. zero deps, plain DOM. edit it here; it is engine source now.
-
-// the mount surface options
 export type { Accessor, AddOptions, Container, ControlName, Folder, FolderOptions, TabGroup, TilesOptions } from './container';
 export type { Base, Context, Control, Handle } from './control';
-// authoring a custom control: `const c: Control<T> = (ctx, prop) => { const b = base(...); ... }`
 export { base } from './control';
 export { el, on } from './dom';
 export type { Formatter } from './format';
 export { bytes, duration, percent, si, suffix } from './format';
 export type { Dashboard, DashboardOptions, Panel, PanelOptions } from './layout/dock';
 export { dashboard } from './layout/dock';
-// realtime watch widgets
 export type { BarsOptions } from './monitors/bars';
 export type { FlameFrame, FlameOptions } from './monitors/flame';
 export type { GaugeOptions } from './monitors/gauge';

@@ -1,21 +1,3 @@
-/**
- * orbit controller script, orbit camera controller.
- *
- * polls blocks' Input each frame instead of attaching DOM listeners (only
- * exception: contextmenu suppression so right-drag pan doesn't pop the menu).
- *
- *   left drag   → rotate (azimuth/polar)
- *   right drag  → pan (screen-space)
- *   wheel       → dolly in/out
- *
- * grabs the active camera node (`getCamera(ctx)`) and writes pose to its
- * TransformTrait each frame while it's the subject. the renderer composes
- * its per-room PerspectiveCamera from that node's TransformTrait +
- * CameraTrait via `RenderCamera.syncRenderCamera`. callers
- * can pre-seed the camera transform (or `target` on this trait) before
- * attach to open with a specific view.
- */
-
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'math';
 import {
     getCanvasTouches,
@@ -40,17 +22,12 @@ import { TransformTrait } from './transform';
 const INITIAL_TARGET_DISTANCE = 5;
 
 /**
- * orbit controller. attaching it wires up the orbit camera script
- * (left-drag rotate, right-drag pan, wheel dolly).
+ * orbit controller. attaching it wires up the orbit camera script (left-drag rotate,
+ * right-drag pan, wheel dolly).
  *
- * `target` is the world-space focal point the camera orbits / pans around.
- * mutable, pan writes back into it and the editor reconcile loop seeds it
- * on takeover.
- *
- * `eye` is the initial world-space camera position. consumed once on
- * attach to seed the camera transform + spherical state. leave the
- * default (null) to use whatever pose the camera transform already
- * carries (set externally before attach, or the room default).
+ * `target` is the world-space focal point the camera orbits / pans around; mutable, pan writes
+ * back into it. `eye` is the initial world-space camera position, consumed once on attach;
+ * leave the default (null) to use whatever pose the camera transform already carries.
  */
 export const OrbitControllerTrait = trait(
     'engine:orbit-controller',
@@ -120,30 +97,20 @@ script(
         // prior lens (character) left set on this room so it doesn't grab on click.
         setPointerLock(ctx, false);
 
-        // ── camera: the active camera node on the client state
-        // (`getCamera(ctx)`, the room default in play, a lens-private camera
-        // under the editor). camera-node lifecycle is owned by the room / the
-        // editor lens; onDispose only clears the contextmenu
-        // listener.
-        // cameraTrait + cameraTransform are re-resolved each active frame in
-        // onFrame; these init values drive the initial eye/look seeding below.
+        // camera-node lifecycle is owned by the room / the editor lens; onDispose only clears
+        // the contextmenu listener. cameraTrait + cameraTransform are re-resolved each active
+        // frame in onFrame; these init values drive the initial eye/look seeding below.
         let cameraNode = getCamera(ctx)!;
         let cameraTrait = getTrait(cameraNode, CameraTrait)!;
         let cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
-        // mirror targets for the orbit eye position. orbit only writes to
-        // cameraTransform (a separate scene-root camera node), so ctx.node's
-        // TransformTrait never moves. see fly-controller for the full
-        // rationale, same two cases (real edit room: ctx.node ===
-        // room.playerNode is the server-authoritative anchor; local lens:
-        // ctx.node is client-only and we additionally mirror into
-        // room.playerNode so owner-sync carries the anchor to the server).
+        // orbit only writes to cameraTransform, so ctx.node's TransformTrait never moves on its
+        // own; mirrored below each frame so the server-authoritative anchor and voxel chunk
+        // streaming stay near the camera instead of stuck at spawn.
         const nodeTransform = getTrait(ctx.node, TransformTrait);
 
-        // ── state (closure, mutable) ───────────────────────────────────
-        // initial eye: either the `eye` trait field if set, or whatever the
-        // camera transform currently holds. target stays on the trait
-        // (mutated by pan).
+        // initial eye: either the `eye` trait field if set, or whatever the camera transform
+        // currently holds. target stays on the trait, mutated by pan.
         const target = ctx.trait.target;
         const seedEye = ctx.trait.eye;
         if (seedEye) setWorldPosition(cameraTransform, seedEye);
@@ -196,19 +163,15 @@ script(
 
         onFrame(ctx, (_args) => {
             if (getSubject(ctx) !== ctx.node) return;
-            // re-resolve the active camera (subject ⟹ client.camera is ours),
-            // so an editor lens swap never strands us on a stale camera node.
+            // re-resolve the active camera each frame so an editor lens swap never strands us
+            // on a stale camera node.
             cameraNode = getCamera(ctx)!;
             cameraTransform = getTrait(cameraNode, TransformTrait)!;
             cameraTrait = getTrait(cameraNode, CameraTrait)!;
-            // Skip until the viewport has a real size, the ResizeObserver
-            // hasn't fired yet on the first frame(s) after attach. Without
-            // this, the `viewport.height || 1` fallback below divides mouse
-            // deltas by 1 instead of ~the canvas height, amplifying any
-            // early drag by ~1000x and hurling the camera into junk
-            // spherical coords that persist after resize lands.
+            // skip until the viewport has a real size (ResizeObserver hasn't fired yet on the
+            // first frame after attach), else mouse deltas divide by 1 instead of the canvas
+            // height and hurl the camera into junk spherical coords.
             if (!viewport.height) return;
-            // ── drag mode transitions ─────────────────────────────
             if (dragMode === 'none') {
                 if (isMouseJustDown(mk, 'left')) dragMode = 'rotate';
                 else if (isMouseJustDown(mk, 'right')) dragMode = 'pan';
@@ -220,7 +183,6 @@ script(
                 dragMode = 'none';
             }
 
-            // ── apply per-frame mouse delta ────────────────────────
             const h = viewport.height;
             if (dragMode === 'rotate') {
                 // rotateLeft (azimuth) = -dx; rotateUp (polar) = -dy
@@ -230,9 +192,8 @@ script(
                 pan(mk._dx * PAN_SPEED, mk._dy * PAN_SPEED);
             }
 
-            // ── wheel dolly ───────────────────────────────────────
-            // skip while a UI overlay holds the pointer, so scrolling an open
-            // panel scrolls the panel instead of dollying the camera.
+            // skip while a UI overlay holds the pointer, so scrolling an open panel scrolls
+            // the panel instead of dollying the camera.
             if (!isPointerCapturedByUi(mk)) {
                 if (mk._wheelDeltaY > 0) {
                     scaleAccum /= zoomScale(mk._wheelDeltaY);
@@ -241,11 +202,9 @@ script(
                 }
             }
 
-            // ── touch gestures ────────────────────────────────────
-            // one finger orbits (same mapping as a left-drag), two fingers
-            // pinch to dolly and drag to pan. touch never fires the mouse-delta
-            // path above (no synthetic mousemove during a touch drag), so this
-            // is the sole touch source and can't double up with the mouse.
+            // one finger orbits (same mapping as a left-drag), two fingers pinch to dolly and
+            // drag to pan. touch never fires the mouse-delta path above (no synthetic mousemove
+            // during a touch drag), so this is the sole touch source and can't double up.
             const touches = getCanvasTouches(input.touch);
             if (touches.size === 1) {
                 const finger = touches.values().next().value!;
@@ -267,7 +226,6 @@ script(
                 pan((panDx / 2) * PAN_SPEED, (panDy / 2) * PAN_SPEED);
             }
 
-            // ── update spherical from current eye relative to target ──
             const camPos = getWorldPosition(cameraTransform);
             eye[0] = camPos[0];
             eye[1] = camPos[1];

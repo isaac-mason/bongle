@@ -1,12 +1,3 @@
-/**
- * client-side replication.
- *
- * each tick, iterates owned nodes and packs owner-authority sync slices
- * individually. only sends a sync_update when at least one slice's packed
- * bytes differ from the previous tick (same per-slice byte-compare approach
- * the server's diff system uses).
- */
-
 import type { PlayerId } from '../core/client';
 import type { BinaryField } from '../core/protocol';
 import { registry } from '../core/registry';
@@ -16,21 +7,15 @@ import { diffSync } from '../core/scene/sync/sync-diff';
 import type { ClientNet } from './net';
 import { send } from './net';
 
-/** the set of owned nodes we currently hold an owner-upload snapshot for. the
- *  snapshot itself lives on each trait instance's `_sync.bytes/values`; this set
- *  exists only so we can reset a node's snapshot when ownership is lost, so a
- *  future re-own re-uploads from scratch (first-seen) rather than diffing against
- *  stale bytes. (name kept for caller stability, it tracks nodes, not state.) */
+/** nodes we currently hold an owner-upload snapshot for (snapshot lives on each
+ *  trait instance's `_sync.bytes/values`); reset when ownership is lost so a
+ *  future re-own re-uploads from scratch. */
 export function createSyncSnapshots(): Set<Node> {
     return new Set();
 }
 
-/**
- * send sync updates for owner-authority slices that changed since last tick.
- * call once per tick (not per frame) to match the server's tick rate. the
- * per-slice byte snapshot lives on `instance._sync`, same store the server
- * diff uses.
- */
+/** send sync updates for owner-authority slices that changed since last tick.
+ *  call once per tick, not per frame, to match the server's tick rate. */
 export function sendOwnerSyncUpdates(
     net: ClientNet,
     sg: SceneTree,
@@ -40,9 +25,8 @@ export function sendOwnerSyncUpdates(
 ): void {
     const owned = sg.replication.owners.get(playerId);
 
-    // reset + untrack nodes we no longer own (destroyed, or owner handed off) so
-    // a future re-own re-uploads from scratch rather than diffing against a stale
-    // per-instance snapshot.
+    // untrack nodes no longer owned (destroyed, or handed off) so a future re-own
+    // re-uploads from scratch rather than diffing against a stale snapshot
     if (tracked.size > 0) {
         for (const node of tracked) {
             if (!owned?.has(node)) {
@@ -71,7 +55,6 @@ export function sendOwnerSyncUpdates(
             const sync = instance._sync;
             if (!sync) continue;
 
-            // skip traits with no owner-authority syncs
             let hasOwnerSync = false;
             for (const sd of handle.def.sync) {
                 if (sd.authority === 'owner') {
@@ -87,8 +70,7 @@ export function sendOwnerSyncUpdates(
             for (let i = 0; i < codecs.length; i++) {
                 if (handle.def.sync[i].authority !== 'owner') continue;
 
-                // byte-diff. the client uploads a first-seen owned slice (the server
-                // needs the initial value), so emitOnFirstSeen = true.
+                // emitOnFirstSeen: the server needs the initial value of a newly owned slice
                 if (diffSync(codecs[i], instance, node, i, sync, true)) {
                     changedFields.push({ index: i, data: sync.bytes[i]! });
                 }

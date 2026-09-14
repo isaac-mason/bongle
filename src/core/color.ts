@@ -1,9 +1,3 @@
-// Color-space helpers. The render pipeline writes into a linear target
-// and applies sRGB encoding on output; texture samples come through
-// `rgba8unorm-srgb` so they're decoded on read. Anything authored as
-// hex/byte values (sky LUT stops, hardcoded billboard tints, ...) must
-// be decoded to linear at authoring time so it lives in the same space.
-
 import type { Vec3 } from 'math';
 
 /** IEC 61966-2-1 sRGB transfer, byte input (0..255) → linear float (0..1). */

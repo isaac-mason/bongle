@@ -1,24 +1,3 @@
-// dom-ui, per-room visuals for the two UI traits (HtmlTrait, CanvasTrait).
-//
-// One init/update/dispose handles both kinds. They share enough
-// concerns (mount under `room.viewport`, CSS-px projection, 3D
-// orientation modes, lazy install with query-driven teardown) that a
-// single module is more honest than two peer dirs.
-//
-// Per-trait responsibilities:
-// - HtmlTrait: positions a `<div>` on a DOM overlay layer over the
-//   canvas. `screen` mode projects the node to CSS px; `world` /
-//   `billboard` / `y-billboard` modes are stubbed for v1 (warn-once).
-// - CanvasTrait: per-instance Mesh + `OffscreenCanvas` quad. User
-//   scripts paint directly and flip `needsUpdate`. DOM-in-canvas (the
-//   former HtmlCanvasTrait use case) is a userland recipe on top,
-//   user mounts an off-screen div themselves and `drawElement`s into
-//   the canvas. See plan-ui-traits.md appendix.
-//
-// Canvas uses one Mesh per instance for v1, readable and shippable.
-// GPU-batched instancing (à la mesh-visuals) is a later optimisation
-// if perf bites.
-
 import {
     attribute,
     type Camera,
@@ -56,14 +35,11 @@ import type { Unsubscribe } from '../core/utils/topic';
 import { UILayer } from './ui/util/ui-layers';
 import type { Viewport } from './viewport';
 
-// ── shared per-instance state ──────────────────────────────────────
-
 type CanvasQuadState = {
-    /** The Mesh added to the scene; per-instance for v1. */
     mesh: Mesh;
     texture: CanvasTexture;
     canvas: OffscreenCanvas;
-    /** The trait's `_version` observed at last config refresh (size, mode, …). */
+    /** trait's `_version` observed at last config refresh (size, mode, etc). */
     versionAtRefresh: number;
     width: number;
     height: number;
@@ -75,22 +51,19 @@ type CanvasState = CanvasQuadState & {
 
 type HtmlState = {
     trait: HtmlTrait;
-    /** The `<div>` mounted on the overlay layer. Same ref as `trait.element`. */
+    /** same ref as `trait.element`. */
     element: HTMLDivElement;
-    /** Cache last-applied transform string to skip redundant style writes. */
+    /** last-applied transform string, skips redundant style writes. */
     lastTransform: string;
     lastZIndex: string;
     lastDisplay: string;
     lastPointerEvents: string;
 };
 
-// ── init ───────────────────────────────────────────────────────────
-
-// `scene` is the room's overlay scene: CanvasTrait quads are added here so they
-// render crisp in the post-fxaa overlay pass. HtmlTrait panels are DOM (mounted
-// on `htmlOverlay`) and ignore this scene. `sceneDepthNode` is the main scene
-// pass's depth, sampled by canvas materials to discard fragments occluded by
-// world geometry.
+// `scene` is the overlay scene CanvasTrait quads render into (crisp in the
+// post-fxaa pass); HtmlTrait panels are DOM, mounted on `htmlOverlay` instead.
+// `sceneDepthNode` is the main pass's depth, sampled to occlude canvas quads
+// behind world geometry.
 export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, sceneDepthNode: DepthTextureNode) {
     const htmlOverlay = document.createElement('div');
     htmlOverlay.className = 'engine-html-layer';
@@ -98,9 +71,8 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, s
     htmlOverlay.style.inset = '0';
     htmlOverlay.style.pointerEvents = 'none';
     htmlOverlay.style.transformStyle = 'preserve-3d';
-    // explicit z-index makes this a stacking context, confining the huge
-    // per-frame depth z-indices the trait panels get (see UILayer) so they
-    // sort among themselves but never paint over the HUD above.
+    // explicit z-index makes this a stacking context, confining the trait
+    // panels' per-frame depth z-indices (see UILayer) below the HUD.
     htmlOverlay.style.zIndex = String(UILayer.worldOverlay);
     viewport.appendChild(htmlOverlay);
 
@@ -116,10 +88,8 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, s
         _unsubscribes: [] as Unsubscribe[],
     };
 
-    // teardown is edge-driven: a panel is torn down the moment its node stops
-    // matching, rather than being noticed a frame later by a sweep. install
-    // stays lazy in `update`, which already walks every match anyway.
-    // DOM work has no phase constraint, so these run inline.
+    // edge-driven teardown: a panel is torn down the moment its node stops
+    // matching, rather than a frame later by a sweep.
     domUi._unsubscribes.push(
         onQueryExit(domUi.htmlQuery, (trait) => {
             const state = domUi.htmlStates.get(trait);
@@ -136,14 +106,10 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, s
 
 export type DomUi = ReturnType<typeof init>;
 
-// ── update ─────────────────────────────────────────────────────────
-
 export function update(domUi: DomUi, camera: Camera, viewport: Viewport): void {
     updateHtml(domUi, camera, viewport);
     updateCanvas(domUi, camera);
 }
-
-// ── HtmlTrait ──────────────────────────────────────────────────────
 
 const _scratchClip: [number, number, number, number] = [0, 0, 0, 0];
 
@@ -163,7 +129,7 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport): void {
             continue;
         }
 
-        // project node world position to clip → NDC → CSS px.
+        // project node world position: clip, then NDC, then CSS px.
         const worldMat = getVisualWorldMatrix(transform);
         const wx = worldMat[12]!;
         const wy = worldMat[13]!;
@@ -180,15 +146,14 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport): void {
         const ndcY = _scratchClip[1] / cw;
         const ndcZ = _scratchClip[2] / cw;
 
-        // off-screen slack: a panel still partially overlaps when its
-        // anchor leaves NDC, so don't hard-clip here. CSS handles overflow.
+        // no hard clip: a panel can still partially overlap once its anchor
+        // leaves NDC, so let CSS handle overflow.
         const cssX = halfW + ndcX * halfW;
         const cssY = halfH - ndcY * halfH;
 
         let scaleStr = '';
         if (trait.distanceFactor !== null) {
-            // distance from camera to the anchor (any positive scalar works,
-            // drei uses cameraDistance and the scale = factor / dist).
+            // drei-style: scale = distanceFactor / distance-to-camera.
             const cam = camera.position;
             const dx = wx - cam[0];
             const dy = wy - cam[1];
@@ -202,9 +167,8 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport): void {
         const transformStr = `translate(${cssX}px,${cssY}px)${centerStr}${scaleStr}`;
         setStyle(state, 'lastTransform', state.element.style, 'transform', transformStr);
 
-        // drei trick: lerp the projected depth into a discrete z-index
-        // range so overlapping panels sort by depth without DOM reorder.
-        // ndcZ is [0,1] in WebGPU; clamp for safety.
+        // lerp projected depth into a discrete z-index range so overlapping
+        // panels sort without DOM reorder. ndcZ is [0,1] in WebGPU; clamp.
         const depthT = Math.max(0, Math.min(1, ndcZ));
         const [zNear, zFar] = trait.zIndexRange;
         const zIndex = Math.round(zNear + (zFar - zNear) * depthT);
@@ -216,9 +180,8 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport): void {
 }
 
 function installHtml(domUi: DomUi, trait: HtmlTrait): HtmlState {
-    // trait.element is created by the trait factory on the client. The
-    // visuals layer just mounts it into the overlay and configures the
-    // engine-managed style bits (positioning + pointer-events).
+    // trait.element is created by the trait factory; this only mounts it and
+    // sets the engine-managed style bits (positioning + pointer-events).
     const element = trait.element!;
     element.style.position = 'absolute';
     element.style.left = '0';
@@ -241,8 +204,7 @@ function installHtml(domUi: DomUi, trait: HtmlTrait): HtmlState {
 }
 
 function disposeHtml(domUi: DomUi, state: HtmlState): void {
-    // Detach from the overlay but leave trait.element intact, the trait
-    // owns the div. Userland keeps any references it stashed.
+    // trait.element stays intact, the trait owns the div.
     state.element.remove();
     domUi.htmlStates.delete(state.trait);
 }
@@ -255,8 +217,6 @@ function warnHtml3DMode(mode: string): void {
         `[dom-ui] HtmlTrait mode '${mode}' is not implemented yet — only 'screen' is supported. Falling back to display:none.`,
     );
 }
-
-// ── CanvasTrait ────────────────────────────────────────────────────
 
 function updateCanvas(domUi: DomUi, camera: Camera): void {
     for (const [trait, transform] of domUi.canvasQuery) {
@@ -277,32 +237,19 @@ function updateCanvas(domUi: DomUi, camera: Camera): void {
 }
 
 function installCanvas(domUi: DomUi, trait: CanvasTrait): CanvasState {
-    // trait.canvas is created by the trait factory on the client. The
-    // visuals layer just resizes it (if width/height defaults differ
-    // from the factory size) and wraps it in a texture.
+    // trait.canvas is created by the trait factory; this only resizes it (if
+    // width/height differ from the factory default) and wraps it in a texture.
     const canvas = trait.canvas!;
     if (canvas.width !== trait.width) canvas.width = trait.width;
     if (canvas.height !== trait.height) canvas.height = trait.height;
-    // WebGPU's copyExternalImageToTexture rejects an OffscreenCanvas with
-    // no rendering context bound. Eagerly bind one so first upload works
-    // even if the user hasn't called getContext yet.
+    // copyExternalImageToTexture rejects an OffscreenCanvas with no bound
+    // rendering context, so bind one eagerly in case the user hasn't yet.
     canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
     const tex = new CanvasTexture(canvas);
-    // NEAREST magnified, LINEAR minified, NO mip chain, anisotropy on.
-    //
-    // `CanvasTexture` takes no options and `Texture` defaults to linear, so this was
-    // the one surface in the engine being filtered - hence nearest for magnification,
-    // matching voxel-textures / mesh-atlas / sprite-resources.
-    //
-    // Minification is the interesting half, because these are world-space quads
-    // whose on-screen size is whatever distance makes it. A trilinear mip chain is
-    // the textbook answer but overshoots here: labels typically sit around 2-3x
-    // minified, where sampling a blended mip throws away detail the screen could
-    // still show. Bilinear off the full-resolution texture is sharper at that range,
-    // and anisotropy covers the glancing angles a billboard hits when you look down
-    // on it. Past ~4x this will start to sparkle, and the fix then is not a filter:
-    // it is that the canvas has more pixels than the quad occupies, so either raise
-    // `worldScale` or lower `width`/`height` to match.
+    // nearest magnification (matches voxel-textures/mesh-atlas/sprite-resources);
+    // linear minification + anisotropy stays sharper than a mip chain at the
+    // ~2-3x minification these label quads typically sit at. Past ~4x this
+    // aliases; fix by raising worldScale or lowering width/height, not the filter.
     tex.magFilter = 'nearest';
     tex.minFilter = 'linear';
     tex.anisotropy = 16;
@@ -330,21 +277,19 @@ function refreshCanvasConfig(state: CanvasState, trait: CanvasTrait): void {
         state.canvas.height = trait.height;
         state.width = trait.width;
         state.height = trait.height;
-        // user code keeps the same OffscreenCanvas ref, just sees a new size.
+        // user code keeps the same OffscreenCanvas ref, sees a new size.
         state.texture.needsUpdate = true;
     }
     state.versionAtRefresh = trait._version;
 }
 
 function disposeCanvas(domUi: DomUi, state: CanvasState): void {
-    // trait.canvas stays, userland may still hold the ref / context.
+    // trait.canvas stays, userland may still hold the ref/context.
     domUi.scene.remove(state.mesh);
     state.mesh.geometry.dispose();
     state.mesh.material.dispose();
     domUi.canvasStates.delete(state.trait);
 }
-
-// ── shared: textured quad pose + material ──────────────────────────
 
 const _meshPos: Vec3 = [0, 0, 0];
 const _meshOffset: Vec3 = [0, 0, 0];
@@ -364,17 +309,16 @@ function applyQuadPose(
     _meshPos[1] = worldMat[13]!;
     _meshPos[2] = worldMat[14]!;
 
-    // orientation
     if (mode === 'billboard') {
-        // copy camera world rotation. plane +Z normal then points back
-        // toward the camera (camera local +Z is "behind camera" in world).
+        // camera local +Z is "behind camera" in world, so copying camera
+        // world rotation points the plane's +Z normal back at the camera.
         quat.fromMat4(mesh.quaternion as Quat, camera.matrixWorld);
     } else if (mode === 'y-billboard') {
         const camPos = camera.position;
         const dx = camPos[0] - _meshPos[0];
         const dz = camPos[2] - _meshPos[2];
         const yaw = Math.atan2(dx, dz);
-        // rotation around world-Y by yaw.
+        // quaternion for a rotation around world-Y by yaw.
         const half = yaw * 0.5;
         const s = Math.sin(half);
         const c = Math.cos(half);
@@ -383,7 +327,6 @@ function applyQuadPose(
         mesh.quaternion[2] = 0;
         mesh.quaternion[3] = c;
     } else {
-        // 'world', copy node world rotation.
         quat.fromMat4(mesh.quaternion as Quat, worldMat);
     }
 
@@ -391,9 +334,8 @@ function applyQuadPose(
     mesh.scale[1] = height * worldScale;
     mesh.scale[2] = 1;
 
-    // center vs top-left anchor: offset by (+w/2, -h/2) in panel local frame
-    // when anchoring at top-left (so the panel center lands +w/2,-h/2 from
-    // the anchor).
+    // top-left anchor: offset the mesh (+w/2, -h/2) in panel local frame so
+    // the panel's center lands there instead of the anchor point.
     if (!center) {
         _meshOffset[0] = width * worldScale * 0.5;
         _meshOffset[1] = -(height * worldScale) * 0.5;
@@ -409,10 +351,8 @@ function applyQuadPose(
     mesh.position[2] = _meshPos[2];
 }
 
-// occlusion by world geometry, done in-shader (the overlay pass has no shared
-// depth attachment). `sceneZ` is the main scene pass's stored NDC depth at this
-// pixel; discard when this fragment's `fragZ` is behind it. `sceneZ == 1` (no
-// geometry / far plane) never occludes.
+// discards fragments occluded by world geometry: `sceneZ` is the main pass's
+// stored NDC depth at this pixel, `sceneZ == 1` (far plane) never occludes.
 const canvasDepthOcclude = Fn(
     (color, fragZ, sceneZ) => {
         If(fragZ.greaterThan(sceneZ), () => {
@@ -431,64 +371,48 @@ const canvasDepthOcclude = Fn(
 );
 
 function createTexturedQuadMaterial(tex: CanvasTexture, sceneDepthNode: DepthTextureNode): Material {
-    // simple textured quad: clip = projection * view * model * vec4(pos,1),
-    // fragment = sample(uv), discarded where occluded by world geometry.
     const aPosition = attribute('position', d.vec3f);
     const aUv = attribute('uv', d.vec2f);
 
     const worldPos = mul(modelWorldMatrix, vec4f(aPosition, f32(1.0)));
     const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, worldPos));
 
-    // attributes can only be read in the vertex stage; pass uv through a
-    // varying so the fragment shader gets interpolated coords.
+    // attributes are vertex-stage only; pass uv through a varying for the
+    // fragment shader's interpolated coords.
     const vUv = varying(aUv, 'domUiUv');
 
     const texNode = texture(tex);
     const sampled = texNode.sample(vUv);
 
-    // sample the scene pass's depth at this fragment's pixel and discard if we're
-    // behind world geometry. same camera as the scene → same NDC-z space as
-    // `fragCoord.z`, so a direct compare is correct.
-    //
-    // index the depth texture by normalized screenUV scaled to the depth
-    // texture's OWN dimensions, not by raw fragCoord pixels. the overlay pass and
-    // the scene-depth attachment can live in different pixel spaces (notably a
-    // devicePixelRatio mismatch on the WebGL backend / HiDPI), and a raw
-    // texelFetch then indexes out of bounds outside a top-left sub-rect,
-    // discarding the quad everywhere else. screenUV is [0,1] across the render
-    // surface by construction, so this maps correctly regardless of DPR.
+    // same camera as the scene pass, so sceneZ is directly comparable to
+    // fragCoord.z. index by screenUV scaled to the depth texture's own
+    // dimensions rather than raw fragCoord pixels: the overlay pass and the
+    // scene-depth attachment can differ in pixel space under a devicePixelRatio
+    // mismatch (WebGL/HiDPI), which would otherwise index out of bounds.
     const depthTexel = vec2i(mul(screenUV, vec2f(textureDimensions(sceneDepthNode.bindingNode))));
     const sceneZ = sceneDepthNode.load(depthTexel);
     const fragment = canvasDepthOcclude(sampled, fragCoord.z, sceneZ);
-    // const fragment = sampled;
-    // const fragment = vec4f(sceneZ, sceneZ, sceneZ, f32(1)); // debug: show the sampled scene
     return new Material({
         name: 'dom-ui-quad',
         vertex: clipPos,
         fragment,
         cullMode: 'none',
-        // occlusion is handled in-shader (above); the overlay pass owns no depth
-        // we test/write against, and transparent panels sort back-to-front.
+        // occlusion is handled in-shader above; transparent panels sort back-to-front.
         depthTest: false,
         depthWrite: false,
         transparent: true,
     });
 }
 
-// ── shared utilities ───────────────────────────────────────────────
-
 function projectPoint(out: [number, number, number, number], x: number, y: number, z: number, camera: Camera): void {
-    // clip = projection * view * vec4(pos, 1)
     const view = camera.matrixWorldInverse;
     const proj = camera.projectionMatrix;
 
-    // vp = view * pos
     const vx = view[0]! * x + view[4]! * y + view[8]! * z + view[12]!;
     const vy = view[1]! * x + view[5]! * y + view[9]! * z + view[13]!;
     const vz = view[2]! * x + view[6]! * y + view[10]! * z + view[14]!;
     const vw = view[3]! * x + view[7]! * y + view[11]! * z + view[15]!;
 
-    // clip = projection * vp
     out[0] = proj[0]! * vx + proj[4]! * vy + proj[8]! * vz + proj[12]! * vw;
     out[1] = proj[1]! * vx + proj[5]! * vy + proj[9]! * vz + proj[13]! * vw;
     out[2] = proj[2]! * vx + proj[6]! * vy + proj[10]! * vz + proj[14]! * vw;
@@ -507,11 +431,9 @@ function setStyle<S extends { [K in T]: string }, T extends keyof S>(
     state[cacheKey] = value as S[T];
 }
 
-// ── dispose ────────────────────────────────────────────────────────
-
 export function dispose(domUi: DomUi): void {
     // unsubscribing is itself an exit: each handler fires once more per node
-    // still matching, which is the whole teardown.
+    // still matching, which does the whole teardown.
     for (const unsubscribe of domUi._unsubscribes) unsubscribe();
     domUi._unsubscribes.length = 0;
     domUi.htmlOverlay.remove();

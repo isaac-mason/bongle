@@ -1,9 +1,3 @@
-// a `prop` is a reference to state you already own. dashcat instruments it, it
-// never owns it. three not-owned shapes: object+key, a get/set lens, or a
-// getter-only source (read-only, for visibility). reactivity is a property of
-// the binding: a `subscribe` means push updates, its absence means opt into
-// `.listen()` polling.
-
 export type Prop<T> = {
     get(): T;
     /** absent ⇒ read-only (a monitor/graph source). */
@@ -14,8 +8,7 @@ export type Prop<T> = {
     name?: string;
 };
 
-// math's shape types are tuples (Vec3 = [x,y,z], Quat = [x,y,z,w]); widen
-// them to number[] so they bind to the array-typed shape controls.
+// Vec3/Quat are tuples ([x,y,z] / [x,y,z,w]); widen to number[] to bind array-typed shape controls.
 type Widen<T> = T extends readonly number[] ? number[] : T;
 
 /** bind to `object[key]` (read/write). the key becomes the default label. */

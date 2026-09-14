@@ -14,17 +14,16 @@ export function init() {
         inbox: [[], []] as Uint8Array[][],
         /** framed outbound batch, drained to the driver at the end of flush. */
         outbox: [] as Uint8Array[],
-        /** reassembles inbound fragments back into a whole message batch (a big
-         *  batch is split across frames by the server's transport). Fragments are
-         *  contiguous only within one channel, so one per channel. */
+        /** reassembles inbound fragments back into a whole message batch. one per
+         *  channel, since fragments are contiguous only within one channel. */
         reassemblers: [createReassembler(), createReassembler()] as Reassembler[],
         outboxMessages: [] as OutboxEntry[],
         bytesInByType: new Map<string, number>(),
         bytesOutByType: new Map<string, number>(),
-        /** latest `net_ping.serverStamp` from the server; echoed back each tick via
-         *  `net_ping_ack` so the server can measure our RTT (Quake-style). */
+        /** latest `net_ping.serverStamp`; echoed back each tick via `net_ping_ack`
+         *  so the server can measure our RTT. */
         lastServerStamp: 0,
-        /** the server's smoothed measurement of OUR ping (ms), for the net HUD. */
+        /** the server's smoothed measurement of our ping (ms), for the net HUD. */
         pingMs: 0,
     };
 }
@@ -38,12 +37,9 @@ export function send(state: ClientNet, message: ClientMessage) {
     state.bytesOutByType.set(type, (state.bytesOutByType.get(type) ?? 0) + bytes.byteLength);
 }
 
-/**
- * Frame the queued messages and hand each frame to the host. The batch is one
- * atomic unit; `frameOutbound` packs it into a single wire frame, splitting into
- * fragments only when it would exceed WIRE_BUDGET. The host sends each frame
- * opaquely; the server reassembles the batch whole.
- */
+/** Frame the queued messages and hand each frame to the host. `frameOutbound`
+ *  packs the batch into a single wire frame, splitting into fragments only
+ *  when it would exceed WIRE_BUDGET; the server reassembles the batch whole. */
 export function flush(state: ClientNet, send: ClientDriver['send']) {
     if (state.outboxMessages.length === 0) return;
 

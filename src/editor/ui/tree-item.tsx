@@ -123,12 +123,10 @@ export const TreeItem = memo(function TreeItem({
             aria-expanded={hasChildren ? !item.collapsed : undefined}
             tabIndex={0}
         >
-            {/* drag handle */}
             <span ref={handleRef} className="cursor-grab active:cursor-grabbing text-fg-muted shrink-0 select-none px-0.5">
                 <Icons.GripVertical size={12} />
             </span>
 
-            {/* expand/collapse */}
             {hasChildren ? (
                 <button
                     type="button"
@@ -141,7 +139,6 @@ export const TreeItem = memo(function TreeItem({
                 <span className="w-3.5 shrink-0" />
             )}
 
-            {/* name (inline rename when isRenaming) */}
             {isRenaming ? (
                 <input
                     ref={inputRef}
@@ -168,12 +165,10 @@ export const TreeItem = memo(function TreeItem({
                 </span>
             )}
 
-            {/* child count badge when collapsed */}
             {item.collapsed && item.childCount > 0 && (
                 <span className="text-[10px] text-fg-muted bg-surface-muted px-1">{item.childCount}</span>
             )}
 
-            {/* delete button */}
             {isSelected && (
                 <IconButton variant="danger" className="ml-auto" onClick={handleRemoveClick}>
                     <Icons.X size={12} />
@@ -182,8 +177,6 @@ export const TreeItem = memo(function TreeItem({
         </li>
     );
 });
-
-/* ── Drag overlay ───────────────────────────────────────────────── */
 
 export function TreeItemOverlay({ item, childCount }: { item: FlattenedNode; childCount: number }) {
     return (

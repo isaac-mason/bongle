@@ -1,24 +1,3 @@
-/**
- * public chat namespace. scripts register slash commands + chat handlers
- * through here. transport rides the first-class `chat_input`
- * (client→server) and `chat_broadcast` (server→client) protocol messages.
- *
- * usage (shared script, runs on both client and server):
- *   const giveCmd = chat.command(ctx, {
- *       name: '/give',
- *       description: 'give a player an item',
- *       args: [{ name: 'item', type: 'string' }],
- *   });
- *   if (env.server) {
- *       chat.listen(ctx, giveCmd, ({ args, from }) => { ... });
- *   }
- *
- * `chat.command` registers the spec on whichever side runs it (both, for a
- * shared script) so completion + parse-validation work on both. `chat.listen`
- * attaches a handler scoped to ctx, auto-removed on script dispose. side is
- * implied by *where* listen is called; no explicit flag.
- */
-
 import type { MessageHandler } from '../client/chat';
 import * as ClientChat from '../client/chat';
 import type {
@@ -45,8 +24,7 @@ function commandsOf(ctx: ScriptContext): ChatCommands.ChatCommands | null {
 
 /**
  * register a chat command spec. returns a handle; attach a runtime handler
- * with `chat.listen(ctx, handle, fn)`. spec lives in the room's chat as
- * long as the script instance is alive, auto-removed on dispose.
+ * with `chat.listen(ctx, handle, fn)`. auto-removed on script dispose.
  */
 export function command(ctx: ScriptContext, spec: CommandSpec): CommandHandle {
     const instance = ctx._instance;
@@ -67,12 +45,8 @@ export function command(ctx: ScriptContext, spec: CommandSpec): CommandHandle {
 }
 
 /**
- * attach a handler for `handle`'s command, scoped to ctx. when the input
- * pipeline finds a command match with a local listener, the listener runs
- * and the command is "consumed" (not forwarded onward).
- *
- * call on whichever side should execute the command. shared scripts gate
- * with `env.server` / `env.client`.
+ * attach a handler for `handle`'s command, scoped to ctx. a matched command
+ * is consumed by the listener, not forwarded onward.
  */
 export function listen(ctx: ScriptContext, handle: CommandHandle, fn: CommandHandler): () => void {
     const instance = ctx._instance;
@@ -87,10 +61,8 @@ export function listen(ctx: ScriptContext, handle: CommandHandle, fn: CommandHan
 }
 
 /**
- * listen for plain chat messages broadcast to this room. fires on every
- * non-command message (server-broadcast ChatBroadcast). client-only,
- * server scripts that want to inspect inbound chat should register a
- * `chat.command` of their own.
+ * listen for plain chat messages broadcast to this room. client-only;
+ * server scripts should register a `chat.command` instead.
  */
 export function onMessage(ctx: ScriptContext, fn: MessageHandler): () => void {
     if (!env.client) return () => {};
@@ -106,25 +78,12 @@ export function onMessage(ctx: ScriptContext, fn: MessageHandler): () => void {
 }
 
 /**
- * emit a chat message. on the server, broadcasts to every client in the
- * room (appears as a system message). on the client, forwards the text to
- * the server as if the user typed it, useful for programmatic /me, etc.
+ * emit a chat message. on the server, broadcasts to every client in the room
+ * as a system message. on the client, forwards the text as if the user typed it.
  *
- * the text may carry inline `[…]` formatting tags, applied by the chat panel
- * as it renders:
- *
- * - `[#rrggbb]`, set the colour to any 24-bit hex (e.g. `[#ff8800]`),
- *   case-insensitive.
- * - `[b]` `[i]` `[u]` `[s]`, turn bold / italic / underline / strike ON.
- * - `[/]`, reset colour and every style back to the default.
- *
- * formatting is cumulative: a colour tag swaps only the colour and leaves any
- * active styles intact (`[b][#ff8800]bold orange`), so colours and styles
- * layer freely, only `[/]` clears them. any bracketed run that isn't a known
- * tag (`[lol]`, `[1]`, an emote) renders verbatim, so ordinary text using
- * brackets is never eaten. tags ride inside the plain string, there's no
- * structured payload, so they degrade gracefully to readable text anywhere
- * the panel isn't doing the rendering.
+ * text may carry inline formatting tags: `[#rrggbb]` sets colour, `[b]` `[i]`
+ * `[u]` `[s]` turn on bold/italic/underline/strike, `[/]` resets both. tags
+ * are cumulative until `[/]`; unrecognised bracketed text renders verbatim.
  *
  * @example
  * // "Alice" aqua+bold, the verb grey, "Bob" red+bold
@@ -141,12 +100,9 @@ export function message(ctx: ScriptContext, text: string): void {
 }
 
 /**
- * enable or disable chat for the calling script's room. state lives on the
- * room's chat (per-room, not global), so call it from a script with ctx. on the
- * client it hides the chat UI; on the server it stops chat propagation (inbound
- * lines and outbound broadcasts are dropped). a shared script hits both sides.
- * default is enabled; apps that embed the engine as a pure display surface
- * call `chat.setEnabled(ctx, false)`.
+ * enable or disable chat for the calling script's room (per-room, not global).
+ * on the client it hides the chat UI; on the server it drops inbound and
+ * outbound chat traffic. default is enabled.
  */
 export function setEnabled(ctx: ScriptContext, enabled: boolean): void {
     if (env.client && ctx.client?.room) ClientChat.setEnabled(ctx.client.room.chat, enabled);

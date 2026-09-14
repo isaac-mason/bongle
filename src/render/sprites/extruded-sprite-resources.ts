@@ -1,41 +1,3 @@
-// ExtrudedSpriteResources, engine-global extruded-sprite material +
-// shared geometry pool.
-//
-// One instance per `EngineClient`, shared across rooms. The atlas Texture
-// is owned by `SpriteResources`, this struct holds a TextureNode bound at
-// build time and exposes `rebindAtlas()` so the registry-dispatch atlas
-// swap can retarget it without rebuilding the compiled pipeline.
-//
-// The geometry pool is also engine-global: a sprite's silhouette mesh
-// bakes once and is reused across every room that references it.
-// `clearGeometryPool` wipes slots + resets allocators (without disposing
-// the underlying GpuBuffers) so atlas-swap invalidation doesn't break
-// per-room geometry bindings.
-//
-// Material binds per-room buffers by name (`instanceData`, `slotMap`,
-// `env`); the engine-global pool's interleaved vertex buffer binds as the
-// HW `vertex` attribute and the pool's index buffer as the geometry index.
-//
-// ── render pipeline ────────────────────────────────────────────────
-// CPU (extruded-sprite-visuals.ts) per frame:
-//   - walks visible aliveStates, buckets each by `geomSlot` identity,
-//     then per-bucket writes the bucket's stable slots contiguously
-//     into `slotMap` and appends one MeshDraw covering that range to
-//     `mesh.draws`.
-//
-// GPU material VS (HW instanced):
-//   - reads `posU` / `v` from the interleaved vertex pool by HW
-//     attribute fetch.
-//   - `realSlot = slotMap[instanceIndex]` (`instanceIndex` is base-inclusive
-//     on both backends, so each draw indexes into its own range).
-//   - `instanceData[realSlot]` for per-instance world matrix + material
-//     (uvRect/tint/light/glow/unlit/litMin). `slotMap` + `instanceData` are
-//     read-only storage — native SSBO reads on WebGPU, auto-lowered to
-//     rgba32uint buffer-texture fetches on WebGL2 (gpucat).
-//
-// One instanced draw per visible bucket per frame (`mesh.draws`). No compute
-// dispatch, no vertex-pull, no triangle queue.
-
 import {
     add,
     attribute,
@@ -77,11 +39,7 @@ import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample'
 import { bakeExtrudedSpriteMesh } from './sprite-extrusion';
 import type { SpriteResources } from './sprite-resources';
 
-// ── shared gpu structs ──────────────────────────────────────────────
-//
-// Exported so per-room ExtrudedSpriteVisuals can pack into the matching
-// layout.
-
+// exported so per-room ExtrudedSpriteVisuals can pack into the matching layout.
 export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     uvRect: d.vec4f,
     // tint: rgb is the recolour target, a the intensity (lightness-preserving).
@@ -95,25 +53,16 @@ export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     dither: d.f32,
 });
 
-// Per-slot stable instance record. Merges transform + material into one
-// binding, mirrors ModelInstance so downstream visuals shares its update
-// shape.
-//
-// Layout: mat4x4f (64B, align 16) then InstanceMaterial (64B, align 16)
-// → total 128B per slot, struct align 16, no internal padding.
+// Per-slot stable instance record; merges transform + material into one binding, mirroring ModelInstance so
+// downstream visuals shares its update shape. Layout: mat4x4f (64B, align 16) then InstanceMaterial (64B,
+// align 16), total 128B per slot, struct align 16, no internal padding.
 export const ExtrudedInstance = struct('ExtrudedInstance', {
     worldMatrix: d.mat4x4f,
     material: InstanceMaterial,
 });
 
-// Interleaved vertex for the geometry pool.
-//
-// posU.xyz = position, posU.w = u
-// v = v
-//
-// Std430 stride rounds the struct to 32B (struct align 16). The trailing
-// 12B are padding, sprites have no per-vertex normals to fill them with;
-// reserved for future use (e.g. face normals for ndotl shading).
+// Interleaved vertex for the geometry pool: posU.xyz = position, posU.w = u, v = v. Std430 stride rounds the
+// struct to 32B (struct align 16); the trailing 12B are unused padding, reserved for future per-vertex normals.
 export const ExtrudedVertex = struct('ExtrudedVertex', {
     posU: d.vec4f,
     v: d.f32,
@@ -128,8 +77,6 @@ const EXTRUDED_VERTEX_STRIDE_F32 = EXTRUDED_VERTEX_STRIDE / 4;
 
 const INITIAL_VERTEX_CAPACITY = 8 * 1024;
 const INITIAL_INDEX_CAPACITY = 24 * 1024;
-
-// ── range allocator (free-list with adjacent-merge) ─────────────────
 
 type Range = { offset: number; count: number };
 
@@ -183,8 +130,6 @@ function freeRange(a: RangeAllocator, range: Range): void {
         } else j++;
     }
 }
-
-// ── geometry pool ───────────────────────────────────────────────────
 
 export type GeometrySlot = {
     vertexOffset: number;
@@ -366,14 +311,10 @@ function growIndex(pool: GeometryPool, newCapacity: number): void {
     pool.indices.needsUpdate = true;
 }
 
-// ── instance batch (client-global, persistent GPU allocation) ───────
-// Mirrors `MeshBatch` (see mesh-resources.ts): the per-slot instance buffer +
-// slotMap + draw list + their Mesh/Geometry live here, NOT on per-room visuals.
-// One room renders at a time, so a room swap REUSES this allocation (reset counts
-// + re-add the Mesh) instead of freeing + reallocating it. Per-room
-// `ExtrudedSpriteVisuals` keep only this-room's use — alive-states, cull entries,
-// scene-tree query.
-
+// Mirrors `MeshBatch` (see mesh-resources.ts): the per-slot instance buffer, slotMap, draw list, and their
+// Mesh/Geometry live here, not on per-room visuals. One room renders at a time, so a room swap reuses this
+// allocation (reset counts + re-add the Mesh) instead of freeing and reallocating it. Per-room
+// `ExtrudedSpriteVisuals` keep only this-room's use: alive-states, cull entries, scene-tree query.
 const INITIAL_INSTANCE_CAPACITY = 64;
 /** f32 count per `ExtrudedInstance` slot (128B / 4 = 32). */
 export const EXTRUDED_INSTANCE_STRIDE_F32 = EXTRUDED_INSTANCE_STRIDE / 4;
@@ -407,17 +348,17 @@ export type ExtrudedSpriteBatch = {
     /** stable per-slot {worldMatrix, material}, 128B/slot; read-only storage,
      *  auto-lowered to a buffer-texture fetch on WebGL2 (gpucat). */
     instanceDataBuf: GpuBufferType;
-    /** per-frame u32[] sized to `instanceCapacity`; slotMap[instanceIndex] → slot. */
+    /** per-frame u32[] sized to `instanceCapacity`; slotMapBuf[instanceIndex] is the target slot. */
     slotMapBuf: GpuBufferType;
     /** per-frame batched draw list, shared by identity with `mesh.draws`. */
     draws: IndexedMeshDraw[];
-    /** scratch buckets reused across frames: bucketKey → array of stable slots. */
+    /** scratch buckets reused across frames: bucketKey maps to an array of stable slots. */
     _bucketScratch: Map<number, number[]>;
     /** stack of empty arrays freed by stale-bucket sweeps, reused on next insert. */
     _freeBuckets: number[][];
     /** parallel to `_bucketScratch`: the GeometrySlot for each bucketKey this frame. */
     _bucketSlotRef: Map<number, GeometrySlot>;
-    /** capacity gating `instanceDataBuf` + `slotMapBuf`; grows 2×. */
+    /** capacity gating `instanceDataBuf` + `slotMapBuf`; doubles on grow. */
     instanceCapacity: number;
     /** slot free-list into the instance buffer. */
     instanceAllocator: SlotAllocator;
@@ -466,9 +407,8 @@ function createExtrudedSpriteBatch(pool: GeometryPool, material: Material): Extr
     };
 }
 
-/** Ready the batch for a fresh room: empty the allocator + scratch + draw list.
- *  Buffers are NOT touched — every visible slot re-writes each frame, and a
- *  cleared allocator means the next refill writes from slot 0. */
+/** Ready the batch for a fresh room: empty the allocator, scratch, and draw list. Buffers are not touched
+ *  since every visible slot re-writes each frame, and a cleared allocator means the next refill writes from slot 0. */
 export function resetExtrudedSpriteBatch(batch: ExtrudedSpriteBatch): void {
     batch.instanceAllocator.head = 0;
     batch.instanceAllocator.freeList.length = 0;
@@ -512,8 +452,6 @@ function disposeExtrudedSpriteBatch(batch: ExtrudedSpriteBatch): void {
     batch.slotMapBuf.dispose();
 }
 
-// ── public type ─────────────────────────────────────────────────────
-
 export type ExtrudedSpriteResources = {
     /** engine-global extruded-sprite material, HW instanced. Per-room
      *  buffers (slotMap, instanceData, env) bind by name through each
@@ -533,8 +471,6 @@ export type ExtrudedSpriteResources = {
      *  Reused across room swaps; per-room `ExtrudedSpriteVisuals` drive it. */
     batch: ExtrudedSpriteBatch;
 };
-
-// ── public api ──────────────────────────────────────────────────────
 
 export function init(spriteResources: SpriteResources, env: EnvironmentResources): ExtrudedSpriteResources {
     const { material, atlasTexNode } = createExtrudedSpriteMaterial(spriteResources.atlas, env);
@@ -556,8 +492,6 @@ export function dispose(res: ExtrudedSpriteResources): void {
     disposeGeometryPool(res.geometryPool);
 }
 
-// ── internals ───────────────────────────────────────────────────────
-
 function createExtrudedSpriteMaterial(
     atlas: Texture,
     env: EnvironmentResources,
@@ -569,7 +503,7 @@ function createExtrudedSpriteMaterial(
     const aPosition = posU.xyz.toVar('esPos');
     const aUv = vec2f(posU.w, vAttr).toVar('esUv');
 
-    // slotMap[instanceIndex] → stable per-slot index in instanceData. HW
+    // slotMap[instanceIndex] resolves to a stable per-slot index in instanceData. HW
     // adds firstInstance to instanceIndex before the VS sees it, so each
     // draw indexes into its own [firstInstance ..] range packed contiguously
     // by extruded-sprite-visuals.
@@ -590,8 +524,7 @@ function createExtrudedSpriteMaterial(
     const litMinF = instMat.field('litMin').toVar('esLitMin');
     const ditherF = instMat.field('dither').toVar('esDither');
 
-    // sampled at the instance origin (the matrix translation column), where the
-    // CPU used to sample it. Unconditional: `unlit` is applied in `shadeTinted`.
+    // sampled at the instance origin (the matrix translation column), unconditionally; `unlit` is applied in `shadeTinted`.
     const lightF = sampleWorldLight(bindLightVolume(env), worldMatrix.element(u32(3)).xyz).toVar('esLight');
 
     const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('esWorldPos');

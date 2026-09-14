@@ -1,40 +1,15 @@
-// cloud-visuals.ts
-//
-// per-room scene anchor for the engine-global cloud system. all heavy
-// state (material, geometry, storage buffers, shared compacted output)
-// lives on CloudResources; this is a thin wrapper that gives each room a
-// Mesh in its scene (with its own single `mesh.draws` entry) plus an
-// `update` that runs the CPU cull and writes into the *shared* compacted
-// instance buffer.
-//
-// only the active room calls update each frame (no split-screen, no
-// editor preview that renders two rooms at once), so the single shared
-// output buffer always reflects the room about to draw.
-//
-// cull pipeline (CPU):
-//   - read env config + camera; derive frustum.
-//   - for each of M_CLOUD_INSTANCES slots: derive {worldPos, scale,
-//     shapeId} via hash; gate on env/cluster/density; AABB-frustum
-//     test.
-//   - append visible slots to resources.compactedInstanceBuf; set
-//     this room's `mesh.draws[0].instanceCount = visibleCount`.
-
 import { type Camera, frustum, Mesh, type NonIndexedMeshDraw, type Scene } from 'gpucat';
 import type { Environment } from '../../../client/environment';
 import type { TimeResources } from '../../time';
 import { type CloudResources, COMPACTED_CLOUD_INSTANCE_STRIDE } from './cloud-resources';
 import { N_CLOUD_SHAPES } from './cloud-shapes';
 
-// ── tunables ────────────────────────────────────────────────────────
-
-// 14 × 14 = 196 simultaneously-considered slots. matches
-// CloudResources.instanceCapacity.
+// matches CloudResources.instanceCapacity.
 const GRID_DIM = 14;
-// per-cell positional jitter as fraction of GRID_SPACING.
+// fraction of GRID_SPACING.
 const POS_JITTER = 0.48;
-// per-cell altitude jitter in world units around cloudsAltitude.
+// world units around cloudsAltitude.
 const Y_JITTER = 25;
-// per-cell scale range.
 const SCALE_MIN = 0.55;
 const SCALE_MAX = 1.35;
 // coarse cluster cells in grid units.
@@ -43,20 +18,15 @@ const CLUSTER_CELLS = 5;
 const CLUSTER_PASS_THRESHOLD = 0.35;
 // world units of cloud drift per second of windTime.
 const WIND_SCALE = 2.5;
-// radial dither fade band, in cells. clouds enter/leave the grid at
-// horizontal distance ≈ (GRID_DIM/2) * gridSpacing from the camera, so
-// fading to invisible just inside that boundary hides every slot swap.
-// inside FADE_START_CELLS → fully solid; beyond FADE_END_CELLS → fully
-// dithered out.
+// radial dither fade band, in cells: clouds enter/leave the grid near the camera at
+// horizontal distance ~(GRID_DIM/2) * gridSpacing, so fading to invisible just inside
+// that boundary hides every slot swap.
 const FADE_START_CELLS = GRID_DIM / 2 - 2;
 const FADE_END_CELLS = GRID_DIM / 2;
 
-// grid spacing is derived per-frame from `camera.far`: we want the
-// outermost ring to sit comfortably inside the far plane so the cloud
-// AABBs don't clip against it.
+// derived per-frame from `camera.far` so the outermost ring sits comfortably inside the
+// far plane and cloud AABBs don't clip against it.
 const SAFE_FAR_FRACTION = 0.9;
-
-// ── public type ─────────────────────────────────────────────────────
 
 export type CloudVisuals = {
     mesh: Mesh;
@@ -67,14 +37,11 @@ export type CloudVisuals = {
     draw: NonIndexedMeshDraw;
 };
 
-// ── init ────────────────────────────────────────────────────────────
-
 export function init(scene: Scene, resources: CloudResources): CloudVisuals {
     const mesh = new Mesh(resources.geometry, resources.material);
     mesh.name = 'cloud-visuals';
     mesh.frustumCulled = false;
-    // single non-indexed instanced draw; instanceCount filled per frame. The
-    // shared geometry carries no indirect buffer — draw submission is per-room.
+    // single non-indexed instanced draw; instanceCount filled per frame.
     const draw: NonIndexedMeshDraw = {
         vertexCount: resources.maxIndexCount,
         instanceCount: 0,
@@ -86,13 +53,10 @@ export function init(scene: Scene, resources: CloudResources): CloudVisuals {
     return { mesh, scene, draw };
 }
 
-// ── update ──────────────────────────────────────────────────────────
-
 const _cpuFrustum = frustum.create();
 
-/** WGSL `fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)`. JS does
- *  the math in f64 which is fine, visible/culled decisions don't have
- *  to bit-exact match a GPU shader because the GPU side is gone now. */
+/** WGSL `fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)`; f64 math is fine since
+ *  visible/culled decisions don't need to bit-exact match a GPU shader. */
 function hash2f(x: number, y: number): number {
     const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
     return v - Math.floor(v);
@@ -110,13 +74,11 @@ export function update(
 ): void {
     const cfg = env.config;
     const cp = camera.position;
-    // shared render clock keeps drift continuous across room switches (the old
-    // per-resources windStartMs anchor only mattered as a phase offset).
+    // shared render clock keeps drift continuous across room switches.
     const windTime = time.seconds;
     const gridSpacing = (camera.far * SAFE_FAR_FRACTION) / (GRID_DIM / 2);
 
-    // frustum planes, same math as the old WGSL cull. pass the clip-space convention
-    // so the near plane is correct on WebGL (z=-1) as well as WebGPU (z=0).
+    // clip-space convention so the near plane is correct on WebGL (z=-1) and WebGPU (z=0).
     frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse, camera.coordinateSystem);
 
     const enabled = cfg.enabled && cfg.clouds.enabled;
@@ -184,7 +146,6 @@ export function update(
 
             if (!aabbInFrustum(aabbMinX, aabbMinY, aabbMinZ, aabbMaxX, aabbMaxY, aabbMaxZ)) continue;
 
-            // radial fade in cells. precomputed once per instance.
             const cloudDx = worldX - cp[0];
             const cloudDz = worldZ - cp[2];
             const horizDist = Math.sqrt(cloudDx * cloudDx + cloudDz * cloudDz);
@@ -203,19 +164,13 @@ export function update(
     }
 
     resources.compactedInstanceBuf.needsUpdate = true;
-    // drive this room's draw; the renderer reads mesh.draws fresh each frame, so
-    // no buffer upload — just the instanceCount for the sweep.
     visuals.draw.instanceCount = count;
 }
-
-// ── dispose ─────────────────────────────────────────────────────────
 
 export function dispose(visuals: CloudVisuals): void {
     visuals.scene.remove(visuals.mesh);
     // material/geometry/buffers are engine-global, owned by CloudResources.
 }
-
-// ── helpers ─────────────────────────────────────────────────────────
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
     const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));

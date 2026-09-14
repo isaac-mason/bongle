@@ -1,19 +1,3 @@
-// lasso select tool.
-//
-// drag left-click to draw a freeform polygon in screen space. on release
-// the polygon is "cast" into the world: a uniform NDC sample grid is
-// clipped to the polygon, each interior sample shoots a ray, and the
-// hit voxel (plus `depth-1` voxels behind it along the ray direction)
-// goes into the selection. nodes are added when their body centre
-// projects inside the polygon and is in front of the camera. respects
-// selectTarget (all/voxels/nodes) and selectionBehavior (replace/add;
-// shift forces add) just like box / magic select.
-//
-// per-frame state lives on store.lasso = { points }. UI selectors read
-// these points directly to render the in-progress SVG overlay; we
-// re-assign the lasso object (fresh ref) on every appended point so
-// `Object.is` comparisons in selectors detect the change.
-
 import type { PerspectiveCamera } from 'gpucat';
 import { mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix } from '../../api/transforms';
@@ -49,8 +33,6 @@ export function clearLassoStroke(store: EditRoomStoreApi): void {
     }
 }
 
-// ── polygon helpers ────────────────────────────────────────────────
-
 function pointInPolygon(pts: ReadonlyArray<readonly [number, number]>, x: number, y: number): boolean {
     let inside = false;
     for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -62,17 +44,15 @@ function pointInPolygon(pts: ReadonlyArray<readonly [number, number]>, x: number
     return inside;
 }
 
-// project world point to NDC. returns false when behind camera. fills _ndc.
+/** Projects a world point to NDC into `_ndc`. Returns false when the point is behind the camera. */
 function projectWorldToNdc(_camera: PerspectiveCamera, w: Vec3): boolean {
-    // detect behind-camera via clip-space w before perspective divide
+    // behind-camera check uses clip-space w before the perspective divide
     const m = _vp;
     const clipW = m[3]! * w[0] + m[7]! * w[1] + m[11]! * w[2] + m[15]!;
     if (clipW <= 0) return false;
     vec3.transformMat4(_ndc, w, m);
     return true;
 }
-
-// ── per-frame update ───────────────────────────────────────────────
 
 export function updateLassoSelect(
     store: EditRoomStoreApi,
@@ -91,7 +71,6 @@ export function updateLassoSelect(
     const cursor = getCursor(mk);
     const lasso = store.getState().lasso;
 
-    // ── start a new stroke ─────────────────────────────────────────
     if (justDown && !lasso) {
         store.setState({
             lasso: { points: [[cursor.ndcX, cursor.ndcY]] },
@@ -99,7 +78,6 @@ export function updateLassoSelect(
         return;
     }
 
-    // ── extend in-progress stroke ──────────────────────────────────
     if (lasso && held && !justUp) {
         const pts = lasso.points;
         const last = pts[pts.length - 1]!;
@@ -109,23 +87,20 @@ export function updateLassoSelect(
             const nextPoints: Array<[number, number]> = new Array(pts.length + 1);
             for (let i = 0; i < pts.length; i++) nextPoints[i] = [pts[i]![0], pts[i]![1]];
             nextPoints[pts.length] = [cursor.ndcX, cursor.ndcY];
+            // fresh array ref so Object.is comparisons in selectors detect the change
             store.setState({ lasso: { points: nextPoints } });
         }
         return;
     }
 
-    // ── commit on release ──────────────────────────────────────────
-    // a sub-3-point stroke (i.e. a click) produces a zero-area polygon,
-    // both branches naturally find nothing inside it, so under 'replace'
-    // it clears the selection and under 'add' it's a no-op.
+    // a sub-3-point stroke (a click) produces a zero-area polygon, so under 'replace' it clears
+    // the selection and under 'add' it's a no-op
     if (lasso && justUp) {
         const stroke = lasso.points;
         clearLassoStroke(store);
         commitLasso(store, ctx, stroke, input, camera, voxels, blocks, nodeBodies, sceneTree);
     }
 }
-
-// ── commit ─────────────────────────────────────────────────────────
 
 function commitLasso(
     store: EditRoomStoreApi,
@@ -150,7 +125,6 @@ function commitLasso(
 
     const next = effective === 'add' ? Selection.clone(s.selection) : Selection.create();
 
-    // ── voxels ────────────────────────────────────────────────────
     if (selectTarget !== 'nodes') {
         // polygon AABB in NDC
         let minX = Infinity,
@@ -230,9 +204,7 @@ function commitLasso(
         }
     }
 
-    // ── nodes ─────────────────────────────────────────────────────
     if (selectTarget !== 'voxels' && nodeBodies) {
-        // rebuild view-proj for projection
         mat4.multiply(_vp, camera.projectionMatrix, camera.matrixWorldInverse);
 
         for (const nodeId of nodeBodies.nodeToBody.keys()) {
@@ -256,8 +228,7 @@ function commitLasso(
     playSelected(ctx, effective === 'add');
 }
 
-// inline NDC → world unprojection. caller must call rebuildUnprojectCache
-// once per commit to refresh against the active camera.
+// NDC to world unprojection cache; rebuildUnprojectCache must run once per commit to refresh it for the active camera
 const _invVp = mat4.create();
 
 function rebuildUnprojectCache(camera: PerspectiveCamera): void {

@@ -1,24 +1,10 @@
-// ── BlockRegistry serde (worker boundary) ──────────────────────────
-//
-// Encode the subset of `BlockRegistry` the mesher reads into one
-// `ArrayBuffer` for transferable `postMessage`. Decode constructs
-// typed-array views over the same buffer (no copies) and returns a
-// partial `BlockRegistry`, only mesher-read fields are populated;
-// physics/handle/Map fields stay undefined and the worker never
-// touches them.
-//
-// To add a new mesher-read field: extend the header offsets table,
-// the layout block, the write block, and the read block. Four edits,
-// all visible in this file.
-
 import type { Blocks } from './block-registry';
 
 // stored as unsigned in the Uint32Array slot; compare unsigned-to-unsigned
 // to avoid surprises with high-bit literals (`0xb7e61571 | 0` is negative).
 const MAGIC = 0xb7e61571;
 
-// ── header layout (u32 indices) ────────────────────────────────────
-
+// header layout, u32 indices. a new mesher-read field touches this table plus the layout, write, and read blocks below.
 const H_MAGIC = 0;
 const H_VERSION = 1;
 const H_TOTAL_STATES = 2;
@@ -89,8 +75,7 @@ function copyBytes(dst: Uint8Array, src: ArrayBufferView, dstOffset: number): vo
     dst.set(new Uint8Array(src.buffer, src.byteOffset, src.byteLength), dstOffset);
 }
 
-// ── encode ─────────────────────────────────────────────────────────
-
+/** Encodes the subset of `Blocks` the mesher reads into one transferable ArrayBuffer for postMessage. */
 export function serializeBlockRegistryForWorker(reg: Blocks, version: number): ArrayBuffer {
     const totalStates = reg.totalStates;
     const meshCount = reg.meshQuads.length - 1; // slot 0 is sentinel
@@ -99,7 +84,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     let totalQuads = 0;
     for (let m = 1; m <= meshCount; m++) totalQuads += reg.meshQuadShape[m]!.length;
 
-    // ── phase 1: layout ────────────────────────────────────────────
+    // phase 1: layout
     let c = HEADER_BYTES;
 
     c = align8(c);
@@ -204,7 +189,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     const u32 = new Uint32Array(buf);
     const u8 = new Uint8Array(buf);
 
-    // ── phase 2: header ────────────────────────────────────────────
+    // phase 2: header
     u32[H_MAGIC] = MAGIC;
     u32[H_VERSION] = version | 0;
     u32[H_TOTAL_STATES] = totalStates;
@@ -243,7 +228,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     u32[H_MESH_QUAD_UVS] = oMeshQuadUVs;
     u32[H_MESH_QUAD_VERTS] = oMeshQuadVerts;
 
-    // ── phase 3: meshQuadCount + per-state bodies ─────────────────
+    // phase 3: meshQuadCount + per-state bodies
     const meshQuadCountView = new Uint16Array(buf, oMeshQuadCount, meshCount + 1);
     for (let m = 1; m <= meshCount; m++) meshQuadCountView[m] = reg.meshQuadShape[m]!.length;
 
@@ -263,7 +248,7 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
     copyBytes(u8, reg.fluidGroup, oFluidGroup);
     copyBytes(u8, reg.emissive, oEmissive);
 
-    // ── phase 4: per-mesh bodies (concat slots 1..meshCount) ──────
+    // phase 4: per-mesh bodies (concat slots 1..meshCount)
     let qti = oMeshTexIndices;
     let qmm = oMeshQuadMaterials;
     let qmus = oMeshQuadUnshaded;
@@ -329,8 +314,6 @@ export function serializeBlockRegistryForWorker(reg: Blocks, version: number): A
 
     return buf;
 }
-
-// ── decode ─────────────────────────────────────────────────────────
 
 export type DeserializedBlockRegistry = Partial<Blocks> & {
     totalStates: number;

@@ -35,7 +35,6 @@ export type GraphOptions = {
 export function graph(opts: GraphOptions = {}): Control<number> {
     return (ctx, prop) => {
         const b = base<number>(ctx, prop, opts.label);
-        // rebuild the row as a vertical stack: [label · current value] over the canvas.
         b.row.classList.add('dc-graph-row');
         b.labelEl.remove();
         b.controlEl.remove();
@@ -46,7 +45,7 @@ export function graph(opts: GraphOptions = {}): Control<number> {
         ]);
         const canvas = el('canvas', 'dc-graph');
         if (opts.height) canvas.style.height = `${opts.height}px`;
-        // build each stat as `label <b>value</b>` once; paint only updates the <b> text (no innerHTML reparse)
+        // each stat is built as `label <b>value</b>` once; paint only updates the <b> text (no innerHTML reparse).
         const mkStat = (label: string) => {
             const val = el('b');
             return { span: el('span', undefined, undefined, [document.createTextNode(`${label} `), val]), val };
@@ -69,7 +68,6 @@ export function graph(opts: GraphOptions = {}): Control<number> {
             hover: opts.hover,
             tick: () => s.push(smooth(prop.get())),
             paint: (g, w, h, hover) => {
-                // the head + stats readout reflects the sampler, and pauses off-screen with paint
                 valueEl.textContent = fmt(s.last());
                 mn.val.textContent = fmt(s.min());
                 av.val.textContent = fmt(s.avg());

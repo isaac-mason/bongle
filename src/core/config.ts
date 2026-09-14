@@ -1,24 +1,3 @@
-/**
- * the user calls config(c) at module scope; the call upserts into
- * `registry.config` under CONFIG_ID, and consumers read it via
- * `resolveConfig(reg)` (defaulting to DEFAULT_CONFIG when unset).
- *
- * a game declares:
- *   - config({ server: false })               — client-only, no server.
- *   - config({ server: { maxPlayers: N } })   — client+server multiplayer.
- * omitting `server` (or config() entirely) defaults to DEFAULT_CONFIG
- * (multiplayer, maxPlayers 32), preserving the pre-existing platform behavior.
- *
- * three consumers read the config:
- *   1. the engine itself (engine-server), refuses onClientJoin past the cap.
- *   2. the bongle build pipeline, stamps the value into bongle.json so the
- *      platform can read it without booting the bundle.
- *   3. (future) any in-game UI / platform routing that wants to read it.
- *
- * keep the field set narrow: only infrastructure knobs belong here. presentational
- * game metadata (display name, icon, …) lives elsewhere.
- */
-
 import type { Config } from '../../os/interface';
 
 export type { Config };
@@ -38,19 +17,15 @@ export const HARD_MAX_PLAYERS_PER_ROOM = 32;
 export const DEFAULT_MAX_PLAYERS = 32;
 
 /**
- * per-game config. a single axis, `server`:
- *   - omitted                          — client+server game, default room cap.
- *   - { server: false }                — client-only game, no server runs.
- *   - { server: { maxPlayers } }       — client+server game. `maxPlayers`
- *     caps simultaneous players in a single room; integer in
- *     [1, HARD_MAX_PLAYERS_PER_ROOM].
+ * per-game config. a single axis, `server`: omitted is a client+server game
+ * with the default room cap; `{ server: false }` is client-only (no server
+ * runs); `{ server: { maxPlayers } }` caps simultaneous players in a single
+ * room, integer in [1, HARD_MAX_PLAYERS_PER_ROOM].
  */
-// Config is DEFINED at the editor-OS boundary (bongle/os, imported above) — one
-// stability-guaranteed, additive-only shape, since it crosses the pin boundary
-// (the pipeline service reports it) and stamps the bundle manifest. The engine
-// re-exports it rather than redeclaring: one definition, no drift possible.
+// Config is defined at the editor-OS boundary (bongle/os, imported above);
+// the engine re-exports it rather than redeclaring.
 
-/** Applied when the user didn't call config(), preserves the pre-existing
+/** Applied when the user didn't call config(); preserves the pre-existing
  *  platform behavior (multiplayer, rooms cap at DEFAULT_MAX_PLAYERS). */
 export const DEFAULT_CONFIG: Config = { server: { maxPlayers: DEFAULT_MAX_PLAYERS } };
 

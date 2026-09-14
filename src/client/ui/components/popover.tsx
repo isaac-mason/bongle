@@ -7,9 +7,6 @@ interface PopoverProps {
     children: ReactNode;
 }
 
-/**
- * Controlled popover root. Wrap a `PopoverTrigger` and `PopoverContent`.
- */
 export function Popover({ open, onOpenChange, children }: PopoverProps) {
     return (
         <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
@@ -25,15 +22,10 @@ interface PopoverTriggerProps {
     className?: string;
 }
 
-/**
- * Popover trigger. With `asChild`, the single child element becomes the trigger
- * (Base UI's `render` prop); otherwise it renders a default button.
- */
 export function PopoverTrigger({ children, asChild, className }: PopoverTriggerProps) {
     if (asChild && isValidElement(children)) {
         const child = children as ReactElement;
-        // host non-button elements (e.g. a positioned <div>) aren't native
-        // buttons; component triggers are assumed to render one.
+        // host non-button elements (e.g. a positioned div) aren't native buttons; component triggers are assumed to render one.
         const nativeButton = typeof child.type === 'string' ? child.type === 'button' : true;
         return <BasePopover.Trigger nativeButton={nativeButton} render={child} />;
     }
@@ -49,9 +41,7 @@ interface PopoverContentProps {
     sideOffset?: number;
 }
 
-/**
- * Popover content panel. Renders in a portal so it escapes overflow clipping.
- */
+// renders in a portal so it escapes overflow clipping.
 export function PopoverContent({ children, className, align = 'start', sideOffset = 4 }: PopoverContentProps) {
     return (
         <BasePopover.Portal>

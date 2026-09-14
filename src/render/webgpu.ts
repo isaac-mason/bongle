@@ -1,9 +1,3 @@
-// The entire WebGPU render backend, one file: state + lifecycle, client-global
-// resources, active-room visuals, the per-frame render tick, offline icon baking,
-// and the `create()` handle. Composition + lifecycle glue over the shared render
-// modules + the WebGPU voxel producer (compute cull/emit); the sibling `webgl.ts`
-// mirrors it with the CPU `cullEmit` producer in place of compute.
-
 import {
     type Camera,
     type ComputeDispatch,
@@ -63,16 +57,10 @@ import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
 import * as VoxelResources from './voxels/voxel-resources-gpu';
 import * as VoxelVisuals from './voxels/voxel-visuals';
 
-/** light tiles rebaked per frame. A tile is ~9.8 kB, so this bounds the
- *  per-frame upload; the rest stay dirty and are retried nearest-first. */
-/** per-frame CPU budget for rebaking light tiles. The drain has no other work,
- *  so this is the whole per-frame cost of the light volume. A time budget rather
- *  than a tile count so it self-calibrates on slower devices. */
+/** Per-frame CPU budget for rebaking light tiles; a time budget rather than a tile count so it self-calibrates on slower devices. */
 const LIGHT_BAKE_BUDGET_MS = 1.5;
 
 export const kind = 'webgpu' as const;
-
-// ═══════════════ state + lifecycle ═══════════════
 
 export type WebGpuState = {
     renderer: WebGPURenderer;
@@ -99,7 +87,7 @@ export function init(camera: PerspectiveCamera): WebGpuState {
     };
 }
 
-/** headless twin of `init` for the Node WebGPU icon renderer (no canvas/window). */
+/** Headless twin of `init` for the Node WebGPU icon renderer (no canvas/window). */
 export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): WebGpuState {
     const renderer = new WebGPURenderer({
         antialias: false,
@@ -120,7 +108,7 @@ export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): W
     };
 }
 
-/** async device handshake; returns the adapter's caps for the client's perf-tier detect. */
+/** Async device handshake; returns the adapter's caps for the client's perf-tier detect. */
 export async function load(state: WebGpuState): Promise<RenderDeviceCaps> {
     await state.renderer.init();
     const dev = state.renderer.device as GPUDevice | undefined;
@@ -148,16 +136,13 @@ export function resize(state: WebGpuState, width: number, height: number, pixelR
     state.renderer.setSize(width, height);
 }
 
-/** Toggle the gpucat Inspector overlay (WebGPU GPU-timing panel); lazily attached
- *  on first show, detached on hide. */
+/** Toggles the gpucat Inspector overlay; lazily attached on first show, detached on hide. */
 export function setInspectorVisible(state: WebGpuState, visible: boolean): void {
     if (visible) {
         if (!state.renderer.inspector) {
             const inspector = new Inspector();
             state.renderer.setInspector(inspector);
-            // the inspector self-attaches its shell into the shared canvas' parent
-            // (the global viewport). pointer-events inherits, so the toggle button and
-            // panels stay unclickable unless we re-assert it on the shell.
+            // The inspector self-attaches its shell into the shared canvas' parent; pointer-events inherits, so reassert it.
             inspector.domElement.style.pointerEvents = 'auto';
         }
     } else if (state.renderer.inspector) {
@@ -165,8 +150,7 @@ export function setInspectorVisible(state: WebGpuState, visible: boolean): void 
     }
 }
 
-/** the per-frame render tick: reconcile the active slot, then (if a room is active)
- *  poll the model pools + drive the active room's visuals. */
+/** Reconciles the active slot, then polls the model pools and drives the active room's visuals. */
 export function updateFrame(state: WebGpuState, activeRoom: ClientRoom | null, ctx: FrameContext): void {
     reconcile(state, activeRoom);
     if (!state.active) return;
@@ -174,22 +158,14 @@ export function updateFrame(state: WebGpuState, activeRoom: ClientRoom | null, c
     updateActiveRoom(state, ctx);
 }
 
-/** render the active room. Draws with `state.pipeline.camera` (resolved by the client
- *  before this call); queues the voxel compute cull/emit then runs the pipeline. */
+/** Renders the active room, draws with `state.pipeline.camera`, queues the voxel compute cull/emit, then runs the pipeline. */
 export function render(state: WebGpuState, voxelViewChunkRadius: number): void {
     if (!state.active) return;
-    // a game's `setRenderPipeline` may have re-declared the stages since the last
-    // frame (a module reload, most often). Rebuilding here, ahead of
-    // `setActiveScene` below, means the fresh passes pick up the active room on
-    // this same frame with nothing extra to re-bind.
+    // A game's `setRenderPipeline` may have re-declared the stages since the last frame; rebuild ahead of `setActiveScene`.
     rebuildRenderPipelineIfStale(state.pipeline);
     const { room } = state.active;
     const camera = state.pipeline.camera;
     const voxelResources = state.resources.voxel;
-
-    // renders to the renderer's own single canvas (mounted by the client into the
-    // active viewport). Only one room renders at a time, so there is no per-room
-    // canvas to swap in.
 
     Time.tick(state.timeResources, performance.now() / 1000);
 
@@ -215,13 +191,13 @@ export function render(state: WebGpuState, voxelViewChunkRadius: number): void {
     state.pipeline.pipeline.render();
 }
 
-/** tear down the active room's visuals (reconcile-to-empty), then the gpucat renderer. */
+/** Tears down the active room's visuals, then the gpucat renderer. */
 export function dispose(state: WebGpuState): void {
     teardown(state);
     state.renderer.dispose();
 }
 
-/** HMR (block/atlas change): swap voxel resources + rebuild the active room's voxel visuals. */
+/** HMR: swaps voxel resources and rebuilds the active room's voxel visuals. */
 export async function refreshBlockResources(
     state: WebGpuState,
     opts: {
@@ -238,7 +214,7 @@ export async function refreshBlockResources(
     return changed;
 }
 
-/** HMR (sprite atlas change): swap sprite resources + rebuild the active room's extruded-sprite visuals. */
+/** HMR: swaps sprite resources and rebuilds the active room's extruded-sprite visuals. */
 export async function refreshSpriteResources(state: WebGpuState, opts: { resources: EngineResources }): Promise<boolean> {
     const changed = await swapSpriteResources(state, opts);
     if (changed && state.active) {
@@ -247,8 +223,6 @@ export async function refreshSpriteResources(state: WebGpuState, opts: { resourc
     return changed;
 }
 
-// ═══════════════ offline (WebGPU-only: Node WebGPU icon baking) ═══════════════
-
 export function createOfflinePipeline(state: WebGpuState, scene: Scene, camera: Camera): RenderPipeline {
     const scenePass = pass(scene, camera, { clearColor: [0, 0, 0, 0] });
     const fxaaPass = fxaa(scenePass.getTextureNode());
@@ -256,8 +230,7 @@ export function createOfflinePipeline(state: WebGpuState, scene: Scene, camera: 
     return new RenderPipeline(state.renderer, outputNode);
 }
 
-/** render `scene` (via a caller-owned offline `pipeline`) into `target`, queuing the
- *  voxel compute for `voxelResources` first. Restores the prior render target. */
+/** Renders `scene` into `target` via a caller-owned offline `pipeline`, queuing the voxel compute for `voxelResources` first, and restores the prior render target. */
 export function renderRoomToTarget(
     state: WebGpuState,
     voxelResources: VoxelResources.VoxelResources,
@@ -279,10 +252,7 @@ export function renderRoomToTarget(
     state.renderer.renderTarget = savedTarget;
 }
 
-/** compose one block into `sceneColor`'s tile cell — the OfflineRenderer contract. Draws
- *  the scene GEOMETRY directly (`renderer.render(scene, camera)`) so the TARGET's own
- *  viewport/scissor confine it (a PassNode would render into its own texture instead).
- *  First tile clears the whole (transparent) target, the rest load. */
+/** Composes one block into `sceneColor`'s tile cell by rendering geometry directly, so the target's own viewport/scissor confine it. First tile clears the target, the rest load. */
 export function composeSceneToTarget(
     state: WebGpuState,
     voxelResources: VoxelResources.VoxelResources,
@@ -310,14 +280,14 @@ export function composeSceneToTarget(
     r.renderTarget = saved;
 }
 
-/** the one-shot post pipeline (fxaa → tonemap/output) reading a composited HDR `sceneColor`. */
+/** The one-shot post pipeline (fxaa, then tonemap/output) reading a composited HDR `sceneColor`. */
 export function createOfflinePostPipeline(state: WebGpuState, sceneColor: RenderTarget): RenderPipeline {
     // `.texture` is Texture|CubeTexture; our scene-color target is a plain 2D target.
     const fxaaPass = fxaa(texture(sceneColor.texture as Texture));
     return new RenderPipeline(state.renderer, renderOutput(fxaaPass));
 }
 
-/** run the post pipeline once over the whole grid into `atlas` (full-frame, clears first). */
+/** Runs the post pipeline once over the whole grid into `atlas`, full-frame, clears first. */
 export function renderPostToTarget(state: WebGpuState, atlas: RenderTarget, postPipeline: RenderPipeline): void {
     const r = state.renderer;
     const saved = r.renderTarget;
@@ -331,10 +301,7 @@ export function renderPostToTarget(state: WebGpuState, atlas: RenderTarget, post
     r.renderTarget = saved;
 }
 
-/** Stand up the WebGPU offline backend (the `OfflineRenderer` handle behind
- *  `render/offline`'s `loadOfflineBackend`). Device is injected (Node Dawn) or
- *  requested from `navigator.gpu` (browser worker). Wraps the offline functions
- *  above + `readPixels` into the backend-neutral contract. */
+/** Stands up the WebGPU offline backend. Device is injected (Node Dawn) or requested from `navigator.gpu` (browser worker). */
 export async function createOffline(gpu?: { device: GPUDevice; adapter: GPUAdapter }): Promise<OfflineRenderer> {
     let device: GPUDevice;
     let adapter: GPUAdapter;
@@ -361,7 +328,7 @@ export async function createOffline(gpu?: { device: GPUDevice; adapter: GPUAdapt
         rebuildDeps: (loader) => buildOfflineDeps(state, offline, budget, loader),
         createPipeline: (scene, camera) => createOfflinePipeline(state, scene, camera),
         renderToTarget: (deps, room, camera, target, pipeline, radius) =>
-            // deps built by this backend's buildOfflineDeps → voxelResources is the gpu type.
+            // Built by this backend's buildOfflineDeps, so voxelResources is the gpu type.
             renderRoomToTarget(
                 state,
                 deps.voxelResources as VoxelResources.VoxelResources,
@@ -400,24 +367,18 @@ export async function createOffline(gpu?: { device: GPUDevice; adapter: GPUAdapt
     return offline;
 }
 
-/**
- * Build a `RenderRoomDeps` (+ teardown) for the offline icon room, against the
- * realm's live registry and the just-baked assets read through `loader`. Rebuilt
- * per bake so the voxel atlas reflects the latest baked textures; the persistent
- * `state` renderer/device is reused. Arena index 0 is free (no live world room).
- */
+/** Builds a `RenderRoomDeps` (and teardown) for the offline icon room against the realm's live registry and the just-baked assets read through `loader`. Rebuilt per bake so the voxel atlas reflects the latest baked textures. */
 async function buildOfflineDeps(
     state: WebGpuState,
     offline: OfflineRenderer,
     budget: VoxelArena.VoxelArenaBudget,
     loader: ResourceLoader,
 ): Promise<{ deps: RenderRoomDeps; dispose: () => void }> {
-    // this path doesn't call engine-client.load(), so rebuild the derived index
-    // fields from the (baked) registrations before reading the block registry.
+    // This path doesn't call engine-client.load(), so rebuild the derived index fields before reading the block registry.
     reindexRegistry(registry);
 
     const resources = initEngineResources(loader, 'client');
-    // no net in a headless render room; a `local:` room's send no-ops anyway.
+    // No net in a headless render room; a `local:` room's send no-ops anyway.
     const rpc = Rpc.init({ send() {}, broadcast() {} });
 
     const cloudResources = CloudResources.init(state.environmentResources);
@@ -425,18 +386,14 @@ async function buildOfflineDeps(
     const voxelResources = VoxelResources.init(registry.blockRegistry, state.environmentResources, budget, state.timeResources);
     const voxelMeshResources = VoxelMeshResources.init(voxelResources.textures, state.timeResources, state.environmentResources);
 
-    // the offline path builds its own resources, so it must route the light
-    // volume too: the model and voxel-mesh materials bind `lightTiles` /
-    // `lightGrid` by name, and a geometry missing them
-    // fails pipeline creation rather than rendering unlit.
+    // The offline path builds its own resources, so it must route the light volume too:
+    // model and voxel-mesh materials bind `lightTiles`/`lightGrid` by name.
     for (const geometry of [modelResources.batch.geometry, voxelMeshResources.batch.geometry]) {
         VoxelLightSample.routeLightVolumeBuffers(geometry, voxelResources.lightVolume);
     }
 
-    // workerCount=0 → synchronous remesh (icons mesh inline via meshChunk); still
-    // fetches + decodes the baked atlas. rebuildDeps returns render-ready deps: wait
-    // for the atlas upload AND the voxel compute pipelines to compile (WebGPU-only —
-    // the offline render dispatches them), so the bakers never gate on it themselves.
+    // workerCount=0 means synchronous remesh. Waits for the atlas upload and the voxel
+    // compute pipelines to compile, so the bakers never gate on it themselves.
     await VoxelResources.load(voxelResources, registry.blockRegistry, 0, 0, resources, state.renderer);
     await Promise.all([voxelResources.textures.ready, voxelResources.computeReady]);
 
@@ -459,20 +416,15 @@ async function buildOfflineDeps(
     return { deps, dispose: disposeDeps };
 }
 
-// ═══════════════ the handle ═══════════════
-
 export function create(): Renderer {
     const camera = RenderCamera.createCamera();
     const state = init(camera);
     return {
         kind,
         camera,
-        // the renderer's own canvas — the single display surface the client mounts.
         get canvas() {
             return state.renderer.domElement;
         },
-        // Forward device-loss observation to the inner gpucat renderer (a live ref, so
-        // this stays correct if the backend renderer is ever swapped).
         get onDeviceLost() {
             return state.renderer.onDeviceLost;
         },
@@ -496,10 +448,7 @@ export function create(): Renderer {
     };
 }
 
-/** See `Renderer.voxelWorldDrawable`. Resident-and-settled: a chunk mesh is on
- *  the GPU and the mesher has nothing left queued or in flight. A room with no
- *  voxel content never queues anything and never goes resident, so it reports
- *  drawable rather than waiting forever — same for a runtime with no worker pool. */
+/** Resident-and-settled: a chunk mesh is on the GPU and the mesher has nothing queued or in flight. A room with no voxel content reports drawable rather than waiting forever. */
 function voxelWorldDrawable(state: WebGpuState): boolean {
     if (!state.active) return false;
     const mesher = state.resources.voxel.meshDispatcher;
@@ -510,9 +459,7 @@ function voxelWorldDrawable(state: WebGpuState): boolean {
     return state.resources.voxel.arenas.residentKeys.size > 0 || state.active.room.voxels.chunks.size === 0;
 }
 
-// ═══════════════ client-global resources (was resources.ts) ═══════════════
-
-/** the eight client-global GPU resource sets, owned by the backend. */
+/** The eight client-global GPU resource sets, owned by the backend. */
 export type BackendResources = {
     sprite: SpriteResources.SpriteResources;
     extrudedSprite: ExtrudedSpriteResources.ExtrudedSpriteResources;
@@ -524,12 +471,7 @@ export type BackendResources = {
     voxelMesh: VoxelMeshResources.VoxelMeshResources;
 };
 
-/**
- * sync construction of every resource set. pure (no awaits, no fetches): builds
- * materials + cull computes against the magenta placeholder atlas so the
- * downstream extruded/particle inits can name-bind it immediately. The async
- * atlas fetches happen in `loadResources`. Sets `renderer.resources`.
- */
+/** Sync construction of every resource set: builds materials and cull computes against the placeholder atlas so downstream inits can name-bind it immediately. Async atlas fetches happen in `loadResources`. */
 export function initResources(
     renderer: WebGpuState,
     opts: { blockRegistry: Blocks; voxelBudget: VoxelArena.VoxelArenaBudget },
@@ -547,9 +489,7 @@ export function initResources(
         renderer.timeResources,
     );
     const voxelMesh = VoxelMeshResources.init(voxel.textures, renderer.timeResources, renderer.environmentResources);
-    // every visual samples light in the shader now, so route the volume's
-    // buffers to the names their (engine-global) materials bind. Here rather
-    // than in each init because the volume is built with VoxelResources.
+    // Every visual samples light in the shader, so route the volume's buffers to the names their materials bind.
     for (const geometry of [
         particle.batch.geometry,
         sprite.batch.geometry,
@@ -564,11 +504,9 @@ export function initResources(
 }
 
 /**
- * async load pass: pre-warms compile pipelines + fetches the real sprite/voxel
- * atlases (the placeholder keeps materials valid meanwhile). Both extruded and
- * particle materials captured a TextureNode against the placeholder atlas during
- * init; `SpriteResources.load` swaps the placeholder out, so re-bind them after.
- * Audio is NOT here — it's not a render resource; engine-client races it.
+ * Async load pass: pre-warms compile pipelines and fetches the real sprite/voxel
+ * atlases. Extruded and particle materials captured a TextureNode against the
+ * placeholder atlas during init, so re-bind them after `SpriteResources.load` swaps it out.
  */
 export async function loadResources(
     renderer: WebGpuState,
@@ -590,11 +528,7 @@ export async function loadResources(
     ParticleResources.rebindAtlas(r.particle, r.sprite.atlas);
 }
 
-/**
- * HMR: re-fetch block atlas + rebuild voxel resources (and voxel-mesh resources,
- * which bind the atlas + texAnim). Resource level only — returns whether the
- * resources actually swapped, so `./index` can rebuild each room's voxel visuals.
- */
+/** HMR: re-fetches the block atlas and rebuilds voxel and voxel-mesh resources. Returns whether the resources actually swapped, so callers can rebuild each room's voxel visuals. */
 export async function swapVoxelResources(
     renderer: WebGpuState,
     opts: {
@@ -618,14 +552,11 @@ export async function swapVoxelResources(
     );
     r.voxel = nextVoxel;
 
-    // voxelMeshResources binds the engine-global atlas + texAnim, so it must
-    // rebuild alongside voxelResources whenever those swap.
+    // voxelMeshResources binds the engine-global atlas + texAnim, so it must rebuild alongside voxelResources.
     if (changed) {
         VoxelMeshResources.dispose(r.voxelMesh);
         r.voxelMesh = VoxelMeshResources.init(r.voxel.textures, renderer.timeResources, renderer.environmentResources);
-        // a new VoxelResources carries a NEW light volume, so EVERY batch has to
-        // be re-pointed, not just the one just rebuilt: the others are still
-        // bound to the old volume's buffers, which this swap disposed.
+        // A new VoxelResources carries a new light volume, so every batch must be re-pointed, not just the one just rebuilt.
         for (const geometry of [
             r.particle.batch.geometry,
             r.sprite.batch.geometry,
@@ -639,12 +570,7 @@ export async function swapVoxelResources(
     return changed;
 }
 
-/**
- * HMR: re-fetch the sprite atlas, rebind the extruded + particle materials that
- * hold their own TextureNodes against it, and wipe the extruded silhouette pool
- * (every bake is stale). Returns whether the atlas changed, so `./index` can
- * rebuild each room's extruded-sprite visuals.
- */
+/** HMR: re-fetches the sprite atlas, rebinds materials that hold their own TextureNodes against it, and wipes the extruded silhouette pool. Returns whether the atlas changed. */
 export async function swapSpriteResources(renderer: WebGpuState, opts: { resources: EngineResources }): Promise<boolean> {
     const r = renderer.resources;
     const changed = await SpriteResources.refresh(r.sprite, opts.resources.loader, opts.resources.spriteAtlas);
@@ -655,8 +581,7 @@ export async function swapSpriteResources(renderer: WebGpuState, opts: { resourc
     return true;
 }
 
-/** dispose the client-global resources. mirrors the prior engine-client dispose
- *  order; modelResources has no dispose (matches prior behaviour). */
+/** Disposes the client-global resources. `modelResources` has no dispose. */
 export function disposeResources(renderer: WebGpuState): void {
     const r = renderer.resources;
     if (!r) return;
@@ -669,9 +594,6 @@ export function disposeResources(renderer: WebGpuState): void {
     SpriteResources.dispose(r.sprite);
 }
 
-// ═══════════════ active-room visuals (was room-visuals.ts) ═══════════════
-
-/** the active room's GPU visual sets. */
 export type RoomVisuals = {
     voxel: VoxelVisuals.VoxelVisuals;
     voxelMesh: VoxelMeshVisuals.VoxelMeshVisuals;
@@ -681,13 +603,11 @@ export type RoomVisuals = {
     extrudedSprite: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals;
     shadow: ShadowVisuals.ShadowVisuals;
     particle: ParticleVisuals.ParticleVisuals;
-    /** env render state (sky/sun/moon/star meshes + cloud anchor). driven each
-     *  frame from the active room's client-side `environment` config. */
+    /** Sky/sun/moon/star meshes and cloud anchor, driven each frame from the active room's `environment` config. */
     env: Environment.EnvVisuals;
 };
 
-/** the active slot: the room + its visuals, plus the `scene`/`visibility` handles
- *  teardown needs captured up front so it never depends on the room outliving it. */
+/** The active slot: the room and its visuals, plus the `scene`/`visibility` handles teardown needs captured up front. */
 export type RoomActive = {
     room: ClientRoom;
     scene: ClientRoom['render']['scene'];
@@ -695,26 +615,14 @@ export type RoomActive = {
     visuals: RoomVisuals;
 };
 
-/**
- * Reconcile the active slot to `activeRoom` (the client's source of truth). When it
- * differs from the currently-held room: tear the old one down, then build the new
- * one (null → just teardown). A no-op when already matching. Called at the top of
- * every `updateFrame`, so all downstream per-frame work keys off the reconciled
- * `state.active` and can never touch a stale room.
- */
+/** Reconciles the active slot to `activeRoom`: tears the old one down and builds the new one when it differs. No-op when already matching. */
 export function reconcile(state: WebGpuState, activeRoom: ClientRoom | null): void {
     if ((state.active?.room ?? null) === activeRoom) return;
     teardown(state);
     if (activeRoom) state.active = build(state, activeRoom);
 }
 
-/**
- * Build the active room's visual bundle from its scene graph (`render.scene` /
- * `render.overlayScene` / `nodes` / `viewport`) + the backend's client-global resources +
- * env buffers + pipeline, mount its world into the single-world voxel arena (marks
- * chunks dirty so the prioritised remesh path refills it), and force-push its env
- * config into the engine-global env UBOs. Returns the slot.
- */
+/** Builds the active room's visual bundle, mounts its world into the single-world voxel arena, and force-pushes its env config into the engine-global env UBOs. */
 function build(state: WebGpuState, room: ClientRoom): RoomActive {
     const res = state.resources;
     const nodes = room.scene;
@@ -723,40 +631,27 @@ function build(state: WebGpuState, room: ClientRoom): RoomActive {
     const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel.geometries, res.voxel.quadMaterials);
     const voxelMesh = VoxelMeshVisuals.init(res.voxelMesh.batch, scene, nodes);
     const model = MeshVisuals.init(res.model.batch, scene, nodes);
-    // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
-    // panels are DOM. the scene depth node lets canvas materials discard fragments
-    // occluded by world geometry.
+    // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait panels are DOM.
     const domUi = DomUi.init(overlayScene, room.viewport, nodes, state.pipeline.sceneDepthNode);
     const sprite = SpriteVisuals.init(res.sprite.batch, scene, nodes);
     const extrudedSprite = ExtrudedSpriteVisuals.init(res.extrudedSprite.batch, scene, nodes);
     const shadow = ShadowVisuals.init(res.shadow.batch, scene, nodes);
     const particle = ParticleVisuals.init(res.particle.batch, scene, res.sprite);
-    // env render state: sky/sun/moon/star meshes + cloud anchor, drawn with the
-    // engine-global env + cloud resources. The room's env *config* is client data
-    // (`room.environment`) the renderer reads each frame.
     const env = Environment.initEnvVisuals(scene, state.environmentResources, res.cloud);
 
     const visuals: RoomVisuals = { voxel, voxelMesh, model, domUi, sprite, extrudedSprite, shadow, particle, env };
 
-    // mount this room's world into the single-world arena + push its env so any
-    // rebind this frame matches what its scripts set.
     VoxelVisuals.mountRoom(voxel, room.voxels);
     Environment.flushActive(room.environment, state.environmentResources);
 
     return { room, scene, visibility: room.visibility, visuals };
 }
 
-/**
- * Dispose the active room's visual bundle, release its world's arena chunks, and
- * clear the active slot. No-op when nothing is active. Uses the slot's captured
- * `scene`/`visibility`, so it stays correct even when the room was already torn
- * down (a leave reconciles on the next frame; `dispose()` calls this at shutdown).
- */
+/** Disposes the active room's visual bundle, releases its world's arena chunks, and clears the active slot. No-op when nothing is active. */
 export function teardown(state: WebGpuState): void {
     if (!state.active) return;
     const { scene, visibility, visuals: rv } = state.active;
     VoxelVisuals.dispose(rv.voxel, scene);
-    // release the active world's chunks from the arena + mesh worker cache.
     VoxelResources.unmountRoom(state.resources.voxel, state.resources.voxel.meshDispatcher);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, visibility);
     MeshVisuals.dispose(rv.model, state.resources.model.batch, visibility);
@@ -774,13 +669,7 @@ export function teardown(state: WebGpuState): void {
     state.active = null;
 }
 
-/**
- * per-frame update of the active room's visuals. Order + Debug labels mirror the
- * old engine-client frame loop exactly. The mesher + arena metrics always run
- * (it's always the active room — its world is the one resident in the arena).
- * Reads the client-resolved POV camera from `ctx`; no-op when there is no active
- * room or its POV camera isn't resolved (no active CameraTrait).
- */
+/** Per-frame update of the active room's visuals. No-op with no active room or unresolved POV camera. */
 export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     if (!state.active) return;
     const povCamera = ctx.povCamera;
@@ -789,13 +678,9 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     const res = state.resources;
 
     Debug.begin(ctx.profiler, 'mesh');
-    // The live drive: the AOI schedules dirty chunks off-thread (streaming rooms
-    // defer a chunk until its 26-neighbourhood has arrived so it meshes once with
-    // correct AO/light; local rooms mesh immediately), then the GPU producer
-    // consumes the staged results into its own arena. No dispatcher means no
-    // worker pool: a runtime that never spawns workers (asset pipeline, headless
-    // harness — see voxel-resources-cpu's `typeof Worker` guard) has no live voxel
-    // meshing to drive, so skip the drive rather than fail the frame.
+    // AOI schedules dirty chunks off-thread (streaming rooms wait for the 26-neighbourhood so
+    // AO/light mesh correctly the first time), then the GPU producer consumes the staged results.
+    // No dispatcher means no worker pool, so skip the drive rather than fail the frame.
     const mesher = res.voxel.meshDispatcher;
     if (mesher !== null) {
         VoxelAoi.reDirtyLost(mesher, room.voxels);
@@ -810,17 +695,13 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
             toForget,
         );
         VoxelResources.consume(res.voxel, mesher, room.voxels, povCamera.position, toForget);
-        // flush AFTER consume drains: the flush recycles output buffers back to the
-        // workers, which would detach them from an undrained result (see mesher.ts).
+        // Flush after consume drains: it recycles output buffers back to the workers, which would detach them from an undrained result.
         flushMeshQueue(mesher, room.voxels);
         rv.voxel.lastMeshPerf = readMeshPerf(mesher);
     }
     Debug.end(ctx.profiler, 'mesh');
 
-    // Light volume: rebake tiles for chunks whose light changed. Deliberately
-    // OUTSIDE the `mesher !== null` guard above — a room with no mesh worker
-    // still has entities, sprites and particles sampling this. Budgeted per
-    // frame because relight is not latency-critical the way input is.
+    // Deliberately outside the `mesher !== null` guard: a room with no mesh worker still has entities/sprites/particles sampling this.
     Debug.begin(ctx.profiler, 'light-volume');
     const lightBakes = VoxelLightVolume.drainLightVolume(
         res.voxel.lightVolume,
@@ -842,8 +723,7 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     }
     Debug.end(ctx.profiler, 'light-volume');
 
-    // arena occupancy + fragmentation, recorded post-update so the sample
-    // reflects this frame's allocs.
+    // Recorded post-update so the sample reflects this frame's allocs.
     if (ctx.profiler.enabled) {
         const quadR = VoxelArena.arenaReport(res.voxel.arenas.quadArena);
         Debug.record(ctx.profiler, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
@@ -875,37 +755,30 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     ShadowVisuals.update(rv.shadow, res.shadow.batch, room.voxels, povCamera);
     Debug.end(ctx.profiler, 'shadow');
 
-    // particle visuals reads pool[0..count) directly, no scene-graph traits. runs
-    // after Particles.update (per-frame loop) so freshly-stepped positions feed
-    // this frame's pose buffer.
+    // Runs after Particles.update so freshly-stepped positions feed this frame's pose buffer.
     Debug.begin(ctx.profiler, 'particle');
     ParticleVisuals.update(rv.particle, res.particle.batch, room.particles, ctx.now);
     Debug.end(ctx.profiler, 'particle');
 
-    // Renderer stats. gpucat zeroes the per-frame fields itself at its own frame boundary, so
-    // we just read them — no delta bookkeeping here, and gpucat's Inspector can read the same
-    // numbers without either of us disturbing the other. Sampled before this frame's render, so
-    // a reading describes the PREVIOUS frame; that's what a per-frame rate wants anyway.
+    // gpucat zeroes the per-frame fields itself at its own frame boundary, so this just reads them.
+    // Sampled before this frame's render, so a reading describes the previous frame.
     if (ctx.profiler.enabled) {
         const info = state.renderer.info;
-        // uploads: how much we push at the GPU. read bytes WITH calls — a batch re-uploading its
-        // whole capacity when one slot moved spikes bytes with calls flat, while a caller queueing
-        // many tiny ranges does the reverse.
+        // Read bytes with calls: a batch re-uploading its whole capacity when one slot moved
+        // spikes bytes with calls flat, while a caller queueing many tiny ranges does the reverse.
         Debug.record(ctx.profiler, 'gpu/upload/bytes', info.buffers.writeBytes, 'B');
         Debug.record(ctx.profiler, 'gpu/upload/calls', info.buffers.writeCalls, 'count');
         Debug.record(ctx.profiler, 'gpu/draws', info.render.drawCalls, 'count');
-        // a floor, not a total: indirect draws keep their counts in a GPU buffer we never read.
+        // A floor, not a total: indirect draws keep their counts in a GPU buffer never read here.
         Debug.record(ctx.profiler, 'gpu/triangles', info.render.triangles, 'count');
-        // resident objects: how much the renderer is HOLDING. a count that climbs frame over
-        // frame is a leak (shader permutations, orphaned buffers), not a workload.
+        // Resident objects the renderer is holding; a count climbing frame over frame is a leak, not a workload.
         Debug.record(ctx.profiler, 'gpu/buffers', info.memory.buffers, 'count');
         Debug.record(ctx.profiler, 'gpu/buffers/raw', info.memory.rawBuffers, 'count');
         Debug.record(ctx.profiler, 'gpu/pipelines/render', info.memory.renderPipelines, 'count');
         Debug.record(ctx.profiler, 'gpu/pipelines/compute', info.memory.computePipelines, 'count');
         Debug.record(ctx.profiler, 'gpu/bindGroupLayouts', info.memory.bindGroupLayouts, 'count');
-        // mesh instance upload shape. `dirty` is what changed this frame, `span` is what the
-        // single min..max range actually uploads — span >> dirty means scattered slots are
-        // dragging untouched neighbours into the write.
+        // `dirty` is what changed this frame; `span` is what the single min..max range actually
+        // uploads. span >> dirty means scattered slots are dragging untouched neighbours into the write.
         const meshBatch = res.model.batch;
         Debug.record(ctx.profiler, 'mesh/instances/alive', meshBatch.aliveInstances, 'count');
         Debug.record(ctx.profiler, 'mesh/instances/dirty', meshBatch.dirtyInstances, 'count');
@@ -913,12 +786,7 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     }
 }
 
-/**
- * HMR: rebuild the active room's voxel + voxel-mesh visuals against freshly-swapped
- * resources. The engine-global arenas/geometries/materials moved to the new
- * `state.resources.voxel`/`voxelMesh`; the old meshes still point at the disposed
- * ones, so drop + re-init. No-op when `room` isn't the active room.
- */
+/** HMR: rebuilds the active room's voxel and voxel-mesh visuals against freshly-swapped resources. No-op when `room` isn't the active room. */
 export function rebuildVoxelVisuals(state: WebGpuState, room: ClientRoom): void {
     if (!state.active || state.active.room !== room) return;
     const rv = state.active.visuals;
@@ -930,17 +798,11 @@ export function rebuildVoxelVisuals(state: WebGpuState, room: ClientRoom): void 
         state.resources.voxel.quadMaterials,
     );
     rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.render.scene, room.scene);
-    // the refresh blew away the previous arena (new packer is empty), so re-mount:
-    // marks the room's chunks dirty and the prioritised remesh path refills it.
+    // The refresh blew away the previous arena, so re-mount to mark chunks dirty and let the remesh path refill it.
     VoxelVisuals.mountRoom(rv.voxel, room.voxels);
 }
 
-/**
- * HMR: rebuild the active room's extruded-sprite visuals after the sprite atlas
- * swapped. Its alive states hold now-dangling GeometrySlot refs into the cleared
- * pool; dropping them lets next frame's update lazily re-acquire into the fresh
- * pool. No-op when `room` isn't the active room.
- */
+/** HMR: rebuilds the active room's extruded-sprite visuals after the sprite atlas swapped, dropping now-dangling GeometrySlot refs. No-op when `room` isn't the active room. */
 export function rebuildExtrudedSpriteVisuals(state: WebGpuState, room: ClientRoom): void {
     if (!state.active || state.active.room !== room) return;
     const rv = state.active.visuals;

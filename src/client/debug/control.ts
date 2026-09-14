@@ -6,7 +6,7 @@ import type { Ticker } from './ticker';
 export type Context = {
     ticker: Ticker;
     doc: Document;
-    /** the `.dashcat` host element — mount popovers/overlays here (scoped + overflow-safe). */
+    /** the `.dashcat` host element, mount popovers/overlays here (scoped + overflow-safe). */
     layer: HTMLElement;
 };
 
@@ -39,7 +39,7 @@ export type Handle<T> = {
  */
 export type Control<T> = (ctx: Context, prop: Prop<T>) => Handle<T>;
 
-/** the kit a control author composes — row + label + handle + wiring. */
+/** the kit a control author composes: row, label, handle, wiring. */
 export type Base<T> = {
     row: HTMLElement;
     labelEl: HTMLElement;
@@ -49,7 +49,7 @@ export type Base<T> = {
     render(fn: () => void): void;
     /** register cleanup run on destroy. */
     onDispose(fn: () => void): void;
-    /** fire change (and finish) handlers — for controls that emit without `set`. */
+    /** fire change (and finish) handlers, for controls that emit without `set`. */
     fire(value: T, finished: boolean): void;
     /** let a control (e.g. switch) implement `view()`. */
     setView(fn: (which: string | number) => void): void;

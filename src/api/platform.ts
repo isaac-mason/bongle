@@ -3,15 +3,9 @@ import type { ScriptContext } from '../core/scene/scripts';
 
 /**
  * Game-facing bridge to the active host platform (CrazyGames / Poki / none).
- * Client-only. The transport lives on the ClientDriver supplied at engine init,
- * this just hands off to it. Standalone / bongle-dev hosts wire these to an
- * inert impl, so a game can call them unconditionally regardless of where it's
- * running.
- *
- * Loading/gameplay lifecycle is NOT here, the host infers that from the
- * connection. These are the ad moments only the game knows the timing of
- * (between rounds, on death, etc.). Audio muting for the ad's duration is
- * handled by `Ads` + the update loop, so games don't think about it.
+ * Client-only; standalone hosts wire these to an inert impl so a game can
+ * call them unconditionally. Covers ad moments only the game knows the
+ * timing of (between rounds, on death); audio muting is handled automatically.
  */
 export const platform = {
     /** Show an interstitial at a natural break. Resolves when the ad finishes

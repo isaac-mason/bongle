@@ -1,82 +1,35 @@
-// ── performance profile ─────────────────────────────────────────────
-//
-// engine-wide quality tier. picked once at boot from navigator hints
-// (deviceMemory / hardwareConcurrency / UA), persisted to localStorage,
-// optionally overridden by the user. subsystems read `settingsForTier`
-// for the actual numeric knobs (view radius, arena sizes, ...) so the
-// settings UI has a single source of truth.
-//
-// the tier ladder is intentionally coarse: each step roughly doubles
-// the per-subsystem resource budget. detection picks the first ladder
-// rung the device is *expected* to handle; users can flip up or down
-// from the settings UI without re-detecting.
-//
-// usage:
-//   const { caps } = await loadRenderBackend();  // backend hands back device caps
-//   const profile = detect(caps);
-//   setActive(profile, 'standard', 'user');   // user override
-//   const s = settingsForTier(profile);       // read tier knobs here
-
 import type { RenderDeviceCaps } from '../render/backend';
 import type { VoxelArenaBudget } from '../render/voxels/voxel-arena';
 
 const TIER_ORDER = ['low', 'standard'] as const;
 export type Tier = (typeof TIER_ORDER)[number];
 
-// ── tier-keyed settings ─────────────────────────────────────────────
-//
-// every numeric knob the active tier controls. keep additions here so a
-// future settings menu can iterate one struct instead of grepping the
-// codebase for `profile.active`.
-//
-// SIZED FROM MEASUREMENT, not from the worst case a radius could theoretically
-// reach. A terrain map at radius 12 sat at 227 resident light tiles and 6.3% of a
-// 96 MB arena (412 allocs), i.e. an order of magnitude under every budget here.
-// The budgets below still carry roughly 2x headroom over a working set scaled to
-// the smaller radius, because a dense build packs far more quads per chunk than
-// open terrain does. The VOXEL LIGHT VOLUME and VOXEL QUAD ARENA debug panels
-// report the live figures; re-measure there rather than re-deriving.
+// every numeric knob the active tier controls; sized so a radius-12 terrain map stays
+// well under the light-tile and arena budget (voxel debug panels report live figures).
 
 export type Settings = {
-    /** upper bound on the device pixel ratio the scene renders at. a
-     *  high-DPI display (2×+ Retina) otherwise shades 4× the fragments,
-     *  and the scene pass is fill/bandwidth-bound, so this is a direct
-     *  lever independent of shader cost. 1 = native resolution (no
-     *  super-sampling); higher trades sharpness for fill. UI renders in a
-     *  separate full-res overlay pass, so text stays crisp regardless. */
+    /** upper bound on device pixel ratio; 1 = native resolution. UI renders
+     *  in a separate full-res overlay pass, so text stays crisp regardless. */
     maxPixelRatio: number;
-    /** how far from the camera (in chunks) voxel chunks remain visible.
-     *  cullCPU drops chunks past this, meshing/eviction is unaffected. */
+    /** how far from the camera (in chunks) voxel chunks stay visible; cullCPU
+     *  drops chunks past this, meshing/eviction is unaffected. */
     voxelViewChunkRadius: number;
-    /** desired megabytes for the voxel quad+order arenas, clamped to
-     *  25 % of `limits.maxArenaBytes` at allocation time. */
+    /** desired megabytes for the voxel quad+order arenas, clamped to 25% of
+     *  `limits.maxArenaBytes` at allocation time. */
     voxelArenaDesiredMB: number;
-    /** max chunk×pass slots per voxel SectionTable. */
+    /** max chunk x pass slots per voxel SectionTable. */
     voxelMaxSections: number;
-    /** light-volume tiles, one per resident CHUNK. Sized independently of
+    /** light-volume tiles, one per resident chunk; sized independently of
      *  `voxelMaxSections`, which counts chunk x pass slots per table. */
     voxelMaxLightTiles: number;
-    /** max simultaneous SegmentArena allocations (node-pool size for the
-     *  OffsetAllocator). target: live + free-node headroom across all 3
-     *  passes, voxelMaxSections × 3 × 2 rounded to a power of two. */
+    /** max simultaneous SegmentArena allocations (OffsetAllocator node-pool
+     *  size); target voxelMaxSections x 3 x 2 rounded to a power of two. */
     voxelArenaMaxAllocs: number;
-    // ── remesh dispatch ─────────────────────────────────────────────
-    // All meshing runs on the worker pool (off-thread). The pool holds
-    // `voxelWorkerCount × voxelWorkerQueueDepth` jobs in flight at once;
-    // results land on the dispatcher's `results` queue and are drained at the
-    // top of the next `voxel-visuals.update` call. Near-camera / just-edited chunks
-    // dispatch URGENT (jump the worker queue) for low edit latency.
-    //
-    // Per-frame *new* dispatch is implicitly bounded by free pool slots
-    // (pool capacity − currently in flight). No explicit per-frame cap.
-
-    /** size of the mesh worker pool. 0 disables workers entirely (every
-     *  remesh runs on the main thread synchronously, useful for tests and
-     *  the asset-pipeline path). */
+    /** size of the mesh worker pool; 0 runs every remesh on the main thread
+     *  synchronously, used by tests and the asset-pipeline path. */
     voxelWorkerCount: number;
-    /** per-worker FIFO queue depth. Worker drains its queue with no
-     *  postMessage round-trip between jobs. Total worker-pool in-flight
-     *  cap = `voxelWorkerCount × voxelWorkerQueueDepth`. */
+    /** per-worker FIFO queue depth; total in-flight cap is
+     *  `voxelWorkerCount x voxelWorkerQueueDepth`. */
     voxelWorkerQueueDepth: number;
 };
 
@@ -86,11 +39,10 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelViewChunkRadius: 6,
         voxelArenaDesiredMB: 48,
         voxelMaxSections: 768,
-        // 8704 B/tile: ~169 columns of a few surface chunks each at radius 6.
         voxelMaxLightTiles: 1024,
-        voxelArenaMaxAllocs: 4096, // 768 × 3 × 2 ≈ 4608 → 4096 (allocs run well under slots)
-        // single mesh worker: low-end (≤4 cores, Chromebook) keeps memory down
-        // and avoids postMessage overhead; the urgent tier still covers edits.
+        voxelArenaMaxAllocs: 4096, // 768 x 3 x 2 ~ 4608, rounded down; allocs run well under slots
+        // single worker: low-end (<=4 cores, Chromebook) keeps memory down;
+        // the urgent tier still covers edit latency.
         voxelWorkerCount: 1,
         voxelWorkerQueueDepth: 3,
     },
@@ -99,13 +51,10 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelViewChunkRadius: 8,
         voxelArenaDesiredMB: 64,
         voxelMaxSections: 1280,
-        // 8704 B/tile = ~15 MB. Radius 8 is ~289 columns of a few surface chunks
-        // each (radius 12 was 625, so a bit under half the working set).
         voxelMaxLightTiles: 1792,
-        voxelArenaMaxAllocs: 8192, // 1280 × 3 × 2 ≈ 7680 → 8192
-        // 2 mesh workers: past ~2 the postMessage + per-worker chunk-cache
-        // (~4 MB each) overhead outweighs the parallelism, and the urgent tier
-        // covers edit latency, so we no longer scale with core count.
+        voxelArenaMaxAllocs: 8192, // 1280 x 3 x 2 ~ 7680, rounded up
+        // 2 workers: past this, postMessage + per-worker chunk-cache overhead
+        // outweighs the parallelism, so this doesn't scale with core count.
         voxelWorkerCount: 2,
         voxelWorkerQueueDepth: 3,
     },
@@ -126,32 +75,26 @@ export function voxelArenaBudgetForTier(profile: Profile): VoxelArenaBudget {
         quadArenaBytes: total,
         maxSections: s.voxelMaxSections,
         maxAllocs: s.voxelArenaMaxAllocs,
-        // one tile per resident CHUNK, where `maxSections` counts chunk x PASS
-        // slots across three tables. Sizing light off the section count made the
-        // pool a third of the residency it is tied to, so it sat at capacity
-        // evicting chunks the AOI immediately asked for again.
+        // one tile per resident chunk; sizing this off maxSections (which
+        // counts chunk x pass slots across three tables) undersizes the pool.
         maxLightTiles: s.voxelMaxLightTiles,
         lightGridChunkRadius: s.voxelViewChunkRadius + STREAM_APRON,
     };
 }
 
-/** chunks of loaded-but-not-drawn apron kept beyond the visual radius. gives
- *  the mesher its 26-neighbour apron and a small pop-in buffer so terrain is
- *  ready before it enters the draw radius. */
+/** chunks of loaded-but-not-drawn apron kept beyond the visual radius, for
+ *  the mesher's 26-neighbour apron and a small pop-in buffer. */
 const STREAM_APRON = 2;
 
-/** the stream radius (in chunks) this client requests from the server: its
- *  visual (draw) radius plus an apron. pushed up via the owner-authoritative
- *  PlayerTrait.viewRadius sync; the server clamps it. low tier lands at the
- *  server's play baseline (6 + 2 = 8), higher tiers raise it. */
+/** stream radius (in chunks) this client requests from the server: visual
+ *  radius plus apron. pushed via the owner-authoritative PlayerTrait.viewRadius
+ *  sync; the server clamps it. */
 export function streamChunkRadius(profile: Profile): number {
     return settingsForTier(profile).voxelViewChunkRadius + STREAM_APRON;
 }
 
-/** the effective device pixel ratio for the active tier: the display's own
- *  ratio, clamped by the tier's `maxPixelRatio`. every `canvasTarget
- *  .setPixelRatio` call routes through here so high-DPI displays never pay
- *  for more fragments than the tier allows. */
+/** effective device pixel ratio for the active tier: the display's own ratio,
+ *  clamped by the tier's `maxPixelRatio`. */
 export function cappedPixelRatio(profile: Profile): number {
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
     return Math.min(dpr, settingsForTier(profile).maxPixelRatio);
@@ -162,8 +105,8 @@ export type Source = 'auto' | 'user';
 export type Platform = 'ios' | 'android' | 'desktop';
 
 export type Limits = {
-    /** min(maxStorageBufferBindingSize, maxBufferSize), every subsystem
-     *  derives its arena budget against this cap, never above it. */
+    /** min(maxStorageBufferBindingSize, maxBufferSize); every subsystem's
+     *  arena budget derives from this cap. */
     maxArenaBytes: number;
     maxStorageBufferBindingSize: number;
     maxBufferSize: number;
@@ -172,8 +115,8 @@ export type Limits = {
 
 export type Profile = {
     active: Tier;
-    /** what `detect()` chose. preserved across user overrides so the
-     *  settings UI can show "reset to auto". */
+    /** what `detect()` chose; preserved across user overrides for a
+     *  "reset to auto" control. */
     autoDetected: Tier;
     source: Source;
     limits: Limits;
@@ -183,8 +126,6 @@ export type Profile = {
 };
 
 const STORAGE_KEY = 'bongle.performance.tier';
-
-// ── detection ───────────────────────────────────────────────────────
 
 function detectPlatform(): Platform {
     if (typeof navigator === 'undefined') return 'desktop';
@@ -197,21 +138,20 @@ function detectPlatform(): Platform {
 function detectAutoTier(): Tier {
     if (typeof navigator === 'undefined') return 'standard';
 
-    // Chrome-only; undefined on Firefox/Safari → falsy, treated as standard.
+    // Chrome-only; undefined on Firefox/Safari, treated as standard.
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     if (memory !== undefined && memory <= 4) return 'low';
 
     if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) return 'low';
 
-    // ChromeOS, overwhelmingly integrated Intel/ARM GPUs on entry-level hw.
+    // ChromeOS: overwhelmingly integrated Intel/ARM GPUs on entry-level hardware.
     if (typeof navigator.userAgent === 'string' && /CrOS/.test(navigator.userAgent)) return 'low';
 
     return 'standard';
 }
 
-// Sandboxed iframes (deployed game-client) expose `localStorage` as a
-// property whose getter throws SecurityError, `typeof` alone trips it.
-// Same envelope handles disabled-storage / quota-exceeded.
+// sandboxed iframes expose `localStorage` as a property whose getter throws
+// SecurityError, so `typeof` alone trips it; same catch handles quota-exceeded.
 function readStoredTier(): Tier | null {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -243,9 +183,9 @@ export function detect(caps: RenderDeviceCaps): Profile {
     };
 }
 
-/** the full performance state derived once at boot: the tier profile, its
- *  numeric settings, and the voxel arena budget. tier is fixed per session (no
- *  live switch wired), so subsystems read these fields instead of recomputing. */
+/** full performance state derived once at boot; tier is fixed per session
+ *  (no live switch wired), so subsystems read these fields instead of
+ *  recomputing. */
 export type Resolved = {
     profile: Profile;
     settings: Settings;
@@ -272,8 +212,6 @@ export function log(r: Resolved): void {
             `maxComputeWorkgroupsPerDimension=${L.maxComputeWorkgroupsPerDimension}`,
     );
 }
-
-// ── override ────────────────────────────────────────────────────────
 
 export function setActive(profile: Profile, tier: Tier, source: Source): void {
     profile.active = tier;

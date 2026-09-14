@@ -1,15 +1,3 @@
-// node-menu.ts, shared menu entry config for node operations.
-//
-// rendered in two places: the hierarchy panel's Radix ContextMenu and the
-// viewport's controlled DropdownMenu (the viewport can't use ContextMenu
-// because Radix only positions it from native contextmenu events). both
-// surfaces map over the same entry list and wrap each one in their own
-// primitive, so the visible items + ordering stay in lockstep.
-//
-// surface-specific items (rename, create-child in hierarchy; voxel ops in the
-// viewport) are not represented here, surfaces compose them around the
-// shared entries inline.
-
 import * as Icons from '../../../icons';
 import type { Node } from '../../core/scene/scene-tree';
 
@@ -42,11 +30,8 @@ export type NodeMenuOptions = {
     actions: NodeMenuActions;
 };
 
-/**
- * canonical shared node-menu entries in render order. `Bake Prefab` only
- * appears for single-node menus on a prefab wrapper. multi-select hides
- * single-target ops (duplicate, bake) entirely.
- */
+/** shared node-menu entries in render order. `Bake Prefab` only appears for
+ *  single-node menus on a prefab wrapper; multi-select hides single-target ops. */
 export function nodeMenuEntries(opts: NodeMenuOptions): NodeMenuEntry[] {
     const { node, multiCount, actions } = opts;
     const isMulti = multiCount > 1;

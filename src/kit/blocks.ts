@@ -1,18 +1,3 @@
-// Starter pack block handles.
-//
-// Tiles come from `./tiles`, sound presets from
-// `./block-sound-presets`, pure composition here. Each block is its
-// own `export const` so the package index can re-export them as
-// `export * as blocks` and bundlers can drop unused declarations.
-//
-// Blocks are grouped by material family (ground, stone, oak, ...) so adding
-// or extending a material is a single contiguous edit. Reach for a
-// `blockPreset.*` factory for the shape (cube, stairs, slab, ...) and drop
-// down to raw `block()` only when a shape-defining field a preset doesn't
-// expose is needed (e.g. `surfaceHeight` on farmland / dirt path). Cube-shaped
-// presets take a bare tile as shorthand for "all faces"; pass a full
-// per-face map only when the faces differ (grass, logs).
-
 import {
     type BlockShape,
     block,
@@ -28,8 +13,6 @@ import {
 import * as soundPreset from './block-sound-presets';
 import * as tex from './tiles';
 
-// ── Ground ──────────────────────────────────────────────────────────
-
 // The ground family draws at one of four y rotations chosen from its world
 // position, so a floor or a hillside does not show the 16px tile repeating on a
 // grid. It is the most common use of the mechanism in minecraft (grass_block,
@@ -39,7 +22,7 @@ import * as tex from './tiles';
 //
 // It does not replace the tiling discipline in scripts/textures/README.md. It
 // weakens what that discipline has to achieve: a texture now only has to
-// survive being tiled against ROTATIONS of itself.
+// survive being tiled against rotations of itself.
 export const stone = blockPreset.cube('kit:stone', {
     name: 'Stone',
     tags: ['stone', 'ground', 'nature'],
@@ -129,8 +112,6 @@ export const gravel = blockPreset.cube('kit:gravel', {
     sounds: soundPreset.gravel,
 });
 
-// ── Stone & cobblestone ─────────────────────────────────────────────
-//
 // building blocks worked from stone and cobble: the raw cobble cubes plus the
 // stairs / slabs / walls / pressure plate for both the stone and cobble lines.
 
@@ -186,8 +167,6 @@ export const cobblestoneWall = blockPreset.wall('kit:cobblestone_wall', {
     sounds: soundPreset.stone,
 });
 
-// ── Stone bricks ────────────────────────────────────────────────────
-//
 // cut stone in a running bond, with the mossy, cracked and chiseled variants
 // and the stairs / slab / wall of the plain block.
 
@@ -234,8 +213,6 @@ export const stoneBricksWall = blockPreset.wall('kit:stone_bricks_wall', {
     sounds: soundPreset.stone,
 });
 
-// ── Bricks ──────────────────────────────────────────────────────────
-//
 // fired clay bricks with pale mortar, plus the stairs / slab / wall.
 
 export const bricks = blockPreset.cube('kit:bricks', {
@@ -263,8 +240,6 @@ export const bricksWall = blockPreset.wall('kit:bricks_wall', {
     sounds: soundPreset.stone,
 });
 
-// ── Sunstone ────────────────────────────────────────────────────────
-//
 // a glowing yellow rock: the block that lights a room the way glowstone does.
 
 export const sunstone = blockPreset.cube('kit:sunstone', {
@@ -275,8 +250,6 @@ export const sunstone = blockPreset.cube('kit:sunstone', {
     emissive: true,
     lightEmission: [15, 14, 9],
 });
-
-// ── Oak ─────────────────────────────────────────────────────────────
 
 export const oakPlanks = blockPreset.cube('kit:oak_planks', {
     name: 'Oak Planks',
@@ -353,8 +326,6 @@ export const oakLeaves = blockPreset.leaves('kit:oak_leaves', {
     sounds: soundPreset.leaves,
 });
 
-// ── Glass ───────────────────────────────────────────────────────────
-
 // full glass cube. transparent (alpha-cutout) like the glass pane, with
 // CullType.SELF so a wall of glass culls its internal shared faces and only
 // the outer shell draws, adjacent glass reads as one clear pane.
@@ -373,8 +344,6 @@ export const glassPane = blockPreset.pane('kit:glass_pane', {
     tiles: tex.glass,
     sounds: soundPreset.glass,
 });
-
-// ── Snow ────────────────────────────────────────────────────────────
 
 export const snowBlock = blockPreset.cube('kit:snow_block', {
     name: 'Snow Block',
@@ -397,8 +366,6 @@ export const snowCarpet = blockPreset.carpet('kit:snow_carpet', {
     sounds: soundPreset.snow,
 });
 
-// ── Ice ─────────────────────────────────────────────────────────────
-
 // slippery. sneakGuard so crouching stops sliding.
 export const ice = blockPreset.cube('kit:ice', {
     name: 'Ice',
@@ -408,8 +375,6 @@ export const ice = blockPreset.cube('kit:ice', {
     sneakGuard: true,
     sounds: soundPreset.ice,
 });
-
-// ── Slime ───────────────────────────────────────────────────────────
 
 // translucent outer shell + opaque inner core, both full cubes. bouncy, slightly slippery.
 export const slime = block('kit:slime', {
@@ -427,8 +392,6 @@ export const slime = block('kit:slime', {
     friction: 0.6,
     sounds: soundPreset.grass,
 });
-
-// ── Liquids ─────────────────────────────────────────────────────────
 
 export const water = blockPreset.liquid('kit:water', {
     name: 'Water',
@@ -453,8 +416,6 @@ export const lava = blockPreset.liquid('kit:lava', {
     lightEmission: [14, 6, 2],
 });
 
-// ── Vegetation ──────────────────────────────────────────────────────
-
 export const mushroomRed = blockPreset.cross('kit:mushroom_red', {
     name: 'Red Mushroom',
     tags: ['mushroom', 'plant', 'fungus', 'nature'],
@@ -478,8 +439,6 @@ export const oakSapling = blockPreset.cross('kit:oak_sapling', {
     sounds: soundPreset.leaves,
 });
 
-// ── Flowers ─────────────────────────────────────────────────────────
-//
 // one-cell crosses like short grass, each with a selection box cut to its own
 // sprite (minetest_game's approach) so a low flower does not block aiming at
 // the ground around it. No jitter: it moves only the geometry, and a narrow
@@ -525,7 +484,7 @@ export const shortGrass = blockPreset.cross('kit:short_grass', {
     sounds: soundPreset.leaves,
 });
 
-// the short tuft grown up, a block and a half tall in ONE cell: the planes
+// the short tuft grown up, a block and a half tall in one cell: the planes
 // reach into the cell above rather than vanilla's two-block plant, so nothing
 // has to be placed or broken as a pair. Sideways jitter only, so the roots
 // stay on the ground.
@@ -729,8 +688,6 @@ export const blueberry = block('kit:blueberry', {
     sounds: soundPreset.leaves,
 });
 
-// ── Light & utility ─────────────────────────────────────────────────
-
 export const ladder = blockPreset.ladder('kit:ladder', {
     name: 'Ladder',
     tags: ['wood', 'climb', 'ladder'],
@@ -817,8 +774,6 @@ export const blueTorch = blockPreset.torch('kit:blue_torch', {
     sounds: soundPreset.wood,
 });
 
-// ── Wool ────────────────────────────────────────────────────────────
-//
 // all 16 dye colors mirroring Minecraft's palette. soft cloth: leaves sounds
 // (snappy dig). kept as individual exports so bundlers tree-shake unused colors.
 export const woolWhite = blockPreset.cube('kit:wool_white', {
@@ -918,8 +873,6 @@ export const woolPink = blockPreset.cube('kit:wool_pink', {
     sounds: soundPreset.leaves,
 });
 
-// ── Concrete ────────────────────────────────────────────────────────
-//
 // all 16 dye colors, each as a full cube plus slab and stairs. the tiles are
 // one shared grain base tinted per color at bake time (see ./tiles), so
 // this section is pure composition. hard mineral surface: stone sounds. kept as

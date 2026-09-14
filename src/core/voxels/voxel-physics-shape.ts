@@ -41,8 +41,6 @@ import { AIR, BLOCK_FLAG_COLLISION, MISSING, MODEL_NONE } from './block-registry
 import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
 import { CHUNK_BITS, CHUNK_SIZE, getChunk, getChunkAt, type Voxels, voxelIndex } from './voxels';
 
-// ── shape type ──────────────────────────────────────────────────────
-
 export type VoxelPhysicsShape = {
     type: ShapeType.USER_1;
     voxels: Voxels;
@@ -51,11 +49,7 @@ export type VoxelPhysicsShape = {
     volume: number;
 };
 
-/** The block registry is deliberately NOT a field here: it is reached through
- *  `voxels.registry`, the one reference `registry-dispatch.refreshBlockResources`
- *  repoints on an HMR block change (alongside `resolveAllChunks`, which rewrites
- *  every chunk palette to the new state ids). A second cached `Blocks` would go
- *  stale on that swap and then index new state ids into old, shorter typed arrays. */
+/** the block registry isn't cached here since HMR block changes repoint voxels.registry; a cached copy would index new state ids into a stale array. */
 export function createVoxelPhysicsShape(voxels: Voxels, aabb: Box3): VoxelPhysicsShape {
     return {
         type: ShapeType.USER_1,
@@ -66,58 +60,31 @@ export function createVoxelPhysicsShape(voxels: Voxels, aabb: Box3): VoxelPhysic
     };
 }
 
-// ── shared unit box shape for cube collisions ───────────────────────
-
+// shared unit box shape for cube collisions
 const _voxelBoxShape = box.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.05 });
 const _voxelBoxQuat = quat.fromValues(0, 0, 0, 1);
 const _voxelBoxScale = vec3.fromValues(1, 1, 1);
 
-// ── hit info buffer ─────────────────────────────────────────────────
-//
-// per-hit info lives in a growable, pool-backed array indexed by a
-// monotonic counter. the index is encoded in the subShapeId (low bits)
-// so getSurfaceNormal, getSupportingFace, and contact listeners can
-// look up the correct voxel data for any hit, even when Jolt holds the
-// subShapeId across multi-frame contact persistence.
-//
-// for cube voxel hits we only need (vx, vy, vz, stateId), geometry is
-// recomputed on demand. for custom-collider hits we additionally capture
-// the contact's surface normal and supporting face at emission time
-// (via a wrapper collector, see below) so we don't need a stale
-// "last-hit" global.
-//
-// lifecycle:
-//   per-voxel-query: push entry → encode index in subShapeId
-//   contact listeners / getSurfaceNormal / getSupportingFace decode the
-//     subShapeId and index into the pool, entries stay valid for the
-//     entire frame.
-//   frame end: flushHitBuffer() resets the high-water mark to 0, freeing
-//     all entries back to the pool. MUST be the absolute last call of
-//     the frame on both server and client (after all hooks AND render).
+// per-hit info lives in a growable pool array; the index is encoded in the low bits of subShapeId so
+// getSurfaceNormal, getSupportingFace, and contact listeners can look up the correct voxel data for any hit.
 
-// supporting faces from typical block colliders (boxes, hulls, compound
-// children) have ≤ 16 vertices. realistic block colliders won't exceed
-// this, captured faces are truncated if they do.
+// supporting faces from typical block colliders (boxes, hulls, compound children) have at most 16 vertices.
 const FACE_MAX_VERTS = 16;
 const FACE_VERT_FLOATS = FACE_MAX_VERTS * 3;
 
 export type VoxelHitInfo = {
-    // min cell corner (inclusive). for a single cube this is the voxel; for a merged run
-    // it is the run's low corner.
+    // inclusive min corner; a single cube's cell, or a merged run's low corner.
     minX: number;
     minY: number;
     minZ: number;
-    // max cell corner (exclusive). unit cube: (minX+1, minY+1, minZ+1). merged run: the run
-    // bounds. used by getSupportingFace / getSurfaceNormal to build the box face, and by the
-    // contact listener to enumerate the covered cells under the contact footprint. unused for custom.
+    // exclusive max corner; used to rebuild the box face and enumerate covered cells.
     maxX: number;
     maxY: number;
     maxZ: number;
     stateId: number;
     cid: number; // 0 = cube, >0 = custom collider
     subAabbIndex: number; // -1 for cube; reserved for sub-aabb tagging on custom colliders
-    // captured for custom-collider hits at emission time. world space,
-    // assumes the voxel shape's body is at identity transform (terrain).
+    // world-space normal captured at emission time (custom colliders only); assumes the voxel body is at identity transform.
     nx: number;
     ny: number;
     nz: number;
@@ -166,9 +133,7 @@ function pushCubeHit(vx: number, vy: number, vz: number, stateId: number): numbe
     return idx;
 }
 
-// a merged run of same-stateId cube cells, spanning [minX,maxX) × [minY,maxY) × [minZ,maxZ).
-// treated as a single box for collision; the contact listener enumerates the covered
-// cells under the contact footprint so per-cell contact fidelity is preserved.
+// a merged run of same-stateId cube cells, treated as a single box; the contact listener enumerates the covered cells.
 function pushMergedHit(
     minX: number,
     minY: number,
@@ -209,8 +174,7 @@ function pushCustomHit(
     entry.minX = vx;
     entry.minY = vy;
     entry.minZ = vz;
-    // custom colliders occupy a single cell; a unit box range keeps the contact-listener
-    // cell enumeration uniform (one cell) even though the box face isn't used for custom.
+    // custom colliders occupy a single cell; a unit box range keeps contact-listener cell enumeration uniform.
     entry.maxX = vx + 1;
     entry.maxY = vy + 1;
     entry.maxZ = vz + 1;
@@ -228,58 +192,29 @@ function pushCustomHit(
     return idx;
 }
 
-// hit-buffer index encoded in the low bits of subShapeId. 20 bits = 1M
-// entries per frame, well beyond realistic narrowphase counts; leaves
-// 12 bits of headroom for any outer subShapeId path bits the caller
-// passes in.
+// hit-buffer index encoded in the low bits of subShapeId; 20 bits = 1M entries per frame, leaving 12 bits of headroom.
 const HIT_BUFFER_BITS = 20;
 
 const _unpack_popResult = subShape.popResult();
 
-/**
- * Reset the hit-info pool's high-water mark. MUST be the absolute last
- * call of each frame on both server and client (after render and any
- * post-render hooks), so contact-listener consumers can resolve
- * subShapeIds for the entire frame. Misplacement is the main correctness
- * risk, call it AFTER everything else.
- */
+/** reset the hit-info pool's high-water mark; must be the last call of the frame, after render and any post-render hooks. */
 export function flushHitBuffer(): void {
     _hitCount = 0;
 }
 
-/**
- * Decode a `subShapeId` produced by this shape back into the original
- * `VoxelHitInfo`. Single source of truth for subShapeId → block lookup
- * used by rigid-body and vcc contact listeners.
- *
- * The returned object is owned by the pool, copy fields you need
- * before another physics query runs.
- */
+/** decode a subShapeId produced by this shape back into its VoxelHitInfo; the result is pool-owned, copy fields before the next query. */
 export function unpackVoxelHitInfo(subShapeId: number): VoxelHitInfo {
     subShape.pop(_unpack_popResult, subShapeId, HIT_BUFFER_BITS);
     return _hitPool[_unpack_popResult.value]!;
 }
 
-// ── wrapper collector for custom-collider emissions ────────────────
-//
-// inner colliders (compound, convex hull, etc.) push their own bits onto
-// subShapeIdA. our getSurfaceNormal / getSupportingFace need the hit
-// buffer index in the *low* bits of subShapeId (so subShape.pop reads it
-// first). we wrap the outer collector, capture each emission's normal
-// and supporting face into the hit buffer, then OVERWRITE subShapeIdA
-// with `outerSubShapeIdA :: hitIdx` before forwarding. inner shape's
-// internal sub-id is discarded, we don't need it because everything we
-// need at flush time is already in the buffer entry.
-//
-// the wrapper assumes the voxel shape body is at identity transform
-// (which is true for the world terrain body). penetrationAxis / faceA
-// are stored as-is in world space, which equals voxel-shape-local space.
+// wraps the outer collector to capture each emission's normal + supporting face into the hit buffer,
+// re-encoding subShapeIdA/B with the hit index before forwarding.
 
 type WrapState = {
     outerCollideCollector: CollideShapeCollector | null;
     outerCastCollector: CastShapeCollector | null;
-    // which side (A or B) the voxel shape is on for this call. determines
-    // whether we re-encode hit.subShapeIdA or hit.subShapeIdB.
+    // which side (A or B) the voxel shape is on; determines whether subShapeIdA or subShapeIdB gets re-encoded.
     voxelSide: 'A' | 'B';
     voxelOuterSubShapeId: number;
     voxelOuterSubShapeIdBits: number;
@@ -316,19 +251,14 @@ const _wrapCollideCollector: CollideShapeCollector = {
     bodyIdB: 0,
     earlyOutFraction: 0,
     addHit(h: CollideShapeHit) {
-        // penetrationAxis points from A's surface outward (direction to
-        // push B out of A). normalize to get A's surface normal, same
-        // direction whether voxel shape is A or B (faceA is on A).
+        // penetrationAxis points from A's surface outward; normalizing it gives A's surface normal on either side.
         const voxelSide = _wrap.voxelSide;
         const face = voxelSide === 'A' ? h.faceA : h.faceB;
         let px = h.penetrationAxis[0];
         let py = h.penetrationAxis[1];
         let pz = h.penetrationAxis[2];
         if (voxelSide === 'B') {
-            // when voxel is B, A's outward normal is -penetrationAxis;
-            // we want B's outward normal, which IS -A's outward = penetrationAxis.
-            // wait: penetrationAxis is direction to push B OUT OF A → away from A's
-            // surface (A's outward normal). B's outward normal points the opposite way.
+            // B's outward normal is the opposite direction of A's penetrationAxis.
             px = -px;
             py = -py;
             pz = -pz;
@@ -364,8 +294,7 @@ const _wrapCastCollector: CastShapeCollector = {
     bodyIdB: 0,
     earlyOutFraction: 0,
     addHit(h: CastShapeHit) {
-        // CastShapeHit.normal points from B to A. A's outward surface normal
-        // is -normal; B's outward surface normal is +normal.
+        // CastShapeHit.normal points from B to A; A's outward normal is -normal, B's is +normal.
         const voxelSide = _wrap.voxelSide;
         const face = voxelSide === 'A' ? h.faceA : h.faceB;
         const sx = voxelSide === 'A' ? -h.normal[0] : h.normal[0];
@@ -387,12 +316,7 @@ const _wrapCastCollector: CastShapeCollector = {
     },
 };
 
-// ── merged cube box + neighbour-reject wrapper ──────────────────────
-//
-// contiguous same-stateId cube cells are collided as one box (see the merge in
-// collideVoxelsVsConvex), so the moving body sees a continuous surface instead of
-// a grid of unit cubes — no interior seams to snag on. this shared box shape is
-// resized per merged run in place (no per-run allocation).
+// contiguous same-stateId cube cells collide as one box (see the merge below) with no interior seams; resized per run in place.
 const _mergedBoxShape = box.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.05 });
 
 function setMergedBoxHalfExtents(hx: number, hy: number, hz: number): void {
@@ -407,19 +331,7 @@ function setMergedBoxHalfExtents(hx: number, hy: number, hz: number): void {
     _mergedBoxShape.aabb[5] = hz;
 }
 
-// wraps the outer collector for the merged-box collision. a contact whose contacted
-// face is buried behind a solid neighbour cube is a tessellation artifact (a "ghost
-// collision"): the moving body could not physically reach that internal face without
-// first hitting the neighbour. we drop it; only exposed-face contacts (neighbour is
-// air or a non-cube) are forwarded. because a merged box spans many cells, the buried
-// test samples the cell just across the contacted face at the CONTACT POINT rather
-// than a fixed neighbour.
-//
-// the contacted face is the one the penetrationAxis points out of (voxel is A;
-// penetrationAxis is the direction to push B out of A, i.e. A's outward normal).
-// pushing the hit + encoding its subShapeId happens lazily here, only for kept
-// contacts; the covered run [min,max) rides along so the contact listener can
-// enumerate the touched cells under the contact footprint.
+// drops contacts on faces buried behind a solid neighbour cube (a tessellation "ghost collision" the mover couldn't reach); only exposed-face contacts forward.
 
 type MergedRejectState = {
     outer: CollideShapeCollector | null;
@@ -464,9 +376,7 @@ const _mergedRejectCollector: CollideShapeCollector = {
         const ax = Math.abs(px);
         const ay = Math.abs(py);
         const az = Math.abs(pz);
-        // sample the cell just across the contacted face at the contact point (world space
-        // equals voxel-local for the identity terrain body). nudge half a cell along the
-        // contact axis into the neighbour; floor the other two axes at the contact point.
+        // sample the cell just across the contacted face at the contact point (world space equals voxel-local here).
         let nx = Math.floor(h.pointA[0]);
         let ny = Math.floor(h.pointA[1]);
         let nz = Math.floor(h.pointA[2]);
@@ -474,10 +384,8 @@ const _mergedRejectCollector: CollideShapeCollector = {
         else if (ay >= az) ny = Math.floor(h.pointA[1] + (py >= 0 ? 0.5 : -0.5));
         else nz = Math.floor(h.pointA[2] + (pz >= 0 ? 0.5 : -0.5));
 
-        // buried behind a solid cube → internal face → drop the ghost contact.
         if (isBackingCube(_mergedReject.voxels!, _mergedReject.registry!, nx, ny, nz)) return;
 
-        // kept: register the merged run and encode its hit index into subShapeIdA, then forward.
         const hitIdx = pushMergedHit(
             _mergedReject.minX,
             _mergedReject.minY,
@@ -513,10 +421,7 @@ const _mergedRejectCollector: CollideShapeCollector = {
     },
 };
 
-// ── face helpers ────────────────────────────────────────────────────
-//
 // face index convention: 0=east(+x), 1=west(-x), 2=up(+y), 3=down(-y), 4=south(+z), 5=north(-z)
-
 function getFaceFromNormal(nx: number, ny: number, nz: number): number {
     const ax = Math.abs(nx);
     const ay = Math.abs(ny);
@@ -530,9 +435,7 @@ function getFaceFromNormal(nx: number, ny: number, nz: number): number {
     }
 }
 
-// build a 4-vertex quad for an axis-aligned box face into an output array.
-// box spans [x0,x1] × [y0,y1] × [z0,z1]. a unit cube passes x1=x0+1 etc; a merged run
-// passes the run bounds. CCW when viewed from outside.
+// builds a CCW (viewed from outside) 4-vertex quad for box [x0,x1] x [y0,y1] x [z0,z1] into out.
 function buildBoxQuad(out: Face, faceIdx: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
     out.numVertices = 4;
     switch (faceIdx) {
@@ -635,8 +538,6 @@ function buildBoxQuad(out: Face, faceIdx: number, x0: number, y0: number, z0: nu
     }
 }
 
-// ── voxel lookup ────────────────────────────────────────────────────
-
 function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number {
     const chunk = getChunkAt(voxels, wx, wy, wz);
     if (!chunk || chunk.nonAirCount === 0) return AIR;
@@ -647,11 +548,7 @@ function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number 
     return chunk.palette[paletteIdx]!;
 }
 
-// whether the cell at (wx,wy,wz) is a solid collidable CUBE (colliderId 0), i.e. a full
-// unit box that "backs" a shared face. used by the neighbour-reject below: only a backing
-// cube behind a face makes that face internal. non-cube solids (slabs, hulls) fill their
-// cell partially, so they never back a neighbour's face — a cube face against them is a
-// real geometric transition (matches voxel-active-edges' cube-vs-custom rule).
+// true only for a full unit-box collidable cube; non-cube solids (slabs, hulls) never fully back a neighbour's face.
 function isBackingCube(voxels: Voxels, registry: Blocks, wx: number, wy: number, wz: number): boolean {
     const stateId = getStateId(voxels, wx, wy, wz);
     if (stateId === AIR || stateId === MISSING) return false;
@@ -659,12 +556,7 @@ function isBackingCube(voxels: Voxels, registry: Blocks, wx: number, wy: number,
     return registry.colliderId[stateId] === 0;
 }
 
-// ── castRay ─────────────────────────────────────────────────────────
-//
-// thin wrapper around raycastVoxels(). transforms ray to local space,
-// calls the existing DDA+BVH raycast, converts result to crashcat
-// collector format. encodes hit info in subShapeId via hit buffer.
-
+// wraps raycastVoxels(): transforms the ray to local space and encodes the hit in subShapeId via the hit buffer.
 const _castRay_invQuat = quat.create();
 const _castRay_localOrigin = vec3.create();
 const _castRay_localDir = vec3.create();
@@ -697,7 +589,6 @@ function castRayVsVoxels(
     scaleY: number,
     scaleZ: number,
 ): void {
-    // transform ray to shape local space
     _castRay_localOrigin[0] = originX - posX;
     _castRay_localOrigin[1] = originY - posY;
     _castRay_localOrigin[2] = originZ - posZ;
@@ -709,7 +600,6 @@ function castRayVsVoxels(
     vec3.set(_castRay_localDir, directionX, directionY, directionZ);
     vec3.transformQuat(_castRay_localDir, _castRay_localDir, _castRay_invQuat);
 
-    // apply inverse scale
     _castRay_localOrigin[0] /= Math.abs(scaleX);
     _castRay_localOrigin[1] /= Math.abs(scaleY);
     _castRay_localOrigin[2] /= Math.abs(scaleZ);
@@ -718,7 +608,6 @@ function castRayVsVoxels(
     _castRay_localDir[1] /= Math.abs(scaleY);
     _castRay_localDir[2] /= Math.abs(scaleZ);
 
-    // normalize direction after scaling
     const dirLen = Math.sqrt(
         _castRay_localDir[0] * _castRay_localDir[0] +
             _castRay_localDir[1] * _castRay_localDir[1] +
@@ -733,7 +622,6 @@ function castRayVsVoxels(
 
     const maxDistance = length * dirLen;
 
-    // call existing raycast with collision flag filter
     raycastVoxels(
         _castRay_result,
         shape.voxels,
@@ -753,16 +641,13 @@ function castRayVsVoxels(
     const fraction = _castRay_result.distance / maxDistance;
     if (fraction > collector.earlyOutFraction) return;
 
-    // push hit info into buffer
     const stateId = _castRay_result.stateId;
     const cid = shape.voxels.registry.colliderId[stateId]!;
     let hitIdx: number;
     if (cid === 0) {
         hitIdx = pushCubeHit(_castRay_result.voxelX, _castRay_result.voxelY, _castRay_result.voxelZ, stateId);
     } else {
-        // custom collider, raycast gives us a single normal + hit point.
-        // store the normal directly; face is a degenerate triangle around
-        // the hit point (raycasts don't carry a supporting face).
+        // custom collider: raycasts give only a point + normal, so approximate with a degenerate triangle face.
         _castRay_degenerateFace.numVertices = 3;
         _castRay_degenerateFace.vertices[0] = _castRay_result.px;
         _castRay_degenerateFace.vertices[1] = _castRay_result.py;
@@ -786,7 +671,6 @@ function castRayVsVoxels(
         );
     }
 
-    // emit hit
     _castRay_subShapeIdBuilder.value = subShapeId;
     _castRay_subShapeIdBuilder.currentBit = subShapeIdBits;
     subShape.push(_castRay_subShapeIdBuilder, _castRay_subShapeIdBuilder, hitIdx, HIT_BUFFER_BITS);
@@ -798,11 +682,7 @@ function castRayVsVoxels(
     collector.addHit(_castRay_hit);
 }
 
-// ── collidePoint ────────────────────────────────────────────────────
-//
-// transform point to local space, floor to voxel coords, check state.
-// for cube: always inside. for custom: AABB check (approximation).
-
+// transforms the point to local space, floors to voxel coords, then checks state (cube = always inside, custom = AABB approximation).
 const _collidePoint_invQuat = quat.create();
 const _collidePoint_localPos = vec3.create();
 const _collidePoint_hit = createCollidePointHit();
@@ -828,7 +708,6 @@ function collidePointVsVoxels(
     scaleBY: number,
     scaleBZ: number,
 ): void {
-    // transform to local space
     _collidePoint_localPos[0] = pointX - posBX;
     _collidePoint_localPos[1] = pointY - posBY;
     _collidePoint_localPos[2] = pointZ - posBZ;
@@ -852,10 +731,7 @@ function collidePointVsVoxels(
     const mt = shapeB.voxels.registry.modelType[stateId]!;
     if (mt === MODEL_NONE && shapeB.voxels.registry.colliderId[stateId] === 0) return;
 
-    // for custom shapes, approximate with unit cube containment check.
-    // collidePoint is a rough test, exact shape containment would require
-    // crashcat's collidePointVsShape but the approximation is sufficient here.
-
+    // custom shapes approximate with unit-cube containment rather than exact collidePointVsShape.
     _collidePoint_subShapeIdBuilder.value = subShapeIdB;
     _collidePoint_subShapeIdBuilder.currentBit = subShapeIdBitsB;
     subShape.pushIndex(_collidePoint_subShapeIdBuilder, _collidePoint_subShapeIdBuilder, 0, 1);
@@ -865,17 +741,7 @@ function collidePointVsVoxels(
     collector.addHit(_collidePoint_hit);
 }
 
-// ── collideVoxelsVsConvex ───────────────────────────────────────────
-//
-// the big one. two codepaths:
-//   cube blocks (colliderId=0): greedy-merged into boxes, collideConvexVsConvexLocal
-//   custom shapes (colliderId≠0): crashcat collideShapeVsShape
-//
-// cube cells in the scan window are stamped into `_collideVox_mergeGrid` by stateId,
-// then a greedy 3D merge (extend x, then z, then y — same as voxel-model-collider)
-// collapses contiguous same-stateId runs into one box each. the moving body sees a
-// continuous surface instead of a grid of unit cubes, so there are no interior seams
-// to snag on, and far fewer narrowphase calls on flat/dense terrain.
+// cube cells (colliderId=0) greedy-merge into boxes via collideConvexVsConvexLocal; custom shapes go through collideShapeVsShape.
 
 // scratch for cube fast path
 const _collideVox_quatAInv = quat.create();
@@ -886,8 +752,7 @@ const _collideVox_scaleAInv = vec3.create();
 const _collideVox_scaleB = vec3.create();
 const _collideVox_aabbMatrix = mat4.create();
 const _collideVox_convexAABB = box3.create();
-// per-query cube-cell grid over the scan window, stateId per cell (0 = empty/consumed).
-// grows monotonically; cleared to the used size each query.
+// per-query cube-cell grid over the scan window, stateId per cell (0 = empty/consumed); grows monotonically.
 let _collideVox_mergeGrid = new Int32Array(0);
 
 // flat index into the scan-window grid; x contiguous inner (matches voxel-model-collider).
@@ -936,25 +801,19 @@ function collideVoxelsVsConvex(
 
     vec3.set(_collideVox_scaleB, scaleBX, scaleBY, scaleBZ);
 
-    // ── compute convex B in voxel A's local space (for AABB scan) ───
-
-    // inverse quat A
+    // compute convex B in voxel A's local space, for the AABB scan below
     quat.set(_collideVox_quatAInv, quatAX, quatAY, quatAZ, quatAW);
     quat.conjugate(_collideVox_quatAInv, _collideVox_quatAInv);
 
-    // B position relative to A, rotated into A's local space
     vec3.set(_collideVox_posBRelative, posBX - posAX, posBY - posAY, posBZ - posAZ);
     vec3.transformQuat(_collideVox_posBInA, _collideVox_posBRelative, _collideVox_quatAInv);
 
-    // B rotation in A's local space
     quat.set(_collideVox_quatBInA, quatBX, quatBY, quatBZ, quatBW);
     quat.multiply(_collideVox_quatBInA, _collideVox_quatAInv, _collideVox_quatBInA);
 
-    // apply inverse scale of A
     vec3.set(_collideVox_scaleAInv, 1.0 / Math.abs(scaleAX), 1.0 / Math.abs(scaleAY), 1.0 / Math.abs(scaleAZ));
     vec3.mul(_collideVox_posBInA, _collideVox_posBInA, _collideVox_scaleAInv);
 
-    // convex B's AABB in voxel space
     mat4.fromRotationTranslationScale(_collideVox_aabbMatrix, _collideVox_quatBInA, _collideVox_posBInA, _collideVox_scaleB);
     box3.transformMat4(_collideVox_convexAABB, shapeB.aabb, _collideVox_aabbMatrix);
     box3.expandByMargin(_collideVox_convexAABB, _collideVox_convexAABB, settings.maxSeparationDistance);
@@ -966,7 +825,6 @@ function collideVoxelsVsConvex(
     const maxVY = Math.ceil(_collideVox_convexAABB[4]);
     const maxVZ = Math.ceil(_collideVox_convexAABB[5]);
 
-    // cube-cell grid over the scan window (local indices, x contiguous inner).
     const gridDimX = maxVX - minVX + 1;
     const gridDimY = maxVY - minVY + 1;
     const gridDimZ = maxVZ - minVZ + 1;
@@ -975,12 +833,10 @@ function collideVoxelsVsConvex(
     _collideVox_mergeGrid.fill(0, 0, gridSize);
     const grid = _collideVox_mergeGrid;
 
-    // ── pass 1: stamp cube cells into the grid; collide custom colliders inline ──
-
+    // stamp cube cells into the grid (merged below); collide custom colliders inline.
     for (let vz = minVZ; vz <= maxVZ; vz++) {
         for (let vy = minVY; vy <= maxVY; vy++) {
             for (let vx = minVX; vx <= maxVX; vx++) {
-                // chunk-skip
                 const cx = vx >> CHUNK_BITS;
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
@@ -1000,17 +856,11 @@ function collideVoxelsVsConvex(
                 if (mt === MODEL_NONE && cid === 0) continue;
 
                 if (cid === 0) {
-                    // cube cell → stamp its stateId into the grid; the merge pass below
-                    // collapses contiguous same-stateId cells into boxes and collides them.
                     grid[cellIndex(vx - minVX, vy - minVY, vz - minVZ, gridDimX, gridDimZ)] = stateId;
                 } else {
-                    // ── custom collider shape: delegate to crashcat ──
-
                     const colliderShape = registry.colliderShapes[cid]!;
 
-                    // wrap the outer collector so we capture each emission's
-                    // surface normal + supporting face into the hit buffer
-                    // and re-encode subShapeIdA with our hit index.
+                    // wrap the outer collector to capture this emission's normal + face into the hit buffer.
                     _wrap.outerCollideCollector = collector;
                     _wrap.voxelSide = 'A';
                     _wrap.voxelOuterSubShapeId = subShapeIdA;
@@ -1023,20 +873,13 @@ function collideVoxelsVsConvex(
                     _wrapCollideCollector.bodyIdB = collector.bodyIdB;
                     _wrapCollideCollector.earlyOutFraction = collector.earlyOutFraction;
 
-                    // collider shape is in block-local [0,1] space,
-                    // positioned at the voxel origin (vx, vy, vz) in voxel-A's local space,
-                    // then scaled by voxel shape scale (scaleA)
+                    // collider shape is in block-local [0,1] space at (vx,vy,vz) in A's local space; world_pos = posA + quatA * (scaleA * local_pos).
                     collideShapeVsShape(
                         _wrapCollideCollector,
                         settings,
                         colliderShape,
                         subShapeIdA,
                         _subShapeIdBitsA,
-                        // collider shape position in world = voxel pos in A-local, transformed to world
-                        // but collideShapeVsShape expects world-space positions. the voxel shape (A)
-                        // is at (posAX, posAY, posAZ) with (quatA, scaleA). the collider is at
-                        // (vx, vy, vz) in A's local space. we need world-space position.
-                        // world_pos = posA + quatA * (scaleA * local_pos)
                         posAX + vx * scaleAX,
                         posAY + vy * scaleAY,
                         posAZ + vz * scaleAZ,
@@ -1068,22 +911,16 @@ function collideVoxelsVsConvex(
         }
     }
 
-    // ── pass 2: greedy-merge cube runs and collide each box ─────────
-    // extend along x, then z, then y (matching voxel-model-collider). each maximal
-    // same-stateId run collides once, through the reject wrapper that drops boundary
-    // internal-face ghosts; the run rides along on the hit so the contact listener can
-    // enumerate the covered cells.
+    // greedy-merge: extend each maximal same-stateId run along x, then z, then y (matching voxel-model-collider).
     for (let lgy = 0; lgy < gridDimY; lgy++) {
         for (let lgz = 0; lgz < gridDimZ; lgz++) {
             for (let lgx = 0; lgx < gridDimX; lgx++) {
                 const s = grid[cellIndex(lgx, lgy, lgz, gridDimX, gridDimZ)]!;
                 if (s === 0) continue;
 
-                // extend along x
                 let extX = 1;
                 while (lgx + extX < gridDimX && grid[cellIndex(lgx + extX, lgy, lgz, gridDimX, gridDimZ)] === s) extX++;
 
-                // extend along z: the whole x-row at z+extZ must match
                 let extZ = 1;
                 zExtend: while (lgz + extZ < gridDimZ) {
                     for (let xx = 0; xx < extX; xx++) {
@@ -1092,7 +929,6 @@ function collideVoxelsVsConvex(
                     extZ++;
                 }
 
-                // extend along y: the whole xz-slab at y+extY must match
                 let extY = 1;
                 yExtend: while (lgy + extY < gridDimY) {
                     for (let zz = 0; zz < extZ; zz++) {
@@ -1103,7 +939,6 @@ function collideVoxelsVsConvex(
                     extY++;
                 }
 
-                // consume the run
                 for (let yy = 0; yy < extY; yy++) {
                     for (let zz = 0; zz < extZ; zz++) {
                         for (let xx = 0; xx < extX; xx++) {
@@ -1112,7 +947,6 @@ function collideVoxelsVsConvex(
                     }
                 }
 
-                // merged box: world cell range [wx0,wx0+extX) × [wy0,..) × [wz0,..)
                 const wx0 = minVX + lgx;
                 const wy0 = minVY + lgy;
                 const wz0 = minVZ + lgz;
@@ -1165,11 +999,7 @@ function collideVoxelsVsConvex(
     }
 }
 
-// ── castConvexVsVoxels ──────────────────────────────────────────────
-//
-// swept shape test. cube blocks: castConvexVsConvexLocal.
-// custom shapes: crashcat castShapeVsShape.
-
+// swept shape test: cube blocks via castConvexVsConvexLocal, custom shapes via castShapeVsShape.
 const _castVox_displacementInB = vec3.create();
 const _castVox_sweptAABB = box3.create();
 const _castVox_posA = vec3.create();
@@ -1236,23 +1066,16 @@ function castConvexVsVoxels(
     quat.set(_castVox_quatB, quatBX, quatBY, quatBZ, quatBW);
     vec3.set(_castVox_scaleB, scaleBX, scaleBY, scaleBZ);
 
-    // A-to-world
     const transformA = mat4.fromRotationTranslationScale(_castVox_AtoWorld, _castVox_quatA, _castVox_posA, _castVox_scaleA);
-
-    // B-to-world (rotation + translation only, voxel shape)
     const targetTransform = mat4.fromRotationTranslation(_castVox_BtoWorld, _castVox_quatB, _castVox_posB);
 
     // castTransform = B^-1 * A (A's transform in B's local space)
     mat4.invert(_castVox_invBtoWorld, targetTransform);
     const castTransform = mat4.multiply(_castVox_AtoB, _castVox_invBtoWorld, transformA);
 
-    // displacement in B's space
     mat4.multiply3x3Vec(_castVox_displacementInB, _castVox_invBtoWorld, _castVox_displacementA);
-
-    // swept AABB of A at t=0 in B's space
     box3.transformMat4(_castVox_sweptAABB, shapeA.aabb, castTransform);
 
-    // expand swept AABB to cover full sweep
     const expandedMinX = Math.min(_castVox_sweptAABB[0], _castVox_sweptAABB[0] + _castVox_displacementInB[0]);
     const expandedMinY = Math.min(_castVox_sweptAABB[1], _castVox_sweptAABB[1] + _castVox_displacementInB[1]);
     const expandedMinZ = Math.min(_castVox_sweptAABB[2], _castVox_sweptAABB[2] + _castVox_displacementInB[2]);
@@ -1272,7 +1095,6 @@ function castConvexVsVoxels(
     for (let vz = minVZ; vz < maxVZ; vz++) {
         for (let vy = minVY; vy < maxVY; vy++) {
             for (let vx = minVX; vx < maxVX; vx++) {
-                // chunk-skip
                 const cx = vx >> CHUNK_BITS;
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
@@ -1292,28 +1114,18 @@ function castConvexVsVoxels(
                 if (mt === MODEL_NONE && cid === 0) continue;
 
                 if (cid === 0) {
-                    // ── cube cast: castConvexVsConvexLocal ──────────
-
                     const hitIdx = pushCubeHit(vx, vy, vz, stateId);
 
                     vec3.set(_castVox_boxPos, vx + 0.5, vy + 0.5, vz + 0.5);
 
-                    // castTransform for this specific voxel box:
-                    // box is at _castVox_boxPos in voxel space (B), identity rotation
-                    // we need A's transform relative to this box
-                    // castTransformCube = boxInv * A_in_B
-                    // since box has identity rotation, boxInv just translates by -boxPos
-                    // so castTransformCube = translate(-boxPos) * castTransform
-                    // i.e. same as castTransform but with translation offset
+                    // box has identity rotation, so castTransformCube = translate(-boxPos) * castTransform.
                     mat4.copy(_castVox_castTransformCube, castTransform);
                     _castVox_castTransformCube[12] -= _castVox_boxPos[0];
                     _castVox_castTransformCube[13] -= _castVox_boxPos[1];
                     _castVox_castTransformCube[14] -= _castVox_boxPos[2];
 
-                    // displacement is the same (just a translation offset)
                     vec3.copy(_castVox_displacementInBox, _castVox_displacementInB);
 
-                    // build the target transform (box → world)
                     const _boxWorldMat = _collideVox_transformAInWorld; // reuse scratch
                     mat4.fromRotationTranslation(
                         _boxWorldMat,
@@ -1339,13 +1151,9 @@ function castConvexVsVoxels(
                         _boxWorldMat,
                     );
                 } else {
-                    // ── custom collider shape: delegate to crashcat ──
-
                     const colliderShape = registry.colliderShapes[cid]!;
 
-                    // wrap the outer collector so emissions get their normal
-                    // + supporting face captured into the hit buffer with
-                    // subShapeIdB re-encoded as our hit index.
+                    // wrap the outer collector to capture this emission's normal + face, re-encoding subShapeIdB.
                     _wrap.outerCastCollector = collector;
                     _wrap.voxelSide = 'B';
                     _wrap.voxelOuterSubShapeId = subShapeIdB;
@@ -1358,8 +1166,7 @@ function castConvexVsVoxels(
                     _wrapCastCollector.bodyIdB = collector.bodyIdB;
                     _wrapCastCollector.earlyOutFraction = collector.earlyOutFraction;
 
-                    // collider shape is in block-local [0,1] space,
-                    // positioned at voxel origin in world space
+                    // collider shape is in block-local [0,1] space, positioned at voxel origin in world space.
                     castShapeVsShape(
                         _wrapCastCollector,
                         settings,
@@ -1400,28 +1207,19 @@ function castConvexVsVoxels(
     }
 }
 
-// ── getSurfaceNormal ────────────────────────────────────────────────
-//
-// decodes hit buffer index from subShapeId to get exact voxel coords,
-// then computes the surface normal geometrically from query position.
-// for cube voxels: closest face of the unit cube. for custom colliders:
-// returns the surface normal captured into the hit buffer at emission
-// time (penetrationAxis / -CastShapeHit.normal, normalized).
-
+// decodes the hit buffer index from subShapeId, then computes the surface normal: closest cube face, or the captured normal for custom colliders.
 const _getSurfaceNormal_popResult = subShape.popResult();
 
 function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsShape, _subShapeId: number): void {
-    // decode hit buffer index from subShapeId
     subShape.pop(_getSurfaceNormal_popResult, _subShapeId, HIT_BUFFER_BITS);
     const info = _hitPool[_getSurfaceNormal_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube or merged run: closest face of the box [v, m] using exact bounds from buffer
+        // cube or merged run: closest face of the box using exact bounds from the buffer.
         const px = ioResult.position[0];
         const py = ioResult.position[1];
         const pz = ioResult.position[2];
 
-        // distance to each face of the box
         const dEast = info.maxX - px;
         const dWest = px - info.minX;
         const dUp = info.maxY - py;
@@ -1429,7 +1227,6 @@ function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsSha
         const dSouth = info.maxZ - pz;
         const dNorth = pz - info.minZ;
 
-        // find the closest face
         let minDist = dEast;
         let nx = 1,
             ny = 0,
@@ -1467,20 +1264,12 @@ function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsSha
 
         vec3.set(ioResult.normal, nx, ny, nz);
     } else {
-        // custom collider, read the per-hit normal captured at the time
-        // the inner shape's collide/cast emitted this contact.
+        // custom collider: use the normal captured when the inner shape emitted this contact.
         vec3.set(ioResult.normal, info.nx, info.ny, info.nz);
     }
 }
 
-// ── getSupportingFace ───────────────────────────────────────────────
-//
-// decodes hit buffer index from subShapeId to get exact voxel coords,
-// then builds the supporting face. for cube voxels: picks the face
-// most aligned with the query direction and builds a 4-vertex quad.
-// for custom colliders: returns the supporting face captured into the
-// hit buffer at emission time.
-
+// decodes the hit buffer index from subShapeId, then builds the supporting face: box quad for cubes, captured face for custom colliders.
 const _getSupportingFace_popResult = subShape.popResult();
 
 function getSupportingFace(
@@ -1491,17 +1280,14 @@ function getSupportingFace(
 ): void {
     const face = ioResult.face;
 
-    // decode hit buffer index from subShapeId
     subShape.pop(_getSupportingFace_popResult, _subShapeId, HIT_BUFFER_BITS);
     const info = _hitPool[_getSupportingFace_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube or merged run: pick face most aligned with direction, build the box quad
-        // direction is in shape-local space (voxel coords), pointing INTO the surface
+        // direction is in shape-local space (voxel coords), pointing into the surface.
         const faceIdx = getFaceFromNormal(-direction[0], -direction[1], -direction[2]);
         buildBoxQuad(face, faceIdx, info.minX, info.minY, info.minZ, info.maxX, info.maxY, info.maxZ);
     } else {
-        // custom collider, copy the per-hit face captured at emission time.
         const n = info.faceNumVerts;
         face.numVertices = n;
         for (let i = 0; i < n * 3; i++) {
@@ -1511,8 +1297,6 @@ function getSupportingFace(
 
     transformFaceWithMat4RotationTranslation(face, ioResult.transform);
 }
-
-// ── defineShape + register ──────────────────────────────────────────
 
 declare module 'crashcat' {
     interface ShapeTypeRegistry {

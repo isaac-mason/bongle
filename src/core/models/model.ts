@@ -1,24 +1,3 @@
-// model.ts, runtime in-memory model shape, the idiomatic form that
-// consumers (renderer, animator, physics, the runtime handle hydrator)
-// read from. Distinct from `ModelBin` (the wire format, flat,
-// index-keyed, packcat-friendly) by design:
-//
-//   - serialization shape is constrained by packcat (no cycles, no refs,
-//     numeric indices for cross-references)
-//   - runtime shape isn't; trees nest naturally, refs are direct object
-//     pointers, lookups are Map<name, T>, channel targets resolve to the
-//     ModelNode they drive
-//
-// Both source formats land here:
-//
-//   .bin bytes  → packcat unpack → ModelBin  → toModel(bin) → Model
-//   .glb bytes  → gltfUnpack ─────────────────────────────→ Model
-//
-// `gltfUnpack` builds a `Model` directly (skips the ModelBin intermediate),
-// it's a runtime parser, not a wire codec, so there's no reason to
-// shape its output for serialization. The .bin path goes through
-// `toModel` because the bytes-on-disk shape *is* ModelBin.
-
 import type { Quat, Vec3 } from 'math';
 import type { Box3 } from 'math/shapes';
 import type { ModelBin } from './model-bin';
@@ -33,8 +12,7 @@ export type ModelNode = {
     /** parent node, or null for the root. */
     parent: ModelNode | null;
     children: ModelNode[];
-    /** mesh attached to this node, or null. resolved at parse time so
-     *  consumers never index back through the model. */
+    /** mesh attached to this node, or null; resolved at parse time so consumers never index back through the model. */
     mesh: ModelMesh | null;
 };
 
@@ -75,42 +53,30 @@ export type ModelImage = {
     bytes: Uint8Array;
 };
 
-/**
- * The parsed in-memory model. Lives only at runtime, never serialized.
- * Produced by `gltfUnpack` (runtime .glb) and `toModel` (declared .bin).
- */
+/** The parsed in-memory model, runtime-only. Produced by `gltfUnpack` (runtime .glb) and `toModel` (declared .bin). */
 export type Model = {
-    /** scene root. when the source has multiple top-level nodes, this is
-     *  a synthetic wrapper named after the modelId. */
+    /** scene root; when the source has multiple top-level nodes, a synthetic wrapper named after the modelId. */
     root: ModelNode;
     /** flat by-name index, same node refs as the tree under `root`. */
     nodesByName: Map<string, ModelNode>;
     meshesByName: Map<string, ModelMesh>;
     clipsByName: Map<string, ModelClip>;
     images: ModelImage[];
-    /** bind-pose AABB in root-local space, union of mesh AABBs
-     *  transformed by each owning node's accumulated TRS chain. */
+    /** bind-pose AABB in root-local space, union of mesh AABBs transformed by each owning node's accumulated TRS chain. */
     aabb: Box3;
 };
 
 /**
- * Convert a wire-format `ModelBin` into the runtime `Model` shape.
- * Resolves all flat indices into direct object refs (parent/children,
- * node→mesh, mesh→image, channel→target), builds the by-name maps, and
- * synthesizes a wrapper root when the source has multiple top-level
- * nodes (matches the bongle codegen barrel's same convention).
- *
- * `modelId` is only used to name the synthetic wrapper root when needed;
- * pass the same id you registered the model under in `Resources`.
+ * Converts a wire-format `ModelBin` into the runtime `Model` shape: resolves flat indices into direct
+ * object refs, builds the by-name maps, and synthesizes a wrapper root for multi-root sources.
+ * `modelId` names the synthetic wrapper root when needed.
  */
 export function toModel(modelId: string, bin: ModelBin): Model {
-    // ── images: direct ref objects, indexable by their original .bin position ──
     const images: ModelImage[] = (bin.images ?? []).map((img) => ({
         mimeType: img.mimeType,
         bytes: img.bytes,
     }));
 
-    // ── meshes: resolve imageIndex → ModelImage ref ──
     const meshesByName = new Map<string, ModelMesh>();
     for (const m of bin.meshes) {
         meshesByName.set(m.name, {
@@ -124,7 +90,7 @@ export function toModel(modelId: string, bin: ModelBin): Model {
         });
     }
 
-    // ── nodes: two-pass build so parent/children refs always resolve ──
+    // two-pass build so parent/children refs always resolve
     const flatNodes: ModelNode[] = new Array(bin.sceneNodes.length);
     const nodesByName = new Map<string, ModelNode>();
     for (let i = 0; i < bin.sceneNodes.length; i++) {
@@ -150,15 +116,12 @@ export function toModel(modelId: string, bin: ModelBin): Model {
         parent.children.push(child);
     }
 
-    // ── clips: resolve channel target nodes by name ──
     const clipsByName = new Map<string, ModelClip>();
     for (const c of bin.clips) {
         const channels: ModelChannel[] = [];
         for (const ch of c.channels) {
             const target = nodesByName.get(ch.nodeName);
-            // a channel without a resolvable target is dead data,
-            // either the wire bytes are stale (node removed but channel
-            // not) or the source gltf was malformed. drop quietly.
+            // no resolvable target means dead data (stale wire bytes or a malformed source gltf); drop quietly
             if (!target) continue;
             channels.push({
                 target,
@@ -171,7 +134,6 @@ export function toModel(modelId: string, bin: ModelBin): Model {
         clipsByName.set(c.name, { name: c.name, duration: c.duration, channels });
     }
 
-    // ── scene root: single top-level node → use directly; multiple → wrap ──
     const root = pickOrSynthesizeRoot(modelId, flatNodes, bin.rootIndices);
 
     return {
@@ -187,8 +149,7 @@ export function toModel(modelId: string, bin: ModelBin): Model {
 function pickOrSynthesizeRoot(modelId: string, flatNodes: ModelNode[], rootIndices: readonly number[]): ModelNode {
     if (rootIndices.length === 1) return flatNodes[rootIndices[0]!]!;
     if (rootIndices.length === 0) {
-        // empty model: no scene, no meshes. give the hydrator something
-        // to mount under so it doesn't have to special-case null.
+        // an empty model still needs a root for the hydrator to mount under
         return makeWrapperRoot(modelId, []);
     }
     const roots = rootIndices.map((i) => flatNodes[i]!);

@@ -1,20 +1,3 @@
-// builds the sprite atlas from spritesRegistry.
-//
-// reads source images from each sprite's `src` (one entry per flipbook
-// frame), skyline-packs them into a single texture, and writes:
-//   resources/client/sprites-atlas.png, the atlas image
-//   resources/client/sprites-atlas.json, per-sprite uvRects + sizePx
-//
-// shape mirrors tile-atlas: content-hash sidecar gates rebuild, missing
-// sources get a magenta placeholder, and the shared packer (core/atlas/pack)
-// grows the atlas from 256 up to 4096 until all frames fit. Sprites pack at
-// texel alignment with their declared padding and ship no mips; that is why
-// they are their own atlas rather than tiles in the block one, whose cells are
-// 16-aligned so its mip chain stays clean.
-//
-// computed textures are baked upstream by `bake-textures.ts` and threaded in
-// via `bakedTextures` as raster surfaces; the composite draws them directly.
-
 import type { Filesystem } from '../../../os/interface';
 import { packAtlas } from '../../core/atlas/pack';
 import type { Region } from '../../core/atlas/skyline';
@@ -51,10 +34,6 @@ export type BuildSpriteAtlasOptions = {
     raster: Raster;
 };
 
-/**
- * Build the sprite atlas. Returns true if a rebuild happened, false if
- * skipped because nothing changed.
- */
 export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, opts: BuildSpriteAtlasOptions): Promise<boolean> {
     const { bakedTextures, textures, cache, loader, fs, raster } = opts;
 
@@ -74,7 +53,6 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
 
     const items = handles.flatMap(collectFrames);
 
-    // load every frame up front: bitmap/canvas source + dimensions + hash part.
     const loaded = await Promise.all(items.map((it) => loadFrame(it, textures, bakedTextures, loader, raster)));
 
     const hash = await computeBuildHash(handles, loaded);
@@ -110,7 +88,6 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
     }
     await fs.write(ATLAS_PNG, await raster.encodePng(atlas));
 
-    // bundle frames back into per-sprite entries.
     const sprites: Record<string, SpriteAtlasEntry> = {};
     let cursor = 0;
     for (const h of handles) {
@@ -130,8 +107,6 @@ export async function buildSpriteAtlas(spritesRegistry: KindStore<SpriteDef>, op
     );
     return true;
 }
-
-// ── internals ───────────────────────────────────────────────────────
 
 type FrameItem = {
     spriteId: string;

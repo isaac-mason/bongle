@@ -1,9 +1,3 @@
-// dashcat ships one small stylesheet, injected once on first use. everything
-// is scoped under `.dashcat` and driven by css custom properties so a consumer
-// can retheme by overriding the vars, without touching the rules.
-//
-// the palette + metrics mirror the makecat editor: dark, monospace, low padding.
-
 const STYLE_ID = 'dashcat-styles';
 
 export const css = /* css */ `

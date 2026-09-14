@@ -1,15 +1,3 @@
-// swept-AABB pass against the voxel grid.
-//
-// iterates every cell overlapping the moving box's swept envelope (one
-// cell of slop on each axis to catch grazing cases). per occupied cell,
-// dispatches on shapeKind:
-//   - cube:  sweep against the unit cell box.
-//   - aabbs: sweep against each sub-box translated to world space.
-//
-// returns the best (smallest TOI) hit, or false if none. the result
-// carries the source coords + subAabbIndex so the controller can attribute
-// ground / contacts back to a specific voxel for debug + ground velocity.
-
 import { type SweepResult, sweepAabbVsAabb } from '../physics/aabb/aabb-sweep';
 import { AIR, BLOCK_FLAG_COLLISION, type Blocks, MISSING, SHAPE_AABBS } from './block-registry';
 import { CHUNK_BITS, CHUNK_SIZE, getChunk, type Voxels, voxelIndex } from './voxels';
@@ -105,7 +93,6 @@ export function sweepAabbVsVoxels(
 ): boolean {
     const reg = voxels.registry;
 
-    // start with no hit. we'll only overwrite if we find something better.
     out.toi = Infinity;
     out.axis = -1;
     out.sign = 0;
@@ -127,7 +114,6 @@ export function sweepAabbVsVoxels(
     const iy1 = Math.floor(maxY) + 1;
     const iz1 = Math.floor(maxZ) + 1;
 
-    // outer loop: chunks. inner: cells. skips empty chunks fast.
     const cx0 = ix0 >> CHUNK_BITS;
     const cy0 = iy0 >> CHUNK_BITS;
     const cz0 = iz0 >> CHUNK_BITS;
@@ -146,10 +132,8 @@ export function sweepAabbVsVoxels(
                 const cwz = cz << CHUNK_BITS;
 
                 if (!chunk) {
-                    // unknown territory: treat the whole chunk as one solid
-                    // 16³ cell so bodies can't tunnel into unloaded space
-                    // (Minetest's CONTENT_IGNORE rule). once the chunk
-                    // streams in (full or empty), this branch is skipped.
+                    // unloaded chunk: treat it as one solid 16x16x16 cell (Minetest's
+                    // CONTENT_IGNORE rule) so bodies can't tunnel into unloaded space.
                     sweepAabbVsAabb(
                         mcX,
                         mcY,
@@ -179,9 +163,8 @@ export function sweepAabbVsVoxels(
                         out.vx = cwx;
                         out.vy = cwy;
                         out.vz = cwz;
-                        // AIR sentinel ⇒ neutral material defaults
-                        // (friction=1, restitution=0), same convention used
-                        // for AABB-vs-AABB hits where no source block exists.
+                        // AIR sentinel means neutral material defaults (friction=1,
+                        // restitution=0), same convention as AABB-vs-AABB hits with no source block.
                         out.stateId = AIR;
                         out.subAabbIndex = -1;
                         out.boxMinX = cwx;
@@ -194,9 +177,8 @@ export function sweepAabbVsVoxels(
                     }
                     continue;
                 }
-                if (chunk.nonAirCount === 0) continue; // known empty (all air)
+                if (chunk.nonAirCount === 0) continue;
 
-                // cell range within this chunk.
                 const lx0 = Math.max(ix0 - cwx, 0);
                 const ly0 = Math.max(iy0 - cwy, 0);
                 const lz0 = Math.max(iz0 - cwz, 0);
@@ -351,20 +333,15 @@ export function sweepAabbVsVoxels(
     return out.axis !== -1;
 }
 
-// ── crossed-cell collection ──────────────────────────────────────────
+// which passable voxels did the box pass through, collected alongside the
+// nearest solid hit when `collect` is set. a zero displacement enumerates the
+// box's currently-occupied cells, so standing-inside and passing-through both
+// report (liquid / trigger detection).
 //
-// "which passable voxels did the box pass through", collected alongside the
-// nearest solid hit in a single sweep when `collect` is set (see
-// sweepAabbVsVoxels). a zero displacement enumerates the box's currently-
-// occupied cells, so this covers standing-inside and passing-through alike
-// (liquid / trigger detection: a resting character in lava and one falling
-// through it both need the cell reported).
-//
-// the per-cell test deliberately does NOT reuse sweepAabbVsAabb: that is a
-// face-contact TOI with grazing / inner-margin / no-motion-axis gates that
-// reject a box resting in or buried inside a cell. this is a pure swept
-// interval-overlap test at cell granularity: a cell counts if the moving box
-// intersects its unit volume for any t in [0, 1].
+// deliberately does NOT reuse sweepAabbVsAabb: that is a face-contact TOI with
+// grazing / inner-margin / no-motion-axis gates that reject a box resting in
+// or buried inside a cell. this is a pure swept interval-overlap test: a cell
+// counts if the moving box intersects its unit volume for any t in [0, 1].
 
 /** one passable voxel the box actually penetrated. */
 export type CrossedVoxel = {

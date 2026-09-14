@@ -2,17 +2,10 @@ import { type TraitType } from '../core/scene/traits';
 import { trait } from '../core/registry';
 
 /**
- * camera trait, plain projection data (fov/near/far) for a scene-tree node.
- * world pose lives on the sibling TransformTrait; a controller (player /
- * orbit / fly) or the editor lens owns the camera node and writes its pose
- * through TransformTrait each frame. the active camera node is `client.camera`
- * on the client state, which the renderer composes the render camera from.
- *
- * the renderer composes a per-room PerspectiveCamera each frame from
- * (camera node Transform + this trait), see `RenderCamera.syncRenderCamera`.
- *
- * persist: false, runtime-only; camera nodes are recreated on room spin-up and
- * never survive a scene round-trip.
+ * plain projection data (fov/near/far) for a scene-tree node. World pose lives on the sibling
+ * TransformTrait; a controller or the editor lens owns the camera node and writes its pose each
+ * frame. The active camera node is `client.camera`, which the renderer composes the render camera
+ * from. `persist: false`, runtime-only.
  */
 export const CameraTrait = trait(
     'camera',
@@ -27,5 +20,4 @@ export const CameraTrait = trait(
     { persist: false },
 );
 
-/** instance type for CameraTrait */
 export type CameraTrait = TraitType<typeof CameraTrait>;

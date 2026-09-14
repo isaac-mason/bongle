@@ -1,15 +1,3 @@
-// raster capability + hash helpers for the bake.
-//
-// The bake composites atlases with a 2d canvas. That's a browser API
-// (OffscreenCanvas) in the editor and a native lib (@napi-rs/canvas) in node, so
-// it's an INJECTED capability (`Raster`, the image analogue of `DecodeAudio`) —
-// see raster-browser.ts for the OffscreenCanvas impl. The abstract handle types
-// (RasterCanvas / RasterContext2D / RasterImage) are the minimal 2d subset the
-// bake uses; both OffscreenCanvas and @napi-rs/canvas satisfy them structurally.
-//
-// Hashing stays here as plain exports: `crypto.subtle` is native in both the
-// browser and node, so the rebuild-gate hashes need no injection.
-
 /** an opaque decoded image (browser: ImageBitmap; node: canvas Image), usable as
  *  a drawImage source. `close()` frees it eagerly where the impl supports it
  *  (ImageBitmap); node images just GC, so it's optional. */

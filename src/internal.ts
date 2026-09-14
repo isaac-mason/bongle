@@ -1,6 +1,3 @@
-// internal api, exposes engine internals needed by the cli, asset pipeline, and
-// other tooling that runs outside the normal client/server paths.
-
 import type { ModelDef } from './core/models/handle';
 import type { SceneHandle } from './core/scene/scene-handle';
 import type { Blocks } from './core/voxels/block-registry';

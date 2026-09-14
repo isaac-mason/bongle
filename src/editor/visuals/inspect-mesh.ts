@@ -1,9 +1,3 @@
-// inspect-mesh.ts, bounding box outline for the selected node.
-//
-// computes the world-space AABB by walking the selected node's subtree
-// directly (via unionSubtreeWorldAabb). falls back to a sphere around
-// the transform position if the subtree contains no mesh geometry.
-
 import { type d, LineMaterial, LineSegmentsGeometry, Mesh, type Scene, type Node as ShaderNode } from 'gpucat';
 import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldPosition } from '../../api/transforms';
@@ -15,8 +9,6 @@ import type { TimeResources } from '../../render/time';
 import { unionSubtreeWorldAabb } from '../node-aabb';
 import { INSPECT_OUTLINE } from './editor-colors';
 import { rainbowLineColor } from './rainbow';
-
-// ── material (shared, created once) ─────────────────────────────────
 
 let _material: LineMaterial | null = null;
 
@@ -32,8 +24,6 @@ function getMaterial(elapsedTime: ShaderNode<d.f32>): LineMaterial {
     }
     return _material;
 }
-
-// ── state ────────────────────────────────────────────────────────────
 
 export type InspectMeshState = {
     scene: Scene;
@@ -52,8 +42,6 @@ export function dispose(state: InspectMeshState): void {
     }
 }
 
-// ── aabb from node subtree ──────────────────────────────────────────
-
 const _SPHERE_RADIUS = 0.5;
 
 const _scratchSphere: Box3 = box3.create();
@@ -61,7 +49,7 @@ const _scratchSphere: Box3 = box3.create();
 function getNodeAABB(node: Node, resources: Resources, out: Box3): boolean {
     if (unionSubtreeWorldAabb(node, resources, out)) return true;
 
-    // fallback: no mesh/voxel geometry anywhere in the subtree, sphere at this node's position
+    // no mesh/voxel geometry anywhere in the subtree, fall back to a sphere at the node's position
     const transform = getTrait(node, TransformTrait);
     if (transform) {
         const p = getVisualWorldPosition(transform);
@@ -73,10 +61,7 @@ function getNodeAABB(node: Node, resources: Resources, out: Box3): boolean {
     return false;
 }
 
-// ── box edge segments ────────────────────────────────────────────────
-//
 // 12 edges of the aabb as flat [x,y,z, x,y,z, ...] for LineSegmentsGeometry.
-
 function appendBoxSegments(b: Box3, out: number[]): void {
     const x0 = b[0],
         y0 = b[1],
@@ -84,7 +69,6 @@ function appendBoxSegments(b: Box3, out: number[]): void {
         x1 = b[3],
         y1 = b[4],
         z1 = b[5];
-    // 4 bottom, 4 top, 4 vertical edges
     out.push(
         // bottom face
         x0,
@@ -164,18 +148,11 @@ function appendBoxSegments(b: Box3, out: number[]): void {
     );
 }
 
-// scratch aabb
 const _aabb: Box3 = box3.create();
 
-// ── update ───────────────────────────────────────────────────────────
-
-/**
- * call each frame to keep the inspect outline in sync with the
- * selected node(s). pass empty array to clear.
- */
+/** call each frame to keep the inspect outline in sync with the selected node(s); pass an empty array to clear. */
 export function update(state: InspectMeshState, nodes: Node[], resources: Resources, time: TimeResources): void {
     if (nodes.length === 0) {
-        // clear
         if (state.mesh) {
             state.scene.remove(state.mesh);
             (state.mesh.geometry as LineSegmentsGeometry).dispose();
@@ -184,9 +161,7 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
         return;
     }
 
-    // one box per selected node, a single merged box loses per-node detail
-    // for multi-selection. skip the scene root since its box would enclose
-    // everything else in the scene.
+    // one box per selected node; skip the scene root since its box would enclose everything else in the scene.
     const pts: number[] = [];
     for (const node of nodes) {
         if (node === node.scene?.root) continue;
@@ -195,7 +170,6 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
     }
 
     if (pts.length === 0) {
-        // no drawable nodes, hide
         if (state.mesh) state.mesh.visible = false;
         return;
     }

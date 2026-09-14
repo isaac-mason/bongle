@@ -1,14 +1,3 @@
-// magic select tool.
-//
-// click a voxel -> BFS flood-fill expands outward to all "matching" voxels.
-// what "matching" means is controlled by MagicSelectOptions.compareType.
-// directional constraints (up/down/horizontal/corners) and gap-jumping (range)
-// further shape the expansion.
-//
-// called each frame from EditorScript.onFrame (client only).
-// uses the room's mouse input for click detection and editor.hoverVoxel
-// for the seed voxel (raycast runs once per frame in editor/client.ts).
-
 import type { Input } from '../../client/input';
 import { isKeyDown, isMouseJustDown } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -20,17 +9,9 @@ import { getBlockState } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi, MagicSelectOptions } from '../edit-room-store';
 import { playSelected } from '../sounds';
 
-// ── neighbour generation ───────────────────────────────────────────
-//
-// build the list of (dx,dy,dz) offsets to expand into, respecting
-// the up/down/horizontal and corners options.
-//
-// 6-connectivity: face neighbours only (|dx|+|dy|+|dz| === 1)
-// 26-connectivity: add edge- and corner-touching cells
-//
-// a diagonal cell is allowed only if all of its non-zero axes are
-// permitted. e.g. (+1, +1, 0) is allowed only if horizontal && up (or down).
-
+// builds (dx,dy,dz) offsets to expand into: 6-connectivity is face neighbours only
+// (|dx|+|dy|+|dz| === 1), 26-connectivity adds edge/corner cells. a diagonal cell is allowed
+// only if all of its non-zero axes are permitted, e.g. (+1, +1, 0) needs horizontal && up.
 function buildNeighbourOffsets(opts: MagicSelectOptions): Array<[number, number, number]> {
     const result: Array<[number, number, number]> = [];
 
@@ -39,7 +20,6 @@ function buildNeighbourOffsets(opts: MagicSelectOptions): Array<[number, number,
             for (let dx = -1; dx <= 1; dx++) {
                 if (dx === 0 && dy === 0 && dz === 0) continue;
 
-                // check each non-zero axis against the direction constraints
                 if (dy > 0 && !opts.up) continue;
                 if (dy < 0 && !opts.down) continue;
                 if ((dx !== 0 || dz !== 0) && !opts.horizontal) continue;
@@ -55,8 +35,6 @@ function buildNeighbourOffsets(opts: MagicSelectOptions): Array<[number, number,
     return result;
 }
 
-// ── match predicate ────────────────────────────────────────────────
-
 function makeMatchFn(
     opts: MagicSelectOptions,
     seedStateId: number,
@@ -69,14 +47,12 @@ function makeMatchFn(
         case 'blockstate':
             return (sid) => sid === seedStateId;
         case 'solid':
-            // cull[0] = CullType.NONE, any non-zero cull type is "solid"
+            // cull[0] is CullType.NONE; any non-zero cull type counts as solid
             return (sid) => sid !== AIR && blocks.cull[sid]! !== 0;
         case 'any':
             return (sid) => sid !== AIR;
     }
 }
-
-// ── BFS ────────────────────────────────────────────────────────────
 
 function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, opts: MagicSelectOptions): Selection.Selection {
     const result = Selection.create();
@@ -84,19 +60,17 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
     const [sx, sy, sz] = seed;
     const seedStateId = getBlockState(voxels, sx, sy, sz);
 
-    // nothing to do if seed is air
     if (seedStateId === AIR) return result;
 
     const seedBlockTypeId = blocks.blockTypeId[seedStateId]!;
     const matches = makeMatchFn(opts, seedStateId, seedBlockTypeId, blocks);
 
-    // guard: seed itself must match
     if (!matches(seedStateId)) return result;
 
     const offsets = buildNeighbourOffsets(opts);
     const { limit, range } = opts;
 
-    // visited set, keyed as "wx,wy,wz" strings. bounded by limit so acceptable cost.
+    // visited set bounded by limit, so its cost stays acceptable
     const visited = new Set<string>();
     const queue: Array<[number, number, number]> = [[sx, sy, sz]];
     visited.add(`${sx},${sy},${sz}`);
@@ -112,7 +86,6 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
         Selection.set(result, cx, cy, cz);
         count++;
 
-        // enqueue neighbours, with gap-jumping for range > 1
         for (const [dx, dy, dz] of offsets) {
             for (let step = 1; step <= range; step++) {
                 const nx = cx + dx * step;
@@ -121,10 +94,8 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
                 const key = `${nx},${ny},${nz}`;
                 if (!visited.has(key)) {
                     visited.add(key);
-                    // for gap > 1 we still need to enqueue intermediate empty cells
-                    // so the BFS can "see through" them, only add if potentially reachable.
-                    // we skip if a previous step was non-matching (gap too wide).
-                    // note: the matches check at the top of the loop handles the filtering.
+                    // for gap > 1, enqueue only if the previous step was air, so the BFS can
+                    // "see through" empty gaps without jumping across a non-matching block
                     if (
                         step === 1 ||
                         getBlockState(voxels, cx + dx * (step - 1), cy + dy * (step - 1), cz + dz * (step - 1)) === AIR
@@ -136,7 +107,7 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
         }
     }
 
-    // surface-only post pass: remove interior voxels (those fully surrounded by matching voxels)
+    // removes interior voxels, those fully surrounded by matching voxels
     if (opts.surfaceOnly) {
         const interior: Array<[number, number, number]> = [];
         Selection.forEach(result, (wx, wy, wz) => {
@@ -145,7 +116,6 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
                 const nx = wx + dx;
                 const ny = wy + dy;
                 const nz = wz + dz;
-                // exposed if the neighbour is not in the selection
                 if (!Selection.has(result, nx, ny, nz)) {
                     exposed = true;
                     break;
@@ -160,8 +130,6 @@ function runBFS(seed: [number, number, number], voxels: Voxels, blocks: Blocks, 
 
     return result;
 }
-
-// ── per-frame update ───────────────────────────────────────────────
 
 export function updateMagicSelect(
     store: EditRoomStoreApi,

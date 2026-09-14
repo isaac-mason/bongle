@@ -1,11 +1,3 @@
-/**
- * hotbar, fixed bottom-center bar with HOTBAR_SIZE slots.
- *
- * each slot is a click target. when no item is carried, click activates the
- * slot. when carrying an inventory item (minecraft-style), click drops it
- * into the slot and clears the carry. right-click clears a slot.
- */
-
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { HOTBAR_SIZE, type HotbarSlot, inventoryItemDisplay } from '../inventory';

@@ -1,13 +1,3 @@
-/**
- * Per-body operations for AABB bodies — create/destroy, the imperative verbs
- * (setVelocity/setPosition/…, applyForce/applyImpulse), impostor management,
- * and the AabbBodyTrait → world sync. Mirrors crashcat's `body/rigid-body.ts`
- * relative to `aabb-world.ts`: this file drives the world/broadphase/awake-set
- * internals exported from there, so the dependency runs one way (body → world).
- *
- * The curated public `aabbBody.*` script namespace (see `api/physics.ts`) is
- * built from `create`/`destroy` + the verbs below.
- */
 import * as crashcat from 'crashcat';
 import { type Vec3, vec3 } from 'math';
 import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/aabb-body';
@@ -37,8 +27,6 @@ import {
     type World,
     wakeSleepingNeighbors,
 } from './aabb-world';
-
-// ── body lifecycle ──────────────────────────────────────────────────
 
 export function createBody(world: World, crashcatWorld: crashcat.World, opts: BodyOpts): Body {
     const id = world._nextId++;
@@ -93,10 +81,7 @@ export function destroyBody(world: World, crashcatWorld: crashcat.World, body: B
         crashcat.rigidBody.remove(crashcatWorld, body._impostor);
         body._impostor = null;
     }
-    // wake anything resting against us BEFORE we vanish from the broadphase.
-    // without this, the stack above a destroyed body keeps sleeping where it
-    // was and floats in midair, the awake-set loop never visits it, and no
-    // other pass re-checks support for sleeping bodies.
+    // wake anything resting against us before we vanish from the broadphase, or it stays frozen in midair.
     wakeSleepingNeighbors(world, body);
     removeFromAwakeSet(world, body);
     removeFromBroadphase(world, body);
@@ -112,7 +97,7 @@ export function applyForce(world: World, body: Body, fx: number, fy: number, fz:
     markBodyActive(world, body);
 }
 
-/** apply an instantaneous impulse (kg·m/s). consumed and cleared each tick. */
+/** apply an instantaneous impulse (kg m/s). consumed and cleared each tick. */
 export function applyImpulse(world: World, body: Body, ix: number, iy: number, iz: number): void {
     body._impulses[0] += ix;
     body._impulses[1] += iy;
@@ -120,8 +105,7 @@ export function applyImpulse(world: World, body: Body, ix: number, iy: number, i
     markBodyActive(world, body);
 }
 
-/** teleport: write position directly and wake. zeroes velocity to avoid spurious slide-in.
- *  reslots the body in the broadphase since its AABB just jumped. */
+/** teleports: writes position directly, zeroes velocity, reslots the broadphase, and wakes the body. */
 export function setPosition(world: World, body: Body, x: number, y: number, z: number): void {
     body.position[0] = x;
     body.position[1] = y;
@@ -139,9 +123,7 @@ export function setPosition(world: World, body: Body, x: number, y: number, z: n
     markBodyActive(world, body);
 }
 
-/** change motion type. STATIC bodies are removed from the awake set; non-STATIC
- *  bodies are (re)added. transitions away from STATIC also wake the body so it
- *  picks up gravity / forces immediately. */
+/** changes motion type; STATIC leaves the awake set, other types wake the body. */
 export function setMotionType(world: World, body: Body, mt: MotionType): void {
     if (body.motionType === mt) return;
     body.motionType = mt;
@@ -160,10 +142,7 @@ export function setVelocity(world: World, body: Body, vx: number, vy: number, vz
     markBodyActive(world, body);
 }
 
-/** trait-sync helper: copy new halfExtents in, reslot the body in the broadphase
- *  (since its AABB extent just changed), and wake it. callers that have already
- *  copied halfExtents must still call this so the broadphase cache + sleep state
- *  stay coherent. */
+/** trait-sync helper: copies halfExtents in, reslots the broadphase, and wakes the body. */
 export function setHalfExtents(world: World, body: Body, hx: number, hy: number, hz: number): void {
     body.halfExtents[0] = hx;
     body.halfExtents[1] = hy;
@@ -211,14 +190,7 @@ function installImpostor(world: World, crashcatWorld: crashcat.World, body: Body
     world.impostorToBody.set(rb.id, body.id);
 }
 
-// ── tick / slide-resolve ────────────────────────────────────────────
-
-// ── public namespace wrappers ───────────────────────────────────────
-//
-// script-facing `create` / `destroy` that take the aabb world + the rigid
-// sub-world (whose crashcat world holds impostor bodies), rather than the raw
-// crashcat world. the trait owns declarative construction; these are for
-// standalone bodies with no node.
+// takes the rigid sub-world (not the raw crashcat world) since its impostor bodies live there.
 
 /** spawn a standalone body in `world` (no trait / node). tear down with `destroy`. */
 export function create(world: World, rigid: RigidWorld, opts: BodyOpts): Body {
@@ -247,8 +219,7 @@ function syncAabbBodyTraitToWorld(
     identity: PlayerId | null,
     simulate: boolean,
 ): void {
-    // first install, create the body. companion-trait (Interpolate, Contacts)
-    // attachment lives in the top-level Physics coordinator.
+    // first install: create the body; companion-trait attachment lives in the coordinator.
     if (!t.body) {
         const wp = getWorldPosition(transform);
         t.body = createBody(world, crashcatWorld, {
@@ -273,8 +244,7 @@ function syncAabbBodyTraitToWorld(
 
     const body = t.body;
 
-    // mirror scalar props (cheap writes; no diffing). motionType goes through
-    // the helper so awake-set membership stays consistent across STATIC flips.
+    // motionType goes through the helper so awake-set membership stays consistent across STATIC flips.
     setMotionType(world, body, effectiveAabbMotionType(t, identity, simulate));
     body.mass = t.mass > 0 ? t.mass : 1;
     body.gravityFactor = t.gravityFactor;
@@ -286,7 +256,6 @@ function syncAabbBodyTraitToWorld(
     body.sensor = t.sensor;
     body.pushable = t.pushable;
 
-    // halfExtents change → copy + reslot broadphase + rebuild impostor (if any).
     if (
         body.halfExtents[0] !== t.halfExtents[0] ||
         body.halfExtents[1] !== t.halfExtents[1] ||
@@ -296,19 +265,11 @@ function syncAabbBodyTraitToWorld(
         if (body._impostor) reinstallBodyImpostor(world, crashcatWorld, body);
     }
 
-    // rigidBodyImpostor flip → install / remove impostor.
     if (body.rigidBodyImpostor !== t.rigidBodyImpostor) {
         setBodyImpostor(world, crashcatWorld, body, t.rigidBodyImpostor);
     }
 
-    // teleport: the body's position IS the last engine-written value, so if
-    // the world transform now differs, something external moved the node.
-    // snap, zero velocity, and wake (setter handles all three).
-    //
-    // if the script ALSO set t.linearVelocity in the same tick (the common
-    // "respawn with new velocity" pattern), pick it up after the zero, this
-    // is the only sanctioned way to inject velocity into a DYNAMIC body from
-    // script. otherwise teleports preserve "fresh start, no momentum" semantics.
+    // a mismatch means something external moved the node; snap, zero velocity, then re-apply t.linearVelocity if the script set it this tick.
     const wp = getWorldPosition(transform);
     if (!vec3.equals(wp, body.position)) {
         setPosition(world, body, wp[0], wp[1], wp[2]);
@@ -317,16 +278,13 @@ function syncAabbBodyTraitToWorld(
         }
     }
 
-    // client-side replication smoothing for non-owner KINEMATIC bodies,
-    // sync'd linearVelocity drives integration between sparse pose updates.
+    // client-side replication smoothing: sync'd linearVelocity drives integration between sparse pose updates.
     if (identity !== null && t._node.owner !== identity && body.motionType === MotionType.KINEMATIC) {
         setVelocity(world, body, t.linearVelocity[0], t.linearVelocity[1], t.linearVelocity[2]);
     }
 }
 
-/** trait → world sync. install/update bodies for nodes with the bound aabb body
- *  trait; destroy bodies for nodes that lost the trait. no-op unless
- *  `bindNodeSync` has been called. */
+/** trait/world sync: installs/updates bodies for nodes with the bound trait, destroys bodies that lost it. */
 export function preStep(world: World, crashcatWorld: crashcat.World, identity: PlayerId | null, simulate: boolean): void {
     if (!world._bodyQuery) return;
 
@@ -346,8 +304,7 @@ export function preStep(world: World, crashcatWorld: crashcat.World, identity: P
     }
 }
 
-/** world → trait writeback for moving bodies. companion-trait management
- *  (Interpolate/Contacts) lives in the coordinator. */
+/** world/trait writeback for moving bodies; companion-trait management lives in the coordinator. */
 export function postStep(world: World): void {
     if (!world._bodyQuery) return;
 
@@ -366,12 +323,7 @@ export function postStep(world: World): void {
     }
 }
 
-// ── per-body step (integration + analytical slide-resolve) ──────────
-//
-// the solver drives bodies in `world.awakeBodies`; it consumes the `_forces`/
-// `_impulses` accumulators the verbs above fill. lives here (not aabb-world.ts)
-// so it can call the verbs directly rather than reaching back across modules.
-
+// lives here (not aabb-world.ts) so the solver can call the verbs above directly.
 const MAX_SLIDE_ITERS = 4;
 const SLOP_EPS = 1e-4;
 const IDENTITY_QUAT: [number, number, number, number] = [0, 0, 0, 1];
@@ -415,25 +367,12 @@ function makeEmptyPair(): PairInfo {
     };
 }
 
-/**
- * step the AABB world by `dt`. drives only bodies in `awakeBodies`.
- *
- *   - iterates `world.awakeBodies` (not the full registry). asleep + STATIC
- *     bodies are not visited; they cost nothing per tick.
- *   - `tickBody` calls `moveInBroadphase` after writing the new position, so
- *     the hash stays current without a global rebuild.
- *   - bodies that sleep this tick are swap-removed from `awakeBodies` inside
- *     `tickBody` → `sleepBody`. the index-walk loop accounts for that.
- *   - if `awakeBodies` is empty we short-circuit and skip the per-tick work
- *     entirely, important for piles that have fully settled.
- */
+/** steps the AABB world by `dt`, driving only bodies in `awakeBodies`. */
 export function tick(world: World, crashcatWorld: crashcat.World, dt: number, recordedPairs: PairSink): void {
     const awake = world.awakeBodies;
     if (awake.length === 0) return;
 
-    // index-walk, not for-of: tickBody can swap-remove the current entry
-    // (via sleepBody). when it does, `awake[i]` is now a different id we
-    // still need to visit on this tick, so we don't advance `i`.
+    // index-walk, not for-of: sleepBody can swap-remove the current entry, so we don't always advance `i`.
     let i = 0;
     while (i < awake.length) {
         const lenBefore = awake.length;
@@ -455,7 +394,6 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
     const mass = body.mass;
     const invMass = 1 / mass;
 
-    // snapshot prev resting BEFORE we clear and re-derive it.
     body._prevResting[0] = body.resting[0];
     body._prevResting[1] = body.resting[1];
     body._prevResting[2] = body.resting[2];
@@ -469,7 +407,7 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
     body._restingStateId[1] = 0;
     body._restingStateId[2] = 0;
 
-    // 1. integrate forces + impulses + gravity (semi-implicit Euler).
+    // integrate forces + impulses + gravity (semi-implicit Euler).
     let aX = body._forces[0] * invMass;
     let aY = body._forces[1] * invMass;
     let aZ = body._forces[2] * invMass;
@@ -484,73 +422,47 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
     body._forces[0] = body._forces[1] = body._forces[2] = 0;
     body._impulses[0] = body._impulses[1] = body._impulses[2] = 0;
 
-    // 2. lateral friction (noa-style): if last tick we were resting against a
-    //    surface on axis K, the velocity components on the *other* axes get
-    //    damped by μ × |pseudo-normal-force|, where the pseudo-force is the
-    //    impulse needed last tick to zero v on axis K. cheap proxy: use the
-    //    pre-friction acceleration along K to derive a friction budget.
+    // lateral friction (noa-style): damped on axes orthogonal to any axis rested against last tick.
     if (body._prevResting[0] !== 0 || body._prevResting[1] !== 0 || body._prevResting[2] !== 0) {
         applyAxisFriction(world, body, dt, aX, aY, aZ);
     }
 
-    // snapshot the POST-INTEGRATION velocity. this is the velocity that would
-    // have driven the body through the surface, it IS the impact velocity.
-    // slideResolve will zero the normal component when it lands a contact;
-    // the bounce step then reads this snapshot to apply -rest × impactVel.
+    // snapshot the pre-resolve (impact) velocity; the bounce step below applies -restitution * this.
     const vImpactX = body.linearVelocity[0];
     const vImpactY = body.linearVelocity[1];
     const vImpactZ = body.linearVelocity[2];
 
-    // 3. slide-resolve against voxels + other AabbBodies.
     slideResolve(world, body, dt, sink);
 
-    // 4. post-impact bounce. slideResolve has already zeroed the normal
-    //    component on any resting axis, so the bounce only needs to ADD
-    //    -rest × impactVel along that axis (not (1+rest) ×, that would
-    //    inject 50% extra energy every hit). gated by `minBounceVelocity`
-    //    to kill perpetual micro-bounces near terminal velocity.
+    // slideResolve already zeroed the normal component on resting axes, so this adds -restitution * impactVel, not (1+restitution) *.
     if (body.restitution > 0) {
         applyPostImpactBounce(world, body, vImpactX, vImpactY, vImpactZ);
     }
 
-    // 5. broadphase reslot (cell-range cache makes this O(1) when AABB hasn't
-    //    crossed a cell boundary, the common micro-movement case).
     moveInBroadphase(world, body);
 
-    // 6. impostor mirror (kinematic), only on awake bodies; asleep bodies'
-    //    impostors were already at the right transform when they slept.
     if (body._impostor) {
         crashcat.rigidBody.setTransform(crashcatWorld, body._impostor, body.position, IDENTITY_QUAT, true);
     }
 
-    // 7. sleep check. may swap-remove this body from `awakeBodies`.
     updateSleepState(world, body);
 }
 
-/** apply lateral friction along the axes orthogonal to each resting axis.
- *  budget per orthogonal axis = μ × |pseudo-normal-force| × dt, where the
- *  pseudo-force on a resting axis is the pre-friction acceleration along it.
- *  per-axis μ = body.friction × block.friction (from the surface this axis
- *  was resting on last tick). block.friction defaults to 1, so non-voxel
- *  hits combine to body.friction unchanged. */
+/** applies lateral friction on axes orthogonal to each resting axis; per-axis coeff = body.friction * block.friction. */
 function applyAxisFriction(world: World, body: Body, dt: number, aX: number, aY: number, aZ: number): void {
-    const μBody = body.friction;
-    if (μBody <= 0) return;
+    const bodyFriction = body.friction;
+    if (bodyFriction <= 0) return;
     const blockFriction = world.voxels.registry.friction;
 
     for (let k = 0; k < 3; k++) {
         if (body._prevResting[k] === 0) continue;
         const aK = k === 0 ? aX : k === 1 ? aY : aZ;
         if (aK === 0) continue;
-        // friction only applies when velocity along K is into the surface
-        // (i.e. the rest direction agrees with the sign of -aK). otherwise
-        // the body is separating and the contact won't sustain friction.
-        // resting[k] = -sign(normal_at_axis); approaching means a points in
-        // the same direction as resting.
+        // friction only applies while still pressing into the surface (sign of aK matches resting[k]).
         if (body._prevResting[k] * aK <= 0) continue;
-        const μ = μBody * (blockFriction[body._prevRestingStateId[k]] ?? 1);
-        if (μ <= 0) continue;
-        const budget = μ * Math.abs(aK) * dt;
+        const frictionCoeff = bodyFriction * (blockFriction[body._prevRestingStateId[k]] ?? 1);
+        if (frictionCoeff <= 0) continue;
+        const budget = frictionCoeff * Math.abs(aK) * dt;
         for (let t = 0; t < 3; t++) {
             if (t === k) continue;
             const v = body.linearVelocity[t];
@@ -560,13 +472,7 @@ function applyAxisFriction(world: World, body: Body, dt: number, aX: number, aY:
     }
 }
 
-/** noa-style post-impact bounce. for each axis we just hit, add -restitution ×
- *  impactVel along that axis (slideResolve already zeroed the normal-axis
- *  velocity, so this is the bounce delta, not a full reflection). gated by
- *  `minBounceVelocity` to suppress perpetual micro-bounces near terminal v.
- *  per-axis e = body.restitution × block.restitution. block.restitution
- *  defaults to 0, so non-restitutive surfaces (everything except opted-in
- *  bouncy blocks) kill bounce regardless of body restitution. */
+/** noa-style post-impact bounce: -restitution * impactVel per resolved axis, gated by minBounceVelocity. */
 function applyPostImpactBounce(world: World, body: Body, vIx: number, vIy: number, vIz: number): void {
     const thresh = world.minBounceVelocity;
     const eBody = body.restitution;
@@ -585,32 +491,25 @@ function applyPostImpactBounce(world: World, body: Body, vIx: number, vIy: numbe
     }
 }
 
-/** decrement sleep budget when slow; sleep when grounded + budget hits 0.
- *  fast path: if the body is grounded on the same surface for two consecutive
- *  ticks AND moving below the velocity epsilon, sleep immediately. this is the
- *  difference between a 300-sphere pile settling in 10 frames vs ~10×SLEEP_RESET_FRAMES. */
+/** decrements the sleep budget while slow; sleeps immediately on two consecutive grounded+slow ticks, or when the budget hits 0. */
 function updateSleepState(world: World, body: Body): void {
     const vx = body.linearVelocity[0];
     const vy = body.linearVelocity[1];
     const vz = body.linearVelocity[2];
     const v2 = vx * vx + vy * vy + vz * vz;
 
-    // resting axes are -1 / 0 / +1. bitwise OR with three signed ints stays
-    // nonzero as long as any axis is touched (since -1 has all 32 bits set).
+    // resting axes are -1 / 0 / +1; bitwise OR stays nonzero while any axis is touched.
     const groundedThisTick = (body.resting[0] | body.resting[1] | body.resting[2]) !== 0;
     const groundedLastTick = (body._prevResting[0] | body._prevResting[1] | body._prevResting[2]) !== 0;
 
     if (v2 < world.sleepVelocityEpsSq) {
-        // FAST PATH, two consecutive grounded + slow ticks ⇒ confidently settled.
         if (groundedThisTick && groundedLastTick) {
             sleepBody(world, body);
             return;
         }
         body._sleepFrameCount--;
         if (body._sleepFrameCount <= 0) {
-            // SLOW PATH (e.g. body is balanced atop a flat top without "resting"
-            // axes recording, or is in a cycle of micro-collisions). gravity probe:
-            // would a gravity-only step intersect anything? if yes → grounded, sleep.
+            // slow path: gravity-probe sweep decides grounded when resting axes weren't recorded.
             const probedX = world.gravity[0] * 0.001;
             const probedY = world.gravity[1] * 0.001;
             const probedZ = world.gravity[2] * 0.001;
@@ -654,9 +553,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
     let dy = body.linearVelocity[1] * dt;
     let dz = body.linearVelocity[2] * dt;
 
-    // when we push another body, its velocity changes via _impulses (deferred
-    // until next tick). within this slide loop we'd otherwise re-collide with
-    // it every iteration. track the most recently pushed body and skip it.
+    // track the most recently pushed body so we don't re-collide with it (its velocity change is deferred to next tick).
     let recentPushedId: BodyId = -1;
 
     for (let iter = 0; iter < MAX_SLIDE_ITERS; iter++) {
@@ -676,9 +573,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         let bestStateId = 0,
             bestSubAabbIndex = -1;
 
-        // voxel sweep, gated by voxelFlagsMask. (the underlying primitive
-        // only filters by BLOCK_FLAG_COLLISION today; we still honor the
-        // body's flag here by skipping the pass when it's cleared.)
+        // gated by voxelFlagsMask; the sweep primitive itself only filters by BLOCK_FLAG_COLLISION.
         if (body.voxelFlagsMask !== 0) {
             _voxelHit.toi = Infinity;
             _voxelHit.axis = -1;
@@ -711,7 +606,6 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
             }
         }
 
-        // body-vs-body sweep against broadphase candidates.
         const envMinX = dx >= 0 ? body.position[0] - body.halfExtents[0] : body.position[0] - body.halfExtents[0] + dx;
         const envMaxX = dx >= 0 ? body.position[0] + body.halfExtents[0] + dx : body.position[0] + body.halfExtents[0];
         const envMinY = dy >= 0 ? body.position[1] - body.halfExtents[1] : body.position[1] - body.halfExtents[1] + dy;
@@ -757,7 +651,6 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         }
 
         if (bestTOI === Infinity) {
-            // no hit, advance freely and stop.
             body.position[0] += dx;
             body.position[1] += dy;
             body.position[2] += dz;
@@ -767,8 +660,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         // sensor or non-resolving best: advance through but record contact.
         const sensorHit = bestOther !== null && (body.sensor || bestOther.sensor);
 
-        // advance by TOI (clamped to >= 0; analytical can return small
-        // negative values for already-overlapping pairs, depenetrate).
+        // clamped to >= 0; analytical can return small negative values for already-overlapping pairs.
         const t = bestTOI < 0 ? 0 : bestTOI;
         body.position[0] += dx * t;
         body.position[1] += dy * t;
@@ -804,12 +696,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
             return;
         }
 
-        // resolve. normal points obstacle → mover. for static-or-infinite-mass
-        // contacts we zero the normal component (minetest-style); restitution
-        // is applied later by `applyPostImpactBounce` against the pre-tick v,
-        // gated by `minBounceVelocity`. for pushable dynamic AabbBodies we
-        // split a mass-aware normal impulse so the obstacle wakes and picks
-        // up momentum next tick.
+        // static/non-pushable contacts zero the normal velocity (minetest-style); pushable dynamic bodies get a mass-aware impulse split instead.
         const otherPushable = bestOther?.pushable && !bestOther.sensor && bestOther.motionType === MotionType.DYNAMIC;
 
         const vAn = body.linearVelocity[0] * bestNX + body.linearVelocity[1] * bestNY + body.linearVelocity[2] * bestNZ;
@@ -825,22 +712,16 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
                 const mB = bestOther.mass;
                 const invSum = 1 / mA + 1 / mB;
                 const J = -vRelN / invSum;
-                // apply -J to self along normal (slow / reverse), +J to other.
                 body.linearVelocity[0] += (-J * bestNX) / mA;
                 body.linearVelocity[1] += (-J * bestNY) / mA;
                 body.linearVelocity[2] += (-J * bestNZ) / mA;
                 applyImpulse(world, bestOther, J * bestNX, J * bestNY, J * bestNZ);
                 recentPushedId = bestOther.id;
             } else {
-                // static / voxel / non-pushable: zero the normal-velocity
-                // component. record the resting axis for friction + sleep.
                 body.linearVelocity[0] -= bestNX * vAn;
                 body.linearVelocity[1] -= bestNY * vAn;
                 body.linearVelocity[2] -= bestNZ * vAn;
-                // resting[axis] = -sign(normal_axis). floor (n=+Y) ⇒ resting[1] = -1.
-                // _restingStateId[axis] tracks the block we're resting against for
-                // per-block friction + restitution combine. AABB-vs-AABB hits write
-                // 0 (AIR sentinel), registry tables return neutral defaults for it.
+                // resting[axis] = -sign(normal on that axis); AABB-vs-AABB hits write stateId 0 (AIR sentinel).
                 const restStateId = bestVoxel ? bestStateId : 0;
                 if (bestNX !== 0) {
                     body.resting[0] = bestNX > 0 ? -1 : 1;
@@ -858,7 +739,6 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         }
         // else: already separating along normal, leave velocity untouched.
 
-        // remaining displacement is the unused portion of this step.
         const tRem = 1 - t;
         dx = body.linearVelocity[0] * dt * tRem;
         dy = body.linearVelocity[1] * dt * tRem;
@@ -885,8 +765,7 @@ function emitPair(
     _pairOut.aBodyId = a.id;
     _pairOut.aNodeId = a._nodeId;
     _pairOut.aIsSensor = a.sensor;
-    // contact point: project A's center along -normal by its halfExtent on
-    // the contact axis. cheap approximation; consumers rarely need exactness.
+    // contact point: A's center projected along -normal by its halfExtent on the contact axis.
     _pairOut.pointX = a.position[0] - nX * (nX !== 0 ? a.halfExtents[0] : 0);
     _pairOut.pointY = a.position[1] - nY * (nY !== 0 ? a.halfExtents[1] : 0);
     _pairOut.pointZ = a.position[2] - nZ * (nZ !== 0 ? a.halfExtents[2] : 0);

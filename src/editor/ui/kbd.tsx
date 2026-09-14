@@ -8,17 +8,8 @@ const SIZE_CLASSES: Record<KbdSize, string> = {
     md: 'text-[11px] min-w-[18px] h-[18px] px-1 pt-[1px]',
 };
 
-/**
- * keyboard-key indicator. pixel face, square (per house style), with a
- * 1px border and a 1px bottom shadow that gives it the visual hint of
- * a physical keycap. `size` defaults to `sm`; use `xs` in tight UI
- * (e.g. the left toolbar's category header).
- *
- * Silkscreen has letters, digits and ASCII punctuation but no modifier
- * symbols — a chord label from `formatKeyLabel` ("⇧F") would draw the ⇧ from
- * the fallback face, antialiased, next to a hard-edged F. Every key bound
- * today is a bare letter, so this doesn't bite; bind a chord and it will.
- */
+// Silkscreen has no modifier symbols, so a chord label (e.g. shift+F) draws the modifier glyph
+// from the fallback face, antialiased, next to a hard-edged letter; every key bound today is a bare letter.
 export function Kbd({ children, size = 'sm', className = '' }: { children: ReactNode; size?: KbdSize; className?: string }) {
     return (
         <kbd

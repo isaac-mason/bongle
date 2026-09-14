@@ -1,19 +1,3 @@
-// Model .bin format, packcat schema shared by CLI emit and engine unpack.
-//
-// Two artifacts per model, same schema:
-//   <basename>.<hash8>.server.bin, meshes + clips + scene (`images: undefined`)
-//   <basename>.<hash8>.client.bin, meshes + clips + scene + images
-//
-// Same `unpack(bytes)` runs on both sides; client reads `result.images ?? []`.
-//
-// Scene tree (`nodes` + `rootIndices` + `aabb`) lives here so runtime-only
-// `.glb` uploads (avatars) can hydrate the same `ModelHandle` shape that
-// codegen produces for declared models. Declared models still have the
-// codegen sidecar, that's the static-at-module-eval source of truth for
-// `wizard.scene` / `.nodes.Body` etc., but the .bin now carries the same
-// data structurally so the runtime hydrator path doesn't need a separate
-// format-specific construction routine.
-
 import * as packcat from 'packcat';
 
 const meshSchema = packcat.object({
@@ -30,13 +14,9 @@ const meshSchema = packcat.object({
     /** local-space AABB, math `Box3` (`[minX, minY, minZ, maxX, maxY, maxZ]`). */
     aabb: packcat.list(packcat.float32(), 6),
     /**
-     * index into `images` for this mesh's base-color texture; absent for
-     * untextured meshes (no material, or material without baseColorTexture).
-     *
-     * one-image-per-mesh is an importer constraint: `extractMesh` flattens
-     * all primitives into one geometry, so primitives with different
-     * baseColor textures would render with whichever the first primitive
-     * picked. fix is to split per-primitive at import; out of scope here.
+     * index into `images` for this mesh's base-color texture; absent for untextured meshes.
+     * One image per mesh: `extractMesh` flattens all primitives into one geometry, so primitives
+     * with different baseColor textures all render with whichever the first primitive picked.
      */
     imageIndex: packcat.optional(packcat.int32()),
 });
@@ -70,12 +50,9 @@ const imageSchema = packcat.object({
 });
 
 /**
- * Flat scene-tree entry. Mirrors the bongle pipeline's `SceneNodeInfo` shape
- * so the runtime hydrator and codegen barrel can produce equivalent
- * `ModelHandle.scene` trees from the same data.
- *
- * DFS order: parents always precede children, so a one-pass build can
- * resolve `parent` indices and accumulate world matrices.
+ * Flat scene-tree entry, mirrors the bongle pipeline's `SceneNodeInfo` shape so the runtime
+ * hydrator and codegen barrel produce equivalent `ModelHandle.scene` trees from the same data.
+ * DFS order: parents always precede children, so a one-pass build resolves `parent` indices.
  */
 const sceneNodeSchema = packcat.object({
     /** unique within model (parser dedupe via numeric suffix). */

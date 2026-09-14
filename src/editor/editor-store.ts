@@ -1,19 +1,3 @@
-/**
- * global editor store, fields that are NOT tied to a specific edit room.
- * per-player-session state (active tool, selection, transform options,
- * inventory session state, undo mirror, etc.) lives on per-player stores in
- * `edit-room-store.ts`, registered here under `playerEditStores`.
- *
- * Maps that vary across joined players (edit state, lens view, edit store)
- * are keyed by `PlayerId`, not `roomId`, a single roomId can have both a
- * play-mode and an edit-mode ClientRoom joined simultaneously, each with
- * its own independent editor state.
- *
- * UI components read global concerns from `useEditor` and per-player
- * concerns via `useEditRoom`, which derives the active player's store from
- * `useEditor.room.playerId` + `useEditor.playerEditStores`.
- */
-
 import { create } from 'zustand';
 import type { ClientRoom } from '../client/rooms';
 import { useClient } from '../client/ui/stores/client-store';
@@ -34,113 +18,68 @@ export type JoinedPlayer = {
 };
 
 export type EditorStore = {
-    /* ── active player / room pointers (describe *which* room is focused) ── */
     mode: 'edit' | 'play';
-    /** the active room's authoritative mode. may differ from `mode` (player
-     *  view mode) when the user joins a play room with playerMode='edit'. */
+    /** the active room's authoritative mode; may differ from `mode` when the user joins a play room with playerMode='edit'. */
     roomMode: 'edit' | 'play';
-    /** true between a Play request (Tab / Play button) being sent and the
-     *  spawned play room activating. drives the Play button's loading state.
-     *  set by `edit-room-store.play()`, cleared deterministically when the
-     *  play room activates (`setRoomMode`), with a timeout fallback in
-     *  `setPlayPending` so a silent spawn failure can't leave it stuck. */
+    /** true between a Play request being sent and the spawned play room activating; drives the Play button's loading state.
+     *  cleared by `setRoomMode` on activation, with a timeout fallback in `setPlayPending` for a silent spawn failure. */
     playPending: boolean;
     roomId: string | null;
     sceneId: string | null;
     room: ClientRoom | null;
 
-    /* ── room registries ── */
-    /** one entry per ClientRoom the client holds; derived from `useClient.rooms`
-     *  by the subscription at the bottom of this file. */
+    /** one entry per ClientRoom the client holds; derived from `useClient.rooms` by the subscription at the bottom of this file. */
     joinedPlayers: JoinedPlayer[];
-    /** per-player edit stores, keyed by PlayerId. populated from
-     *  EditorScript onInit; the active store is `playerEditStores[room.playerId]`.
-     *  keyed by player so play- and edit-mode joins to the same roomId hold
-     *  independent stores. */
+    /** keyed by PlayerId (not roomId) so play- and edit-mode joins to the same roomId hold independent stores. */
     playerEditStores: Record<PlayerId, EditRoomStoreApi>;
 
-    /* ── shared resources ── */
-    /** the engine's resource bag, bound by `loadEditorAssets` (icons.ts); the icon
-     *  loaders read the byte loader off it. */
+    /** the engine's resource bag, bound by `loadEditorAssets` (icons.ts); icon loaders read the byte loader off it. */
     resources: Resources | null;
 
-    /* ── blueprints (editor-only) ──
-     * Payloads pulled in by `blueprints.ts` from the injected scene source
-     * (the browser editor's OPFS). Keyed by scene id (always `blueprints/...`);
-     * read by the inventory + placement tool to look up node trees without
-     * consulting the runtime scene registry. */
+    /** payloads pulled in by `blueprints.ts` from the injected scene source, keyed by scene id (always `blueprints/...`). */
     blueprints: Map<string, ScenePayload>;
     setBlueprint: (id: string, payload: ScenePayload) => void;
     removeBlueprint: (id: string) => void;
 
-    /* ── scene list (editor-only) ──
-     * The authoritative scene set, listed by `blueprints.ts` from the injected
-     * scene source. Includes every `scene()`-declared id and (in edit mode)
-     * every `blueprints/...` file on disk. Read by the scenes drawer, inventory,
-     * and the blueprint sync loop itself. */
+    /** every `scene()`-declared id plus, in edit mode, every `blueprints/...` file on disk. */
     sceneList: string[];
     setSceneList: (sceneList: string[]) => void;
 
-    /* ── voxel icon atlas ── */
     blockIconAtlasUrl: string | null;
     blockIconCoords: Record<string, [number, number]>;
     blockIconPx: number;
     blockIconCols: number;
     blockIconRows: number;
-    /** prefab icons, rendered per-prefab in-browser on demand. prefabId → object
-     *  URL. absent = not yet rendered (the inventory triggers a render on first
-     *  display); cleared + revoked on registry change. */
+    /** prefabId -> object URL, rendered per-prefab in-browser on demand. absent = not yet rendered. */
     prefabIconUrls: Record<string, string>;
 
-    /* ── per-player scene-view (tabs) ── */
-    // which perspective the user is viewing the scene through. only present
-    // while a play-mode player has a lens, entries are seeded by
-    // enterLocalEditorView (writes 'edit') and cleared by exitLocalEditorView.
-    // Tabs in the toolbar subscribe here; click handlers in lens.ts call
-    // `setRoomView` after running the imperative POV swap.
+    /** which perspective the user is viewing the scene through; only present while a play-mode
+     *  player has a lens, seeded by enterLocalEditorView and cleared by exitLocalEditorView. */
     playerToView: Map<PlayerId, 'edit' | 'play'>;
-    /** the local editor lens on each play-mode player's room (lens.ts), keyed by
-     *  player. entries come and go with enter/exitLocalEditorView and are dropped
-     *  with the room; the toolbar keys its lens tabs on this map's identity. */
+    /** the local editor lens on each play-mode player's room (lens.ts), keyed by player. */
     lenses: Map<PlayerId, Lens>;
 
-    /* ── network latency simulation (editor dev only) ──
-     * When enabled, edit-client's RAF loop holds outbound + inbound WS
-     * frames to simulate round-trip latency; `netSimRttMs` is split in
-     * half across each direction. `netSimJitterMs` adds a per-frame uniform
-     * random [0, jitter] on top, so releases are unevenly spaced — the
-     * variable-latency condition that exercises snapshot interpolation and
-     * the server-clock estimator (a constant delay alone spaces releases
-     * evenly and hides jitter). Read by the edit-client realm via
-     * `useEditor.getState()` each frame. Per-session, never persisted. */
+    /** editor dev only: edit-client's RAF loop holds WS frames to simulate round-trip latency,
+     *  split in half across each direction. */
     netSimEnabled: boolean;
     netSimRttMs: number;
+    /** per-frame uniform random [0, jitter] added on top of netSimRttMs. */
     netSimJitterMs: number;
-    /** occasional head-of-line stall size (ms) and its per-frame probability. This
-     *  is the bursty, correlated delay a real WAN link produces — the shape that
-     *  actually breaks remote interpolation (freeze-and-snap), which steady rtt/jitter
-     *  can't reproduce. 0 stall disables it. */
+    /** occasional head-of-line stall size (ms) and its per-frame probability, the bursty WAN
+     *  delay shape that breaks remote interpolation (freeze-and-snap). 0 disables it. */
     netSimBurstMs: number;
     netSimBurstChance: number;
 
-    /* ── debug view toggles, global (shared across rooms). read by the editor's
-     *  per-room update loop (client.ts) + the orientation-cube overlay. per-session,
-     *  never persisted. ── */
     showPhysicsColliders: boolean;
     showGrid: boolean;
     showOrientationCube: boolean;
     showChunkBoundaries: boolean;
 
-    /* ── hotbar (localStorage-persisted user palette, shared across rooms) ── */
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
 
-    /* ── room registry actions ── */
-    /** register the per-player edit store for a ClientRoom into `playerEditStores`
-     *  (the `useEditRoom` React hook + the page-level listeners read it there).
-     *  Keyed by `room.playerId`. Pass `null` on dispose. */
+    /** registers the per-player edit store for a ClientRoom into `playerEditStores`, keyed by `room.playerId`. pass `null` on dispose. */
     registerEditRoomStore: (room: ClientRoom, store: EditRoomStoreApi | null) => void;
 
-    /* ── setters ── */
     setMode: (mode: 'edit' | 'play') => void;
     setRoomMode: (roomMode: 'edit' | 'play') => void;
     setPlayPending: (pending: boolean) => void;
@@ -152,10 +91,8 @@ export type EditorStore = {
     clearRoomView: (playerId: PlayerId) => void;
     setLens: (playerId: PlayerId, lens: Lens | null) => void;
 
-    /* ── hotbar ── */
     setHotbarSlot: (index: number, item: HotbarSlot) => void;
 
-    /* ── net sim ── */
     setNetSimEnabled: (enabled: boolean) => void;
     setNetSimRttMs: (ms: number) => void;
     setNetSimJitterMs: (ms: number) => void;
@@ -167,14 +104,11 @@ export type EditorStore = {
     setShowChunkBoundaries: (show: boolean) => void;
 };
 
-// fallback release for the Play spinner. the play room normally activates in
-// well under a second; this only fires if the spawn fails silently (there's no
-// `play_failed` protocol message), so the button can't get stuck spinning.
+// fallback release for the Play spinner if the spawn fails silently (no `play_failed` protocol message).
 const PLAY_PENDING_TIMEOUT_MS = 15_000;
 let playPendingTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useEditor = create<EditorStore>((set, _get) => ({
-    /* ── initial state ── */
     mode: 'edit',
     roomMode: 'edit',
     playPending: false,
@@ -228,7 +162,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     hotbar: loadHotbar(),
 
-    /* ── room registry ── */
     registerEditRoomStore: (room, store) => {
         set((s) => {
             const next = { ...s.playerEditStores };
@@ -238,13 +171,9 @@ export const useEditor = create<EditorStore>((set, _get) => ({
         });
     },
 
-    /* ── setters ── */
     setMode: (mode) => set({ mode }),
     setRoomMode: (roomMode) => {
-        // room activation is the deterministic "Play resolved" signal: a
-        // successful play spawns + activates the play room, flipping roomMode
-        // to 'play'. clear the pending spinner on any activation (switching to
-        // another room while a play is in flight abandons it too).
+        // any room activation clears the pending spinner, including switching rooms mid-play-request.
         useEditor.getState().setPlayPending(false);
         set({ roomMode });
     },
@@ -264,12 +193,8 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setRoomId: (roomId) => set({ roomId }),
     setSceneId: (sceneId) => set({ sceneId }),
     setRoom: (room) => {
-        // lazy first-run hotbar seed. loadHotbar() runs at module init, before
-        // the block registry is populated, so the default can't be computed
-        // there; the first activated room is our "registry is ready" signal.
-        // seeds only when nothing was ever persisted, and the write persists
-        // (via the subscribe below), so a hotbar the user later empties is left
-        // alone. no-op on subsequent room switches once a hotbar exists.
+        // loadHotbar() runs at module init before the block registry is populated, so the
+        // default seeds here instead, on the first activated room; no-op once a hotbar exists.
         if (room && !hasStoredHotbar()) {
             const seed = defaultHotbar();
             if (seed.some((slot) => slot !== null)) {
@@ -322,9 +247,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setShowChunkBoundaries: (showChunkBoundaries) => set({ showChunkBoundaries }),
 }));
 
-// persist hotbar slot changes to localStorage. only fires when the array
-// reference changes (setHotbarSlot makes a new array), so other state
-// updates don't trigger writes.
+// only fires when the array reference changes (setHotbarSlot makes a new array).
 let lastSavedHotbar = useEditor.getState().hotbar;
 useEditor.subscribe((state) => {
     if (state.hotbar !== lastSavedHotbar) {
@@ -333,21 +256,16 @@ useEditor.subscribe((state) => {
     }
 });
 
-// the engine writes the room set + active player into the client store; the
-// editor's active-room pointers and the joined-player list derive from those.
 function applyClientRooms(rooms: Map<PlayerId, ClientRoom>, activePlayerId: PlayerId | null): void {
     const editor = useEditor.getState();
     const players: JoinedPlayer[] = [];
     for (const room of rooms.values()) players.push({ playerId: room.playerId, roomId: room.roomId, mode: room.playerMode });
     editor.setJoinedPlayers(players);
 
-    // per-player editor state for a room the client no longer holds goes with it:
-    // the lens nodes died with the scene, the POV choice has nothing to apply to.
+    // drop per-player editor state for a room the client no longer holds.
     for (const playerId of editor.lenses.keys()) if (!rooms.has(playerId)) editor.setLens(playerId, null);
     for (const playerId of editor.playerToView.keys()) if (!rooms.has(playerId)) editor.clearRoomView(playerId);
 
-    // `room.playerId` keys the active per-player store for useEditRoom (which
-    // derives from `playerEditStores[room.playerId]`).
     const room = activePlayerId != null ? (rooms.get(activePlayerId) ?? null) : null;
     if (room) {
         editor.setMode(room.playerMode);

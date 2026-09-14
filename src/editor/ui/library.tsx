@@ -1,18 +1,3 @@
-/**
- * library overlay, floating panel for browsing and managing project content.
- *
- * shown when `libraryOpen` is true (toggled with E). top-level tabs:
- *   - inventory: catalog of blocks, prefabs, blueprints. click an item to
- *     pick it up (minecraft-style carry), then click a hotbar slot to bind
- *     it. while an item is hovered, 1-9 binds it directly to that slot.
- *   - scenes:    list of every scene on disk (scenes have no icon). click to
- *     open (switches to an existing edit room if one's already open). row
- *     hover surfaces rename + delete; a "create new" input is pinned at the
- *     bottom.
- *
- * esc or E again closes.
- */
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
 import {
@@ -55,12 +40,10 @@ export function LibraryOverlay() {
     const close = useEditRoom((s) => s.setLibraryOpen);
     const [tab, setTab] = useState<Tab>('inventory');
 
-    // free the cursor while open so the user can interact with the overlay;
-    // otherwise fly/character controllers re-grab pointer lock on canvas click.
-    // the engine re-locks on the next canvas click after this closes.
+    // otherwise fly/character controllers re-grab pointer lock on canvas click while this is open.
     useReleasePointer('editor:library', open);
 
-    // close on Esc (and drop carry implicitly via setLibraryOpen).
+    // drops carry implicitly via setLibraryOpen.
     useEffect(() => {
         if (!open) return;
         const onKey = (e: KeyboardEvent) => {
@@ -76,11 +59,9 @@ export function LibraryOverlay() {
     if (!open) return null;
 
     return (
-        // floating panel, positioned, no full-screen backdrop, doesn't block
-        // clicks on the rest of the editor (canvas + hotbar remain interactive).
+        // no full-screen backdrop, so canvas + hotbar remain interactive while this is open.
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
             <div className="bg-surface shadow-xl border border-border w-[640px] max-w-[90vw] max-h-[70vh] flex flex-col">
-                {/* header */}
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
                     <span className="text-sm font-mono text-fg flex-1">library</span>
                     <button
@@ -93,7 +74,6 @@ export function LibraryOverlay() {
                     </button>
                 </div>
 
-                {/* top-level tab strip */}
                 <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
                     <TopTab label="inventory" active={tab === 'inventory'} onClick={() => setTab('inventory')} />
                     <TopTab label="scenes" active={tab === 'scenes'} onClick={() => setTab('scenes')} />
@@ -119,20 +99,14 @@ function TopTab({ label, active, onClick }: { label: string; active: boolean; on
     );
 }
 
-/* ── inventory tab ───────────────────────────────────────────────── */
-
 function InventoryTab() {
     const room = useEditor((s) => s.room);
     const sceneList = useEditor((s) => s.sceneList);
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<Filter>('all');
 
-    // 1-9 over a hovered tile binds it to that hotbar slot. handled at the DOM
-    // layer rather than the per-frame shortcut loop so it also works while the
-    // search box has focus (the engine drops every key while a text input is
-    // focused). stopPropagation keeps the engine's window listener from also
-    // reading the digit as a plain slot select; preventDefault keeps it out of
-    // the search text. with no tile hovered the event passes through untouched.
+    // handled at the DOM layer (not the per-frame shortcut loop) so 1-9 binds a hovered tile to
+    // that hotbar slot even while the search box has focus, which the engine's own loop ignores.
     const hovered = useEditRoom((s) => s.hoveredInventoryItem);
     useEffect(() => {
         if (!hovered) return;
@@ -163,7 +137,6 @@ function InventoryTab() {
 
     return (
         <>
-            {/* filter + search */}
             <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
                 <FilterTab label="all" active={filter === 'all'} onClick={() => setFilter('all')} />
                 <FilterTab label="blocks" active={filter === 'bongle'} onClick={() => setFilter('bongle')} />
@@ -178,7 +151,6 @@ function InventoryTab() {
                 />
             </div>
 
-            {/* grid */}
             <div className="overflow-y-auto p-2 flex-1">
                 {filtered.length === 0 ? (
                     <div className="text-[12px] font-mono text-fg-muted px-2 py-4 text-center">no items</div>
@@ -208,9 +180,8 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
     const display = inventoryItemDisplay(item, room);
 
     return (
-        // HoverCard wraps the tile (a plain div anchor) so its hover snippet stays
-        // independent of the button's click/right-click, which drive carry + the
-        // details Popover. Both popups portal, so the scrolling grid can't clip them.
+        // wraps the tile in a plain div anchor so the hover snippet stays independent of the
+        // button's click/right-click, which drive carry + the details Popover.
         <HoverCard>
             <HoverCardTrigger asChild>
                 <div className="relative">
@@ -219,7 +190,7 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
                             <button
                                 type="button"
                                 onMouseEnter={() => setHovered(item)}
-                                onMouseLeave={() => setHovered(null) /* next enter sets it again */}
+                                onMouseLeave={() => setHovered(null)}
                                 onClick={() => setCarried(isCarried ? null : item)}
                                 onContextMenu={(e) => {
                                     e.preventDefault();
@@ -254,7 +225,6 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
     );
 });
 
-/** the hover card body: a compact info snippet plus how to equip the item. */
 function InventoryHoverBody({ item, display }: { item: InventoryItem; display: { name: string; id: string; title: string } }) {
     // a meaningful sub-line: the block's state suffix, or the prefab's type.
     const detail =
@@ -327,8 +297,7 @@ function PrefabInfoRows({ prefabId }: { prefabId: string }) {
     if (!room) return null;
     const def = registry.prefabs.byId.get(prefabId);
     if (!def) return null;
-    // realm = where it instantiates (client/server/shared); args = its
-    // parameter names, so you can tell a configurable prefab from a fixed one.
+    // args lists parameter names, so you can tell a configurable prefab from a fixed one.
     const realm = def.node?.realm;
     const argsDefault = def.args?.default;
     const argKeys = argsDefault && typeof argsDefault === 'object' ? Object.keys(argsDefault) : [];
@@ -346,8 +315,7 @@ function PrefabInfoRows({ prefabId }: { prefabId: string }) {
 function BlockInfoRows({ blockKey }: { blockKey: string }) {
     const blocks = registry.blockRegistry;
     if (!blocks) return null;
-    // resolve the specific state so every attribute reflects THIS variant, read
-    // straight from the frozen per-state tables (authoritative, no def-fn calls).
+    // reads straight from the frozen per-state tables so every attribute reflects this exact variant.
     const parsed = parseKey(blockKey);
     const stateProps = parsed ? Object.entries(parsed.props) : [];
     const sid = resolveKey(blocks, blockKey);
@@ -362,7 +330,6 @@ function BlockInfoRows({ blockKey }: { blockKey: string }) {
 
     return (
         <>
-            {/* the state's own props (facing, half, ...), one row each. */}
             {stateProps.map(([name, value]) => (
                 <AttrRow key={name} label={name} value={value} />
             ))}
@@ -377,8 +344,7 @@ function BlockInfoRows({ blockKey }: { blockKey: string }) {
     );
 }
 
-/** a compact, non-copyable label/value row for resolved attributes (the copy
- *  affordance is reserved for the id). */
+// non-copyable; the copy affordance is reserved for the id row (InfoRow).
 function AttrRow({ label, value }: { label: string; value: string }) {
     return (
         <div className="flex items-center gap-1.5">
@@ -430,8 +396,6 @@ function FilterTab({ label, active, onClick }: { label: string; active: boolean;
         </button>
     );
 }
-
-/* ── scenes tab ──────────────────────────────────────────────────── */
 
 function nextSceneName(existing: string[]): string {
     const set = new Set(existing);
@@ -492,7 +456,6 @@ function ScenesTab() {
 
     return (
         <>
-            {/* scene list */}
             <div className="overflow-y-auto py-1 flex-1">
                 {sortedScenes.length === 0 ? (
                     <div className="text-[12px] font-mono text-fg-muted px-2 py-4 text-center">no scenes</div>
@@ -514,7 +477,6 @@ function ScenesTab() {
                 )}
             </div>
 
-            {/* create new */}
             <div className="px-3 py-2 border-t border-border">
                 <div className="flex items-center gap-1">
                     <input
@@ -593,7 +555,7 @@ function SceneRow({
                 isActive ? 'bg-accent' : 'bg-surface-muted hover:bg-border'
             }`}
         >
-            {/* name / rename (scenes have no icon — plain row) */}
+            {/* scenes have no icon, so this is a plain text row */}
             {editing ? (
                 <input
                     ref={inputRef}
@@ -622,7 +584,6 @@ function SceneRow({
                 </button>
             )}
 
-            {/* hover-only action chips, trailing */}
             {!editing && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
                     {isPrefabSource && (

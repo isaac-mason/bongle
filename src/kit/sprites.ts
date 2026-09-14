@@ -1,26 +1,3 @@
-/**
- * Starter pack particle sprites. Source pngs live in `assets/textures/` with
- * every other picture the pack ships: `texture()` is what a png declares, and
- * `tile()` / `sprite()` are the two things built from one, so a split by
- * consumer put the same kind of file in two places.
- *
- * Pixel-art textures sourced from
- * minetest_game (CC BY-SA 3.0) and Mineclonia/VoxeLibre (GPL-3.0 /
- * CC BY-SA 4.0). Each `sprite()` sources its pixels via
- * `asset('./…', import.meta.url)`, so they ship alongside this module and
- * resolve relative to it wherever the starter package is installed; the
- * pipeline reads the resolved path at bake time.
- *
- * Exposed individually so the package index re-exports them as
- * `export * as sprites`. Consumers reach them as `sprites.smoke`,
- * `sprites.snowflake`, etc., and pass them straight into
- * `particlePresets.smoke('puff', { sprite: sprites.smoke })`.
- *
- * `mipmap: false` across the board, pixel-art particles look mushy
- * with mips and these textures are tiny enough that mipping buys
- * nothing for atlas memory.
- */
-
 import { asset, sprite } from 'bongle';
 import {
     beetrootItem as beetrootItemTexture,
@@ -55,14 +32,9 @@ export const smoke = sprite('kit:smoke', {
 
 /** 12×12 snowflake. VoxeLibre mcl_weather (snowflake4, the largest
  *  of the 11 weather-pack flakes that's still cleanly readable). */
-// `kit:snowflake`, NOT `kit:snow`: that id already belongs to the snow block TILE,
-// and ids are shared across tiles and sprites. The collision put this 12x12
-// snowflake - transparent everywhere except the flake - into the block atlas layer
-// the terrain samples, so snow blocks rendered the flake's cutout as black holes.
-//
-// The FILE is `snowflake.png` for the same reason. It was `sprites/snow.png`, and
-// once every source png shares one directory that name collides with the snow
-// block's own texture on disk, which is the same mistake one layer down.
+// `kit:snowflake`, not `kit:snow`: that id belongs to the snow block tile, and ids
+// are shared across tiles and sprites. The file is `snowflake.png` to avoid the
+// same collision with the snow block's own texture on disk.
 export const snowflake = sprite('kit:snowflake', {
     src: asset('./assets/textures/snowflake.png', import.meta.url),
     mipmap: false,

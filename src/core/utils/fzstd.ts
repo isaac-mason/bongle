@@ -1,18 +1,9 @@
-// Vendored Zstandard decompressor, decode-only.
-//
-// Source: fzstd v0.1.1 (https://github.com/101arrowz/fzstd) by Arjun Barrera,
-// MIT licensed. The streaming Decompress class is dropped (chunks arrive as
-// whole frames), leaving the one-shot decompress() path.
-//
-// Two hot-path patches over upstream (each marked `bongle patch`):
-//   1. the RLE-mode sequence table literal is built with the same key order as
-//      rfse's FSE table {b,s,n,t}, so the sequence loop reads one monomorphic
-//      hidden class instead of two.
-//   2. long literal/match runs copy via copyWithin instead of a scalar loop,
-//      gated on CWMIN so short runs dodge copyWithin's fixed call overhead.
-// Measured ~1.05-1.3x decode on busy voxel chunks, weighted toward the costly ones.
+// Vendored Zstandard decompressor, decode-only. Adapted from fzstd v0.1.1
+// (https://github.com/101arrowz/fzstd) by Arjun Barrera, MIT licensed. The
+// streaming Decompress class is dropped, leaving the one-shot decompress() path.
+// Hot-path deviations from upstream are marked `bongle patch` at each site.
 
-// Some numerical data is initialized as -1 even when it doesn't need initialization to help the JIT infer types
+// numerical data is initialized as -1 even when unneeded, to help the JIT infer types
 
 // bulk-copy threshold: runs >= CWMIN bytes use copyWithin, shorter stay scalar
 const CWMIN = 16;
@@ -33,7 +24,6 @@ type FSEDT = HDT & {
     t: Uint16Array;
 };
 
-// decompress Zstandard state
 type DZstdState = {
     // byte
     b: number;
@@ -85,7 +75,6 @@ export const ZstdErrorCode = {
 
 type ZEC = (typeof ZstdErrorCode)[keyof typeof ZstdErrorCode];
 
-// error codes
 const ec: Record<ZEC, string | undefined> = [
     'invalid zstd data',
     'window size too large (>2046MB)',
@@ -583,7 +572,7 @@ const rzb = (dat: Uint8Array, st: DZstdState, out?: Uint8Array): Uint8Array | un
             for (let i = 2; i > -1; --i) {
                 const md = (scm >> ((i << 1) + 2)) & 3;
                 if (md === 1) {
-                    // rle buf — key order matches rfse's table {b,s,n,t} so the sequence
+                    // rle buf, key order matches rfse's table {b,s,n,t} so the sequence
                     // loop below reads one monomorphic hidden class (bongle patch)
                     const rbuf = new Uint8Array([0, 0, dat[bt++]]);
                     dts[i] = {

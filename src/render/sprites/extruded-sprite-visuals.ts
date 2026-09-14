@@ -1,44 +1,3 @@
-// ExtrudedSpriteVisuals, per-room HW-instanced renderer for
-// ExtrudedSpriteTrait instances.
-//
-// Material + silhouette mesh pool live engine-global on
-// `ExtrudedSpriteResources`. This per-room struct owns only the stable
-// per-slot `instanceData`, the per-frame slotMap + drawIndexedIndirect
-// array, and the alive-state bookkeeping. Pool buffers bind into our
-// geometry as the HW `vertex` attribute + geometry index; per-room
-// read-only storage (instanceData, slotMap) routes to the engine-global
-// material by name via `geometry.setBuffer(name, buf)` (native SSBO on
-// WebGPU, auto-lowered to buffer-texture reads on WebGL2). Env is the
-// shared uniform captured by the material, not a per-room binding.
-//
-// Architecture mirrors mesh-visuals.ts:
-//   - engine-global geometry pool (in ExtrudedSpriteResources): interleaved
-//     ExtrudedVertex (vertex usage) + u32 index (index usage). Lazily
-//     baked, refcounted, shared across rooms.
-//   - stable per-slot `instanceData` (mat4x4f worldMatrix +
-//     InstanceMaterial, uvRect / tint / flash / light / glow / unlit / litMin / dither).
-//     Written every frame for visible slots; never zeroed on destroy
-//     because the next allocation overwrites before use.
-//   - per-frame `slotMap` (u32[]) + `mesh.draws` (MeshDraw[]) rebuilt from
-//     the visible subset by bucketing each visible state by
-//     `geomSlot.bucketKey`, writing the bucket's stable slots contiguously
-//     into slotMap, and appending one MeshDraw covering that range. The
-//     renderer loops `mesh.draws` (one instanced draw per entry) — the
-//     portable replacement for WebGPU-only indirect draws.
-//
-// Visibility:
-//   - every instance owns a frustum-cull entry on its state (`cull`, sized
-//     from the bake's pixel dims × worldScale + depth*worldScale on Z),
-//     registered with the room culler at alloc. Visibility frustum-culls it
-//     once per frame; the per-frame loop reads `cull.visible && trait.visible`
-//     and skips invisible instances, no per-slot visible flag, visibility =
-//     "got included in some bucket this frame".
-//
-// Atlas swap invalidates every cached silhouette in the engine-global
-// pool. `registry-dispatch.ts:refreshSpriteResources` calls
-// `clearGeometryPool` on the pool and disposes + re-inits each room's
-// ExtrudedSpriteVisuals, re-init's first frame re-acquires lazily.
-
 import { packTo, type Scene } from 'gpucat';
 import type { Mat4 } from 'math';
 import { box3 } from 'math/shapes';
@@ -64,8 +23,6 @@ import {
 import type { SpriteEntry } from './sprite-resources';
 
 type ExtrudedSpriteQuery = ReturnType<typeof query<[typeof ExtrudedSpriteMeshTrait, typeof TransformTrait]>>;
-
-// ── per-instance state ──────────────────────────────────────────────
 
 /** Renderer-owned per-instance state stored on `ExtrudedSpriteTrait._state`.
  *  Created on first sight, cleared (back to null on the trait) when the
@@ -103,12 +60,10 @@ export type ExtrudedSpriteVisuals = {
     scene: Scene;
 };
 
-// ── init ────────────────────────────────────────────────────────────
-
 /**
  * Create per-room extruded-sprite visuals: ready the client-global instance
  * batch (reset its allocator + scratch + draws, buffers untouched) and mount its
- * Mesh into this room's scene. The batch — Mesh, Geometry, per-slot buffers — is
+ * Mesh into this room's scene. The batch (Mesh, Geometry, per-slot buffers) is
  * owned by `ExtrudedSpriteResources` and survives room swaps; only this room's
  * use of it (alive-states, cull entries, scene-tree query) lives here.
  */
@@ -122,8 +77,6 @@ export function init(batch: ExtrudedSpriteBatch, scene: Scene, sceneTree: SceneT
         scene,
     };
 }
-
-// ── update ──────────────────────────────────────────────────────────
 
 /**
  * Per-frame update.
@@ -152,7 +105,7 @@ export function update(
     let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
     let dirtyMaxSlot = -1;
 
-    // ── phase 1: allocate / refresh states ──────────────────────────
+    // phase 1: allocate / refresh states
     for (const [trait, _transform] of visuals._query) {
         const sprite = trait.sprite;
         if (!sprite) {
@@ -183,8 +136,7 @@ export function update(
         const transform = getTrait(trait._node, TransformTrait);
         if (!transform) continue;
 
-        // own frustum-cull box from the baked silhouette's pixel dims ×
-        // per-axis scale (worldScale on x/y, depth*worldScale on z).
+        // own frustum-cull box from the baked silhouette's pixel dims times per-axis scale (worldScale on x/y, depth*worldScale on z).
         const sx = trait.worldScale;
         const sy = trait.worldScale;
         const sz = trait.depth * trait.worldScale;
@@ -207,14 +159,14 @@ export function update(
         visuals.aliveStates.push(state);
     }
 
-    // ── phase 2: cleanup stale states ───────────────────────────────
+    // phase 2: cleanup stale states
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
         if (state.lastSeenFrame !== frameId) destroyInstance(visuals, batch, state.trait, resources, visibility);
     }
 
-    // ── phase 3: per-instance writes + per-sprite bucket sort ───────
+    // phase 3: per-instance writes + per-sprite bucket sort
     const buckets = batch._bucketScratch;
     const freeBuckets = batch._freeBuckets;
     const bucketSlotRef = batch._bucketSlotRef;
@@ -264,7 +216,7 @@ export function update(
         if (slot < dirtyMinSlot) dirtyMinSlot = slot;
         if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
 
-        // ── bucket by geomSlot.bucketKey ─────────────────────────
+        // bucket by geomSlot.bucketKey
         const key = geomSlot.bucketKey;
         let bucket = buckets.get(key);
         if (bucket === undefined) {
@@ -275,7 +227,7 @@ export function update(
         bucketSlotRef.set(key, geomSlot);
     }
 
-    // ── phase 4: pack slotMap + mesh.draws ──────────────────────────
+    // phase 4: pack slotMap + mesh.draws
     const slotMapArr = batch.slotMapBuf.array as Uint32Array;
     const draws = batch.draws;
 
@@ -332,8 +284,7 @@ export function update(
  * Dispose per-room extruded-sprite visuals: release every slot this room holds
  * in the client-global batch (frees the allocator entries, unregisters cull,
  * drops the geometry-pool refcount, clears `trait._state`) and detach the batch
- * Mesh from this room's scene. The batch's GPU buffers are NOT freed — they
- * survive for the next room's `init`.
+ * Mesh from this room's scene. The batch's GPU buffers are not freed; they survive for the next room's `init`.
  */
 export function dispose(
     visuals: ExtrudedSpriteVisuals,
@@ -345,8 +296,6 @@ export function dispose(
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, resources, visibility);
     visuals.scene.remove(batch.mesh);
 }
-
-// ── internals ───────────────────────────────────────────────────────
 
 function destroyInstance(
     visuals: ExtrudedSpriteVisuals,

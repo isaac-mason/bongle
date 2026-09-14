@@ -1,18 +1,3 @@
-// Bakes computed textures to in-memory raster surfaces before the atlas builders run.
-//
-// Walks the TEXTURE STORE rather than scraping consumer registries for embedded
-// descriptors, which is the whole point of textures having identity: the set of things to
-// bake is a store, results are keyed by texture id, a texture referenced by several
-// consumers bakes once, and a cycle names the texture that closed the loop instead of
-// reporting an anonymous descriptor.
-//
-// File textures are not baked — the atlas builders load them from disk. Only computed ones
-// run a draw fn, and their `inputs` are resolved through the store: a file input is loaded
-// and decoded, a computed input is baked first (depth-first, memoised).
-//
-// No disk cache: the atlas builders' own content hashes decide whether anything is
-// rewritten downstream.
-
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { TextureDef } from '../../core/textures/textures';
@@ -56,9 +41,8 @@ export async function bakeTextures(textures: KindStore<TextureDef>, opts: BakeTe
     if (computed.length === 0) return baked;
 
     console.log(`[bongle] baking ${computed.length} computed texture(s)...`);
-    // Each root gets its own cycle guard — the guard tracks ANCESTRY within one chain, not
-    // global in-flight-ness — while `inFlight` is shared so a texture several others draw
-    // from still bakes once.
+    // each root gets its own cycle guard (tracks ancestry within one chain, not global
+    // in-flight-ness), while `inFlight` is shared so a texture several others draw from still bakes once.
     await mapConcurrent(computed, BAKE_CONCURRENCY, (def) =>
         bakeOne(def.id, textures, baked, inFlight, imageCache, opts.loader, opts.raster, new Set()),
     );

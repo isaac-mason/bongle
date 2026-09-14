@@ -1,15 +1,4 @@
-// a shared requestAnimationFrame loop. controllers that `listen()` for external
-// changes, live monitors/graphs, and `show()`/`disable()` predicates register a
-// callback here; the loop only runs while at least one callback is registered and
-// the ticker is not paused.
-//
-// in `manual` mode the loop never self-drives — the host calls `tick()` (via
-// `dashboard.update()`) once per frame, so every widget samples in phase with the
-// caller's own loop and shares one coherent snapshot per update.
-
-// handlers receive the tick's timestamp (ms). in auto mode it's the rAF time; in
-// manual mode it's whatever `dashboard.update(now?)` passed (default performance.now()).
-// throttling reads this, so `interval` honors the caller's clock when stepping off-realtime.
+// timestamp is ms: rAF time in auto mode, whatever `dashboard.update(now?)` passed in manual mode.
 export type TickHandler = (now: number) => void;
 
 export type Ticker = {
@@ -31,8 +20,7 @@ export function createTicker(opts: { manual?: boolean } = {}): Ticker {
     let paused = false;
 
     const tick = (now: number = performance.now()) => {
-        // isolate handlers: a getter that throws (a stale live source, a transient
-        // null) must not kill the rAF loop and freeze every other widget's history.
+        // a throwing handler must not kill the rAF loop for every other widget.
         for (const handler of handlers) {
             try {
                 handler(now);

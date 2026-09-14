@@ -1,6 +1,3 @@
-// value formatters for monitors & graphs. the built-ins auto-scale magnitude so
-// a metrics dashboard reads naturally: 1.4 GB, 12.4 ms, 1.2K, 58 fps.
-
 export type Formatter = (value: number) => string;
 
 // ~3 significant figures, scaled by magnitude

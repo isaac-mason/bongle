@@ -1,42 +1,5 @@
-// Pixel-extrusion bake, turns a sprite's union silhouette into a 3D
-// mesh suitable for the "MC item/generated" look.
-//
-// Input: SpriteResources (atlas pixels + per-sprite frame regions).
-// Output: a gpucat Geometry with position + uv (vec3f / vec2f), indexed.
-//
-// Algorithm:
-//   1. Resolve the sprite's frame regions in atlas-pixel coords.
-//   2. Build the UNION silhouette across all frames: a pixel (i, j) in
-//      sprite-local coords is "extruded" if it is opaque in *any* frame.
-//      Animated sprites whose silhouette shifts per-frame thus share one
-//      mesh, frames where a pixel is transparent simply sample alpha=0
-//      at render time (the local-uv → atlas-uv remap in the material
-//      hits the current frame's atlas region).
-//   3. For each opaque pixel emit a unit-pixel cube (1 × 1 × 1 in source
-//      pixels). Front + back faces always; side faces only on
-//      boundaries with non-opaque neighbours (greedy-mesh-lite). Per
-//      face: 4 vertices + 6 indices.
-//   4. Per-vertex UVs are constant per pixel, `(i + 0.5)/W`,
-//      `(j + 0.5)/H` in sprite-local [0..1] space, so all faces of a
-//      pixel sample that pixel's centre. The material then remaps
-//      local-uv → atlas-uv via the current frame's `uvRect` uniform,
-//      so frame swaps cost one uniform update (not a re-bake).
-//
-// Coordinate convention:
-//   - sprite-local space, source pixels, centred on the local origin:
-//     X right (-W/2..+W/2), Y up (-H/2..+H/2), Z front-to-back
-//     (-0.5..+0.5). Centring keeps the trait's transform rotating /
-//     scaling about the sprite's middle. World scaling happens at draw
-//     time (caller multiplies axes by worldScale, and Z by depth).
-//   - matches the SpriteVisuals plane orientation (UV origin top-left
-//     in atlas, V grows downward); we flip V at vertex emit so the
-//     baked mesh in world space has Y growing up like the rest of the
-//     scene while still sampling the atlas correctly.
-
 import type { SpriteAtlasMetadata } from '../../core/sprites/atlas';
 import type { SpriteResources } from './sprite-resources';
-
-// ── public api ──────────────────────────────────────────────────────
 
 /** Raw bake output, vertex/index arrays ready to upload into an
  *  uber-buffer pool. `pixelWidth/pixelHeight` carry the native sprite
@@ -50,14 +13,11 @@ export type ExtrudedSpriteMesh = {
 };
 
 /**
- * Bake a sprite's union-silhouette extruded mesh into raw vertex/index
- * arrays. Returns `null` when the sprite isn't ready (atlas/metadata
- * absent, sprite unknown, fully-transparent silhouette), caller
- * should retry next frame.
- *
- * Bake is depth-agnostic (Z spans -0.5..+0.5, one source pixel of
- * depth, centred); the caller scales each instance's transform Z by
- * `depth * worldScale` so the same mesh renders at any thickness.
+ * Bake a sprite's union-silhouette extruded mesh into raw vertex/index arrays. Returns `null` when the sprite
+ * isn't ready (atlas/metadata absent, sprite unknown, fully-transparent silhouette); caller should retry next frame.
+ * Sprite-local space is centred on the local origin in source pixels: X right (-W/2..+W/2), Y up (-H/2..+H/2),
+ * Z front-to-back (-0.5..+0.5, one pixel of depth, depth-agnostic); the caller scales each instance's transform
+ * Z by `depth * worldScale` so the same mesh renders at any thickness.
  */
 export function bakeExtrudedSpriteMesh(res: SpriteResources, spriteId: string): ExtrudedSpriteMesh | null {
     if (!res.metadata || !res.pixels) return null;
@@ -65,8 +25,6 @@ export function bakeExtrudedSpriteMesh(res: SpriteResources, spriteId: string): 
     if (!entry || entry.frames.length === 0) return null;
     return bakeExtrudedGeometry(res.pixels, res.metadata, entry);
 }
-
-// ── bake ────────────────────────────────────────────────────────────
 
 function bakeExtrudedGeometry(
     atlasPixels: Uint8Array,
@@ -82,8 +40,7 @@ function bakeExtrudedGeometry(
 
     const silhouette = buildUnionSilhouette(atlasPixels, metadata.atlasSize, entry, W, H);
 
-    // worst case: every pixel solid + every face emitted (6 faces × pixel).
-    // Pre-size scratch arrays at the upper bound; trim with drawRange.
+    // worst case: every pixel solid and every face emitted (6 faces per pixel). Pre-size scratch arrays at the upper bound; trim with drawRange.
     const maxFaces = W * H * 6;
     const positions = new Float32Array(maxFaces * 4 * 3);
     const uvs = new Float32Array(maxFaces * 4 * 2);

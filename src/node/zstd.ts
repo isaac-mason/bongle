@@ -1,8 +1,3 @@
-// Node-native zstd compressor. This is the ONLY module that touches node:zlib,
-// and it is imported solely by the server entry (engine-server), never by the
-// public barrel — so the browser bundle never pulls a Node builtin. The codec
-// itself (core/voxels/chunk-codec) takes this as an injected Zstd impl.
-
 import { constants, zstdCompressSync } from 'node:zlib';
 import type { Zstd } from '../core/voxels/chunk-codec';
 

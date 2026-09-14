@@ -1,16 +1,3 @@
-// core/resources.ts, pipeline-prepared / dynamic asset registry.
-//
-// "resources" in this codebase means: assets the user declares that come
-// from a build pipeline (today, gltf → bin via the cli) or are produced
-// dynamically at runtime (future: synthesized player models). authored
-// content (scenes, etc.) lives under `core/content/`, not here.
-//
-// today the only resource type is models. this module owns the per-modelId
-// URL registry (declared via `model()`) and the lazy payload state machine
-// that fetches the per-side `.bin`, parses it, and exposes
-// geometry/clipChannels for downstream systems (renderer, animator,
-// physics) to poll.
-
 import type { Box3 } from 'math/shapes';
 import { createEmptyDef, hydrateRuntimeHandle } from './models/build-runtime-handle';
 import type { ClipChannel, ClipChannels, ClipDef, MeshId, ModelDef } from './models/handle';
@@ -20,8 +7,6 @@ import { gltfUnpack } from './models/model-glb';
 import type { ResourceLoader } from './resource-loader';
 import type { SpriteAtlasMetadata } from './sprites/atlas';
 
-// ── cached model ────────────────────────────────────────────────────
-
 // keyed in resources.models by user-chosen modelId string (`'wizard'`).
 export type ResourceModel = {
     /** payload fetch URL the client side uses. */
@@ -29,18 +14,12 @@ export type ResourceModel = {
     /** payload fetch URL the server side uses. */
     serverUrl: string;
     /**
-     * provenance of the entry. dictates both wire replication and
-     * payload unpacker:
-     *   - `'bundled'`, codegen'd, ships as part of the engine build.
-     *     Both sides have it locally via their own registry-dispatch;
-     *     never crosses the wire. Bytes are packcat `.bin` (unpack()).
-     *   - `'runtime'`, registered dynamically at runtime (e.g. an
-     *     uploaded avatar). The server is the canonical source of
-     *     truth and Discovery broadcasts `register_model` to clients
-     *     so they learn the URLs. Bytes are `.glb` (gltfUnpack()).
-     *
-     * Today this is 1:1 with bytes-format; if a future runtime source
-     * ever ships `.bin`, split into two fields.
+     * provenance of the entry, dictates both wire replication and payload
+     * unpacker. `'bundled'` is codegen'd and ships with the engine build;
+     * both sides have it locally, never crosses the wire, bytes are packcat
+     * `.bin`. `'runtime'` is registered dynamically (e.g. an uploaded
+     * avatar); the server is canonical and broadcasts `register_model` to
+     * clients, bytes are `.glb`.
      */
     source: 'bundled' | 'runtime';
     /** content hash for cache busting / change detection. optional. */
@@ -48,36 +27,23 @@ export type ResourceModel = {
     /** payload size in bytes. informational. */
     size?: number;
     /**
-     * codegen'd handle for bundled models, passed through by the
-     * `_registerModelHandle` → registry-dispatch path so consumers like
-     * `Resources.modelDef()` return the same def object that user
-     * code addresses via the codegen barrel (`wizard.nodes.Body`).
-     *
-     * Optional + omitted for runtime-source models. When omitted,
-     * `setModel` constructs an empty `ModelDef` shell and stashes it
-     * here; `ensureModel` hydrates it in place on payload-ready (same
-     * object identity across the swap).
+     * codegen'd handle for bundled models, so consumers like
+     * `Resources.modelDef()` return the same def object user code addresses
+     * via the codegen barrel. Omitted for runtime-source models: `setModel`
+     * constructs an empty `ModelDef` shell and stashes it here, and
+     * `ensureModel` hydrates it in place on payload-ready.
      */
     def?: ModelDef;
-    /**
-     * runtime-source refcount, managed by `acquireRuntimeModel` /
-     * `releaseRuntimeModel`. Undefined for bundled entries (never
-     * released, they live for the engine lifetime). At zero, the
-     * entry is eligible for deletion; the release op does this
-     * eagerly today (no grace period, server lifecycle hooks already
-     * filter rapid swaps).
-     */
+    /** runtime-source refcount, managed by `acquireRuntimeModel` /
+     *  `releaseRuntimeModel`. Undefined for bundled entries, which are
+     *  never released. At zero, the entry is eligible for deletion. */
     _refcount?: number;
 };
 
-// ── lazy-loaded model payload ────────────────────────────────────────
-
 /**
- * read raw model bytes by url. the engine is built per-side so each
- * side bakes in its own impl (fetch on the client, fs.readFile on the
- * server), this type just lets the side-agnostic registry stay
- * decoupled from web/node apis. format-agnostic: same loader serves
- * both `.bin` and `.glb` urls; dispatch happens after bytes arrive.
+ * read raw model bytes by url. The engine is built per-side so each side
+ * bakes in its own impl (fetch on the client, fs.readFile on the server).
+ * Format-agnostic: same loader serves both `.bin` and `.glb` urls.
  */
 export type ModelBytesLoader = (url: string) => Promise<Uint8Array>;
 
@@ -95,29 +61,25 @@ export type ModelGeometry = {
 
 export type ModelPayload = {
     state: 'unloaded' | 'loading' | 'ready' | 'failed';
-    /** mesh-name → ModelGeometry. populated on both sides. */
+    /** mesh-name to ModelGeometry. populated on both sides. */
     geometry: Map<string, ModelGeometry>;
-    /** clip-name → ClipChannels. populated on ready. animator looks up
-     *  via Resources.modelClipChannels(s, clip). */
+    /** clip-name to ClipChannels. populated on ready; animator looks up via
+     *  Resources.modelClipChannels(s, clip). */
     clips: Map<string, ClipChannels>;
-    /** parsed runtime model, populated when state becomes 'ready'.
-     *  Consumers (MeshResources on the client) null this after consuming
-     *  to free memory. Server has no consumer; the field remains until
-     *  release. Same shape regardless of source format (.bin or .glb). */
+    /** parsed runtime model, populated when state becomes 'ready'. Consumers
+     *  (MeshResources on the client) null this after consuming to free
+     *  memory. Server has no consumer, so the field remains until release. */
     model: Model | null;
     /** consecutive load failures; gates exponential backoff in
      *  `ensureModel`. Reset on a successful load. */
     _failedAttempts: number;
-    /** earliest performance.now() timestamp at which a 'failed' payload
-     *  may be retried. systems poll `ensureModel` every tick, without
-     *  this, a single missing model bin would flood the network. */
+    /** earliest performance.now() timestamp at which a 'failed' payload may
+     *  be retried, without which a missing model bin would flood the network. */
     _nextRetryAt: number;
     /** deferred for the awaited (non-tick-driven) load path, created lazily
      *  by `whenModelReady`. Resolved on 'ready', rejected on give-up or
-     *  release. Its mere existence signals "someone is awaiting with no
-     *  external pump", so `ensureModel` self-schedules its own retry while
-     *  it's set, tick-driven consumers (where this stays null) keep
-     *  driving retries by polling `ensureModel` themselves. */
+     *  release. While set, `ensureModel` self-schedules its own retry;
+     *  tick-driven consumers (where this stays null) poll `ensureModel` themselves. */
     _ready: PromiseWithResolvers<ModelDef> | null;
 };
 
@@ -127,8 +89,6 @@ const BACKOFF_INITIAL_MS = 500;
 const BACKOFF_MAX_MS = 30_000;
 const BACKOFF_GIVE_UP_AFTER = 6;
 
-// ── resources state ─────────────────────────────────────────────────
-
 export type ResourcesSide = 'client' | 'server';
 
 export type Resources = {
@@ -136,17 +96,16 @@ export type Resources = {
     models: Map<string, ResourceModel>;
     /** keyed by user-chosen modelId string. lazy load state + parsed bin. */
     modelPayloads: Map<string, ModelPayload>;
-    /** environment resource-I/O, byte loading (fetch on the client, fs/fetch
+    /** environment resource-I/O: byte loading (fetch on the client, fs/fetch
      *  on the server, disk in the asset pipeline) plus the optional image
      *  decoder the asset pipeline injects. See `ResourceLoader`. */
     loader: ResourceLoader;
-    /** which side this Resources instance runs on. Picks `clientUrl` vs
+    /** which side this Resources instance runs on; picks `clientUrl` vs
      *  `serverUrl` in `ensureModel`. Set once at init. */
     side: ResourcesSide;
-    /** sprite atlas sidecar metadata (pixel rects + per-sprite flags), CPU asset
-     *  data loaded via `Sprites.loadAtlasMetadata` at boot + on HMR atlas change.
-     *  null server-side / before load. The render layer reads it to derive frame
-     *  UVs + the extrusion bake; script helpers read native pixel dims from it. */
+    /** sprite atlas sidecar metadata (pixel rects + per-sprite flags), loaded
+     *  via `Sprites.loadAtlasMetadata` at boot + on HMR atlas change. Null
+     *  server-side / before load. */
     spriteAtlas: SpriteAtlasMetadata | null;
 };
 
@@ -160,22 +119,19 @@ export function init(loader: ResourceLoader, side: ResourcesSide): Resources {
     };
 }
 
-// ── url registry mutations ──────────────────────────────────────────
-
 export function setModel(resources: Resources, id: string, model: ResourceModel): void {
-    // runtime models pass no handle, construct an empty shell here so
-    // `Resources.modelDef(id)` returns the codegen'd def, refilled in place
-    // object that the hydrator (called from `ensureModel`) can mutate in
-    // place on payload-ready. re-registering the same id without a
-    // handle preserves the existing shell so user/script-held refs stay
-    // valid across `setModel(url1)` → `setModel(url2)` sequences.
+    // runtime models pass no handle: construct an empty shell here so
+    // `Resources.modelDef(id)` returns a def the hydrator (called from
+    // `ensureModel`) can mutate in place on payload-ready. Re-registering the
+    // same id without a handle preserves the existing shell so user/script-held
+    // refs stay valid across `setModel(url1)` -> `setModel(url2)` sequences.
     if (!model.def) {
         const existing = resources.models.get(id);
         model.def = existing?.def ?? createEmptyDef(id);
     }
     resources.models.set(id, model);
-    // every payload swap counts as a content change for the handle,
-    // bump so prefabs that have it in `deps` rebuild.
+    // every payload swap counts as a content change for the handle, bump so
+    // prefabs that have it in `deps` rebuild.
     model.def!.version++;
 }
 
@@ -183,23 +139,16 @@ export function deleteModel(resources: Resources, id: string): void {
     resources.models.delete(id);
 }
 
-/* ── runtime-source refcount ────────────────────────────────────────── */
-//
-// Bundled models live for the engine lifetime and never call these.
-// Runtime models (uploaded avatars) use acquire/release at the server
-// join/leave boundary: the same modelId worn by N players in a room
-// resolves to refcount=N. At zero, the bytes (`releaseModel`) and URL
-// entry (`deleteModel`) are both dropped, and Discovery's next flush
-// notices the entry is gone and emits `unregister_model` to clients
-// that knew about it. Symmetric on the client: it `releaseRuntimeModel`s
-// on `unregister_model` receive, refcount tracking there is a no-op
-// today (one acquire per server signal) but keeps the API parallel.
+// bundled models live for the engine lifetime and never call these. Runtime
+// models (uploaded avatars) use acquire/release at the server join/leave
+// boundary: the same modelId worn by N players resolves to refcount=N. At
+// zero, the bytes and URL entry are both dropped, and Discovery's next flush
+// emits `unregister_model` to clients that knew about it.
 
 /**
- * Acquire a runtime model. First acquire registers the entry via
- * `setModel`; subsequent acquires just bump the refcount. Idempotent
- * against re-supplying the same entry (URL + handle re-bind is a noop
- * inside `setModel`).
+ * Acquire a runtime model. First acquire registers the entry via `setModel`;
+ * subsequent acquires just bump the refcount. Idempotent against
+ * re-supplying the same entry.
  */
 export function acquireRuntimeModel(resources: Resources, id: string, entry: Omit<ResourceModel, '_refcount'>): void {
     const existing = resources.models.get(id);
@@ -211,10 +160,10 @@ export function acquireRuntimeModel(resources: Resources, id: string, entry: Omi
 }
 
 /**
- * Release a runtime model. Decrements the refcount; at zero, releases
- * the payload bytes and drops the URL entry. Safe to call against an
- * unknown id (noop) or a bundled entry (noop) so leave-side cleanup can
- * call it unconditionally without checking the resolved kind.
+ * Release a runtime model. Decrements the refcount; at zero, releases the
+ * payload bytes and drops the URL entry. Safe to call against an unknown id
+ * or a bundled entry (both noop), so leave-side cleanup can call it
+ * unconditionally.
  */
 export function releaseRuntimeModel(resources: Resources, id: string): void {
     const existing = resources.models.get(id);
@@ -228,8 +177,6 @@ export function releaseRuntimeModel(resources: Resources, id: string): void {
     releaseModel(resources, id);
     deleteModel(resources, id);
 }
-
-/* ── pollable sync accessors, return null while loading; never throw ── */
 
 /** model payload ready? */
 export function hasModel(resources: Resources, modelId: string): boolean {
@@ -255,23 +202,21 @@ export function modelDef(resources: Resources, modelId: string): ModelDef | null
     return resources.models.get(modelId)?.def ?? null;
 }
 
-/* ── lazy load, fire-and-forget. transitions unloaded → loading ── */
-
 /**
  * idempotent; safe to call every tick from systems that observe missing
- * payload. picks the per-side URL off the entry (`clientUrl` /
- * `serverUrl`) by `resources.side`, fetches via the host loader, and
- * dispatches the unpacker by `entry.source` (bundled → packcat bin,
- * runtime → glb subset).
+ * payload. Fire-and-forget, transitions unloaded to loading. Picks the
+ * per-side URL off the entry by `resources.side`, fetches via the host
+ * loader, and dispatches the unpacker by `entry.source` (bundled to packcat
+ * bin, runtime to glb subset).
  */
 export function ensureModel(resources: Resources, modelId: string): void {
     let payload = resources.modelPayloads.get(modelId);
     if (payload) {
         if (payload.state === 'loading' || payload.state === 'ready') return;
         if (payload.state === 'failed') {
-            // permanent give-up after enough failures, leave 'failed'
-            // sticky so renderer/physics see no payload, and let humans
-            // see one error rather than a continuous stream.
+            // permanent give-up after enough failures: leave 'failed' sticky
+            // so renderer/physics see no payload, and log once rather than
+            // a continuous stream.
             if (payload._failedAttempts >= BACKOFF_GIVE_UP_AFTER) return;
             if (performance.now() < payload._nextRetryAt) return;
         }
@@ -319,9 +264,9 @@ export function ensureModel(resources: Resources, modelId: string): void {
             );
             _settleWaiter(resources, modelId); // rejects iff this attempt hit give-up
             if (!giveUp && p._ready) {
-                // awaited load with no tick-driver to re-poll us, self-drive the
-                // retry once the backoff elapses. `ensureModel` is idempotent, so
-                // this is harmless if a tick-driven consumer also exists.
+                // awaited load with no tick-driver to re-poll us: self-drive
+                // the retry once the backoff elapses. Harmless if a
+                // tick-driven consumer also exists, since `ensureModel` is idempotent.
                 setTimeout(() => ensureModel(resources, modelId), delay);
             }
         });
@@ -330,14 +275,10 @@ export function ensureModel(resources: Resources, modelId: string): void {
 /**
  * hydrate parsed model into the payload + sidecar clip refs. Side-agnostic:
  * stashes the model on the payload for downstream consumers (MeshResources
- * on client polls + nulls it). Server has no consumer.
- *
- * For runtime (`.glb`) models, also populates the empty `ModelDef`
- * shell that `setModel` constructed, `scene`, `nodes`, `meshes`,
- * `animations`, `aabb` get stamped from the parsed model. Declared
- * (`.bin`) models pass through without handle mutation: the
- * codegen-stamped handle is already authoritative (constructed at
- * module-eval from the same scene-tree data baked into JS source).
+ * on client polls + nulls it). For runtime (`.glb`) models, also populates
+ * the empty `ModelDef` shell that `setModel` constructed. Declared (`.bin`)
+ * models pass through without handle mutation: the codegen-stamped handle is
+ * already authoritative.
  */
 function _onPayloadReady(resources: Resources, modelId: string, model: Model): void {
     const payload = resources.modelPayloads.get(modelId);
@@ -375,10 +316,9 @@ function _onPayloadReady(resources: Resources, modelId: string, model: Model): v
 
 /**
  * Settle the awaited-load deferred (`payload._ready`) against the payload's
- * CURRENT terminal state, resolve on 'ready', reject at the backoff give-up.
- * No-op while still loading/retrying, or when nothing is awaiting. Idempotent
- * (re-settling a settled promise does nothing), so every state-transition site,
- * and `whenModelReady` itself, can call it without tracking waiters.
+ * current terminal state: resolve on 'ready', reject at the backoff give-up.
+ * No-op while still loading/retrying, or when nothing is awaiting. Idempotent,
+ * so every state-transition site can call it without tracking waiters.
  */
 function _settleWaiter(resources: Resources, modelId: string): void {
     const payload = resources.modelPayloads.get(modelId);
@@ -393,11 +333,9 @@ function _settleWaiter(resources: Resources, modelId: string): void {
     }
 }
 
-/**
- * release a payload. drops CPU geometry + bin. Client-side gpu pools
- * (MeshResources) detect the removal on next update tick and free their
- * own state.
- */
+/** release a payload. drops CPU geometry + bin. Client-side gpu pools
+ *  (MeshResources) detect the removal on next update tick and free their
+ *  own state. */
 export function releaseModel(resources: Resources, modelId: string): void {
     const payload = resources.modelPayloads.get(modelId);
     if (!payload) return;
@@ -412,18 +350,12 @@ export function releaseModel(resources: Resources, modelId: string): void {
 }
 
 /**
- * Promise that settles with the model's handle once its payload is ready,
- * or rejects if the load gives up after backoff (or the entry is released
- * mid-flight). The awaited sibling of the `hasModel`/`modelDef` poll
- * pair: same payload state machine, surfaced as a promise off the actual
- * fetch chain rather than a poll over the state it sets.
- *
- * Pair with `ensureModel` (or `acquireRuntimeModel` + `ensureModel`) so a
- * load is actually in flight, this only attaches to it. Registering the
- * deferred also opts the load into self-driven retries: tick-driven
- * consumers re-poll `ensureModel` themselves, but an awaited one-shot has
- * no such pump, so the failure path re-schedules itself while a waiter is
- * attached.
+ * Promise that settles with the model's handle once its payload is ready, or
+ * rejects if the load gives up after backoff (or the entry is released
+ * mid-flight). The awaited sibling of the `hasModel`/`modelDef` poll pair.
+ * Pair with `ensureModel` so a load is actually in flight; this only
+ * attaches to it. Registering the deferred also opts the load into
+ * self-driven retries, since an awaited one-shot has no tick-driven pump.
  */
 export function whenModelReady(resources: Resources, modelId: string): Promise<ModelDef> {
     const payload = resources.modelPayloads.get(modelId);
@@ -431,14 +363,11 @@ export function whenModelReady(resources: Resources, modelId: string): Promise<M
         return Promise.reject(new Error(`[Resources] whenModelReady "${modelId}": no payload; call ensureModel first`));
     }
     payload._ready ??= Promise.withResolvers<ModelDef>();
-    // Settle now if the payload already reached a terminal state before any
-    // awaiter existed, the transition sites only fire on the edge, not
-    // retroactively.
+    // settle now if the payload already reached a terminal state before any
+    // awaiter existed; the transition sites only fire on the edge.
     _settleWaiter(resources, modelId);
     return payload._ready.promise;
 }
-
-/* ── helpers ── */
 
 function toModelGeometry(m: ModelMesh): ModelGeometry {
     return {

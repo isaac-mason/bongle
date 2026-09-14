@@ -1,31 +1,13 @@
-// api/avatars.ts, script-facing avatar API: source, load, assign, release.
-//
-//   - sampleAvatars, pull an opaque batch from the `ServerDriver.avatars` host capability
-//   - loadAvatar, acquire + ensure a resolved avatar's model; +1 refcount (runtime; bundled = ensure-only)
-//   - assignAvatar, point a node's CharacterTrait at an already-loaded model (no refcount)
-//   - releaseAvatar, drop the refcount; bytes freed only when the last holder releases
-//
-// `loadAvatar` MUST precede `assignAvatar` for runtime avatars: acquire registers
-// the resource entry that ensure + the rig reconciler need (bundled entries are
-// codegen-hydrated, so they can be assigned directly). Every `loadAvatar` balances
-// with exactly one `releaseAvatar` per holder; the shared per-modelId refcount means
-// a player and an NPC on the same avatar = one load, freed only when both release.
-//
-// The load/assign internals live in core/avatar/model and are shared with the engine
-// player-join path (server/avatars); this module is the script-facing surface.
-
 import type { ResolvedAvatar } from 'bongle/interface';
 import { RIG_TYPE_6BONE } from '../../avatar/rig';
 import { acquireAvatarModel } from '../core/avatar/model';
 import * as Resources from '../core/resources';
 import type { ScriptContext } from '../core/scene/scripts';
 
-// Rig contract (bone names, required/attach node lists, validator). Also reachable
-// via the `bongle/avatar/rig` subpath; surfaced here so scripts can resolve bones by
-// name (`findByName(playerNode, RIG_6BONE_HAND_RIGHT)`) straight off bare `bongle`.
+/** Rig contract (bone names, required/attach node lists, validator), so scripts can
+ *  resolve bones by name (`findByName(playerNode, RIG_6BONE_HAND_RIGHT)`). */
 export * from '../../avatar/rig';
-// `assignAvatar` is shared with the engine player path, so it lives in core; surface
-// it here as part of the script-facing API.
+
 export { assignAvatar } from '../core/avatar/model';
 
 /**
@@ -48,8 +30,7 @@ export function sampleAvatars(ctx: ScriptContext): Promise<ResolvedAvatar[]> {
 export function loadAvatar(ctx: ScriptContext, avatar: ResolvedAvatar): { modelId: string; rigType: string } {
     const resources = ctx._runtime?.resources;
     if (!resources) {
-        // No runtime resources (degenerate context), return identity so a bundled
-        // assign still works; runtime payloads simply won't load here.
+        // No runtime resources: return identity so a bundled assign still works.
         const rigType = avatar.source === 'runtime' ? (avatar.rigType ?? RIG_TYPE_6BONE) : RIG_TYPE_6BONE;
         return { modelId: avatar.modelId, rigType };
     }
@@ -65,9 +46,7 @@ export function releaseAvatar(ctx: ScriptContext, modelId: string): void {
     if (resources) Resources.releaseRuntimeModel(resources, modelId);
 }
 
-// Small bundled word pools so ambient NPCs read as handles, not "Dummy 3".
-// Wholly separate from avatar sourcing, games may use them, ignore them, or
-// bring their own lists.
+// Word pools so ambient NPCs read as handles, not "Dummy 3".
 const ADJECTIVES = [
     'Agile',
     'Airy',

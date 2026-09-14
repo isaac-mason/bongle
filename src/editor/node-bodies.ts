@@ -1,26 +1,4 @@
-// node-bodies.ts, maintains crashcat sensor rigid bodies for scene nodes
-// so broadphase queries (castRay, intersectAABB) can find them efficiently.
-//
-// Only nodes in the *targetable frontier* hold bodies. The frontier is a
-// Blender-style drill-down model derived from the current selection:
-//
-//   - no selection: every direct child of root that has a transform.
-//   - with selection: each selected node's direct children replace the
-//     selected node in the frontier (you've drilled past it). leaf-selected
-//     nodes (no children) stay in the frontier so they remain clickable.
-//   - root.children are always present so the user can pick another
-//     top-level object without first deselecting.
-//
-// Nodes whose subtree contributes a mesh/voxel AABB get a body sized to it;
-// transform-only nodes (empties, group pivots, not-yet-loaded visuals) fall
-// back to a small fixed-size pick box on their world origin so they stay
-// clickable in the viewport rather than being hierarchy-only. Each tracked
-// body owns a stable `BoxShape` whose `halfExtents` is mutated in place each
-// frame to avoid per-frame allocations.
-//
-// the module does NOT use userData on the rigid body, instead it maintains
-// a bidirectional map: bodyId ↔ nodeId.
-
+// no userData on the rigid body; instead a bidirectional map of bodyId <-> nodeId.
 import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
 import { type Mat4, mat4, type Vec3 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
@@ -37,41 +15,27 @@ import type { EditRoomStoreApi } from './edit-room-store';
 import { EditorTrait } from './editor-trait';
 import { unionSubtreeWorldAabb } from './node-aabb';
 
-// ── types ───────────────────────────────────────────────────────────
-
 type BodyEntry = {
     bodyId: BodyId;
     shape: BoxShape;
-    /** subtree mesh-AABB union expressed in this node's local frame.
-     * snapshotted at first sync (using the current pose) and re-derived
-     * only when the frontier rebuilds. animation moving bones inside the
-     * rig does NOT re-tighten this, same trade Godot makes. */
+    /** subtree mesh-AABB union in this node's local frame; snapshotted at first sync and
+     *  re-derived only when the frontier rebuilds. animation moving bones inside the rig does
+     *  not re-tighten this. */
     localAabb: Box3 | null;
-    /** transform._version at last body sync. an int-compare against the
-     * current frame's _version short-circuits the per-frame update when
-     * the rig hasn't moved (markDirty / interpolate bump _version). */
+    /** transform._version at last body sync; an int-compare short-circuits the per-frame update when the rig hasn't moved. */
     lastVersion: number;
 };
 
 export type NodeBodies = {
-    // bidirectional maps
     nodeToBody: Map<number, BodyEntry>;
     bodyToNode: Map<BodyId, number>;
-    // pre-built filter that only hits the editor nodes layer
     queryFilter: Filter;
-    // cached player node id, refreshed when the frontier rebuilds
     playerNodeId: number;
-    // current targetable frontier (node ids eligible for a body)
     targetable: Set<number>;
-    // last selection signature we built `targetable` from
     _lastSelectionVersion: number;
-    // unsubscribe from the editor store on dispose
     _unsubscribe: () => void;
-    // set when frontier inputs change (selection, scene structure)
     targetableDirty: boolean;
 };
-
-// ── init / dispose ──────────────────────────────────────────────────
 
 export function init(store: EditRoomStoreApi): NodeBodies {
     const qf = filterMod.createEmpty();
@@ -113,12 +77,7 @@ export function dispose(state: NodeBodies, physics: Physics): void {
     state.targetable.clear();
 }
 
-// ── frontier computation ────────────────────────────────────────────
-
-/** does this node carry a transform and is not a player, scene root, or the
- * editor's own lens nodes (the free-fly camera + the EditorTrait host)? both
- * lens traits are runtime-only (persist:false) view artifacts, never level
- * content, so they should never be click-selectable. */
+/** excludes the scene root, the player, and the editor's own lens nodes (runtime-only view artifacts, never level content). */
 function isFrontierEligible(node: Node, playerNodeId: number, root: Node): boolean {
     if (node === root) return false;
     if (node.id === playerNodeId) return false;
@@ -174,16 +133,11 @@ function recomputeFrontier(state: NodeBodies, sceneTree: SceneTree, store: EditR
     }
 }
 
-// ── per-frame sync ──────────────────────────────────────────────────
-
 const _worldAabb: Box3 = box3.create();
 const _invMat: Mat4 = mat4.create();
 const _scratchPos: Vec3 = [0, 0, 0];
 
-// half-size of the fallback pick box dropped on transform-only nodes (no
-// mesh/voxel geometry in their subtree). a 0.5-unit cube centered on the
-// node's world origin, big enough to click, small enough not to swallow
-// nearby geometry picks.
+// 0.5-unit cube centered on the world origin of a transform-only node with no mesh/voxel geometry in its subtree.
 const FALLBACK_PICK_HALF_EXTENT = 0.25;
 
 function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): void {
@@ -245,10 +199,8 @@ export function update(
 
         const existing = nodeToBody.get(nodeId);
 
-        // ── steady state: cached local AABB + version short-circuit ──
         if (existing?.localAabb) {
             if (existing.lastVersion === transform._version) {
-                // rig root hasn't moved since last sync, body already in place.
                 continue;
             }
             const iwm = getVisualWorldMatrix(transform);
@@ -258,11 +210,8 @@ export function update(
             continue;
         }
 
-        // ── first sync (or post-dirty rebuild): walk subtree once ──
         box3.set(_worldAabb, Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
         if (!unionSubtreeWorldAabb(node, resources, _worldAabb)) {
-            // no mesh/voxel geometry in the subtree, fall back to a small fixed
-            // box centered on the node's world origin so it stays clickable.
             const wm = getVisualWorldMatrix(transform);
             const wx = wm[12];
             const wy = wm[13];
@@ -311,8 +260,6 @@ export function update(
         }
     }
 }
-
-// ── lookup helpers ──────────────────────────────────────────────────
 
 export function nodeIdForBody(state: NodeBodies, bodyId: BodyId): number | undefined {
     return state.bodyToNode.get(bodyId);

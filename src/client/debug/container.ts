@@ -79,9 +79,8 @@ type Common = {
     span?: number;
 };
 
-// exactly the fields `wire` reads. widget option bags (lines/bars/…) carry extra,
-// differently-typed fields (e.g. a numeric `format`) that aren't AddOptions<T>, so
-// wire is typed to only what it touches rather than the full AddOptions<T>.
+// typed to only the fields `wire` reads; widget option bags (lines/bars/…) carry
+// extra, differently-typed fields that aren't AddOptions<T>.
 type Wireable<T> = Common & {
     onChange?: (value: T) => void;
     onFinishChange?: (value: T) => void;
@@ -107,7 +106,6 @@ const BUILTINS: Record<string, (opts: any) => Control<any>> = {
     interval,
 };
 
-// resolve the value + options into a concrete control (override or auto-detect).
 function resolveControl(value: unknown, options: any): Control<any> {
     const c = options.control;
     if (typeof c === 'function') return c;
@@ -170,7 +168,7 @@ export type Container = {
     filter(placeholder?: string): HTMLInputElement;
 
     folder(title: string, options?: FolderOptions): Folder;
-    /** a collapsible container whose children lay out in a responsive grid — a HUD of tiles.
+    /** a collapsible container whose children lay out in a responsive grid, a HUD of tiles.
      * best for compact widgets (stat / gauge / small graph); children take `{ span }` to widen. */
     tiles(title: string, options?: TilesOptions): Folder;
     /** a tabbed region: `tab(name)` returns a container, shown one at a time. a layout primitive

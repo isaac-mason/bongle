@@ -1,26 +1,3 @@
-/**
- * client input, split into:
- *   - `Input` (per-room data; held keys/buttons, mouse deltas, the cursor,
- *     prev maps)
- *   - `InputManager` (client-level; owns DOM listeners and routes events
- *     into whichever Input is currently the active target)
- *
- * buttons, deltas and the cursor come from pointer events (primary pointer
- * only), so a mouse, a pen and the first finger all drive them; extra fingers
- * are the multi-touch `TouchInput`'s business.
- *
- * scripts read from `ctx.client!.input` (their room's data). Inactive
- * rooms' inputs receive no events, so scripts running there see zeros.
- *
- * usage:
- *   const mouseKeyboard = ctx.client!.input.mouseKeyboard
- *   if (mouseKeyboard.isKeyDown('KeyW')) { ... }
- */
-
-/* ── text input focus detection ───────────────────────────────────── */
-
-// returns true when a text input / textarea / contenteditable / select
-// has focus. used to suppress game input while the user is typing.
 function isTextInputFocused(): boolean {
     const el = document.activeElement;
     if (!el) return false;
@@ -35,37 +12,20 @@ function isTextInputElement(el: Element | EventTarget | null): boolean {
     return false;
 }
 
-/* ── mouse + keyboard data ────────────────────────────────────────── */
-
 export type MouseButton = 'left' | 'middle' | 'right';
 
-/**
- * pixel threshold for drag-vs-tap discrimination. cursor movement beyond
- * this distance from the down-point promotes the gesture to a drag;
- * release before crossing it is reported as a tap.
- */
+/** cursor movement beyond this distance from the down-point (px) promotes the gesture to a drag; a release before that is a tap. */
 const DRAG_THRESHOLD_PX = 4;
 
-/**
- * per-button drag-vs-tap state. sampled at button-down (in clientX/Y
- * screen space). while the button is held, mousemove compares cursor
- * distance from the down-point: once it exceeds DRAG_THRESHOLD_PX the
- * gesture becomes a drag and `dragJustStarted` fires for one frame. on
- * button-up, if no drag ever started, `tapped` fires for one frame.
- * lets press-and-drag handlers (e.g. fly-look pointer-lock) and click
- * handlers (e.g. block placement) coexist on the same button.
- */
+/** per-button drag-vs-tap state, lets press-and-drag handlers and click handlers coexist on the same button. */
 type MouseButtonGesture = {
     downX: number;
     downY: number;
     drag: boolean;
     dragJustStarted: boolean;
     tapped: boolean;
-    /** a registered down landed since the last reset. drives `isMouseJustDown`
-     *  as a latch (like `_keyJustPressed`) so a press and release that both land
-     *  inside one frame still read as a press. */
+    /** latches like `_keyJustPressed` so a press and release inside one frame still reads as a press. */
     pressed: boolean;
-    /** a registered up landed since the last reset, see `pressed`. */
     released: boolean;
 };
 
@@ -73,11 +33,7 @@ function createGesture(): MouseButtonGesture {
     return { downX: 0, downY: 0, drag: false, dragJustStarted: false, tapped: false, pressed: false, released: false };
 }
 
-/** where the primary pointer (mouse, pen, or first finger) is over the shared
- *  display canvas. `x`/`y` are CSS px from the canvas top-left, `ndcX`/`ndcY`
- *  the same in normalized device coords (y up). while pointer-locked the cursor
- *  is hidden and bound to the crosshair, so ndc is pinned to (0, 0). read it
- *  with `getCursor`. */
+/** position of the primary pointer over the shared display canvas; ndc is pinned to (0, 0) while pointer-locked. */
 export type Cursor = {
     x: number;
     y: number;
@@ -85,50 +41,28 @@ export type Cursor = {
     ndcY: number;
 };
 
-/** modifier state, sampled from KeyboardEvent/MouseEvent on every event. */
 type ModifierState = { mod: boolean; shift: boolean; alt: boolean };
 
 export type MouseKeyboardInput = {
-    /** currently held keys by KeyboardEvent.code */
     _keyState: Map<string, boolean>;
-    /** key state from the previous frame (for just-up; just-down uses _keyJustPressed) */
+    /** key state from the previous frame; just-down uses _keyJustPressed instead. */
     _prevKeyState: Map<string, boolean>;
-    /**
-     * codes that received a non-repeat keydown since last reset. drives
-     * isKeyJustDown directly so macOS doesn't drop subsequent presses when
-     * Cmd is held (Cmd+letter swallows the letter's keyup on macOS, leaving
-     * _keyState stuck true so the prev/current diff fails on the next press).
-     */
+    /** codes with a non-repeat keydown since last reset, so macOS doesn't drop presses when Cmd+letter swallows the letter's keyup. */
     _keyJustPressed: Set<string>;
-    /**
-     * current modifier state. `mod` is cmd-on-mac / ctrl-on-win (e.metaKey
-     * || e.ctrlKey), matching the convention used elsewhere in the editor.
-     */
+    /** `mod` is cmd-on-mac / ctrl-on-win (e.metaKey || e.ctrlKey) */
     _mods: ModifierState;
-    /** modifier state from previous frame */
     _prevMods: ModifierState;
-    /** accumulated mouse movement since last reset() */
     _dx: number;
     _dy: number;
-    /** current mouse button state */
     _buttons: { left: boolean; right: boolean; middle: boolean };
-    /** primary pointer position over the canvas, see `Cursor`. written by the
-     *  canvas pointer listeners (`installCanvasListeners`), so only the active
-     *  room's cursor moves. */
+    /** written by the canvas pointer listeners, so only the active room's cursor moves. */
     _cursor: Cursor;
-    /** accumulated scroll wheel delta since last reset() */
     _wheelDeltaY: number;
-    /** per-button drag-vs-tap discrimination, see MouseButtonGesture */
     _gestures: { left: MouseButtonGesture; middle: MouseButtonGesture; right: MouseButtonGesture };
-    /** pointer-lock state, snapshotted once per frame so `is/was/just` agree
-     *  within a frame (raw `document.pointerLockElement` can flip mid-frame). */
+    /** snapshotted once per frame so `is/was/just` agree within a frame, since raw `document.pointerLockElement` can flip mid-frame. */
     _locked: boolean;
     _prevLocked: boolean;
-    /** mirrors InputManager._lockReleases: true while a UI surface (library,
-     *  dialog, ad, host overlay) is holding pointer input via useReleasePointer,
-     *  so the viewport does not own the cursor/wheel. viewport wheel gestures
-     *  (orbit dolly, hotbar cycle) read this to ignore scrolls aimed at a panel
-     *  instead of sniffing the event target for "is this the game". */
+    /** mirrors InputManager._lockReleases: true while a UI surface is holding pointer input, so viewport wheel gestures ignore it. */
     _pointerCapturedByUi: boolean;
 };
 
@@ -153,21 +87,17 @@ export function createMouseKeyboardInput(): MouseKeyboardInput {
 
 /** call once per frame to snapshot prev state and clear per-frame accumulators. */
 export function resetMouseKeyboardInput(mouseKeyboard: MouseKeyboardInput): void {
-    // snapshot key state into prev
     const allKeys = new Set([...mouseKeyboard._keyState.keys(), ...mouseKeyboard._prevKeyState.keys()]);
     mouseKeyboard._prevKeyState.clear();
     for (const key of allKeys) {
         mouseKeyboard._prevKeyState.set(key, mouseKeyboard._keyState.get(key) ?? false);
     }
 
-    // snapshot modifier state into prev
     mouseKeyboard._prevMods.mod = mouseKeyboard._mods.mod;
     mouseKeyboard._prevMods.shift = mouseKeyboard._mods.shift;
     mouseKeyboard._prevMods.alt = mouseKeyboard._mods.alt;
 
-    // snapshot pointer-lock state into prev, then re-read it for this frame.
-    // canvas pointer events don't reach us while locked, so pin the cursor to
-    // the crosshair here rather than in a listener.
+    // canvas pointer events don't reach us while locked, so pin the cursor to the crosshair here
     mouseKeyboard._prevLocked = mouseKeyboard._locked;
     mouseKeyboard._locked = typeof document !== 'undefined' && !!document.pointerLockElement;
     if (mouseKeyboard._locked) {
@@ -175,7 +105,6 @@ export function resetMouseKeyboardInput(mouseKeyboard: MouseKeyboardInput): void
         mouseKeyboard._cursor.ndcY = 0;
     }
 
-    // clear per-frame accumulators
     mouseKeyboard._keyJustPressed.clear();
     mouseKeyboard._dx = 0;
     mouseKeyboard._dy = 0;
@@ -221,8 +150,7 @@ export function isMouseDown(mouseKeyboard: MouseKeyboardInput, button: MouseButt
     return mouseKeyboard._buttons[button];
 }
 
-/** fires for one frame when the button went down. latched at the event, so a
- *  press released again before the next frame is still seen. */
+/** fires for one frame when the button went down, latched at the event so a press-then-release within a frame is still seen. */
 export function isMouseJustDown(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
     return mouseKeyboard._gestures[button].pressed;
 }
@@ -231,27 +159,17 @@ export function isMouseJustUp(mouseKeyboard: MouseKeyboardInput, button: MouseBu
     return mouseKeyboard._gestures[button].released;
 }
 
-/** primary pointer position over the canvas (mouse, pen, or first finger). the
- *  returned object is the live cursor, read it, don't hold it across frames. */
+/** the returned object is the live cursor, read it, don't hold it across frames. */
 export function getCursor(mouseKeyboard: MouseKeyboardInput): Readonly<Cursor> {
     return mouseKeyboard._cursor;
 }
 
-/**
- * fires for one frame the moment a held button crosses the drag
- * threshold. use in place of `isMouseJustDown` for actions that should
- * commit to a drag gesture (e.g. fly-look pointer-lock), so a quick
- * click doesn't trigger them.
- */
+/** fires for one frame the moment a held button crosses the drag threshold; use in place of `isMouseJustDown` for drag-commit actions. */
 export function isMouseDragStart(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
     return mouseKeyboard._gestures[button].dragJustStarted;
 }
 
-/**
- * fires for one frame on button-up when the press never crossed the
- * drag threshold. use for click commit actions (e.g. block placement)
- * so a drag release doesn't double as a tap.
- */
+/** fires for one frame on button-up when the press never crossed the drag threshold; use for click-commit actions. */
 export function isMouseTap(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
     return mouseKeyboard._gestures[button].tapped;
 }
@@ -266,20 +184,12 @@ export function wasMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean {
     return mouseKeyboard._prevLocked;
 }
 
-/** Fires for one frame the moment the pointer becomes locked (unlocked → locked). */
+/** Fires for one frame the moment the pointer becomes locked (unlocked to locked). */
 export function isMouseJustLocked(mouseKeyboard: MouseKeyboardInput): boolean {
     return mouseKeyboard._locked && !mouseKeyboard._prevLocked;
 }
 
-/* ── touch input ──────────────────────────────────────────────────── */
-
-/**
- * Single canvas touch (one finger). Mirrors Unity's EnhancedTouch.Touch
- * for raw position/start/delta state, and adds latched gesture edge
- * flags (`tapped`/`longPressed`/`swiped`) so scripts can read intent
- * with a single per-touch iteration, same model as the mouse gestures
- * above.
- */
+/** single canvas touch (one finger): raw position/start/delta state, plus latched gesture edge flags. */
 export type CanvasTouch = {
     pointerId: number;
     /** current position, CSS px from canvas top-left. */
@@ -294,7 +204,6 @@ export type CanvasTouch = {
     /** Date.now() at pointerdown, ms. */
     downAt: number;
 
-    /** first frame this pointerId is observed. */
     justStarted: boolean;
     /** last frame; only set on entries in _canvasTouchesEnded. */
     justEnded: boolean;
@@ -327,9 +236,7 @@ export type TouchButtonState = {
     down: boolean;
     /** previous-frame `down`, for just-down / just-up edges. */
     _prevDown: boolean;
-    /** `look:true` buttons also drive the camera while held (a fire button you
-     *  can aim with). their drag is forwarded into the same look pipeline as a
-     *  right-half canvas drag, see `consumeTouchButtonLookDrag`. */
+    /** `look:true` buttons also drive the camera while held; their drag is forwarded into the same look pipeline as a canvas drag. */
     look: boolean;
     /** CSS-px drag accumulated since the last consume; meaningful only when `look`. */
     _dragX: number;
@@ -337,15 +244,12 @@ export type TouchButtonState = {
 };
 
 export type TouchInput = {
-    /** live touches keyed by pointerId. */
     _canvasTouches: Map<number, CanvasTouch>;
     /** touches that ended this frame; cleared by reset. */
     _canvasTouchesEnded: Map<number, CanvasTouch>;
     /** inter-touch distance last frame (for pinch). 0 when !=2 touches. */
     _pinchPrevDist: number;
-    /** registered virtual joysticks. id chosen by the script. */
     _joysticks: Map<string, JoystickState>;
-    /** registered virtual buttons. */
     _buttons: Map<string, TouchButtonState>;
 };
 
@@ -391,7 +295,6 @@ export function resetTouchInput(t: TouchInput): void {
         touch.dy = 0;
         touch.justStarted = false;
         touch.longPressed = false;
-        // latch long-press once it crosses the threshold without drifting.
         if (
             !touch._longPressLatched &&
             now - touch.downAt >= LONG_PRESS_MIN_MS &&
@@ -400,7 +303,6 @@ export function resetTouchInput(t: TouchInput): void {
             touch.longPressed = true;
             touch._longPressLatched = true;
         }
-        // trim stale velocity samples.
         const cutoff = now - SWIPE_SAMPLE_WINDOW_MS;
         const s = touch._recentSamples;
         while (s.length > 0 && s[0]!.t < cutoff) s.shift();
@@ -410,8 +312,6 @@ export function resetTouchInput(t: TouchInput): void {
     for (const j of t._joysticks.values()) j._prevActive = j.active;
     for (const b of t._buttons.values()) b._prevDown = b.down;
 }
-
-/* ── touch predicates ─────────────────────────────────────────────── */
 
 export function getCanvasTouches(t: TouchInput): ReadonlyMap<number, CanvasTouch> {
     return t._canvasTouches;
@@ -466,10 +366,7 @@ export function isTouchButtonJustUp(t: TouchInput, id: string): boolean {
     return b ? !b.down && b._prevDown : false;
 }
 
-/** Sum the drag accumulated by every `look:true` button since the last call,
- *  zeroing it. CSS px, same units as a canvas touch's `dx/dy`, so the caller
- *  applies it with the touch look sensitivity. Lets a fire button double as an
- *  aim surface: hold to act, slide to look. Returns `{dx:0, dy:0}` when none. */
+/** sums the drag accumulated by every `look:true` button since the last call, zeroing it; lets a fire button double as an aim surface. */
 export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: number } {
     let dx = 0;
     let dy = 0;
@@ -483,25 +380,9 @@ export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: num
     return { dx, dy };
 }
 
-/* ── canvas touch listeners ───────────────────────────────────────── */
-
-/**
- * Installs `pointerdown/move/up/cancel` on the shared display canvas, routed to the
- * active room's input via `manager.target` (one canvas, many rooms — same routing
- * mouse/keyboard already use). Two consumers share the listeners:
- *   - the cursor: the primary pointer of any type writes its canvas position into
- *     `mouseKeyboard._cursor`, and is captured on down so a drag that strays off the
- *     canvas keeps reporting.
- *   - touches: `pointerType === 'touch'` pointers feed the multi-touch `TouchInput`.
- * HUD touches land on the overlay DOM (in the room viewport, a sibling of the backdrop
- * canvas), which isn't the canvas's ancestor, so they never reach here — automatic
- * separation between canvas gestures and HUD touches. Installed once by the client.
- */
+/** installs pointerdown/move/up/cancel on the shared display canvas, routed to the active room's input via `manager.target`. */
 export function installCanvasListeners(canvas: HTMLCanvasElement, manager: InputManager): void {
-    // the canvas is the only place the pointer's position is meaningful (it's the
-    // render surface the cursor is over), so position lives here rather than on the
-    // window handlers that track buttons. under pointer lock no canvas pointer events
-    // arrive; `resetMouseKeyboardInput` pins ndc to the crosshair instead.
+    // under pointer lock no canvas pointer events arrive; resetMouseKeyboardInput pins ndc to the crosshair
     const writeCursor = (e: PointerEvent): void => {
         if (!e.isPrimary) return;
         const mouseKeyboard = manager.target?.mouseKeyboard;
@@ -514,14 +395,13 @@ export function installCanvasListeners(canvas: HTMLCanvasElement, manager: Input
         cursor.ndcY = -((cursor.y / rect.height) * 2 - 1);
     };
     const onCursorDown = (e: PointerEvent): void => {
-        // touch has no hover, so the down is the first time we learn the position;
-        // write it before the window handler registers the press this frame.
+        // touch has no hover, so the down is the first time we learn the position; write it before the window handler registers the press.
         writeCursor(e);
         if (!e.isPrimary || e.button !== 0) return;
         try {
             canvas.setPointerCapture(e.pointerId);
         } catch {
-            // capture can fail if the pointer is already released.
+            // pointer may already be released
         }
     };
 
@@ -542,7 +422,6 @@ export function installCanvasListeners(canvas: HTMLCanvasElement, manager: Input
 
     const onDown = (e: PointerEvent): void => {
         if (e.pointerType !== 'touch') return;
-        // route to the active room's input (one shared canvas, many rooms).
         const t = manager.target?.touch;
         if (!t) return;
         const rect = canvas.getBoundingClientRect();
@@ -573,7 +452,7 @@ export function installCanvasListeners(canvas: HTMLCanvasElement, manager: Input
         try {
             canvas.setPointerCapture(e.pointerId);
         } catch {
-            // capture can fail if the pointer is already released.
+            // pointer may already be released
         }
     };
 
@@ -604,7 +483,6 @@ export function installCanvasListeners(canvas: HTMLCanvasElement, manager: Input
         const touch = t._canvasTouches.get(e.pointerId);
         if (!touch) return;
         const now = Date.now();
-        // finalise gestures.
         touch.justEnded = true;
         const tapped = now - touch.downAt < TAP_MAX_MS && touch._maxDriftSq < TAP_MAX_DRIFT_PX_SQ;
         touch.tapped = tapped;
@@ -645,22 +523,12 @@ export function installCanvasListeners(canvas: HTMLCanvasElement, manager: Input
     };
 }
 
-/* ── input container ──────────────────────────────────────────────── */
-
 export type Input = {
     mouseKeyboard: MouseKeyboardInput;
     touch: TouchInput;
-    /** does this room want the pointer locked (desktop mouse-look)? Persistent
-     *  room intent, set via `setPointerLock`. Lives here (not on a controller
-     *  trait) so it survives a controller being removed and re-added — e.g. the
-     *  death→respawn churn — with no relock dance. Default false; the player
-     *  controller sets it true in `onInit`, fly/orbit set it false. */
+    /** persistent room intent, set via `setPointerLock`; survives a controller being removed and re-added with no relock dance. */
     _lockWanted: boolean;
-    /** has this room's controller declared its lock intent at least once (any
-     *  `setPointerLock` call)? Distinguishes a freshly-mounted room whose
-     *  `_lockWanted=false` is merely the un-run default (intent still pending)
-     *  from a live room whose `false` is authoritative. `reconcilePointerLock`
-     *  holds a lock through a room swap only while intent is still pending. */
+    /** whether the room's controller has declared its lock intent at least once, so a fresh `_lockWanted=false` reads as pending. */
     _lockDeclared: boolean;
 };
 
@@ -678,30 +546,18 @@ export function resetInput(input: Input): void {
     resetTouchInput(input.touch);
 }
 
-/* ── input manager (DOM listeners + active target router) ─────────── */
-
 export type InputManager = {
     /** the Input that DOM events currently write into. null = drop events. */
     target: Input | null;
-    /** live input modality ("last input wins") — the SOURCE OF TRUTH, written by the
-     *  `pointerdown` handler below. Lives here (not the React store) because it's
-     *  authored by a DOM event and its primary readers are React-free: the pointer-lock
-     *  gate (a finger can't be locked) and `isTouchPrimary`, both reachable from
-     *  server-side trait code that must not import React. engine-client mirrors it into
-     *  `useClient.inputMode` for reactive touch UI (chat). */
+    /** "last input wins", written by the `pointerdown` handler below; lives here since its readers are React-free trait code. */
     inputMode: 'mouse' | 'touch';
     /** UI / ad / host surfaces holding the cursor free while shown. */
     _lockReleases: Set<string>;
-    /** element to pointer-lock; captured from the last canvas mousedown. fallback
-     *  only — prefer `_lockEl` when set. */
+    /** captured from the last canvas mousedown; fallback only, prefer `_lockEl` when set. */
     _lockTargetEl: HTMLElement | null;
-    /** stable element to pointer-lock (`document.documentElement`), instead of a
-     *  per-room canvas. the canvas gets display:none'd (and its room disposed) on a
-     *  room swap, which drops a lock bound to it; the root element never does. mouse
-     *  deltas are global while locked, so look still works. */
+    /** stable element to pointer-lock instead of a per-room canvas, since the canvas gets display:none'd on a room swap. */
     _lockEl: HTMLElement | null;
-    /** tracked from window focus/blur — don't poll document.hasFocus() (unreliable
-     *  in the embed iframe, would flicker the lock). */
+    /** tracked from window focus/blur; document.hasFocus() is unreliable in the embed iframe. */
     _focused: boolean;
     _handlers: {
         keydown: (e: KeyboardEvent) => void;
@@ -716,8 +572,7 @@ export type InputManager = {
         modality: (e: PointerEvent) => void;
         pointerlockerror: () => void;
     };
-    /** teardown for the shared canvas' pointer listeners, set by
-     *  installCanvasListeners and run in disposeInputManager. */
+    /** set by installCanvasListeners, run in disposeInputManager. */
     _disposeCanvas: (() => void) | null;
 };
 
@@ -737,18 +592,9 @@ export function createInputManager(): InputManager {
         keydown: (e: KeyboardEvent) => {
             const mouseKeyboard = m.target?.mouseKeyboard;
             if (!mouseKeyboard) return;
-            // suppress game/editor input while a text field has focus so
-            // typing in inspector fields, chat, etc. doesn't trigger
-            // shortcuts or character movement. Check both `e.target` (stable
-            // even if a portal/dismissable layer moves focus before this
-            // bubble-phase listener fires, e.g. Radix Popover on Escape) and
-            // current focus, to cover the case where the keypress originates
-            // outside the input.
+            // check both e.target (stable even if a portal moves focus before this bubble-phase listener fires) and current focus.
             if (isTextInputElement(e.target) || isTextInputFocused()) return;
-            // Tab has aggressive default browser behavior (focus traversal).
-            // only fire it as a game key when focus is on the viewport
-            // (body or canvas); on any other UI element let the browser
-            // handle tab navigation normally.
+            // only fire Tab as a game key when focus is on the viewport; otherwise let the browser's focus-traversal handle it.
             if (e.code === 'Tab') {
                 const a = document.activeElement;
                 const onViewport = !a || a === document.body || a instanceof HTMLCanvasElement;
@@ -764,15 +610,11 @@ export function createInputManager(): InputManager {
         keyup: (e: KeyboardEvent) => {
             const mouseKeyboard = m.target?.mouseKeyboard;
             if (!mouseKeyboard) return;
-            // always clear on keyup to avoid stuck keys when focus
-            // changes while a key is held.
             mouseKeyboard._keyState.set(e.code, false);
             mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
             mouseKeyboard._mods.shift = e.shiftKey;
             mouseKeyboard._mods.alt = e.altKey;
-            // macOS swallows letter keyups while Cmd is held, when Cmd
-            // itself releases, flush any non-modifier held keys so the
-            // next press registers as a fresh just-down.
+            // macOS swallows letter keyups while Cmd is held; when Cmd releases, flush held keys so the next press is a fresh just-down.
             if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
                 for (const code of mouseKeyboard._keyState.keys()) {
                     if (
@@ -790,11 +632,7 @@ export function createInputManager(): InputManager {
                 }
             }
         },
-        // buttons, drag gestures and look deltas come from pointer events rather
-        // than mouse events so the first finger drives them too: the browser only
-        // synthesises compat mouse events for a touch after it lifts, and none
-        // while it drags. `isPrimary` keeps a second finger (a pinch/pan gesture,
-        // see TouchInput) from reading as a button.
+        // pointer events (not mouse events) so the first finger drives buttons/drag/look too; `isPrimary` keeps a second finger from reading as a button.
         pointerdown: (e: PointerEvent) => {
             if (!e.isPrimary) return;
             const mouseKeyboard = m.target?.mouseKeyboard;
@@ -802,36 +640,14 @@ export function createInputManager(): InputManager {
             mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
             mouseKeyboard._mods.shift = e.shiftKey;
             mouseKeyboard._mods.alt = e.altKey;
-            // game input is viewport-only: ignore presses that originate on
-            // overlay UI (toolbars, inspector, hotbar). otherwise a right-
-            // click on UI would arm a drag gesture and the fly controller
-            // would grab pointer-lock as soon as the cursor moved. mousemove
-            // and mouseup stay on window so a drag that started on the canvas
-            // still completes if released elsewhere.
-            // while pointer-locked the event targets the lock element (the root
-            // `_lockEl`), not the canvas — those clicks ARE game input by
-            // definition (no cursor to land on UI), so let them through, same as
-            // the wheel handler does.
+            // game input is viewport-only, otherwise a right-click on UI could arm a drag gesture and grab pointer-lock.
             const onCanvas = e.target instanceof HTMLCanvasElement;
             if (!onCanvas && !document.pointerLockElement) return;
-            // a click on the canvas should defocus any active text input so
-            // shortcuts like cmd+z route to the editor instead of the input's
-            // native undo history. the canvas itself isn't focusable, so
-            // without this the previously-focused input keeps focus.
+            // the canvas itself isn't focusable, so a click there wouldn't otherwise defocus a text input holding shortcuts.
             if (isTextInputFocused()) (document.activeElement as HTMLElement).blur();
-            // this is a real user gesture on the game surface — the only place
-            // the browser lets us ACQUIRE pointer lock. remember the canvas so
-            // `releasePointer().restore()` can re-lock later, then try now. (only
-            // a canvas press sets the fallback target; a locked-state press already
-            // has the lock, and its target is the root, not a canvas.)
+            // remember the canvas so `releasePointer().restore()` can re-lock later.
             if (onCanvas) m._lockTargetEl = e.target;
-            // the press that RE-acquires the lock (room wants it, not held yet) is
-            // spent on recapturing the cursor — swallow it so it never registers as a
-            // button-down, and no gameplay reads it as a click (fire, place, tap). the
-            // next press, made while already locked, is the first real action. testing
-            // the lock BEFORE tryAcquire (below) is the reliable read: acquisition is
-            // async, so a frame loop can't tell this press from a real one once the
-            // lock lands mid-hold.
+            // the press that RE-acquires the lock is spent recapturing the cursor: swallow it, testing the lock before tryAcquire.
             const acquiresLock = computeShouldBeLocked(m) && !document.pointerLockElement;
             tryAcquirePointerLock(m);
             const name: MouseButton | null =
@@ -854,24 +670,15 @@ export function createInputManager(): InputManager {
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
-            // no matching registered press → nothing to release. covers the swallowed
-            // lock-acquire click (its down never registered) and presses begun off the
-            // game surface, so neither emits a spurious tap.
+            // no matching registered press: covers the swallowed lock-acquire click and presses begun off the game surface.
             if (!mouseKeyboard._buttons[name]) return;
             mouseKeyboard._buttons[name] = false;
             const g = mouseKeyboard._gestures[name];
             g.released = true;
             // a release that never crossed the drag threshold is a tap.
-            // a drag-look release isn't mis-fired here because the drag
-            // promotion that triggered pointer-lock already set g.drag,
-            // the lock state doesn't need to be re-checked. taps issued
-            // while pointer-locked (e.g. RMB-place from inside the
-            // player-controller's locked view) are intentional.
             if (!g.drag) g.tapped = true;
         },
-        // the browser took the pointer away mid-press (a touch the OS claimed, a
-        // pen leaving range). release every held button as a plain up: no tap, the
-        // gesture was interrupted, not finished.
+        // the browser took the pointer away mid-press: release every held button as a plain up, no tap.
         pointercancel: (e: PointerEvent) => {
             if (!e.isPrimary) return;
             const mouseKeyboard = m.target?.mouseKeyboard;
@@ -903,11 +710,7 @@ export function createInputManager(): InputManager {
         },
         wheel: (e: WheelEvent) => {
             const mouseKeyboard = m.target?.mouseKeyboard;
-            // Consume the wheel when it's over the canvas (or while pointer-
-            // locked) so the page (or embedding iframe's parent) doesn't
-            // also scroll while the user is dolly-zooming. Same viewport-
-            // only gate as mousedown: wheel over overlay UI scrolls
-            // normally.
+            // consume the wheel over the canvas (or while locked) so the embedding page doesn't also scroll during a dolly-zoom.
             const onCanvas = e.target instanceof HTMLCanvasElement;
             if (!mouseKeyboard) {
                 if (document.pointerLockElement || onCanvas) e.preventDefault();
@@ -923,23 +726,15 @@ export function createInputManager(): InputManager {
             m._focused = true;
         },
         blur: () => {
-            // the browser already drops pointer lock on blur; mirror it so the
-            // formula agrees and we don't try to re-acquire while unfocused.
+            // the browser already drops pointer lock on blur; mirror it so we don't try to re-acquire while unfocused.
             m._focused = false;
             reconcilePointerLock(m);
         },
-        // "last input wins": every real pointer event sets the modality (the source of
-        // truth). Runs in the capture phase, so it lands BEFORE the bubbling
-        // `pointerdown` button handler for the same interaction and the acquire path
-        // reads the right value. Only a finger is touch; pen/mouse are fine pointers.
-        // This is what makes a hybrid (touchscreen laptop) adapt instead of being
-        // frozen by a boot-time capability guess.
+        // capture phase, so it lands before the bubbling pointerdown handler for the same interaction.
         modality: (e: PointerEvent) => {
             m.inputMode = e.pointerType === 'touch' ? 'touch' : 'mouse';
         },
-        // fires on `document` in browsers that report failure via the event
-        // instead of a rejected promise; the promise path warns in
-        // tryAcquirePointerLock. Both share the once-per-session guard.
+        // fires on `document` in browsers that report pointer-lock failure via the event instead of a rejected promise.
         pointerlockerror: warnPointerLockBlocked,
     };
 
@@ -954,20 +749,14 @@ export function createInputManager(): InputManager {
     window.addEventListener('wheel', handlers.wheel, { passive: false });
     window.addEventListener('focus', handlers.focus);
     window.addEventListener('blur', handlers.blur);
-    // capture + passive: see the modality of EVERY interaction (even ones a target
-    // stops from bubbling) without blocking it.
+    // capture + passive: see the modality of every interaction, even ones a target stops from bubbling, without blocking it.
     window.addEventListener('pointerdown', handlers.modality, { capture: true, passive: true });
     document.addEventListener('pointerlockerror', handlers.pointerlockerror);
 
     return m;
 }
 
-/** Mirror the "a UI surface is holding pointer input" fact onto the active
- *  target's per-frame input. Viewport gestures only see `Input`, not the
- *  manager, so this lets them interpret the wheel against real ownership state
- *  (the _lockReleases registry that useReleasePointer drives) rather than
- *  guessing from the DOM event target. Called wherever _lockReleases or the
- *  target changes, so the flag is always current when scripts read it. */
+/** mirrors the "a UI surface is holding pointer input" fact onto the active target's per-frame input. */
 function syncPointerCapture(m: InputManager): void {
     if (m.target) m.target.mouseKeyboard._pointerCapturedByUi = m._lockReleases.size > 0;
 }
@@ -975,13 +764,7 @@ function syncPointerCapture(m: InputManager): void {
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
     m.target = target;
     syncPointerCapture(m);
-    // a room swap changes whose intent we read — re-derive. Usually the new room
-    // already declared its intent (onInit fires at join, before this activation),
-    // so reconcile settles it now: keep the lock for a room that wants it, release
-    // for one that doesn't. If the new room is mounted but hasn't declared yet,
-    // reconcile HOLDS the held lock (on the stable `_lockEl`, not the swapped-out
-    // canvas) until its controller runs — releasing needs a user gesture to undo,
-    // so a premature release in that gap would strand the cursor.
+    // a room swap changes whose intent we read; reconcile holds the lock until the new room's controller declares its intent.
     reconcilePointerLock(m);
 }
 
@@ -1003,39 +786,22 @@ export function disposeInputManager(m: InputManager): void {
     m.target = null;
 }
 
-/* ── pointer lock ─────────────────────────────────────────────────────
- * Whether the pointer is locked is a value DERIVED each frame from the active
- * room's intent + UI releases + input modality + focus (Quake `IN_Frame`). The
- * web adds one asymmetry over a native grab: releasing works any time, acquiring
- * needs a user gesture — so the reconciler only RELEASES, and acquisition happens
- * from gesture handlers (canvas mousedown, `releasePointer().restore()`). */
+// lock state is derived each frame from room intent + UI releases + modality + focus; releasing works any time, acquiring needs a user gesture.
 
-/** pure derivation, no side effects. Gated on the CURRENT modality, not touch
- *  capability, so a mouse user on a touchscreen laptop still locks. */
+/** pure derivation, no side effects; gated on the current modality, not touch capability, so a mouse user on a touchscreen laptop still locks. */
 export function computeShouldBeLocked(m: InputManager): boolean {
     return (m.target?._lockWanted ?? false) && m._lockReleases.size === 0 && m.inputMode !== 'touch' && m._focused;
 }
 
-/** RELEASE-only. Runs end-of-frame, on target swap/blur, and on release add. */
+/** release-only; runs end-of-frame, on target swap/blur, and on release add. */
 export function reconcilePointerLock(m: InputManager): void {
     if (computeShouldBeLocked(m) || !document.pointerLockElement) return;
-    // the active room doesn't want the lock right now — but if it's freshly
-    // mounted and hasn't declared its intent yet (controller onInit pending after
-    // a room swap), that `false` is the un-run default, not an authoritative "no".
-    // hold the held lock until the controller runs (it declares next tick, then a
-    // following reconcile keeps or releases as it truly wants). only hold when the
-    // sole blocker IS the pending intent — a UI release, blur, or touch genuinely
-    // wants the cursor free, so those fall through to release.
+    // a freshly-mounted room that hasn't declared its lock intent yet reads its un-run `false` as pending, so hold the lock.
     if (m.target && !m.target._lockDeclared && m._lockReleases.size === 0 && m._focused && m.inputMode !== 'touch') return;
     document.exitPointerLock();
 }
 
-/** A genuine request failure (as opposed to the benign post-Esc cooldown) usually
- *  means the embedding blocked capture: a sandboxed iframe missing the
- *  `allow-pointer-lock` sandbox flag, or a hardened browser with pointer lock
- *  disabled. Silent failures make these reports undiagnosable, so surface one hint.
- *  Guarded so we log at most once per session (post-Esc reacquire attempts also
- *  land here and must not spam). */
+/** a genuine request failure usually means the embedding blocked capture or the browser has pointer lock disabled. */
 let warnedPointerLockBlocked = false;
 function warnPointerLockBlocked(): void {
     if (warnedPointerLockBlocked) return;
@@ -1047,13 +813,10 @@ function warnPointerLockBlocked(): void {
     );
 }
 
-/** ACQUIRE — call only from a real user gesture. `unadjustedMovement` gives raw,
- *  un-accelerated deltas (better aim); older Safari rejects it, so retry plain,
- *  and always swallow the post-Esc cooldown's rejection (logging one hint). */
+/** acquire, call only from a real user gesture; `unadjustedMovement` gives raw deltas, older Safari rejects it so retry plain. */
 export function tryAcquirePointerLock(m: InputManager): void {
     if (!computeShouldBeLocked(m) || document.pointerLockElement) return;
-    // prefer the stable container so the lock survives room swaps; fall back to
-    // the last-clicked canvas if the container isn't wired yet.
+    // prefer the stable container so the lock survives room swaps.
     const el = m._lockEl ?? m._lockTargetEl;
     if (!el) return;
     const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
@@ -1062,23 +825,19 @@ export function tryAcquirePointerLock(m: InputManager): void {
     if (p?.catch) p.catch(() => (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(warnPointerLockBlocked));
 }
 
-/** UI/ad/host surface asks to free the cursor while shown. Releases immediately
- *  (no waiting a frame with a menu over a locked cursor). */
+/** UI/ad/host surface asks to free the cursor while shown; releases immediately, no waiting a frame. */
 export function addLockRelease(m: InputManager, id: string): void {
     m._lockReleases.add(id);
     syncPointerCapture(m);
     reconcilePointerLock(m);
 }
 
-/** True while a UI overlay is holding pointer input (see _pointerCapturedByUi).
- *  Viewport wheel gestures check this so a scroll over an open panel drives the
- *  panel, not the game. */
+/** true while a UI overlay is holding pointer input; viewport wheel gestures check this so a scroll over a panel drives the panel. */
 export function isPointerCapturedByUi(mouseKeyboard: MouseKeyboardInput): boolean {
     return mouseKeyboard._pointerCapturedByUi;
 }
 
-/** the surface closed. Re-acquire synchronously — call from the close gesture so
- *  the lock comes back in that gesture; otherwise it waits for the next click. */
+/** the surface closed; re-acquire synchronously, called from the close gesture so the lock comes back in that gesture. */
 export function removeLockRelease(m: InputManager, id: string): void {
     m._lockReleases.delete(id);
     syncPointerCapture(m);

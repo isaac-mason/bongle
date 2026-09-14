@@ -1,9 +1,3 @@
-/**
- * source of truth for the editor's tool groupings. consumed by the
- * left toolbar UI (rendering + dividers) and the global keyboard
- * handler (category-key cycle + hold-and-digit slot jump).
- */
-
 import * as Icons from '../../icons';
 import type { EditorTool } from './edit-room-store';
 import { TOOL_CATEGORY_KEYS, type ToolCategoryId } from './editor-controls';

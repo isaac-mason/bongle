@@ -35,101 +35,56 @@ import {
 
 export type { TraitHandle } from './traits';
 
-/**
- * which side(s) a node lives on. see {@link Node.realm}.
- *
- * - `'inherit'`: take the effective realm from the nearest non-inherit ancestor (default)
- * - `'shared'`: server-owned, replicated to all clients
- * - `'client'`: lives only on the client that created it; never replicated
- * - `'server'`: lives only on the server; never replicated
- * - `'each'`: server AND every client get their own independent copy on attach
- *
- * the scene tree root is always `'shared'`, so an `'inherit'` node with no
- * explicit realm anywhere in its chain resolves to `'shared'`.
- */
+/** Which side(s) a node lives on: 'inherit' (default, takes the nearest non-inherit ancestor's realm), 'shared', 'client', 'server', or 'each' (server and every client get an independent copy). */
 export type Realm = 'inherit' | 'shared' | 'client' | 'server' | 'each';
 
 export type Node = {
-    /** runtime-only numeric ID, assigned by the scene tree's incrementing counter. not persisted. */
+    /** runtime-only numeric ID, not persisted. */
     id: number;
 
-    /** optional name, a non-unique label. */
     name: string | undefined;
 
-    /** parent node, or null if this is a root node */
     parent: Node | null;
 
-    /** ordered list of child nodes */
     children: Node[];
 
-    /** our index in the parent, or */
+    /** cached sibling index, revalidated by {@link childIndexOf} before use. */
     childIndex: number;
 
-    /** the scene tree this node belongs to, or null if detached */
+    /** the scene tree this node belongs to, or null if detached. */
     scene: SceneTree | null;
 
-    /**
-     * which Player owns this node. null = server-owned (default).
-     * Ownership is keyed per-Player (not per-Client) so parallel
-     * memberships, same client with multiple Players in a room, don't
-     * collapse onto one body.
-     */
+    /** null = server-owned. Keyed per-Player rather than per-Client so one client holding multiple Players doesn't collapse onto one body. */
     owner: PlayerId | null;
 
-    /**
-     * whether this node is saved to scene files. default: true.
-     * non-persistent nodes are still included in network replication
-     * and hot-reload round-trips.
-     */
+    /** whether this node is saved to scene files; still replicated and hot-reloaded when false. default true. */
     persist: boolean;
 
-    /**
-     * which side(s) this node lives on / is replicated to:
-     * - `'inherit'`: take effective realm from nearest non-inherit ancestor (default)
-     * - `'shared'`: server-owned, replicated to all clients
-     * - `'client'`: lives only on the client that created it; never replicated
-     * - `'server'`: lives only on the server; never replicated to clients
-     * - `'each'`: server AND every client get their own independent copy on attach
-     *
-     * realm boundaries cascade through the tree implicitly: an `'inherit'`
-     * descendant of a `'server'` node behaves as `'server'`. consumers that walk
-     * the tree (replication, prefab tick) thread the inherited realm through
-     * the recursion so each node sees its effective value in O(1).
-     */
+    /** which side(s) this node lives on / is replicated to; see {@link Realm}. Realm boundaries cascade implicitly through 'inherit' descendants. */
     realm: Realm;
 
     /** trait instances indexed by trait slot; holes for slots the node doesn't carry. */
     traits: Array<TraitBase | undefined>;
 
-    /** traits whose def isn't in the registry, keyed by trait id  */
+    /** traits whose def isn't in the registry, keyed by trait id. */
     unresolved: Map<string, Record<string, unknown> | undefined> | null;
 
-    /** bitset for trait query matching */
     bitset: Bitset;
 
-    /** bumped on structural changes to the node */
+    /** bumped on structural changes to the node. */
     version: number;
 
-    /**
-     * if non-null, this node is a prefab instance. its children are
-     * instantiated from the referenced scene. only the prefab config
-     * is persisted, children have persist: false.
-     */
+    /** if non-null, this node is a prefab instance; only the prefab config is persisted, its children have persist: false. */
     prefab: PrefabConfig | null;
 };
-
-/* uuid, retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
 
 /** shared empty map, so read paths can iterate a node with no unresolved traits without a branch. */
 export const EMPTY_UNRESOLVED: ReadonlyMap<string, Record<string, unknown> | undefined> = new Map();
 
 export function generateUuid(): string {
-    // use crypto.randomUUID if available (modern browsers + Node 19+),
-    // otherwise fall back to a simple v4-like generator.
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         return crypto.randomUUID();
     }
-    // fallback: pseudo-random v4 UUID
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -156,20 +111,7 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
     };
 }
 
-/* version bumping */
-
-/** per-node replication version, the send path's node-level early-out gate.
- *  the trait/field versions live on each trait instance's `_sync`; only this
- *  node-level rollup lives here, since it spans all of a node's traits. */
-/**
- * File a node into its scene tree's per-tick discovery set. Server-side only (gated on
- * `!env.client`), a no-op in the client bundle, where nothing drains it. Every version bump
- * funnels through here, so structural, trait and field changes all land in
- * `replication.dirty` for the per-client fan-out.
- *
- * Membership lives in the set rather than in a flag on the node, so a node detached from one
- * tree and attached to another is simply filed in each, with nothing to keep in step.
- */
+/** Files a node into its scene tree's per-tick discovery set, drained by the per-client fan-out; server-side only, a no-op on the client. */
 export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
     if (env.client) return;
     sceneTree.replication.dirty.add(node);
@@ -195,8 +137,7 @@ export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: nu
     markNodeDirty(sceneTree, node);
 }
 
-/** bump a single field's version (+ the trait + node versions). takes the
- *  instance + slice index directly, the diff already has both in hand. */
+/** bump a single field's version (+ the trait + node versions); takes the instance + slice index directly since the diff already has both in hand. */
 export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: TraitBase, i: number): void {
     const v = ++sceneTree.replication.versionCounter;
     if (instance._sync) {
@@ -207,96 +148,62 @@ export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: Tra
     markNodeDirty(sceneTree, node);
 }
 
-/* node scene tree */
-
 export type SceneTree = {
-    /** the root node of this scene tree. always present, cannot be destroyed. */
+    /** the root node of this scene tree; always present, cannot be destroyed. */
     root: Node;
 
-    /** all nodes in this scene tree (including root) */
+    /** all nodes in this scene tree (including root). */
     nodes: Set<Node>;
 
-    /** @internal node id -> the node. */
     idToNode: Map<number, Node>;
 
-    /** @internal server ids count up from 1, client-created ones down from -1, so the two
-     *  never collide on the wire. */
+    /** server ids count up from 1, client-created ones down from -1, so the two never collide on the wire. */
     nextServerId: number;
     nextClientId: number;
 
-    /**
-     * @internal what the server fan-out needs each tick. `dirty` is what changed, drained
-     * and cleared per tick by `Discovery.flush`; `versionCounter` is the monotonic source
-     * for node and trait sync versions; `owners` backs authority checks.
-     */
+    /** replication bookkeeping for the per-client fan-out: `dirty` nodes to send this tick, `versionCounter` for node/trait sync versions, `owners` for authority checks. */
     replication: {
         dirty: Set<Node>;
         versionCounter: number;
         owners: Map<PlayerId, Set<Node>>;
     };
 
-    /**
-     * @internal prefab anchors. `nodes` is every anchor in the tree; `dirty` is the subset
-     * awaiting reconcile, and membership in it IS the work list (no version compare). An
-     * anchor whose deps aren't ready stays in `dirty` across ticks.
-     */
+    /** prefab anchors: `nodes` is every anchor in the tree, `dirty` is the reconcile work list (an anchor whose deps aren't ready stays in it). */
     prefabs: {
         nodes: Set<Node>;
         dirty: Set<Node>;
         state: Map<Node, PrefabState>;
     };
 
-    /**
-     * @internal transforms whose owner called `setInterpolation(node, true)`.
-     * the per-frame `interpolate()` pass iterates this set instead of running
-     * a query. populated by `setInterpolation`, cleared by
-     * `setInterpolation(node, false)` and by trait/node removal.
-     */
+    /** transforms with `setInterpolation(node, true)` set; the per-frame `interpolate()` pass iterates this instead of running a query. */
     interpolating: Set<TransformTrait>;
 
-    /**
-     * @internal every query on this tree, in the shapes the hot paths need. One group
-     * rather than four fields: they are created, indexed and reaped together, and nothing
-     * outside this module touches any of them.
-     */
+    /** every query on this tree, grouped since they're created, indexed and reaped together. */
     queries: {
         /** dedup by condition hash, so `query()` hands back the existing one for the same terms. */
         hashToQuery: Map<string, Query<any>>;
-        /** trait slot -> the queries referencing it. The candidate index `collectQueries` walks. */
+        /** trait slot -> the queries referencing it; the candidate index `collectQueries` walks. */
         traitToQuery: Array<Array<Query<any>> | undefined>;
         /** queries with no positive self-trait, which no bitset can rule out for a node. */
         always: Array<Query<any>>;
         /** queries holding staged enter/exit tuples, drained by `flushQueryEvents`. */
         events: Array<Query<any>>;
-        /** live `Up` / `Ancestor` terms, bucketed by the trait slot they resolve. One bucket
-         *  is one walk. Maintained as queries register and release, so there is nothing to
-         *  invalidate and nothing to rebuild. */
+        /** live `Up` / `Ancestor` terms, bucketed by the trait slot they resolve, so a slot change touches one bucket. */
         traversals: TraversalTerm[][];
-        /** stamp for deduping candidates within one `collectQueries`, so a query reachable
-         *  through two of a node's traits is only visited once without allocating a Set. */
+        /** stamp for deduping candidates within one `collectQueries`, so a query reachable through two of a node's traits is visited once. */
         visitGeneration: number;
-        /** re-entrancy guard: a handler that mutates the tree stages more events and is
-         *  drained by the outer loop rather than starting a nested flush. */
+        /** re-entrancy guard: a handler that mutates the tree stages more events, drained by the outer loop rather than starting a nested flush. */
         flushingEvents: boolean;
     };
 
-    /**
-     * @internal the transform-root region index, the server-side AOI granularity. A root's
-     * world chunk gates the presence of its whole subtree on a client; `changes` records
-     * this tick's transitions so the per-player pass can re-evaluate moved roots without
-     * climbing the tree.
-     */
+    /** transform-root region index, the server-side AOI granularity; `rootRegionChanges` records this tick's transitions for the per-player pass. */
     regions: {
         regionToRoots: Map<string, Set<Node>>;
         rootToRegion: Map<Node, string>;
         rootRegionChanges: RootRegionChange[];
     };
 
-    /**
-     * optional runtime reference. when set, registerSubtree creates script instances,
-     * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
-     * set this after createSceneTree, before adding live nodes.
-     */
+    /** optional runtime reference; set this after createSceneTree, before adding live nodes. */
     context: SceneTreeContext | undefined;
 };
 
@@ -324,7 +231,6 @@ export function createSceneTree(): SceneTree {
         context: undefined,
     };
 
-    // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
     root.id = sceneTree.nextServerId++;
@@ -336,50 +242,26 @@ export function createSceneTree(): SceneTree {
     return sceneTree;
 }
 
-/* node lifecycle */
-
 export type CreateNodeOptions = {
     name?: string;
-    /** provide a runtime numeric ID (e.g. when unpacking from network). auto-assigned if omitted. */
+    /** provide a runtime numeric ID (e.g. when unpacking from network); auto-assigned if omitted. */
     id?: number;
     /** whether this node is saved to scene files. default: true. */
     persist?: boolean;
-    /**
-     * which side(s) this node lives on. defaults to `'inherit'`, which means
-     * "take the effective realm from the nearest non-inherit ancestor". the
-     * scene tree root is `'shared'`, so an `'inherit'` chain bottoms out
-     * there unless an ancestor explicitly opts into `'server'`/`'client'`/`'each'`.
-     */
+    /** which side(s) this node lives on; see {@link Realm}. defaults to `'inherit'`. */
     realm?: Realm;
 };
 
-/**
- * create a new **detached** node, not registered in any scene tree,
- * no script init, no queries. attach with `addChild(parent, node)` to
- * make it live; the scene tree allocates an id at attach time (negative
- * on the client, positive on the server).
- *
- * realm defaults to `'inherit'`, so the node takes whatever its eventual
- * parent dictates. set explicitly (`'server'`, `'client'`, `'each'`,
- * `'shared'`) to override.
- */
+/** Creates a **detached** node: not registered in any scene tree, no script init, no queries; attach with `addChild(parent, node)` to make it live. */
 export function createNode(options?: CreateNodeOptions): Node {
     return createNodeObject(options?.name, options?.id, options?.persist, options?.realm);
 }
 
-/**
- * look up a node by its runtime ID. returns undefined if not found.
- */
 export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
     return sceneTree.idToNode.get(id);
 }
 
-/**
- * set a node's owner, keeping `sceneTree.replication.owners` in sync. all owner
- * writes outside tests should route through here, the index drives the
- * client's per-tick owner-sync replication loop, so silent direct assignment
- * to `node.owner` will desync that walk.
- */
+/** Sets a node's owner, keeping `sceneTree.replication.owners` in sync; route all owner writes through here, a direct assignment to `node.owner` desyncs replication. */
 export function setOwner(sceneTree: SceneTree, node: Node, owner: PlayerId | null): void {
     const prev = node.owner;
     if (prev === owner) return;
@@ -399,18 +281,10 @@ export function setOwner(sceneTree: SceneTree, node: Node, owner: PlayerId | nul
         }
         set.add(node);
     }
-    // owner is replicated (node_owner); mark the change for discovery when the
-    // node is live. (editor/scene-pack paths also bump explicitly, harmless.)
     if (node.scene) bumpNodeVersion(node.scene, node);
 }
 
-/**
- * set a node's realm. realm controls which side(s)/clients a node replicates to,
- * so changing it can flip the effective relevance of the whole subtree
- * (descendants inherit), mark them all dirty so the per-client discovery fan-out
- * re-evaluates visibility (create on become-visible, destroy on become-hidden).
- * route runtime realm changes through here so the change can't bypass discovery.
- */
+/** Sets a node's realm; since descendants inherit it, this marks the subtree dirty for the per-client discovery fan-out. */
 export function setRealm(node: Node, realm: Realm): void {
     if (node.realm === realm) return;
     node.realm = realm;
@@ -419,59 +293,28 @@ export function setRealm(node: Node, realm: Realm): void {
     bumpSubtreeVersions(scene, node);
 }
 
-/**
- * returns true iff this node is replicable from server to clients, i.e. every
- * node on the chain from root down to (and including) this one resolves to
- * `'shared'`. a `'shared'` node under a `'server'`/`'each'`/`'client'`
- * ancestor isn't reachable for the client because the ancestor never
- * replicates, so the descendant can't either. `'inherit'` nodes are
- * transparent, they defer to whatever ancestor next sets a concrete realm.
- *
- * does not consult `mode`, callers (e.g. discovery in edit mode) decide
- * whether to bypass the filter.
- */
+/** True iff every node from root down to (and including) this one resolves to `'shared'`; a `'shared'` node under a non-shared ancestor isn't reachable. */
 export function isReplicable(node: Node): boolean {
-    let cur: Node | null = node;
-    while (cur) {
-        if (cur.realm !== 'shared' && cur.realm !== 'inherit') return false;
-        cur = cur.parent;
+    let current: Node | null = node;
+    while (current) {
+        if (current.realm !== 'shared' && current.realm !== 'inherit') return false;
+        current = current.parent;
     }
     return true;
 }
 
-/**
- * True iff this node was created locally on the current runtime rather than
- * allocated by the server. The server allocates positive ids (and nodes
- * replicated in from the server keep their positive server id); a client
- * allocates negative ids for nodes it creates locally (see id assignment in
- * the attach path above). So on a client this is false for server-owned
- * (replicated-in) nodes and true for client-only ones, a true *origin* test,
- * unlike `isReplicable` (a realm-policy test). Use it to decide who authors a
- * node's derived content (e.g. the character rig): the server builds for its
- * nodes, a client builds only its own local ones and otherwise defers to
- * replication.
- */
+/** True iff this node was created locally (server allocates positive ids, a client negative ones); an origin test, unlike `isReplicable` (a realm-policy test). */
 export function isLocalNode(node: Node): boolean {
     return node.id < 0;
 }
 
-/**
- * True iff `node` is a *transform root*: the topmost `TransformTrait` node in its
- * chain (has a transform, no ancestor has one), and is live + replicable. Transform
- * roots are the unit of chunk-tied AOI: a root's world chunk gates the
- * presence of its whole subtree on a client, and nested transforms ride their root.
- * Derived on demand (no maintained set), reconciled per tick off `replication.dirty`.
- */
+/** True iff `node` is a *transform root*: the topmost `TransformTrait` node in its chain, and live + replicable. Derived on demand, not a maintained set. */
 export function isTransformRoot(node: Node): boolean {
     const transform = node.traits[transformSlot()] as TransformTrait | undefined;
     return node.scene !== null && transform !== undefined && isReplicable(node) && parentTransform(transform) === null;
 }
 
-/* ── transform-root region index (server-side AOI) ─────────────────────── */
-
-/** a transform root's region transition this tick. `from`/`to` are region keys,
- *  `null` = not filed (newly eligible → `from: null`; destroyed or shadowed →
- *  `to: null`). moved-within-region produces no entry. */
+/** a transform root's region transition this tick; `null` means not filed (newly eligible -> `from: null`; destroyed or shadowed -> `to: null`). */
 export type RootRegionChange = { root: Node; from: string | null; to: string | null };
 
 function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
@@ -488,35 +331,26 @@ function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
     const set = sceneTree.regions.regionToRoots.get(key);
     if (set) {
         set.delete(node);
-        // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
+        // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets
         if (set.size === 0) sceneTree.regions.regionToRoots.delete(key);
     }
     sceneTree.regions.rootToRegion.delete(node);
 }
 
-/** the transform roots currently filed in a region, or undefined if none. read by
- *  the per-player AOI discovery to turn a region transition into node create/destroy. */
+/** the transform roots currently filed in a region, or undefined if none; read by per-player AOI discovery to turn a region transition into node create/destroy. */
 export function rootsInRegion(sceneTree: SceneTree, key: string): Set<Node> | undefined {
     return sceneTree.regions.regionToRoots.get(key);
 }
 
-/**
- * reconcile the region index against this tick's `replication.dirty`: file newly-eligible
- * transform roots, unfile ones that stopped being roots (lost the trait, got shadowed
- * by an ancestor transform, or were destroyed → `scene === null`), and re-bucket movers
- * whose world region changed. Records every transition in `rootRegionChanges` so the
- * per-player presence pass can re-evaluate moved roots without climbing the tree.
- * O(`replication.dirty`). Call once per room per tick, after scripts + physics and before the
- * per-player AOI discovery reads the index.
- */
+/** Reconciles the region index against this tick's `replication.dirty`, recording every transition in `rootRegionChanges`; call once per room per tick, after scripts + physics and before AOI discovery. */
 export function reconcileRootRegions(sceneTree: SceneTree): void {
     sceneTree.regions.rootRegionChanges.length = 0;
-    // a node filed during the pass is still picked up: Set iteration sees later additions.
+    // a node filed during the pass is still picked up: Set iteration sees later additions
     for (const node of sceneTree.replication.dirty) {
         const filed = sceneTree.regions.rootToRegion.get(node);
         if (isTransformRoot(node)) {
-            const t = node.traits[transformSlot()] as TransformTrait;
-            const c = getWorldChunk(t);
+            const transform = node.traits[transformSlot()] as TransformTrait;
+            const c = getWorldChunk(transform);
             const key = regionKey(chunkToRegionCoord(c[0]), chunkToRegionCoord(c[1]), chunkToRegionCoord(c[2]));
             if (filed === key) continue; // already filed here, nothing moved
             if (filed !== undefined) unfileRoot(sceneTree, node, filed);
@@ -529,30 +363,19 @@ export function reconcileRootRegions(sceneTree: SceneTree): void {
     }
 }
 
-/**
- * destroy a node: dispose scripts, remove from parent, recursively
- * destroy children, remove from all queries, and detach from the scene tree.
- *
- * the scene tree's root node cannot be destroyed.
- */
+/** Destroys a node: dispose scripts, remove from parent, recursively destroy children, remove from all queries, and detach from the scene tree. The root node cannot be destroyed. */
 export function destroyNode(sceneTree: SceneTree, node: Node): void {
     if (node.scene !== sceneTree) return;
-    if (node === sceneTree.root) return; // root node is permanent
+    if (node === sceneTree.root) return;
 
-    // park the node in the discovery dirty set (server-side; no-op on the client).
-    // node.scene is nulled at the end of this fn, so the fan-out sees node.scene
-    // === null and emits node_destroyed. recurses, so each destroyed node lands
-    // here. if the same node is re-added this tick it becomes live again → the
-    // fan-out treats it as a create/update instead (add→remove→add correctness).
+    // node.scene is nulled at the end of this fn, so the fan-out sees scene === null and emits node_destroyed
     markNodeDirty(sceneTree, node);
 
-    // destroy children first (iterate a copy since we mutate)
     const childrenCopy = node.children.slice();
     for (let i = 0; i < childrenCopy.length; i++) {
         destroyNode(sceneTree, childrenCopy[i]);
     }
 
-    // dispose all script instances from runtime
     if (sceneTree.context) {
         const nodeInstances = sceneTree.context.instances.get(node.id);
         if (nodeInstances) {
@@ -564,78 +387,44 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     }
     node.unresolved = null;
 
-    // remove from all queries
-    // a node can only be a member of a query that references one of its traits
-    // (or of one with no positive self-trait at all), so the candidate set is
-    // sufficient here — no need to sweep every query in the tree.
     removeNodeFromAllQueries(sceneTree, node, []);
 
-    // detach from parent
     if (node.parent) {
         removeChildInternal(node.parent, node);
     }
 
-    // detach from scene tree
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
     sceneTree.idToNode.delete(node.id);
-    // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
-    // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
-    // node never needs the two deletes.
     if (node.prefab !== null) {
         sceneTree.prefabs.nodes.delete(node);
         sceneTree.prefabs.dirty.delete(node);
         sceneTree.prefabs.state.delete(node);
     }
-    const t = node.traits[transformSlot()] as TransformTrait | undefined;
-    if (t) releaseTransform(sceneTree, t);
+    const transform = node.traits[transformSlot()] as TransformTrait | undefined;
+    if (transform) releaseTransform(sceneTree, transform);
     node.scene = null;
 
-    // recursive: each level flushes once its own node is fully detached, so a
-    // handler always sees a coherent (bottom-up) teardown.
+    // recursive: each level flushes once its own node is detached, for bottom-up-consistent teardown
     flushQueryEvents(sceneTree);
 }
-
-/* trait operations */
-
-// ── parent transform bookkeeping ──────────────────────────────────────
-//
 
 /** user-facing props for addTrait, only the trait's own declared fields, minus base fields. */
 export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | '_sync'>>;
 
-/**
- * add a trait to a node. pass an optional props object to override defaults.
- *
- *   addTrait(node, Health, { current: 50, max: 100 })
- *
- * works on both detached and live nodes. for detached nodes, scene-tree-level ops
- * (version bump, query reindex) and script instantiation are skipped and
- * deferred to registerSubtree.
- *
- * if the trait def has registered scripts (via `script(handle, ...)`) and
- * the node is live in a scene tree with a runtime, one ScriptInstance is
- * created per script and onInit/onEnter fire immediately.
- */
+/** Adds a trait to a node, with optional prop overrides; works on detached nodes too, deferring scene-tree-level effects to `registerSubtree`. */
 export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>, props?: TraitProps<T>): T {
     const traitSlot = handle.slot;
 
-    // Re-adding a trait that's already present is a REPLACE: tear the old
-    // instance down first (dispose its scripts → onExit fires — e.g. a
-    // CharacterTrait unmounts its rig), so nothing it set up is orphaned.
-    // Without this, a re-add silently overwrites the old instance and leaks
-    // its scripts and any side effects (mounted nodes, listeners, ...).
+    // re-adding an existing trait is a replace: tear down the old instance first so its scripts' onExit fires
     if (bitset.has(node.bitset, traitSlot)) {
         removeTrait(node, handle);
     }
 
-    // build plain instance from field defs, apply prop overrides
     const instance = buildTraitInstance(handle, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
 
     const scene = node.scene;
-    // descendants resolving this trait from the hierarchy now resolve to it.
-    // runs detached too: a subtree is often fully built before it is attached.
     resolveChildren(scene, node, traitSlot);
 
     if (scene) {
@@ -656,18 +445,13 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
                 }
             }
         }
-        // after the new trait's own scripts exist and have inited
         flushQueryEvents(scene);
     }
 
     return instance;
 }
 
-/**
- * instantiate every script registered on `def` for this trait instance,
- * fire `onInit`, then `onEnter` if the node is in-graph. used by addTrait
- * (live path) and registerSubtree (scene-load path).
- */
+/** instantiate every script registered on `def` for this trait instance; caller fires onInit/onEnter after. */
 function instantiateTraitScripts(runtime: SceneTreeContext, node: Node, trait: TraitBase, def: TraitDef): ScriptInstance[] {
     if (def.scripts.length === 0) return [];
 
@@ -687,10 +471,7 @@ function instantiateTraitScripts(runtime: SceneTreeContext, node: Node, trait: T
     return created;
 }
 
-/**
- * dispose every live script instance bound to a specific trait on a node.
- * fires onExit then onDispose. called from removeTrait and destroyNode paths.
- */
+/** dispose every live script instance bound to a specific trait on a node, firing onExit then onDispose. */
 function disposeTraitScripts(runtime: SceneTreeContext, node: Node, def: TraitDef): void {
     if (def.scripts.length === 0) return;
     const nodeInstances = runtime.instances.get(node.id);
@@ -715,11 +496,7 @@ function disposeTraitScripts(runtime: SceneTreeContext, node: Node, def: TraitDe
     if (nodeInstances.size === 0) runtime.instances.delete(node.id);
 }
 
-/**
- * write a trait instance into a node's trait map and bitset. does not touch
- * the scene tree, queries, or transform parent pointers, those side
- * effects belong to addTrait. used by addTrait and cloneNode.
- */
+/** write a trait instance into a node's trait map and bitset; scene tree, query and transform side effects belong to addTrait. */
 function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase): void {
     instance._node = node;
     node.traits[traitSlot] = instance;
@@ -732,25 +509,19 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
     if (traitSlot === undefined) return;
 
     if (bitset.has(node.bitset, traitSlot)) {
-        // dispose scripts before clearing trait state, onExit fires while
-        // the trait value is still resolvable.
+        // dispose scripts before clearing trait state, onExit fires while the trait value is still resolvable
         if (scene?.context) disposeTraitScripts(scene.context, node, handle.def);
 
         if (traitSlot === transformSlot()) {
             releaseTransform(scene, node.traits[transformSlot()] as TransformTrait);
         }
 
-        // update bitset so queries see the node as no longer matching
         bitset.remove(node.bitset, traitSlot);
         if (scene) {
             bumpNodeVersion(scene, node);
-            // reindex this node, callbacks fire while trait value still in _traits
             reindex(scene, node, traitSlot);
         }
-        // now safe to delete the value
         node.traits[traitSlot] = undefined;
-        // descendants that resolved to this trait now fall through to the next
-        // one above. runs after the delete so the walk sees the new answer.
         resolveChildren(scene, node, traitSlot);
         flushQueryEvents(scene);
     }
@@ -768,10 +539,7 @@ export function hasTrait(node: Node, handle: TraitHandle): boolean {
     return bitset.has(node.bitset, traitSlot);
 }
 
-/**
- * remove a trait by its numeric index. used internally by the inspector
- * and other engine code that works with numeric indices directly.
- */
+/** remove a trait by its numeric slot; used internally by the inspector and other engine code that works with numeric indices directly. */
 export function removeTraitBySlot(node: Node, traitSlot: number): void {
     const scene = node.scene;
 
@@ -796,10 +564,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
     }
 }
 
-/**
- * add a trait by its numeric index. used internally by the inspector
- * and other engine code that works with numeric indices directly.
- */
+/** add a trait by its numeric slot; used internally by the inspector and other engine code that works with numeric indices directly. */
 export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<string, unknown>): TraitBase | null {
     const scene = node.scene;
 
@@ -812,8 +577,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     node.traits[traitSlot] = instance;
     bitset.add(node.bitset, traitSlot);
 
-    // descendants resolving this trait from the hierarchy now resolve to it.
-    // outside the `scene` guard: this path hydrates detached trees (scene-pack).
+    // outside the `scene` guard: this path also hydrates detached trees (scene-pack)
     resolveChildren(scene, node, traitSlot);
 
     if (scene) {
@@ -842,36 +606,24 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     return instance;
 }
 
-/* trait validation issues */
-
-/**
- * compute issues for every prop field on a trait instance against its def.
- * returned array is empty when the instance conforms to all schemas.
- */
+/** compute issues for every prop field on a trait instance against its def; empty when the instance conforms to all schemas. */
 function computeTraitIssues(def: TraitDef, instance: TraitBase): Issue[] {
     if (def.controls.length === 0) return [];
     const issues: Issue[] = [];
-    for (const reg of def.controls) {
-        const value = reg.get(instance);
-        const fieldIssues = validate(reg.schema, value);
+    for (const control of def.controls) {
+        const value = control.get(instance);
+        const fieldIssues = validate(control.schema, value);
         for (const issue of fieldIssues) {
             issues.push({
                 ...issue,
-                path: [reg.controlId, ...issue.path],
+                path: [control.controlId, ...issue.path],
             });
         }
     }
     return issues;
 }
 
-/**
- * Validate a trait's control values and warn once per issue. `label` is prepended (e.g.
- * node name or scene path) so the source of the bad data is identifiable in mixed logs.
- *
- * The issues are reported, not retained: nothing reads them back, and an inspector that
- * wanted to surface them would want its own shape anyway. `_unresolvedTraits` is the
- * pattern for that, see the inspector's card for a trait whose def is missing.
- */
+/** Validates a trait's control values and warns once per issue; `label` is prepended so the source of bad data is identifiable in mixed logs. */
 export function refreshTraitIssues(def: TraitDef, instance: TraitBase, label?: string): Issue[] {
     const issues = computeTraitIssues(def, instance);
     if (issues.length > 0) {
@@ -884,24 +636,11 @@ export function refreshTraitIssues(def: TraitDef, instance: TraitBase, label?: s
     return issues;
 }
 
-/* script lifecycle (driven by trait attach / detach) */
-
-/**
- * fire onInit on all uninitialized script instances in a scene tree.
- *
- * scripts are now owned by traits, for each trait on each node, instantiate
- * any missing script instance, then init, then fire enter hooks.
- *
- * call this after the tree is fully built and all runtime context is wired
- * (e.g. client.room, client.state) so onInit handlers can safely access them.
- * used by the client after unpackSceneTree + room wiring, before the first tick.
- */
+/** Fires onInit on all uninitialized script instances in a scene tree; call after the tree is fully built and runtime context is wired. */
 export function initSceneTree(sceneTree: SceneTree): void {
     if (!sceneTree.context) return;
 
-    // pass 1: create instances for any node-trait pairs that don't have one
-    // (e.g. the client unpack path: unpackSceneTree runs without runtime, then
-    // engine-client sets sceneTree.runtime and calls initSceneTree to instantiate)
+    // pass 1: create instances for any node-trait pairs that don't have one yet
     for (const node of sceneTree.nodes) {
         const nodeTraits = node.traits;
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
@@ -926,15 +665,8 @@ export function initSceneTree(sceneTree: SceneTree): void {
     }
 }
 
-/* hierarchy */
-
-/**
- * add a child node to a parent. if the child already has a parent, it is
- * removed from the old parent first. if the parent is in a scene tree, the
- * child (and its descendants) are registered in that scene tree.
- */
+/** Adds a child node to a parent; if the child already has a parent it's removed first, and if the parent is in a scene tree the child registers into it. */
 export function addChild(parent: Node, child: Node): void {
-    // if child already has a parent, detach first
     if (child.parent) {
         removeChildInternal(child.parent, child);
     }
@@ -943,27 +675,21 @@ export function addChild(parent: Node, child: Node): void {
     child.childIndex = parent.children.length;
     parent.children.push(child);
 
-    // if parent is in a scene tree, register child subtree
     if (parent.scene) {
         registerSubtree(parent.scene, child);
     }
 
-    // re-resolve every resolution over the attached subtree. runs even when
-    // `parent` is itself detached — pointers within the subtree still matter.
+    // runs even when `parent` is itself detached, pointers within the subtree still matter
     resolveSubtree(parent.scene, child, undefined);
 
     // last, so an enter handler reading a world matrix sees fresh pointers
     flushQueryEvents(parent.scene);
 }
 
-/**
- * remove a child from its parent. the child (and its descendants) are
- * detached from the scene tree and removed from all queries.
- */
+/** Removes a child from its parent; the child (and its descendants) are detached from the scene tree and removed from all queries. */
 export function removeChild(parent: Node, child: Node): void {
     if (child.parent !== parent) return;
 
-    // detach subtree from scene tree first
     if (child.scene) {
         unregisterSubtree(child.scene, child);
     }
@@ -975,27 +701,15 @@ export function removeChild(parent: Node, child: Node): void {
     flushQueryEvents(parent.scene);
 }
 
-/**
- * get a node's parent, or null if it has none.
- */
 export function getParent(node: Node): Node | null {
     return node.parent;
 }
 
-/**
- * get a readonly snapshot of a node's children.
- */
 export function getChildren(node: Node): Node[] {
     return node.children;
 }
 
-/**
- * position of `node` among its siblings, 0 when it has no parent.
- *
- * The hint on the node makes this O(1) for the replication fan-out, which asks for it once per known
- * node per client per flush and was scanning the sibling array every time. Any code that reorders
- * `children` without updating the hint just costs one repair here.
- */
+/** Position of `node` among its siblings, 0 when it has no parent; the cached hint on the node makes this O(1) for the replication fan-out. */
 export function childIndexOf(node: Node): number {
     const parent = node.parent;
     if (parent === null) return 0;
@@ -1012,14 +726,10 @@ function reindexChildren(parent: Node, start: number): void {
     for (let i = start; i < children.length; i++) children[i]!.childIndex = i;
 }
 
-/**
- * move a node to a new parent. the node must be in the same scene tree as
- * the new parent, or detached (will be registered if parent is in a scene tree).
- */
+/** Moves a node to a new parent; the node must be in the same scene tree as the new parent, or detached (will be registered). */
 export function reparent(node: Node, newParent: Node): void {
     if (node.parent === newParent) return;
 
-    // can only reparent within the same scene tree (or from detached)
     if (node.scene !== null && node.scene !== newParent.scene) {
         throw new Error(`cannot reparent node to a different scene tree`);
     }
@@ -1043,30 +753,21 @@ export function reparent(node: Node, newParent: Node): void {
     node.childIndex = newParent.children.length;
     newParent.children.push(node);
 
-    // if node was detached, register it now (also fires onInit + onEnter + marks dirty)
     if (node.scene === null) {
+        // was detached: register now, which also fires onInit + onEnter + marks dirty
         registerSubtree(scene, node);
     } else {
-        // already in-tree reparent: fire onEnter with the new parent.
         if (scene.context) fireEnterHooks(scene.context, node, newParent);
-        // mark the whole moved subtree for discovery: reparenting can flip
-        // effective relevance (e.g. moving under a non-shared parent), and
-        // descendants inherit it, the per-client fan-out must re-evaluate them.
+        // reparenting can flip effective relevance and descendants inherit it, so the whole moved subtree needs re-evaluating
         bumpSubtreeVersions(scene, node);
     }
 
-    // re-resolve every resolution over the moved subtree. a node that was
-    // already live carries its old parent, so ones that resolve identically
-    // either side of the move skip their walk entirely.
     resolveSubtree(scene, node, wasInTree ? oldParent : null);
 
     flushQueryEvents(scene);
 }
 
-/**
- * move a child to a specific index in its parent's children array.
- * does nothing if the child is not a child of parent.
- */
+/** Moves a child to a specific index in its parent's children array; does nothing if the child is not a child of parent. */
 export function reorderChild(parent: Node, child: Node, index: number): void {
     if (child.parent !== parent) return;
     const current = childIndexOf(child);
@@ -1075,17 +776,10 @@ export function reorderChild(parent: Node, child: Node, index: number): void {
     const target = Math.min(index, parent.children.length);
     parent.children.splice(target, 0, child);
     reindexChildren(parent, Math.min(current, target));
-    // index change is a structural change discovery must replicate (it bumped
-    // nothing before, the old per-client walk diffed childIndex directly).
     if (child.scene) bumpNodeVersion(child.scene, child);
 }
 
-/**
- * replace all children of `root` with `node`, destroying every other child.
- * `node` must be a direct child of `root`. analogous to the DOM's
- * `replaceChildren()`, useful after eager prefab instantiation when you
- * want to keep only one sub-node and discard the rest.
- */
+/** Replaces all children of `root` with `node`, destroying every other child; `node` must be a direct child of `root`. Mirrors the DOM's `replaceChildren()`. */
 export function replaceChildren(root: Node, node: Node): void {
     if (node.parent !== root) {
         throw new Error('replaceChildren: node must be a direct child of root');
@@ -1096,7 +790,6 @@ export function replaceChildren(root: Node, node: Node): void {
         if (scene) {
             destroyNode(scene, child);
         } else {
-            // detached, just unlink
             child.parent = null;
         }
     }
@@ -1104,10 +797,7 @@ export function replaceChildren(root: Node, node: Node): void {
     node.childIndex = 0;
 }
 
-/**
- * returns true if `ancestor` is an ancestor of `descendant` (i.e. the
- * descendant is somewhere below the ancestor in the tree).
- */
+/** True if `ancestor` is an ancestor of `descendant`. */
 export function isAncestorOf(ancestor: Node, descendant: Node): boolean {
     let current = descendant.parent;
     while (current !== null) {
@@ -1117,84 +807,58 @@ export function isAncestorOf(ancestor: Node, descendant: Node): boolean {
     return false;
 }
 
-/* hierarchy internals */
-
 /** remove a child from parent's children array (does not touch scene tree registration) */
 function removeChildInternal(parent: Node, child: Node): void {
-    const idx = childIndexOf(child);
-    if (idx !== -1) {
-        parent.children.splice(idx, 1);
-        reindexChildren(parent, idx);
+    const index = childIndexOf(child);
+    if (index !== -1) {
+        parent.children.splice(index, 1);
+        reindexChildren(parent, index);
     }
     child.parent = null;
     child.childIndex = 0;
 }
 
-/**
- * register a node and all its descendants into a scene tree.
- *
- * two-pass for scripts:
- *   pass 1, register: register nodes, index into queries, create script instances (if runtime present).
- *   pass 2, init: fire onInit on all newly created script instances.
- *
- * this ensures all nodes in the subtree are registered and all scripts
- * have their state available before any onInit fires.
- *
- * query enter events raised in pass 1 are staged, not emitted: the caller
- * flushes once transform pointers are rebuilt too. see `flushQueryEvents`.
- */
+/** Registers a node and all its descendants into a scene tree, two-pass: pass 1 registers nodes, indexes queries and creates script instances; pass 2 fires onInit on all of them. */
 function registerSubtree(sceneTree: SceneTree, node: Node): void {
-    // collect all nodes in the subtree (pre-order)
     const subtree: Node[] = [];
     collectSubtree(node, subtree);
 
-    // pass 1: register all nodes in the scene tree + index into queries + create script instances
     const newScriptInstances: ScriptInstance[] = [];
-    // one candidate buffer for the whole subtree, refilled per node by `collectQueries`.
+    // one candidate buffer for the whole subtree, refilled per node by `collectQueries`
     const candidates: Array<Query<any>> = [];
 
-    for (const n of subtree) {
-        n.scene = sceneTree;
-        sceneTree.nodes.add(n);
-        // a node entering the live tree is a create for the discovery fan-out.
-        // server-only (gated inside markNodeDirty); pre-order so creates emit
-        // parent-first (fan-out also depth-orders as a backstop).
-        markNodeDirty(sceneTree, n);
-        if (n.prefab) {
-            sceneTree.prefabs.nodes.add(n);
-            sceneTree.prefabs.dirty.add(n);
+    for (const subtreeNode of subtree) {
+        subtreeNode.scene = sceneTree;
+        sceneTree.nodes.add(subtreeNode);
+        markNodeDirty(sceneTree, subtreeNode);
+        if (subtreeNode.prefab) {
+            sceneTree.prefabs.nodes.add(subtreeNode);
+            sceneTree.prefabs.dirty.add(subtreeNode);
         }
 
-        // assign runtime ID if needed (node entering scene tree from detached state).
-        // client picks from the negative id space, server from the positive id space.
-        if (n.id === 0) {
-            n.id = env.client ? sceneTree.nextClientId-- : sceneTree.nextServerId++;
-        } else if (n.id >= sceneTree.nextServerId) {
+        if (subtreeNode.id === 0) {
+            subtreeNode.id = env.client ? sceneTree.nextClientId-- : sceneTree.nextServerId++;
+        } else if (subtreeNode.id >= sceneTree.nextServerId) {
             // pre-assigned id (e.g. from network unpack), bump counter past it
-            sceneTree.nextServerId = n.id + 1;
+            sceneTree.nextServerId = subtreeNode.id + 1;
         }
-        sceneTree.idToNode.set(n.id, n);
+        sceneTree.idToNode.set(subtreeNode.id, subtreeNode);
 
-        const candidateCount = collectQueries(sceneTree, n, candidates);
-        for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, n, true);
+        const candidateCount = collectQueries(sceneTree, subtreeNode, candidates);
+        for (let qi = 0; qi < candidateCount; qi++) reconcile(candidates[qi]!, subtreeNode, true);
 
-        // create script instances for every trait on this node
         if (sceneTree.context) {
-            const nodeTraits = n.traits;
+            const nodeTraits = subtreeNode.traits;
             for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
                 const trait = nodeTraits[traitSlot];
                 if (trait === undefined) continue;
                 const handle = registry.slotToTrait[traitSlot];
                 if (!handle || handle.def.scripts.length === 0) continue;
-                const created = instantiateTraitScripts(sceneTree.context, n, trait, handle.def);
+                const created = instantiateTraitScripts(sceneTree.context, subtreeNode, trait, handle.def);
                 for (const i of created) newScriptInstances.push(i);
             }
         }
     }
-
-    // fill the hierarchy slots pass 1 deferred, before any user code runs.
-    // pass 2 fires `onInit`, and a script reading a query tuple there must not
-    // see a half-built match.
 
     // pass 2: fire onInit on all new script instances
     for (const instance of newScriptInstances) {
@@ -1203,31 +867,25 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
 
     // pass 3: fire onEnter on each node that has a parent (all nodes in the subtree do)
     if (sceneTree.context) {
-        for (const n of subtree) {
-            if (n.parent) {
-                fireEnterHooks(sceneTree.context, n, n.parent);
+        for (const subtreeNode of subtree) {
+            if (subtreeNode.parent) {
+                fireEnterHooks(sceneTree.context, subtreeNode, subtreeNode.parent);
             }
         }
     }
 }
 
-/**
- * unregister a node and all its descendants from a scene tree.
- * disposes scripts, removes from queries, detaches from scene tree.
- */
+/** Unregisters a node and all its descendants from a scene tree: disposes scripts, removes from queries, detaches from scene tree. */
 function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Query<any>> = []): void {
-    // unregister children first (bottom-up)
     for (let i = 0; i < node.children.length; i++) {
         unregisterSubtree(sceneTree, node.children[i]!, candidates);
     }
 
-    // fire onExit before disposing, parent is still set here
     if (sceneTree.context && node.parent) {
         fireExitHooks(sceneTree.context, node, node.parent);
     }
 
-    // dispose all script instances from runtime, scripts re-instantiate
-    // from traits when the subtree re-registers, so we drop the lot here.
+    // scripts re-instantiate from traits when the subtree re-registers, so drop them all here
     if (sceneTree.context) {
         const nodeInstances = sceneTree.context.instances.get(node.id);
         if (nodeInstances) {
@@ -1243,26 +901,16 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node, candidates: Array<Q
     setOwner(sceneTree, node, null);
     sceneTree.nodes.delete(node);
     sceneTree.idToNode.delete(node.id);
-    // mirrors the guarded add in `registerSubtree`: nothing files a node into these unless
-    // it bears a prefab, and `setPrefab` keeps them in step for a live node, so a plain
-    // node never needs the two deletes.
     if (node.prefab !== null) {
         sceneTree.prefabs.nodes.delete(node);
         sceneTree.prefabs.dirty.delete(node);
         sceneTree.prefabs.state.delete(node);
     }
-    // a node leaving the live tree is a destroy for the discovery fan-out,
-    // symmetric with registerSubtree marking entering nodes dirty. server-only
-    // (gated inside markNodeDirty). the node ends this fn in dirtyNodes with
-    // scene === null, so the fan-out emits node_destroyed (only to clients that
-    // knew it). without this, removing a server-owned (owner === null) node via
-    // removeChild never replicated, setOwner above only dirties when the owner
-    // actually changes, which it doesn't for an already-server-owned node.
+    // ends with scene === null so it's reported even for an already-server-owned node, which setOwner above wouldn't dirty
     markNodeDirty(sceneTree, node);
     node.scene = null;
 }
 
-/** collect all nodes in a subtree (pre-order) into the output array */
 /** bump every node in the subtree, without materialising it. */
 function bumpSubtreeVersions(scene: SceneTree, node: Node): void {
     bumpNodeVersion(scene, node);
@@ -1277,16 +925,10 @@ function collectSubtree(node: Node, out: Node[]): void {
     }
 }
 
-/* traversal */
-
 // re-exported from traverse.ts
 export { traverse } from './traverse';
 
-/* scene-tree-level script driving */
-
-// memoised `script/<hook>/<key>` metric ids, built once per (hook, script) so the
-// hot path (incl. while the client panel is closed and begin/end no-op) does no
-// string work.
+// memoised `script/<hook>/<key>` metric ids so the hot path does no string work even while the profiler is off
 const perfKeyCache = new Map<string, Map<string, string>>();
 function perfKey(hook: string, key: string): string {
     let byKey = perfKeyCache.get(hook);
@@ -1302,14 +944,10 @@ function perfKey(hook: string, key: string): string {
     return id;
 }
 
-// a disabled profiler for hooks we don't surface (the physics-step hooks run from
-// physics.tick, which has no profiler handle); begin/end no-op on it.
+// a disabled profiler for hooks we don't surface (physics-step hooks run from physics.tick, which has no profiler handle)
 const SILENT = Debug.createProfiler(false);
 
-// the one driver behind every runOn* below: walk initialized instances, run each
-// `select`-ed hook fn with `args`, scope it as `script/<hook>/<key>` (begin/end
-// self-gate on the profiler), and log errors with the node + hook name. one span
-// per INSTANCE, so a trait's per-frame total is the sum the reduction reports.
+// the one driver behind every runOn* below: walk initialized instances and run each `select`-ed hook fn with `args`, one profiler span per instance
 function runHook<A>(
     sceneTree: SceneTree,
     args: A,
@@ -1335,67 +973,40 @@ function runHook<A>(
     }
 }
 
-/**
- * fire onInput hooks on all scripts. runs at the very start of each frame,
- * before runOnUpdate, so consumers can pre-process / consume input (e.g. an
- * editor zeroing mk._dx/_dy) before player controllers read it.
- */
+/** fire onInput hooks on all scripts, before runOnUpdate so consumers can pre-process input before player controllers read it. */
 export function runOnInput(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onInput', (i) => i.onInput);
 }
 
-/**
- * update all scripts in the scene tree. fires once per frame before the
- * fixed-timestep tick loop, intended for input polling and camera binding.
- */
+/** update all scripts in the scene tree, once per frame before the fixed-timestep tick loop. */
 export function runOnUpdate(sceneTree: SceneTree, args: UpdateArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onUpdate', (i) => i.onUpdate);
 }
 
-/**
- * tick all scripts in the scene tree. iterates all nodes and calls onTick
- * on each script instance.
- */
+/** tick all scripts in the scene tree, calling onTick on each script instance. */
 export function runOnTick(sceneTree: SceneTree, args: TickArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onTick', (i) => i.onTick);
 }
 
-/**
- * fire onPrePhysicsStep hooks on all scripts in the scene tree. called after
- * tickSceneTree but before the physics step. routes through SILENT, it runs
- * from physics.tick, which carries no profiler, and isn't surfaced in the digest.
- */
+/** fire onPrePhysicsStep hooks on all scripts, after tickSceneTree but before the physics step; runs off the profiler since it runs from physics.tick. */
 export function runOnPrePhysicsStep(sceneTree: SceneTree, args: TickArgs): void {
     runHook(sceneTree, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
 }
 
-/**
- * fire onPostPhysicsStep hooks on all scripts in the scene tree. called after
- * the physics step, before frameSceneTree. SILENT, see runOnPrePhysicsStep.
- */
+/** fire onPostPhysicsStep hooks on all scripts, after the physics step, before frameSceneTree. */
 export function runOnPostPhysicsStep(sceneTree: SceneTree, args: TickArgs): void {
     runHook(sceneTree, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
 }
 
-/**
- * fire onPostAnimate hooks on all scripts in the scene tree.
- * called after Animation.tick (animator sampling) and before world-matrix
- * recompute, so post-anim callbacks see fresh local TRS but world matrices
- * are still last-tick.
- */
+/** fire onPostAnimate hooks on all scripts, after Animation.tick and before world-matrix recompute, so callbacks see fresh local TRS but last-tick world matrices. */
 export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
-/**
- * frame all scripts in the scene tree. iterates all nodes and calls onFrame
- * on each script instance. intended for client-side render frame updates.
- */
+/** frame all scripts in the scene tree, calling onFrame on each script instance; client-side render frame updates. */
 export function runOnFrame(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onFrame', (i) => i.onFrame);
 }
-
-/* serialization, schema-driven */
 
 export type SerializeOptions = {
     /** if true, skip nodes with persist: false and traits with persist: false. */
@@ -1419,10 +1030,7 @@ export type SerializedNode = {
     prefab?: PrefabConfig;
 };
 
-/**
- * serialize a trait instance to a plain object for scene files.
- * only `control()`-decorated fields are serialized. tag traits get `controls: undefined`.
- */
+/** Serializes a trait instance to a plain object for scene files; only `control()`-decorated fields are serialized, tag traits get `controls: undefined`. */
 function serializeTrait(traitSlot: number, instance: TraitBase, options?: SerializeOptions): SerializedTrait | null {
     const handle = registry.slotToTrait[traitSlot];
     if (!handle) return null;
@@ -1432,28 +1040,17 @@ function serializeTrait(traitSlot: number, instance: TraitBase, options?: Serial
         return { id: handle.id, controls: undefined };
     }
 
-    // extract control values from the instance. clone, callers (scene save,
-    // blueprint capture, undo snapshots) retain this and reapply later;
-    // sharing references with the live instance would let runtime mutations
-    // (vec3.copy on transform.position etc.) corrupt the snapshot.
+    // clone control values: callers retain this and reapply later, so sharing refs with the live instance would let runtime mutations corrupt the snapshot
     const controls: Record<string, unknown> = {};
-    for (const reg of handle.def.controls) {
-        const value = reg.get(instance);
-        controls[reg.controlId] = value !== null && typeof value === 'object' ? cloneTraitValue(value) : value;
+    for (const control of handle.def.controls) {
+        const value = control.get(instance);
+        controls[control.controlId] = value !== null && typeof value === 'object' ? cloneTraitValue(value) : value;
     }
     return { id: handle.id, controls };
 }
 
-/**
- * serialize a node and all its descendants to a plain object.
- *
- * for each trait, only `control()`-decorated fields are serialized. runtime-only
- * fields and sync-only fields are skipped.
- *
- * tag traits (empty class) are serialized with `controls: undefined`.
- */
+/** Serializes a node and all its descendants to a plain object; for each trait, only `control()`-decorated fields are serialized. */
 export function serializeNode(node: Node, options?: SerializeOptions): SerializedNode {
-    // serialize traits
     const serializedTraits: SerializedTrait[] = [];
 
     const nodeTraits = node.traits;
@@ -1466,14 +1063,11 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
         }
     }
 
-    // include unresolved traits
     for (const [id, controls] of node.unresolved ?? EMPTY_UNRESOLVED) {
         serializedTraits.push({ id, controls });
     }
 
-    // prefab nodes own no authored children, all children are derived
-    // from the prefab source and get re-instantiated at load time.
-    // never persist them to avoid stale/circular data on disk.
+    // prefab nodes own no authored children: they're re-instantiated at load time, so never persist them
     const children: SerializedNode[] = [];
     if (!node.prefab) {
         for (let i = 0; i < node.children.length; i++) {
@@ -1493,23 +1087,12 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
     };
 }
 
-/**
- * deserialize a node tree from a plain object. the returned node is **detached**,
- * caller is responsible for `addChild(parent, node)` if attachment is desired.
- *
- * traits are restored from their definitions; their bound scripts are
- * instantiated by registerSubtree (via addChild) if sceneTree.runtime is set.
- *
- * resilient to schema changes:
- * - if a property field exists in saved data but not in the current schema, it is ignored.
- * - if a property field exists in the schema but not in saved data, the default is used.
- * - if a trait id is not registered, it is stashed as unresolved (preserving json data).
- */
+/** Deserializes a node tree from a plain object into a **detached** node; the caller calls `addChild(parent, node)` to attach it. Resilient to schema changes. */
 export function deserializeNode(data: SerializedNode): Node {
     const node = createNodeObject(data.name, 0, data.persist !== false, data.realm);
     const label = `node "${data.name ?? '(unnamed)'}"`;
 
-    // detached, so this only records the config; the anchor is reconciled once it attaches.
+    // detached, so this only records the config; the anchor is reconciled once it attaches
     if (data.prefab) setPrefab(node, structuredClone(data.prefab));
 
     for (const traitData of data.traits) {
@@ -1532,23 +1115,7 @@ export function deserializeNode(data: SerializedNode): Node {
     return node;
 }
 
-/**
- * clone a node and all its descendants. the returned subtree is **detached**,
- * it has no parent, is not registered in any scene tree, and its scripts are
- * not instantiated. add it to the graph with `addChild(parent, clone)` to wake
- * it up; `onInit` for any scripts fires at that point.
- *
- * source node may be detached.
- *
- * controls (editor + persisted state) are deep-copied via per-control packcat
- * codecs (`getControlCodecs`). runtime-only fields reset to defaults on the
- * clone, systems re-derive them on first tick (e.g. RigidBodyTrait.body
- * comes back null, and the installer rebuilds from the cloned `def` on the
- * next preStep).
- *
- * the clone root inherits the source's realm. callers who want a different
- * realm on the clone can assign `clone.realm = ...` before `addChild`.
- */
+/** Clones a node and all its descendants into a **detached** subtree with no scripts instantiated; `addChild(parent, clone)` wakes it up. Controls are deep-copied via per-control codecs. */
 export function cloneNode(source: Node): Node {
     const clone = createNodeObject(source.name, 0, source.persist, source.realm);
     clone.prefab = source.prefab;
@@ -1565,8 +1132,8 @@ export function cloneNode(source: Node): Node {
             for (let i = 0; i < codecs.length; i++) {
                 const codec = codecs[i];
                 const bytes = codec.pack(sourceInstance, source);
-                const reg = traitHandle.def.controls[i];
-                reg.set(cloneInstance, codec.unpack(bytes));
+                const control = traitHandle.def.controls[i];
+                control.set(cloneInstance, codec.unpack(bytes));
             }
         }
         attachTraitInstance(clone, traitSlot, cloneInstance);
@@ -1578,9 +1145,6 @@ export function cloneNode(source: Node): Node {
         clone.unresolved.set(id, controls);
     }
 
-    // scripts ride on traits, clone needs no script copy; registerSubtree
-    // re-instantiates from the cloned trait list.
-
     for (const child of source.children) {
         addChild(clone, cloneNode(child));
     }
@@ -1588,13 +1152,7 @@ export function cloneNode(source: Node): Node {
     return clone;
 }
 
-/**
- * find the first descendant of `node` (depth-first) whose `name` matches `name`.
- * returns null if none found. `node` itself is not considered a match.
- *
- * useful for resolving rig joint targets in animations and similar
- * name-keyed lookups (mirrors three.js `Object3D.getObjectByName`).
- */
+/** Finds the first descendant of `node` (depth-first) whose `name` matches `name`, or null; `node` itself is not considered a match. */
 export function findChildByName(node: Node, name: string): Node | null {
     for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
@@ -1605,13 +1163,7 @@ export function findChildByName(node: Node, name: string): Node | null {
     return null;
 }
 
-/**
- * find every descendant of `node` (depth-first) whose `name` matches `name`.
- * returns an empty array if none found. `node` itself is not considered a match.
- *
- * use when you genuinely need to handle multiple matches (e.g. counted-suffix
- * names from non-unique gltf labels). prefer `findChildByName` for unique lookups.
- */
+/** Finds every descendant of `node` (depth-first) whose `name` matches `name`; prefer `findChildByName` for unique lookups. */
 export function findChildrenByName(node: Node, name: string): Node[] {
     const out: Node[] = [];
     collectChildrenByName(out, node, name);
@@ -1626,46 +1178,26 @@ function collectChildrenByName(out: Node[], node: Node, name: string): void {
     }
 }
 
-/**
- * serialize the entire scene tree. the root node is a regular SerializedNode
- * with its children nested inside.
- */
 export type SerializedSceneTree = {
-    /** the root node of the scene, including all descendants */
     root: SerializedNode;
 };
 
-/**
- * save the scene tree to a JSON-friendly structure for writing to disk.
- * respects persist flags, skips nodes with persist: false and traits with
- * persist: false. only property fields are included.
- *
- * the root node is serialized as a regular node with its children nested inside.
- */
+/** Saves the scene tree to a JSON-friendly structure for writing to disk; skips nodes and traits with persist: false. */
 export function saveSceneTree(sceneTree: SceneTree): SerializedSceneTree {
     const options: SerializeOptions = { persistOnly: true };
     return { root: serializeNode(sceneTree.root, options) };
 }
 
-/**
- * load a scene tree from serialized JSON data (from disk).
- * clears existing children of root and replaces them with the loaded scene.
- * root traits, scripts, and name are restored from the saved data.
- *
- * if sceneTree.runtime is set, script instances are created and initialized as nodes
- * are added. set sceneTree.runtime before calling this function if you want live scripts.
- */
+/** Loads a scene tree from serialized JSON data, replacing root's existing children and restoring root traits, scripts and name. */
 export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): void {
     const root = sceneTree.root;
     const rootData = data.root;
 
-    // clear existing children
     const existingChildren = root.children.slice();
     for (const child of existingChildren) {
         destroyNode(sceneTree, child);
     }
 
-    // clear existing root scripts (data + instances)
     if (sceneTree.context) {
         const rootInstances = sceneTree.context.instances.get(root.id);
         if (rootInstances) {
@@ -1679,23 +1211,23 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     root.bitset = bitset.init();
     root.unresolved = null;
 
-    // restore root name
     root.name = rootData.name;
 
-    // restore root traits
     if (rootData.traits) {
-        for (const st of rootData.traits) {
-            const handle = registry.traits.handles.get(st.id);
+        for (const serializedTrait of rootData.traits) {
+            const handle = registry.traits.handles.get(serializedTrait.id);
             if (!handle) {
-                console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
+                console.warn(`[bongle] unresolved trait "${serializedTrait.id}" on root node — preserving raw data`);
                 if (root.unresolved === null) root.unresolved = new Map();
-                // cloned like the `deserializeNode` path: the caller keeps `rootData`, and the
-                // round-trip copy must not alias it.
-                root.unresolved.set(st.id, st.controls ? cloneTraitValue(st.controls) : undefined);
+                // cloned so the round-trip copy doesn't alias the caller's retained rootData
+                root.unresolved.set(
+                    serializedTrait.id,
+                    serializedTrait.controls ? cloneTraitValue(serializedTrait.controls) : undefined,
+                );
                 continue;
             }
 
-            const controls = st.controls ? cloneTraitValue(st.controls) : undefined;
+            const controls = serializedTrait.controls ? cloneTraitValue(serializedTrait.controls) : undefined;
             const instance = buildTraitInstance(handle, controls);
             instance._node = root;
             root.traits[handle.slot] = instance;
@@ -1705,7 +1237,6 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
         reindex(sceneTree, root);
     }
 
-    // root scripts ride on traits, instantiate per trait if runtime present
     if (sceneTree.context) {
         const nodeTraits = root.traits;
         for (let traitSlot = 0; traitSlot < nodeTraits.length; traitSlot++) {
@@ -1721,20 +1252,12 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     // the root's own reindex above is staged; drain it before children land
     flushQueryEvents(sceneTree);
 
-    // deserialize children of root (registerSubtree fires via addChild, creating instances)
     for (const nodeData of rootData.children) {
         const child = deserializeNode(nodeData);
         addChild(root, child);
     }
 }
 
-/* query system */
-
-/**
- * Sparse-index key for a node id. Server ids count up from 1 and client ids
- * down from -1, and a client tree holds both (replicated nodes arrive with
- * server ids), so the two runs are interleaved into one dense-ish key space.
- */
 /** record `node`'s position in `q.matches`, in whichever sparse array owns its id's sign. */
 function sparseSet(q: Query<any>, id: number, index: number): void {
     if (id >= 0) q._sparse[id] = index;
@@ -1761,15 +1284,7 @@ function pushCandidates(sceneTree: SceneTree, slot: number, gen: number, out: Ar
     return n;
 }
 
-/**
- * Gather the queries whose verdict for `node` could have changed, into the
- * scene tree's scratch buffer; returns how many. Pass `changedSlot` when a
- * single trait was added or removed, otherwise every trait the node bears is
- * considered.
- *
- * Walks the node's bitset words rather than its trait map: iterating a Map
- * allocates an iterator, and this runs once per node per membership site.
- */
+/** Gathers the queries whose verdict for `node` could have changed into the scene tree's scratch buffer, returning how many; pass `changedSlot` for a single trait add/remove. */
 function collectQueries(sceneTree: SceneTree, node: Node, out: Array<Query<any>>, changedSlot?: number): number {
     const gen = ++sceneTree.queries.visitGeneration;
     let n = 0;
@@ -1802,14 +1317,9 @@ function queryIndexOf(q: Query<any>, node: Node): number {
     return i !== undefined && q.matchNodes[i] === node ? i : -1;
 }
 
-/** placeholder until `query()` binds a term's apply to its query. */
-
 export type Query<Conditions extends Array<Condition<any, any, any>>> = {
-    /** @internal the tree this query is registered on. */
     scene: SceneTree;
-    /** @internal tuples staged for `onExit` / `onEnter`, drained by `flushQueryEvents`.
-     *  Exits are emitted before enters, so a replaced tuple always retires the old value
-     *  before the new one is announced. */
+    /** tuples staged for `onExit` / `onEnter`, drained by `flushQueryEvents`; exits are emitted before enters. */
     _pendingExits: any[][];
     _pendingEnters: any[][];
     hash: string;
@@ -1818,94 +1328,51 @@ export type Query<Conditions extends Array<Condition<any, any, any>>> = {
     withBitset: Bitset;
     withoutBitset: Bitset;
     matches: Array<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    /** the node behind each entry of `matches`, same index. Also the validity
-     *  check for `_sparse`, whose entries are allowed to go stale. */
+    /** the node behind each entry of `matches`, same index; also the validity check for `_sparse`, whose entries are allowed to go stale. */
     matchNodes: Node[];
-    /**
-     * @internal sparse membership index: node id (zigzagged, since client ids
-     * are negative) → position in `matches`. A plain array, not a Map: node
-     * ids are integers so V8 keeps this as a fast elements-kind array, and
-     * membership is looked up once per resolution per visited node in the walk,
-     * which measured as the dominant cost of the walk.
-     *
-     * Entries are never cleared on removal — a stale index is caught by
-     * `matchNodes[i] === node`, the same trick koota's SparseSet uses.
-     */
+    /** sparse membership index: node id -> position in `matches`. A plain array so V8 keeps it a fast elements-kind array. */
     _sparse: number[];
-    /** @internal the negative-id half of `_sparse`, indexed by `-id`. Split by sign rather
-     *  than zigzagged into one array: a scene tree's ids are effectively all one sign
-     *  (server positive, client negative), so interleaving doubled the length and left
-     *  every other slot a permanent hole. */
+    /** the negative-id half of `_sparse`, indexed by `-id`; split by sign since a scene tree's ids are effectively all one sign. */
     _sparseNeg: number[];
-    /** @internal `conditions` minus the `Not` terms, in tuple order. Precomputed so
-     *  `buildQueryTuple` knows its exact arity and can build a literal. */
+    /** `conditions` minus the `Not` terms, in tuple order, so `buildQueryTuple` knows its exact arity. */
     _tupleTerms: Array<Condition<any, any, any>>;
-    /** @internal stamp written by `collectQueries` so a query reachable through two of a
-     *  node's traits is only added to the candidate list once. */
+    /** stamp written by `collectQueries` so a query reachable through two of a node's traits is added to the candidate list once. */
     _visitGeneration: number;
-    /** terms whose value comes from the hierarchy (`Up` / `Ancestor`), with the
-     *  tuple slot each writes. empty for the ordinary self-only query, which is
-     *  what lets structural mutations skip the resolve walk entirely. */
+    /** terms whose value comes from the hierarchy (`Up` / `Ancestor`); empty for an ordinary self-only query, letting structural mutations skip the resolve walk entirely. */
     traversals: TraversalTerm[];
-    /** node started matching. subscribe with {@link onQueryEnter}, never directly:
-     *  the topic alone has no backfill, no error isolation, and no lifetime. */
+    /** node started matching; subscribe with {@link onQueryEnter}, never directly. */
     onEnter: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    /** node stopped matching. subscribe with {@link onQueryExit}. */
+    /** node stopped matching; subscribe with {@link onQueryExit}. */
     onExit: Topic<[...traits: ExtractTraitsFromConditions<Conditions>]>;
-    /**
-     * live ref-count from script instances that called `query(ctx, ...)`.
-     * 0 + `acquired` false → engine-persistent (never reaped).
-     * 0 + `acquired` true → all script holders released; reap on next releaseQuery.
-     */
+    /** live ref-count from script instances that called `query(ctx, ...)`; 0 + acquired false = engine-persistent, 0 + acquired true = reap on next releaseQuery. */
     refcount: number;
     /** true once any script instance has acquired this query; gates reaping. */
     acquired: boolean;
     [Symbol.iterator](): Iterator<[...traits: ExtractTraitsFromConditions<Conditions>]>;
 };
 
-/**
- * the full `matches` array of a query, keyed by the same condition args you pass to {@link query}
- * (e.g. `QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>`). use it to type a function that
- * receives query matches without hand-respelling the trait tuple:
- *
- * ```ts
- * const fighters = query(ctx, [ScoreTrait, TransformTrait]);
- * const positions = (matches: QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>) => ...;
- * positions(fighters.matches);
- * ```
- */
+/** The full `matches` array of a query, keyed by the same condition args passed to {@link query}. */
 export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToConditions<Args>>['matches'];
 /** one element of {@link QueryMatches}, the trait tuple a single query result yields. */
 export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
 
-/**
- * one `Up` / `Ancestor` term of a query, resolved against the hierarchy rather
- * than the node's own bitset. `tupleIndex` is the slot it writes in a match;
- * `required` terms also gate membership, so a re-resolve can add or drop a node.
- *
- * `traitSlot` is both what gets resolved and where the walk prunes: below a node
- * bearing it, the answer is that node and nothing above can have changed it.
- */
+/** one `Up` / `Ancestor` term of a query, resolved against the hierarchy rather than the node's own bitset. */
 type TraversalTerm = {
     traitSlot: number;
     /** `Up` counts the node itself; `Ancestor` starts at the parent. */
     inclusive: boolean;
     required: boolean;
     tupleIndex: number;
-    /** the query whose matches this term writes into. */
     query: Query<any>;
 };
 
-/**
- * nearest trait instance at or above `node`, per `inclusive`. the walk is
- * O(depth) map lookups and runs only on structural change, never per frame.
- */
+/** nearest trait instance at or above `node`, per `inclusive`; O(depth), runs only on structural change, never per frame. */
 function nearestTrait(node: Node | null, traitSlot: number, inclusive: boolean): TraitBase | undefined {
-    let cur: Node | null = inclusive ? node : (node?.parent ?? null);
-    while (cur) {
-        const t = cur.traits[traitSlot];
-        if (t !== undefined) return t;
-        cur = cur.parent;
+    let current: Node | null = inclusive ? node : (node?.parent ?? null);
+    while (current) {
+        const trait = current.traits[traitSlot];
+        if (trait !== undefined) return trait;
+        current = current.parent;
     }
     return undefined;
 }
@@ -1914,8 +1381,7 @@ function nearestTrait(node: Node | null, traitSlot: number, inclusive: boolean):
 function resolveTerm(node: Node, condition: Condition<any, any, any>): TraitBase | undefined {
     const traitSlot = condition.trait.slot;
     if (traitSlot === undefined) return undefined;
-    // the bitset is the truth, not `_traits`: `removeTraitBySlot` clears the bit before
-    // reindexing but keeps the instance until after, so the two disagree mid-removal.
+    // the bitset is the truth, not `_traits`: removeTraitBySlot clears the bit before reindexing but keeps the instance until after
     if (condition.src === Src.Self) {
         return bitset.has(node.bitset, traitSlot) ? node.traits[traitSlot] : undefined;
     }
@@ -1931,7 +1397,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
 } {
     const parsedConditions = conditions.map((cond): Condition<any, any, any> => {
         if (typeof cond === 'object' && cond !== null && 'slot' in cond) {
-            // bare trait handle → implicit With
+            // bare trait handle: implicit With
             return { trait: cond, oper: Oper.And, src: Src.Self };
         }
         return cond as Condition<any, any, any>;
@@ -1942,7 +1408,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     const withTraits: number[] = [];
     const traversalSpecs: Array<Omit<TraversalTerm, 'query'>> = [];
 
-    // tuple index advances for every value-carrying term, i.e. everything but Not.
+    // tuple index advances for every value-carrying term, everything but Not
     let tupleIndex = 0;
     for (const condition of parsedConditions) {
         const traitSlot = condition.trait.slot;
@@ -1952,9 +1418,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
         }
         if (traitSlot !== undefined) {
             if (condition.src === Src.Self) {
-                // only a self-sourced requirement is a bitmask test on the node. A
-                // self-sourced Optional needs no registration at all: it gates nothing, and
-                // `reconcile` notices its value moving like any other tuple change.
+                // only a self-sourced requirement is a bitmask test; a self-sourced Optional needs no registration
                 if (condition.oper === Oper.And) {
                     withBitset = bitset.add(withBitset, traitSlot);
                     withTraits.push(traitSlot);
@@ -1986,21 +1450,18 @@ export function query<const Args extends ConditionArgs[]>(
 ): Query<ConditionArgsToConditions<Args>> {
     const { parsedConditions, withBitset, withoutBitset, withTraits, traversalSpecs } = buildConditionBitsets(conditions);
 
-    // hash conditions (order matters, do not sort). oper and src both belong in
-    // the key: `[Mesh, Up(Model)]` and `[Mesh, Model]` are different queries.
+    // hash conditions (order matters, do not sort); oper and src both belong in the key since `[Mesh, Up(Model)]` and `[Mesh, Model]` are different queries
     const hashParts: string[] = [];
-    for (const c of parsedConditions) {
-        hashParts.push(`${OPER_TAG[c.oper]}${SRC_TAG[c.src]}${c.trait.slot}`);
+    for (const condition of parsedConditions) {
+        hashParts.push(`${OPER_TAG[condition.oper]}${SRC_TAG[condition.src]}${condition.trait.slot}`);
     }
     const hash = hashParts.join(',');
 
-    // return existing query if already registered
     const existing = sceneTree.queries.hashToQuery.get(hash);
     if (existing) {
         return existing as Query<ConditionArgsToConditions<Args>>;
     }
 
-    // create query
     const q: Query<ConditionArgsToConditions<Args>> = {
         scene: sceneTree,
         _pendingExits: [],
@@ -2026,18 +1487,16 @@ export function query<const Args extends ConditionArgs[]>(
         },
     };
 
-    // terms carry their query, so the resolve walk calls `applyTraversal` directly
-    // rather than through a per-term closure.
+    // terms carry their query, so the resolve walk calls `applyTraversal` directly rather than through a per-term closure
     const traversals = q.traversals;
     for (const spec of traversalSpecs) traversals.push({ ...spec, query: q });
 
-    // register query
     sceneTree.queries.hashToQuery.set(hash, q);
     if (withTraits.length === 0) {
         sceneTree.queries.always.push(q);
     } else {
-        for (const c of parsedConditions) {
-            const slot = c.trait.slot;
+        for (const condition of parsedConditions) {
+            const slot = condition.trait.slot;
             if (slot === undefined) continue;
             const list = sceneTree.queries.traitToQuery[slot];
             if (list === undefined) sceneTree.queries.traitToQuery[slot] = [q];
@@ -2046,7 +1505,6 @@ export function query<const Args extends ConditionArgs[]>(
     }
     for (const term of traversals) addQueryResolution(sceneTree, term);
 
-    // populate with existing matching nodes
     for (const node of sceneTree.nodes) {
         if (nodeMatchesQuery(node, q)) {
             addNodeToQuery(q, node);
@@ -2056,28 +1514,20 @@ export function query<const Args extends ConditionArgs[]>(
     return q;
 }
 
-/**
- * acquire a script-side reference to a query. paired with `releaseQuery`.
- * engine-side callers of `query()` skip this and let the query persist for
- * the lifetime of the scene tree.
- */
+/** Acquires a script-side reference to a query, paired with `releaseQuery`; engine-side callers of `query()` skip this and let the query persist for the tree's lifetime. */
 export function acquireQuery(_sceneTree: SceneTree, q: Query<any>): void {
     q.refcount++;
     q.acquired = true;
 }
 
-/**
- * release a script-side reference. when refcount hits zero on a query that
- * was ever acquired, evict from `sceneTree.queries` so per-mutation walks stop
- * paying for it.
- */
+/** Releases a script-side reference; when refcount hits zero on a query that was ever acquired, evict from `sceneTree.queries` so per-mutation walks stop paying for it. */
 export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     q.refcount--;
     if (q.refcount <= 0 && q.acquired) {
         sceneTree.queries.hashToQuery.delete(q.hash);
         swapRemove(sceneTree.queries.always, q);
-        for (const c of q.conditions) {
-            const slot = (c as Condition<any, any, any>).trait.slot;
+        for (const condition of q.conditions) {
+            const slot = (condition as Condition<any, any, any>).trait.slot;
             if (slot === undefined) continue;
             const list = sceneTree.queries.traitToQuery[slot];
             if (list !== undefined) swapRemove(list, q);
@@ -2088,13 +1538,7 @@ export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     }
 }
 
-/**
- * one-shot match, returns nodes satisfying `conditions` at call time.
- *
- * unlike `query()`, no caching, no event subscriptions, no `sceneTree.queries` entry.
- * use this when you need a snapshot (e.g. populating an inspector picker)
- * rather than a live-maintained set.
- */
+/** One-shot match returning nodes satisfying `conditions` at call time; unlike `query()`, no caching, no event subscriptions, no `sceneTree.queries` entry. */
 export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree, conditions: Args): Node[] {
     const { withBitset, withoutBitset } = buildConditionBitsets(conditions);
     const result: Node[] = [];
@@ -2106,17 +1550,7 @@ export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree,
     return result;
 }
 
-/* ── query membership events ──────────────────────────────────────────
- *
- * enter/exit are staged, not emitted inline. a node is indexed into queries
- * partway through `registerSubtree` (before its own scripts exist) and in
- * `addTrait` (before the new trait's scripts are instantiated), so emitting
- * at index time would hand handlers a node that is not finished being built.
- * every public mutation entry point calls `flushQueryEvents` once it has a
- * consistent tree, which is also the point where nested mutations raised by a
- * handler drain: `_flushingQueryEvents` makes a nested flush a no-op and the
- * outer loop picks up whatever was appended.
- */
+// query enter/exit events are staged, not emitted inline: a node is indexed into queries before its own scripts exist, so emitting at index time would hand a handler an unfinished node; every public mutation entry point calls flushQueryEvents once the tree is consistent again
 
 /** stage `tuple` on one of the query's pending lists, enrolling the query for the drain. */
 function stageQueryEvent(q: Query<any>, list: any[][], tuple: any[]): void {
@@ -2130,38 +1564,30 @@ function callQueryListener(listener: Listener<any>, tuple: any[]): void {
     try {
         listener(...tuple);
     } catch (err) {
-        // script-registered listeners log their own identity and never throw;
-        // this catches engine-side subscribers so one cannot abort the drain.
+        // catches engine-side subscribers (script-registered listeners log their own identity and never throw) so one cannot abort the drain
         logScriptError('query membership handler', err);
     }
 }
 
-function emitQueryEvents(t: Topic<any>, tuples: any[][]): void {
+function emitQueryEvents(eventTopic: Topic<any>, tuples: any[][]): void {
     for (let i = 0; i < tuples.length; i++) {
-        for (const listener of t.listeners) {
+        for (const listener of eventTopic.listeners) {
             callQueryListener(listener, tuples[i]!);
         }
     }
 }
 
-/**
- * emit every staged enter/exit. called at the end of each public mutation
- * (addChild, removeChild, reparent, destroyNode, addTrait, removeTrait, ...),
- * once the tree is consistent again.
- */
+/** emit every staged enter/exit; called at the end of each public mutation (addChild, removeChild, reparent, destroyNode, addTrait, removeTrait, ...) once the tree is consistent. */
 export function flushQueryEvents(sceneTree: SceneTree | null): void {
-    // a detached tree has no queries, so nothing can have been staged.
     if (sceneTree === null || sceneTree.queries.flushingEvents) return;
     const queued = sceneTree.queries.events;
     sceneTree.queries.flushingEvents = true;
-    // length is read every iteration on purpose: a handler that mutates the tree stages
-    // more events, re-enrolling its query, and this loop picks it up.
+    // length is read every iteration on purpose: a handler that mutates the tree stages more events, re-enrolling its query, and this loop picks it up
     for (let i = 0; i < queued.length; i++) {
         const q = queued[i]!;
         const exits = q._pendingExits;
         const enters = q._pendingEnters;
-        // detach both before emitting, so a handler re-staging on this same query
-        // enrolls it afresh rather than appending to a list being iterated.
+        // detach both before emitting, so a handler re-staging on this same query enrolls it afresh rather than appending to a list being iterated
         q._pendingExits = [];
         q._pendingEnters = [];
         emitQueryEvents(q.onExit, exits);
@@ -2171,34 +1597,20 @@ export function flushQueryEvents(sceneTree: SceneTree | null): void {
     sceneTree.queries.flushingEvents = false;
 }
 
-/**
- * subscribe to nodes *starting* to match `q`.
- *
- * **subscribing is itself an enter**: the handler fires immediately for every
- * node already matching, so a subscriber never has to hand-write a backfill
- * loop over `q.matches` (the classic way to miss everything that loaded before
- * the subscriber existed).
- *
- * fires after the node is fully live: its whole subtree is registered and its
- * own scripts have run `onInit`. structural changes made inside a handler take
- * effect immediately, and any membership events they raise drain in the same
- * flush.
- */
+/** Subscribes to nodes *starting* to match `q`; subscribing is itself an enter, firing immediately for every node already matching, after its own scripts have run `onInit`. */
 export function onQueryEnter<Conditions extends Condition[]>(
     q: Query<Conditions>,
     fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
 ): Unsubscribe {
     q.onEnter.add(fn as Listener<any>);
-    // snapshot: a handler is free to mutate the tree, which swap-removes from
-    // `matches` underneath us.
+    // snapshot: a handler is free to mutate the tree, which swap-removes from `matches` underneath us
     for (const tuple of q.matches.slice()) {
         callQueryListener(fn as Listener<any>, tuple as any[]);
     }
     return () => offQueryEnter(q, fn);
 }
 
-/** drop an {@link onQueryEnter} subscription. no exit drain, enter has no
- *  teardown half. idempotent. */
+/** drop an {@link onQueryEnter} subscription; no exit drain, enter has no teardown half. idempotent. */
 export function offQueryEnter<Conditions extends Condition[]>(
     q: Query<Conditions>,
     fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
@@ -2206,15 +1618,7 @@ export function offQueryEnter<Conditions extends Condition[]>(
     q.onEnter.remove(fn as Listener<any>);
 }
 
-/**
- * subscribe to nodes *stopping* matching `q`.
- *
- * **unsubscribing is itself an exit**: the handler fires for every node still
- * matching when the subscription ends. paired with {@link onQueryEnter}'s
- * backfill that gives one invariant worth relying on, every enter is matched by
- * exactly one exit, so a per-node resource owned by a handler cannot leak, not
- * across scene teardown and not across a hot reload.
- */
+/** Subscribes to nodes *stopping* matching `q`; unsubscribing is itself an exit, so paired with {@link onQueryEnter}'s backfill, every enter is matched by exactly one exit. */
 export function onQueryExit<Conditions extends Condition[]>(
     q: Query<Conditions>,
     fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
@@ -2223,10 +1627,7 @@ export function onQueryExit<Conditions extends Condition[]>(
     return () => offQueryExit(q, fn);
 }
 
-/**
- * drop an {@link onQueryExit} subscription, firing it one last time for every
- * node still matching. idempotent: a second call drains nothing.
- */
+/** drop an {@link onQueryExit} subscription, firing it one last time for every node still matching. idempotent. */
 export function offQueryExit<Conditions extends Condition[]>(
     q: Query<Conditions>,
     fn: Listener<[...traits: ExtractTraitsFromConditions<Conditions>]>,
@@ -2238,12 +1639,10 @@ export function offQueryExit<Conditions extends Condition[]>(
     }
 }
 
-/* query internals */
-
 function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
     if (!bitset.containsAll(node.bitset, q.withBitset)) return false;
     if (!bitset.containsNone(node.bitset, q.withoutBitset)) return false;
-    // a required hierarchy term can't be answered from the node's own bitset.
+    // a required hierarchy term can't be answered from the node's own bitset
     for (let i = 0; i < q.traversals.length; i++) {
         const term = q.traversals[i]!;
         if (!term.required) continue;
@@ -2252,23 +1651,13 @@ function nodeMatchesQuery(node: Node, q: Query<any>): boolean {
     return true;
 }
 
-/**
- * Build a match tuple. `Not` terms contribute no slot; everything else does, `null` when
- * unresolved, so a tuple's arity never depends on what resolved.
- *
- * Hierarchy terms resolve here, with an O(depth) ancestor walk per node. A bulk register
- * used to defer them to null and let the resolve walk carry values down instead, O(1) per
- * node — asymptotically better, but it measured as indistinguishable even on a 64-deep
- * chain, and it cost a queued-enter aliasing trick plus five threaded flags to keep
- * straight. A tuple is now complete the moment it is built.
- */
+/** Builds a match tuple; `Not` terms contribute no slot, everything else does (`null` when unresolved), so a tuple's arity never depends on what resolved. */
 function termValue(condition: Condition<any, any, any>, node: Node): unknown {
     return resolveTerm(node, condition) ?? null;
 }
 
 function buildQueryTuple(q: Query<any>, node: Node): any[] {
-    // an array literal allocates its elements store at the exact arity; `[]` plus
-    // `push` allocates a 16-slot store no matter how few elements go in.
+    // an array literal allocates its elements store at the exact arity; `[]` plus `push` allocates a 16-slot store regardless
     const terms = q._tupleTerms;
     switch (terms.length) {
         case 0:
@@ -2298,8 +1687,7 @@ function addNodeToQuery(q: Query<any>, node: Node): void {
     q.matchNodes.push(node);
     q.matches.push(tuple as any);
 
-    // the tuple pushed above is the event payload: it stays valid even if a
-    // later swap-remove moves it out of `matches` before the flush.
+    // the tuple pushed above is the event payload: it stays valid even if a later swap-remove moves it out of `matches` before the flush
     if (q.onEnter.listeners.size > 0) stageQueryEvent(q, q._pendingEnters, tuple);
 }
 
@@ -2307,14 +1695,10 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     const index = queryIndexOf(q, node);
     if (index === -1) return;
 
-    // the payload is the tuple the consumer was actually handed, captured before the
-    // swap-remove. Rebuilding here would read post-change state and report values the
-    // node never had while it was a member.
+    // captured before the swap-remove: rebuilding here would read post-change state and report values the node never had while it was a member
     const tuple = q.onExit.listeners.size > 0 ? (q.matches[index] as unknown as any[]) : null;
 
-    // swap-remove from matches, keeping matchNodes in lockstep. The moved
-    // entry's sparse slot is repointed; the departing node's is left stale,
-    // since `matchNodes[i] === node` will reject it.
+    // swap-remove from matches, keeping matchNodes in lockstep; the departing node's sparse slot is left stale since `matchNodes[i] === node` will reject it
     const lastIndex = q.matches.length - 1;
     if (index !== lastIndex) {
         q.matches[index] = q.matches[lastIndex] as any;
@@ -2329,47 +1713,23 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     if (tuple !== null) stageQueryEvent(q, q._pendingExits, tuple);
 }
 
-/* ── traversal terms ──────────────────────────────────────────────────
- *
- * A query's `Up` / `Ancestor` term keeps "the nearest trait at or above me" resolved into
- * every member's match tuple, and is re-resolved when the tree changes shape or the target
- * trait is added or removed.
- *
- * Invalidation is pushed from the mutation rather than discovered by
- * rescanning: `resolveSubtree` after the tree around a node changed shape,
- * `resolveChildren` when the target trait on the node itself changed.
- *
- * The walk prunes: at a node bearing the target trait, everything below
- * already resolves to that node and cannot have been affected by whatever
- * changed above it, so the descent stops there.
- */
+// a query's `Up` / `Ancestor` term keeps "the nearest trait at or above me" resolved into every member's match tuple; invalidation is pushed from the mutation (resolveSubtree, resolveChildren) rather than discovered by rescanning
 
-/**
- * Reconcile `node` against every query with a term on this slot and, unless pruned, its
- * descendants. Every member of `group` targets the same trait slot, so they share the walk
- * and the prune. The walk only says WHICH nodes to reconcile; `reconcile` re-reads the
- * values itself, so nothing is threaded down.
- */
+/** Reconciles `node` against every query with a term on this slot and, unless pruned, its descendants; every member of `group` targets the same trait slot, so they share the walk. */
 function resolveFrom(group: TraversalTerm[], node: Node, above: TraitBase | undefined): void {
     const traitSlot = group[0]!.traitSlot;
     for (let i = 0; i < group.length; i++) {
         const term = group[i]!;
         reconcile(term.query, node, term.required, traitSlot, above);
     }
-    // stop at a bearer: everything below already resolves to it, and nothing above
-    // changed that. Below this point nothing bears the slot, so `above` carries down
-    // unchanged and the whole descent resolves it exactly once.
+    // stop at a bearer: everything below already resolves to it
     if (node.traits[traitSlot] !== undefined) return;
     for (const child of node.children) {
         resolveFrom(group, child, above);
     }
 }
 
-/**
- * re-resolve every live resolution over `node`'s subtree, seeding each from what
- * `node` inherits from strictly above. Call after the tree around `node` has
- * changed shape (attach, detach, reparent).
- */
+/** re-resolve every live resolution over `node`'s subtree, seeding each from what `node` inherits from strictly above; call after the tree around `node` changed shape. */
 function resolveSubtree(sceneTree: SceneTree | null, node: Node, movedFrom?: Node | null): void {
     invalidateTransformAncestry(node, movedFrom);
     if (sceneTree !== null) resolveSubtreeFor(sceneTree.queries.traversals, node, movedFrom);
@@ -2409,12 +1769,7 @@ function resolveSubtreeFor(groups: TraversalTerm[][], node: Node, movedFrom?: No
         const group = groups[g]!;
         const resolution = group[0]!;
         const inherited = nearestTrait(node.parent, resolution.traitSlot, true);
-        // A move whose old and new parents resolve this to the same value
-        // changes nothing anywhere in the subtree: every resolution inside it
-        // derives from what the subtree inherits, and the subtree's own shape
-        // and traits didn't change. Two O(depth) walks replace one O(subtree)
-        // one. Only offered for a move of an already-live node, where "the
-        // subtree is otherwise unchanged" is guaranteed.
+        // a move whose old and new parents resolve this to the same value changes nothing in the subtree, so two O(depth) walks replace one O(subtree) walk
         if (movedFrom !== undefined && movedFrom !== null) {
             if (nearestTrait(movedFrom, resolution.traitSlot, true) === inherited) continue;
         }
@@ -2422,12 +1777,7 @@ function resolveSubtreeFor(groups: TraversalTerm[][], node: Node, movedFrom?: No
     }
 }
 
-/**
- * re-resolve over `node`'s descendants only, for the case where the
- * target trait *on `node` itself* changed: the node's own value is the
- * caller's business, but its descendants inherit differently now and must not
- * prune at the node that changed.
- */
+/** re-resolve over `node`'s descendants only, for when the target trait *on `node` itself* changed and must not prune at the changed node. */
 function resolveChildren(sceneTree: SceneTree | null, node: Node, traitSlot: number): void {
     if (traitSlot === transformSlot()) invalidateTransformChildren(node);
     if (sceneTree !== null) resolveChildrenFor(sceneTree.queries.traversals, node, traitSlot);
@@ -2438,8 +1788,7 @@ function resolveChildrenFor(groups: TraversalTerm[][], node: Node, traitSlot: nu
         const group = groups[g]!;
         if (group[0]!.traitSlot !== traitSlot) continue;
         const above = nearestTrait(node.parent, traitSlot, true);
-        // an `Up` term on the node itself also just changed answer, and nothing else
-        // re-resolves it: membership didn't change, so `reindex` alone would no-op.
+        // an `Up` term on the node itself also just changed answer, and reindex alone would no-op since membership didn't change
         for (let i = 0; i < group.length; i++) {
             const term = group[i]!;
             reconcile(term.query, node, term.required, traitSlot, above);
@@ -2452,30 +1801,7 @@ function resolveChildrenFor(groups: TraversalTerm[][], node: Node, traitSlot: nu
     }
 }
 
-/**
- * Bring `node`'s standing in `q` up to date, whatever changed: its own traits, its
- * ancestry, or a value one of its terms resolves to.
- *
- * A match IS its tuple, so a tuple whose contents moved is a different match and is retired
- * and re-announced like any other membership change. That is why there is one function here
- * rather than a membership path and a keep-the-value-fresh path: `Optional` terms never gate
- * membership, so nothing else would ever tell a subscriber their value changed.
- *
- * The two cases are split because they need different work, not different meanings. A node
- * that is not a member only has to answer "does it match", which no `Optional` term can
- * affect, so none are resolved. A node that is a member answers "does it still match" and
- * "did any slot move" in one pass, since both need the same resolved values.
- *
- * `mayJoin` is what the caller knows about its own event: a trait change or a node entering
- * the tree can make a stranger a member, but an ancestry change can only do so through a
- * required traversal term. Passing `false` skips the membership test for non-members, which
- * is most of the nodes a subtree walk visits.
- *
- * `knownSlot`/`knownAbove` are a memo, not a behaviour switch: a subtree walk resolves one
- * slot once for a whole descent, so it hands the answer in rather than making every node
- * re-derive it. `knownAbove` is what the node inherits from strictly above, so an `Up` term
- * still has to consider the node's own trait first.
- */
+/** Brings `node`'s standing in `q` up to date, whatever changed; `mayJoin` skips the membership test for nodes that can't have become members, `knownSlot`/`knownAbove` memoize one slot's resolved value for a whole subtree walk. */
 function reconcile(
     q: Query<any>,
     node: Node,
@@ -2490,7 +1816,7 @@ function reconcile(
         return;
     }
 
-    // `_tupleTerms` excludes `Not` terms, so the negative bitmask is checked separately.
+    // `_tupleTerms` excludes `Not` terms, so the negative bitmask is checked separately
     if (!bitset.containsNone(node.bitset, q.withoutBitset)) {
         removeNodeFromQuery(q, node);
         return;
@@ -2501,9 +1827,7 @@ function reconcile(
     let differs = false;
     for (let i = 0; i < terms.length; i++) {
         const term = terms[i]!;
-        // a slot walk only re-resolves its own slot; nothing it did can have moved a term
-        // sourced from the node's own traits or from a different ancestry slot, each of
-        // which gets its own walk.
+        // a slot walk only re-resolves its own slot; a term sourced from the node's own traits or a different ancestry slot gets its own walk
         if (knownSlot >= 0 && term.trait.slot !== knownSlot) continue;
         const value =
             term.trait.slot === knownSlot && term.src !== Src.Self
@@ -2512,7 +1836,7 @@ function reconcile(
                     : knownAbove
                 : resolveTerm(node, term);
         if (value === undefined && term.oper === Oper.And) {
-            // a required term that no longer resolves drops the node.
+            // a required term that no longer resolves drops the node
             removeNodeFromQuery(q, node);
             return;
         }
@@ -2524,14 +1848,8 @@ function reconcile(
     addNodeToQuery(q, node);
 }
 
-/**
- * Drop `node` from every query it is currently a member of. `candidates` is the caller's
- * scratch: a subtree detach reuses one array for the whole walk rather than allocating per
- * node, and nothing shares a buffer across calls that could nest.
- */
+/** Drops `node` from every query it is currently a member of; `candidates` is the caller's scratch, reused across a whole subtree-detach walk. */
 function removeNodeFromAllQueries(sceneTree: SceneTree, node: Node, candidates: Array<Query<any>>): void {
-    // a node can only be a member of a query that references one of its traits (or of one
-    // with no positive self-trait at all), so the candidate set is sufficient here.
     const count = collectQueries(sceneTree, node, candidates);
     for (let i = 0; i < count; i++) {
         const q = candidates[i]!;
@@ -2539,38 +1857,14 @@ function removeNodeFromAllQueries(sceneTree: SceneTree, node: Node, candidates: 
     }
 }
 
-/**
- * Re-test `node` against every query that could care. `changedSlot` narrows the work to
- * queries referencing the trait that just came or went; omit it when several traits
- * changed at once and every trait the node bears should be considered.
- */
+/** Re-tests `node` against every query that could care; `changedSlot` narrows the work to queries referencing the trait that just came or went. */
 function reindex(sceneTree: SceneTree, node: Node, changedSlot?: number): void {
     const candidates: Array<Query<any>> = [];
     const count = collectQueries(sceneTree, node, candidates, changedSlot);
     for (let i = 0; i < count; i++) reconcile(candidates[i]!, node, true);
 }
 
-/* ── findAncestor ── */
-
-/**
- * walk up the tree from `node.parent` toward the root and return the first
- * ancestor that has **all** of the given traits. returns a tuple of
- * `[...traitValues]`, or `null` if no ancestor matches. access the ancestor
- * node via any returned trait's `.node` property.
- *
- * this is an ad-hoc traversal, it is **not** reactive. call it when you
- * need to resolve inherited / contextual data from the hierarchy.
- *
- * @example
- * ```ts
- * const result = findAncestor(node, [Physics]);
- * if (result) {
- *   const [physics] = result;
- *   console.log(physics.gravity);
- *   console.log(physics.node); // the ancestor node
- * }
- * ```
- */
+/** Walks up the tree from `node.parent` toward the root and returns the first ancestor that has all of the given traits, as a tuple, or null; ad-hoc, not reactive. */
 export function findAncestor<const Args extends TraitHandle[]>(
     node: Node,
     traits: Args,
@@ -2600,34 +1894,17 @@ export function findAncestor<const Args extends TraitHandle[]>(
     return null;
 }
 
-/* ── prefab config (persisted + replicated) ── */
-
 export type PrefabConfig = {
     prefabId: string;
     args: unknown;
 };
 
-/* ── prefab helpers ── */
-
-/**
- * set or clear a node's prefab config and reconcile the scene tree's
- * `_prefabNodes` / `_prefabsDirty` indices. callers mutating `node.prefab`
- * on a *live* node (one that's already attached) MUST use this, direct
- * assignment leaves the indices stale and the prefab tick driver won't
- * pick the node up.
- *
- * detached nodes (pre-`addChild`) can assign `node.prefab` directly;
- * `registerSubtree` indexes them on attach.
- *
- * always drops any cached instantiation. callers of this function are
- * making an explicit prefab change, so force re-instantiation matches
- * historical editor / SetPrefab behavior even when args are unchanged.
- */
+/** Sets or clears a node's prefab config and reconciles the scene tree's prefab indices; callers mutating `node.prefab` on a *live* node MUST use this, a direct assignment leaves the indices stale. */
 export function setPrefab(node: Node, config: PrefabConfig | null): void {
     node.prefab = config;
     const scene = node.scene;
     if (!scene) return;
-    // any cached instantiation is stale the moment the config changes.
+    // any cached instantiation is stale the moment the config changes
     scene.prefabs.state.delete(node);
     if (config) {
         scene.prefabs.nodes.add(node);
@@ -2638,24 +1915,14 @@ export function setPrefab(node: Node, config: PrefabConfig | null): void {
     }
 }
 
-/**
- * flip a live node's `persist` flag, controls whether the node is written to
- * scene files. use this rather than mutating `node.persist` directly when the
- * node is already attached to a scene tree.
- */
+/** flip a live node's `persist` flag; use this rather than mutating `node.persist` directly when the node is already attached to a scene tree. */
 export function setNodePersist(node: Node, persist: boolean): void {
     if (node.persist === persist) return;
     node.persist = persist;
 }
 
-/**
- * mark every anchor in `_prefabNodes` whose `prefab.prefabId` is in
- * `dirtyPrefabIds` for reconcile. called from `applyRegistryChanges*` after
- * `collectDirtyByRegistry` resolves which prefab defs were directly or
- * transitively touched by the flush. drives the edit-mode + play-mode tick
- * uniformly off the same dirty set, neither side scans the full prefab
- * node set on its own.
- */
+/** mark every prefab anchor whose `prefab.prefabId` is in `dirtyPrefabIds` for reconcile,
+ *  driving the edit-mode and play-mode tick off the same dirty set. */
 export function markPrefabAnchorsDirty(sceneTree: SceneTree, dirtyPrefabIds: ReadonlySet<string>): void {
     if (dirtyPrefabIds.size === 0) return;
     for (const node of sceneTree.prefabs.nodes) {
@@ -2677,18 +1944,12 @@ export function createPrefabConfig(
     };
 }
 
-/**
- * encode a PrefabConfig to a json string for network replication.
- * only used in edit-mode scene sync.
- */
+/** encode a PrefabConfig to a json string for network replication. only used in edit-mode scene sync. */
 export function encodePrefabConfig(config: PrefabConfig): string {
     return JSON.stringify(config);
 }
 
-/**
- * decode a json-encoded PrefabConfig from network replication.
- * returns null if the string is missing or malformed.
- */
+/** decode a json-encoded PrefabConfig from network replication, or null if missing/malformed. */
 export function decodePrefabConfig(encoded: string | undefined): PrefabConfig | null {
     if (!encoded) return null;
     try {

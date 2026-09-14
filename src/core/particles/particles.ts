@@ -1,46 +1,13 @@
-// particle() declaration primitive + pure-data type surface.
-//
-// Lives in core/ for the same reason sprite() does: the declaration is a
-// pure registry write with no client-runtime dependency. The pool, tick,
-// and spawn op are client-only and live next door under
-// `render/particles/particles.ts`, that file imports the types from
-// here and supplies the implementations.
-//
-// The split mirrors sprites: declaration + handle shape in core,
-// runtime (atlas/pool/visuals/spawn) in client. The original step 11/12
-// arrangement collapsed both halves into client/ per KISS; step 15
-// (block() auto-deriving break particles in core/voxels/blocks.ts)
-// forced the split, block() needs to call `particle(...)` at module
-// scope, and core can't take a runtime dep on client.
-//
-// ── particle() declaration ──
-//
-// Shape mirrors sprite() / tile(): a typed registry entry whose
-// payload is fully authored content (sprite ref + playback knobs + update
-// fn). No codegen barrel, the runtime resolves particle types by id at
-// spawn time via `particlesRegistry.byId.get(typeId)`, parallel to how
-// sprites get resolved by `SpriteTrait`.
-//
-// Four fields per the plan: `sprite`, `playback`, `fps` (required for
-// `'loop'` / `'once'` on multi-frame sprites), and `update`. Everything
-// else, gravity, drag, collision, lifetime range, etc., lives inside
-// the `update` fn. Curated update fns live next door in
-// `./particle-update.ts`, they're pure pool mutations + voxel queries,
-// no client deps, so they sit in the declaration layer alongside
-// `particle()` itself (and let `block()` reference `particleUpdate.dust`
-// for auto-derived block-dust without inverting core → client).
-
 import type { AssetMeta } from '../asset-meta';
 import type { SpriteHandle } from '../sprites/sprites';
 import type { Voxels } from '../voxels/voxels';
 
-/* ── pool shape (impl lives in render/particles/particles.ts) ── */
-
-/** Per-room SoA pool. Alive prefix is `[0, count)`; dead slots are
- *  compacted by `particleUpdate` (client). The type is declared here
- *  so `ParticleUpdateFn` (also here) can name its first param without forcing a
- *  core→client import; the runtime that allocates / mutates it lives in
- *  client. Both halves agree on the layout via this single declaration. */
+/** Per-room SoA pool (impl lives in render/particles/particles.ts). Alive
+ *  prefix is `[0, count)`; dead slots are compacted by `particleUpdate`
+ *  (client). The type is declared here so `ParticleUpdateFn` (also here) can
+ *  name its first param without forcing a core->client import; the runtime
+ *  that allocates / mutates it lives in client. Both halves agree on the
+ *  layout via this single declaration. */
 export type ParticlePool = {
     /** max slots. */
     capacity: number;
@@ -92,10 +59,7 @@ export type ParticlePool = {
     seed: Uint32Array;
 };
 
-/* ── declaration types ── */
-
-/** how a particle's sprite frame timeline maps onto its lifetime.
- *  see plan §"Playback mode" for the full table. */
+/** how a particle's sprite frame timeline maps onto its lifetime. */
 export type ParticlePlayback = 'stretch' | 'loop' | 'once';
 
 /** per-particle update fn, owns motion, collision, and death.
@@ -166,5 +130,3 @@ export type ParticleHandle = {
     /** the declared data. re-pointed on every re-declaration. */
     def: ParticleDef;
 };
-
-/* ── registration ── */

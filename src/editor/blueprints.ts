@@ -1,13 +1,3 @@
-// blueprints, client-only sync of `useEditor.sceneList` + `useEditor.blueprints`.
-// `initBlueprints()` is called from the editor's client activation path; never
-// imported on the server.
-//
-// Scenes are read through an injected `SceneSource` — the browser editor backs it
-// with the project OPFS (see `engine-client-editor.setup` + the client boot), and re-
-// lists / reloads over the client's fs-change relay when a `content/scenes/**`
-// file changes. The engine stays blueprint-agnostic; this module is the editor's
-// subscriber that pulls each `blueprints/...` payload named in the scene list.
-
 import type { ScenePayload } from '../core/content/scene-store';
 import { useEditor } from './editor-store';
 

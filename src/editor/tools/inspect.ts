@@ -1,11 +1,3 @@
-// inspect.ts, per-frame update for the inspect and transform tools.
-//
-// handles:
-//   - gizmo + pivot point sync (transform mode)
-//   - click-to-select raycasting (node + voxel)
-//   - keyboard shortcuts (inspect: Q/T/Y/Escape; transform: delegated to handleTransformKeys)
-//   - inspect bounding box mesh update
-
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import { vec3 } from 'math';
 import { TransformTrait } from '../../builtins/transform';
@@ -39,13 +31,9 @@ import { updateSelectionMeshes } from '../visuals/selection-mesh';
 import type { TransformToolState } from './transform';
 import * as TransformTool from './transform';
 
-/**
- * resolve which node to actually select when clicking a node.
- * builds the chain of TransformTrait-bearing ancestors from the topmost
- * (under sceneRoot) down to the hit node. first click selects the
- * topmost; each subsequent click on an already-selected member of the
- * chain drills down one tier toward the leaf.
- */
+// Builds the chain of TransformTrait-bearing ancestors from topmost (under
+// sceneRoot) to the hit node; first click selects the topmost, each subsequent
+// click on an already-selected chain member drills one tier toward the leaf.
 function resolveSelectionTarget(hitNode: Node, selectedNodeIds: Set<number>, sceneRoot: Node): Node {
     const chain: Node[] = [];
     let cur: Node | null = hitNode;
@@ -71,13 +59,9 @@ const _farWorld: [number, number, number] = [0, 0, 0];
 const _rayDir: [number, number, number] = [0, 0, 0];
 const MAX_RAY_DIST = 1024;
 
-/**
- * right-click tap → raycast, refine selection, open viewport context menu at
- * the cursor. callers gate by activeTool, wired in inspect + the dedicated
- * selection tools (box/magic/lasso-select) where right-click is otherwise
- * unused. drags are filtered out: only fires on release if the press never
- * crossed the input layer's drag threshold.
- */
+// Right-click tap: raycast, refine selection, open the viewport context menu at
+// the cursor. Callers gate by activeTool. Drags are filtered out, only fires on
+// release if the press never crossed the input layer's drag threshold.
 export function openViewportContextMenu(
     store: EditRoomStoreApi,
     client: ClientContext,
@@ -86,10 +70,8 @@ export function openViewportContextMenu(
     nodeBodies: NodeBodies,
     camera: PerspectiveCamera,
 ): void {
-    // desktop opens on a right-click tap. touch has no second button, so a
-    // long-press (a finger held in place past the hold threshold) stands in for
-    // it. the cursor already tracks the pressing finger, so the raycast and menu
-    // anchor below use its position unchanged.
+    // Touch has no second button, so a long-press stands in for a right-click tap;
+    // the cursor already tracks the pressing finger.
     const cursor = getCursor(client.input.mouseKeyboard);
     let longPress = false;
     for (const finger of getCanvasTouches(client.input.touch).values()) {
@@ -133,9 +115,8 @@ export function openViewportContextMenu(
     let shouldOpen = false;
 
     if (!voxelWins && nodeHit) {
-        // right-click on a node: if it isn't part of the current selection,
-        // make it the selection (topmost transform-bearing ancestor, no drill-down
-        // on right-click; menu acts on whatever the user sees highlighted).
+        // Right-click on a node outside the selection makes it the selection
+        // (topmost transform-bearing ancestor, no drill-down).
         let target: Node = nodeHit.node;
         let cur: Node | null = nodeHit.node.parent;
         while (cur && cur !== room.scene.root) {
@@ -170,9 +151,8 @@ export function updateInspect(
     camera: PerspectiveCamera,
 ): void {
     const cursor = getCursor(client.input.mouseKeyboard);
-    // place-mode-with-selection cursor follow is a non-destructive preview:
-    // confirm (click) commits with a history entry; any other exit (mode-key,
-    // escape, tool change, selection cleared) reverts to the snapshot positions.
+    // Place-mode cursor follow is a non-destructive preview: a click commits with
+    // a history entry, any other exit reverts to the snapshot positions.
     if (transformToolState.placeSnapshots !== null) {
         const s0 = store.getState();
         const stillActive = activeTool === 'transform' && s0.transformMode === 'place' && s0.selection.nodes.size > 0;
@@ -181,15 +161,14 @@ export function updateInspect(
         }
     }
 
-    // snapshot hover state before we clear it, used by transform placement raycast
+    // Snapshotted before being cleared below; used by transform placement raycast.
     const s = store.getState();
     const hoverVoxelAtFrame = s.hoverVoxel;
     const hoverNormalAtFrame = s.hoverNormal;
     const hoverPointAtFrame = s.hoverPoint;
 
-    // inspect/transform suppress the voxel tool path entirely: clear hover,
-    // brush, in-progress box-select, and drop any voxel chunks while keeping
-    // the node selection intact.
+    // Inspect/transform suppress the voxel tool path entirely, keeping the node
+    // selection intact.
     const dirty = s.hoverVoxel !== null || s.boxSelect !== undefined || s.brush !== null || s.selection.chunks.size > 0;
     if (dirty) {
         store.setState((cur) => ({
@@ -203,18 +182,14 @@ export function updateInspect(
         }));
         updateSelectionMeshes(meshState, store.getState(), client.state!.renderer.time);
     }
-    // clear inspected voxel when not in inspect tool
     if (activeTool !== 'inspect' && store.getState().inspectedVoxel !== null) {
         store.setState({ inspectedVoxel: null });
     }
 
-    // update gizmo for transform tool + pivot point
     if (activeTool === 'transform') {
-        // build-tool prefab placement loop: if the active hotbar slot no longer
-        // matches the in-flight prefab placement, drop the lingering ghost and
-        // bounce back to the build tool so its auto-enter can re-arm for the
-        // new slot. placementContinuous is the marker that the placement was
-        // started by the build tool (regular ctrl+v paste leaves it false).
+        // placementContinuous marks a placement started by the build tool (a plain
+        // ctrl+v paste leaves it false). If the active hotbar slot no longer matches
+        // the in-flight placement, drop the ghost and bounce back to the build tool.
         const { placementContinuous, activeSlotIndex } = store.getState();
         if (placementContinuous && transformToolState.placement) {
             const placementPrefabId = transformToolState.placement.sourcePrefabId;
@@ -230,14 +205,13 @@ export function updateInspect(
             }
         }
 
-        // refresh transformHasVoxels each frame so snapTo can be force-clamped
-        // to 'corner' when voxel content is present (and the UI can disable the toggle).
+        // Refreshed each frame so snapTo can be force-clamped to 'corner' when voxel
+        // content is present, and the UI can disable the toggle.
         const hasVoxels = TransformTool.computeTransformHasVoxels(transformToolState, room.scene);
         if (store.getState().transformHasVoxels !== hasVoxels) {
             store.setState({ transformHasVoxels: hasVoxels });
         }
 
-        // in place mode, drive placement ghost from cursor raycast
         const { transformMode } = store.getState();
         if (transformMode === 'place' && hoverVoxelAtFrame && hoverNormalAtFrame) {
             TransformTool.updatePlacementFromRaycast(
@@ -255,25 +229,20 @@ export function updateInspect(
         PivotPointMod.update(pivotPoint, [0, 0, 0], false);
     }
 
-    // click-to-select: only when gizmo is not dragging
     const gizmoDragging = activeTool === 'transform' && transformToolState.dragging;
     const transformModeNow = store.getState().transformMode;
     const inPlaceMode = activeTool === 'transform' && transformModeNow === 'place';
     const inGrabMode = activeTool === 'transform' && transformModeNow === 'grab';
     const clicked = isMouseJustDown(client.input.mouseKeyboard, 'left');
-    // right-click trigger is mode-aware, mirroring the build tool: when the
-    // pointer is already locked (RMB unambiguous) fire on down for a snappy
-    // commit; when the cursor is visible (fly / orbit) fire only on a tap,
-    // a release that didn't cross the drag threshold, so a right-drag look
-    // doesn't also commit the placement.
+    // Mirrors the build tool: when the pointer is locked (RMB unambiguous) fire on
+    // down; when the cursor is visible (fly/orbit) fire only on a tap, so a
+    // right-drag look doesn't also commit the placement.
     const pointerLocked = !!document.pointerLockElement;
     const rightClicked = pointerLocked
         ? isMouseJustDown(client.input.mouseKeyboard, 'right')
         : isMouseTap(client.input.mouseKeyboard, 'right');
 
-    // grab mode: hold LMB on a node to grab; release/blur to drop. clicks on
-    // empty space are no-ops. tool/mode switch force-release happens in
-    // editor/client.ts before this function runs.
+    // Tool/mode switch force-release happens in editor/client.ts before this runs.
     if (inGrabMode) {
         if (TransformTool.isInGrab(transformToolState)) {
             if (isMouseJustUp(client.input.mouseKeyboard, 'left') || !isMouseDown(client.input.mouseKeyboard, 'left')) {
@@ -306,9 +275,8 @@ export function updateInspect(
                     h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
             );
             if (nodeHit) {
-                // grab always targets the topmost transform-bearing ancestor,
-                // no drill-down. drilling into subnodes mid-grab leads to
-                // grabbing the wrong child of an already-selected parent.
+                // Grab always targets the topmost transform-bearing ancestor; drilling
+                // into subnodes mid-grab would grab the wrong child of a selected parent.
                 let target: Node = nodeHit.node;
                 let cur: Node | null = nodeHit.node.parent;
                 while (cur && cur !== room.scene.root) {
@@ -323,19 +291,16 @@ export function updateInspect(
 
     if (inPlaceMode && TransformTool.isInPlacement(transformToolState)) {
         if (rightClicked) {
-            // right click → commit placement immediately
             TransformTool.commitPlacement(transformToolState, room.scene, ctx.voxels, ctx);
         } else if (clicked) {
-            // left click → pin ghost here, switch to translate gizmo for fine-tuning
+            // Left click pins the ghost here and switches to the translate gizmo for fine-tuning.
             if (transformToolState.placement) transformToolState.placement.placed = true;
             store.setState({ transformMode: 'translate' });
         }
     } else if (inPlaceMode && store.getState().selection.nodes.size > 0) {
-        // place mode driving plain selection (no placement ghost): clicks pin
-        // the selection at its current cursor-driven position. left → switch to
-        // translate for fine-tune; right → exit place mode (back to translate).
+        // Place mode driving a plain selection (no ghost): either click pins the
+        // cursor-follow position as a history entry and exits back to translate.
         if (clicked || rightClicked) {
-            // explicit confirm, commit cursor-follow as a history entry
             TransformTool.commitPlaceSelection(transformToolState, room.scene, ctx);
             store.setState({ transformMode: 'translate' });
         }
@@ -361,12 +326,11 @@ export function updateInspect(
             MAX_RAY_DIST,
         );
 
-        // exclude the local player node + descendants, and the editor lens node.
+        // Excludes the local player node + descendants, and the editor lens node.
         const playerNode = room.playerNode;
         const editorNode = lensOf(room)?.subject;
 
-        // find the nearest node hit (excluding player) and nearest voxel hit.
-        // hits are distance-sorted, use the nearest of each type, then let
+        // Hits are distance-sorted; take the nearest of each type, then let
         // distance arbitrate which one wins when both are present.
         const nodeHit = hits.find(
             (h): h is Selector.NodeHit =>
@@ -374,7 +338,6 @@ export function updateInspect(
         );
         const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
 
-        // voxel wins if it's closer than the nearest node (or there's no node)
         const voxelWins = voxelHit !== undefined && (nodeHit === undefined || voxelHit.distance < nodeHit.distance);
 
         if (selectTarget !== 'voxels') {
@@ -386,7 +349,6 @@ export function updateInspect(
             const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
             const s = store.getState();
             if (shiftHeld && selectedNode) {
-                // shift+click: toggle the clicked node in the selection
                 if (s.selection.nodes.has(selectedNode.id)) {
                     s.removeFromSelection(selectedNode.id);
                 } else {
@@ -397,7 +359,6 @@ export function updateInspect(
             }
         }
 
-        // inspect tool: set inspected voxel on click
         if (activeTool === 'inspect' && selectTarget !== 'nodes') {
             if (voxelHit && (voxelWins || selectTarget === 'voxels')) {
                 const key = getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ);
@@ -415,20 +376,19 @@ export function updateInspect(
         }
     }
 
-    // context menu is an inspect-tool concept; transform owns right-click
-    // for its own semantics (place commit, grab exit).
+    // Context menu is an inspect-tool concept; transform owns right-click for its
+    // own semantics (place commit, grab exit).
     if (activeTool === 'inspect') {
         openViewportContextMenu(store, client, room, ctx, nodeBodies, camera);
     }
 
-    // keyboard shortcuts for tool switching (only when not typing in an input)
     if (!isInputFocused()) {
         const mk = client.input.mouseKeyboard;
         const hasNodeSelection = store.getState().selection.nodes.size > 0;
 
         if (activeTool === 'inspect') {
             if (hasNodeSelection) {
-                // Q/T/Y from inspect → activate transform tool with that mode
+                // Q/T/Y activate the transform tool with the matching mode.
                 if (isKeyJustDown(mk, INSPECT_KEYS.toTranslate)) {
                     store.setState({ activeTool: 'transform', transformMode: 'translate' });
                 } else if (isKeyJustDown(mk, INSPECT_KEYS.toRotate)) {
@@ -438,7 +398,7 @@ export function updateInspect(
                 }
             }
 
-            // Escape → clear node selection, then inspected voxel
+            // Escape clears the node selection first, then the inspected voxel.
             if (isKeyJustDown(mk, 'Escape')) {
                 if (hasNodeSelection) {
                     store.getState().clearSelection();
@@ -451,6 +411,6 @@ export function updateInspect(
         }
     }
 
-    // (inspect mesh update is hoisted out, see editor/client.ts so the
-    // selection outline is drawn for every tool, not just inspect/transform.)
+    // Inspect mesh update is hoisted out to editor/client.ts, so the selection
+    // outline is drawn for every tool, not just inspect/transform.
 }

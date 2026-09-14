@@ -1,29 +1,3 @@
-// SpriteResources, engine-global GPU resources backing all sprite rendering.
-//
-// One instance per `EngineClient`, shared across rooms. Owns:
-//   - the sprite atlas texture (sync placeholder + async real-atlas swap)
-//   - CPU-side frame UV LUT parsed from the `sprites-atlas.json` sidecar
-//   - the engine-global batched-sprite Material
-//
-// Two-phase init: synchronous `init()` returns a magenta 1×1 placeholder
-// atlas + builds the material against it, then `load()` fetches the real
-// atlas + sidecar. When the atlas swaps, `load()` allocates a new Texture
-// (size can grow/shrink between asset rebuilds) and rebinds the material's
-// TextureNode to it, no material rebuild needed. Same compiled pipeline
-// survives across atlas reloads.
-//
-// Material binds per-instance + env buffers by name (`instancePose`,
-// `instanceMaterial`, `env`). Each per-room SpriteVisuals routes its
-// buffers to those names via `geometry.setBuffer(name, buf)` and sets
-// `mesh.count = head` (alive slot count) per frame, slots are compacted
-// CPU-side via swap-pop, so the draw needs no per-instance visibility gate.
-//
-// The pixel-extrusion bake cache is NOT on this struct, it lives privately
-// inside `ExtrudedSpriteVisuals`'s geometry pool (per-room, refcounted by
-// spriteId). Atlas swaps wipe the visuals wholesale via
-// `registry-dispatch.ts:refreshSpriteResources`, so no cross-subsystem
-// cache invalidation is needed here.
-
 import {
     add,
     attribute,
@@ -68,8 +42,7 @@ import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
 
-// ── runtime LUT shape, pixel uvs normalized into 0..1 sampler space ──
-
+// pixel uvs normalized into 0..1 sampler space.
 export type SpriteFrameUv = {
     /** top-left u in [0..1]. */
     u: number;
@@ -87,10 +60,7 @@ export type SpriteEntry = {
     mipmap: boolean;
 };
 
-// ── shared gpu structs ──────────────────────────────────────────────
-//
-// Exported so per-room SpriteVisuals can pack into the matching layout.
-
+// exported so per-room SpriteVisuals can pack into the matching layout.
 export const InstancePose = struct('SpriteInstancePose', {
     posWorld: d.vec3f,
     width: d.f32,
@@ -122,28 +92,24 @@ export const MODE_BILLBOARD = 1;
 export const MODE_Y_BILLBOARD = 2;
 export const CENTER_BIT = 1 << 8;
 
-// ── instance batch (client-global, persistent GPU allocation) ───────
-// The plane geometry + per-instance pose/material buffers + their Mesh live
-// here, NOT on per-room visuals. One room renders at a time, so a room swap
-// REUSES this allocation (reset `head` + re-add the Mesh) instead of freeing +
-// reallocating it. Dense swap-pop layout: slots are `[0, head)`, drawn as a
-// single `drawIndexed(6, head, 0)` via `mesh.count`. Per-room `SpriteVisuals`
-// keep only this-room's use — alive-states, cull entries, scene-tree query.
-
+// The plane geometry, per-instance pose/material buffers, and their Mesh live here, not on per-room visuals.
+// One room renders at a time, so a room swap reuses this allocation (reset `head` + re-add the Mesh) instead
+// of freeing and reallocating it. Dense swap-pop layout: slots are `[0, head)`, drawn as a single
+// `drawIndexed(6, head, 0)` via `mesh.count`. Per-room `SpriteVisuals` keep only this-room's use: alive-states,
+// cull entries, scene-tree query.
 const INITIAL_INSTANCE_CAPACITY = 64;
 
 type GpuBufferType = GpuBuffer<any>;
 
-/** minimal shape the batch's `slotOwner` needs: the per-instance state's mutable
- *  slot. `SpriteVisualState` (owned by sprite-visuals) satisfies this — kept
- *  structural so resources doesn't import back from visuals. */
+/** minimal shape the batch's `slotOwner` needs: the per-instance state's mutable slot. `SpriteVisualState`
+ *  (owned by sprite-visuals) satisfies this; kept structural so resources doesn't import back from visuals. */
 type SlotOwner = { slot: number };
 
 export type SpriteBatch = {
     /** one Mesh(plane, material); added to the active room's scene on `init`,
      *  removed on `dispose`. Never disposed on a room swap. `mesh.count = head`. */
     mesh: Mesh;
-    /** 1×1 plane; per-instance pose/material buffers bind by name. */
+    /** 1x1 plane; per-instance pose/material buffers bind by name. */
     geometry: Geometry;
     instancePoseBuf: GpuBufferType;
     instanceMaterialBuf: GpuBufferType;
@@ -151,18 +117,18 @@ export type SpriteBatch = {
      *  `instanceCapacity`; free is swap-pop, not freelist push. */
     head: number;
     instanceCapacity: number;
-    /** slot → owning state. Parallel to the GPU buffers; freeSlot's swap-pop
+    /** slot to owning state, parallel to the GPU buffers; freeSlot's swap-pop
      *  reads this to find the moved state and rewrite its `slot`. */
     slotOwner: (SlotOwner | null)[];
 };
 
-/** Build the client-global instance batch: a shared 1×1 plane with per-instance
+/** Build the client-global instance batch: a shared 1x1 plane with per-instance
  *  pose/material vertex buffers, wrapped in a Mesh with the engine-global
  *  material. Not added to any scene until a room `init`s. */
 function createSpriteBatch(material: Material): SpriteBatch {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
-    // Shared 1×1 plane geometry; per-instance pose + material drive world
+    // Shared 1x1 plane geometry; per-instance pose + material drive world
     // placement + atlas region.
     const geometry = createPlaneGeometry(1, 1);
 
@@ -193,8 +159,7 @@ function createSpriteBatch(material: Material): SpriteBatch {
     };
 }
 
-/** Ready the batch for a fresh room: empty the dense head + slot ownership.
- *  Buffers are NOT touched — every visible slot re-writes each frame. */
+/** Ready the batch for a fresh room: empty the dense head and slot ownership. Buffers are not touched since every visible slot re-writes each frame. */
 export function resetSpriteBatch(batch: SpriteBatch): void {
     batch.head = 0;
     batch.mesh.count = 0;
@@ -237,8 +202,6 @@ function disposeSpriteBatch(batch: SpriteBatch): void {
     batch.instanceMaterialBuf.dispose();
 }
 
-// ── public type ─────────────────────────────────────────────────────
-
 export type SpriteResources = {
     /** 2D atlas texture, sRGB rgba8. magenta until `load()` completes. */
     atlas: Texture;
@@ -266,8 +229,6 @@ export type SpriteResources = {
      *  head). Reused across room swaps; per-room `SpriteVisuals` drive it. */
     batch: SpriteBatch;
 };
-
-// ── public api ──────────────────────────────────────────────────────
 
 /**
  * Sync construct an empty SpriteResources with a magenta-placeholder
@@ -298,8 +259,7 @@ export function init(env: EnvironmentResources): SpriteResources {
  * pipeline is preserved. Returns `true` when the atlas swapped.
  */
 export async function load(res: SpriteResources, loader: ResourceLoader, meta: SpriteAtlasMetadata | null): Promise<boolean> {
-    // An empty manifest (0 sprites) has no PNG on disk — treat it exactly like
-    // a missing atlas so we don't fetch (and 404 on) sprites-atlas.png.
+    // an empty manifest (0 sprites) has no PNG on disk; treat it exactly like a missing atlas so we don't fetch (and 404 on) sprites-atlas.png.
     if (!meta || meta.atlasSize === 0) {
         if (res.metadata === null) return false;
         swapAtlas(res, createPlaceholderTexture());
@@ -337,14 +297,9 @@ export function dispose(res: SpriteResources): void {
     res.atlasHash = null;
 }
 
-// ── internals ───────────────────────────────────────────────────────
-
-// dispose the old atlas + rebind the material's TextureNode at the new
-// one. gpucat caches GPUTextures by GpuTexture identity, and the
-// per-frame upload path doesn't reallocate when width/height change on
-// an existing GpuTexture, so we always swap to a fresh Texture, then
-// retarget the binding+sampler nodes that the material captured at
-// build time. material itself stays alive across reloads.
+// gpucat caches GPUTextures by GpuTexture identity, and the per-frame upload path doesn't reallocate when
+// width/height change on an existing GpuTexture, so this always swaps to a fresh Texture, then retargets the
+// binding+sampler nodes the material captured at build time. The material itself stays alive across reloads.
 function swapAtlas(res: SpriteResources, next: Texture): void {
     res.atlas.dispose();
     res.atlas = next;
@@ -373,8 +328,7 @@ async function fetchAtlasPixels(atlasSize: number, loader: ResourceLoader): Prom
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
-/** decode image bytes → <img> via a transient object url (the loader gives us
- *  bytes; an <img> can't source a bare vfs/file path). */
+/** decodes image bytes into an <img> via a transient object url (the loader gives bytes; an <img> can't source a bare vfs/file path). */
 function loadImageFromBytes(bytes: Uint8Array): Promise<HTMLImageElement> {
     const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
     return new Promise((resolve, reject) => {
@@ -433,8 +387,6 @@ function rebuildFrames(out: Map<string, SpriteEntry>, meta: SpriteAtlasMetadata)
         out.set(id, { frames, padding: entry.padding, mipmap: entry.mipmap });
     }
 }
-
-// ── material + cull compute ─────────────────────────────────────────
 
 function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { material: Material; atlasTexNode: TextureNode } {
     const aPosition = attribute('position', d.vec3f);
@@ -498,9 +450,8 @@ function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { mate
     const litMinF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 56 }).toVar('svLitMin');
     const ditherF = attribute('instanceMaterial', d.f32, { instanced: true, stride: M, offset: 60 }).toVar('svDither');
 
-    // sampled at the billboard's world origin, where the CPU used to sample it.
-    // Unconditional: `unlit` is applied downstream in `shadeTinted`, so an unlit
-    // sprite pays a few taps rather than needing a branch here.
+    // sampled at the billboard's world origin, unconditionally; `unlit` is applied downstream in
+    // `shadeTinted`, so an unlit sprite pays a few taps rather than needing a branch here.
     const lightF = sampleWorldLight(bindLightVolume(env), posWorld).toVar('svLight');
 
     const sampledU = add(uvRect.x, mul(aUv.x, uvRect.z)).toVar('svSampledU');

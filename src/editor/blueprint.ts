@@ -1,15 +1,3 @@
-// blueprint, captured snapshot of voxels and/or nodes for copy/paste.
-//
-// a blueprint stores voxel data in a Voxels instance (local space, with
-// the AABB min corner at the voxel origin) and node data as serialized
-// trait snapshots with positions relative to the blueprint origin.
-//
-// voxel data uses the same Voxels type as the world, no custom chunk
-// format needed. this means setBlock/getBlock/createVoxelModel all
-// work directly on blueprint voxels.
-//
-// usage: import * as Blueprint from './blueprint'
-
 import type { Quat, Vec3 } from 'math';
 import { TransformTrait } from '../builtins/transform';
 import type { ScenePayload } from '../core/content/scene-store';
@@ -26,62 +14,36 @@ import type { Voxels } from '../core/voxels/voxels';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, getBlock, setBlock } from '../core/voxels/voxels';
 import { useEditor } from './editor-store';
 
-// ── types ──────────────────────────────────────────────────────────
-//
-// nodes are stored as SerializedNode trees, the same format scene files
-// use. each top-level node's transform.position is **origin-relative**
-// (we shift it during bake). children carry their normal parent-relative
-// positions and rotate naturally with their parent.
-
+// each top-level node's transform.position is origin-relative; children stay parent-relative.
 export type Blueprint = {
     id: number;
 
-    // voxel data in local space. null if node-only selection.
-    // chunk coords are origin-relative (AABB min corner = local (0,0,0)).
+    // null if node-only selection; local space, min corner at (0,0,0).
     voxels: Voxels | null;
 
-    // tight AABB size in voxels ([0,0,0] if no voxels)
+    // [0,0,0] if no voxels.
     size: Vec3;
 
-    // total non-air block count
     blockCount: number;
 
-    // captured node subtrees (empty array if voxel-only). each top-level
-    // node's transform.position is origin-relative.
+    // empty array if voxel-only.
     nodes: SerializedNode[];
 
-    // world-space origin of the blueprint (min corner of voxel AABB,
-    // or centroid of selected nodes if no voxels).
-    // node positions are stored relative to this.
+    // min corner of voxel AABB, or centroid of selected nodes if no voxels.
     origin: Vec3;
 
-    // human-readable label ("3x2x3, 14 blocks, 2 nodes")
     label: string;
 
-    // what content types this blueprint contains
     hasVoxels: boolean;
     hasNodes: boolean;
 
-    // present when the blueprint was baked from a prefab. preview uses the
-    // snapshotted voxels/nodes, but commit emits a single wrapper node
-    // carrying this config so the placed instance stays linked to the prefab
-    // (children re-instantiated by the runtime). cleared when the user copies
-    // the blueprint to the clipboard, that path is explicit "freeze".
+    // set when baked from a prefab; commit emits a linked wrapper node, cleared on copy to clipboard.
     sourcePrefab?: PrefabConfig;
 };
 
-// ── transform-trait helper ─────────────────────────────────────────
-
 type TransformProps = { position: Vec3; quaternion: Quat; scale: Vec3 };
 
-/**
- * find the transform trait on a serialized node and return its controls as
- * typed Vec3/Quat tuples. returns null if no transform trait is present.
- *
- * the returned object has fresh tuples, mutate or replace freely without
- * affecting the source. caller is responsible for writing back via
- * `setTransformProps` if mutation is desired on the source node.
- */
+/** returns fresh tuples; write back via `writeTransformProps` if mutating the source node. */
 function readTransformProps(node: SerializedNode): TransformProps | null {
     const t = node.traits.find((st) => st.id === 'transform');
     if (!t?.controls) return null;
@@ -104,35 +66,20 @@ function writeTransformProps(node: SerializedNode, props: Partial<TransformProps
     if (props.scale) p.scale = [...props.scale] as Vec3;
 }
 
-// ── id counter ─────────────────────────────────────────────────────
-
 let nextBlueprintId = 1;
 
-// ── copy ───────────────────────────────────────────────────────────
-
-/**
- * copy selected voxels and/or nodes into a Blueprint.
- * captures whatever the selection contains, voxels, nodes, or both.
- *
- * voxel data is copied into a fresh Voxels instance with coords shifted
- * so the AABB min corner sits at local (0,0,0).
- *
- * node trait data is serialized via serializeNode. positions are stored
- * relative to the blueprint origin.
- */
+/** captures whatever the selection contains (voxels, nodes, or both) into a Blueprint. */
 export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selection: Selection.Selection): Blueprint {
     const voxelCount = Selection.countVoxels(selection);
     const hasVoxels = voxelCount > 0;
     const hasNodes = selection.nodes.size > 0;
 
-    // ── voxels ──
     let blueprintVoxels: Voxels | null = null;
     let size: Vec3 = [0, 0, 0];
     let voxelOrigin: Vec3 = [0, 0, 0];
     let blockCount = 0;
 
     if (hasVoxels) {
-        // scan AABB of selected voxels
         let minX = Infinity;
         let minY = Infinity;
         let minZ = Infinity;
@@ -150,10 +97,9 @@ export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selecti
         });
 
         voxelOrigin = [minX, minY, minZ];
-        // size is inclusive max - min + 1 (number of voxels per axis)
+        // size is inclusive max - min + 1
         size = [maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1];
 
-        // copy selected voxels into local-space Voxels
         blueprintVoxels = createVoxels(worldVoxels.registry);
 
         Selection.forEach(selection, (wx, wy, wz) => {
@@ -164,12 +110,9 @@ export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selecti
         });
     }
 
-    // ── nodes ──
     const blueprintNodes: SerializedNode[] = [];
 
     if (hasNodes) {
-        // compute origin for nodes: use voxel origin if we have voxels,
-        // otherwise use centroid of selected node positions.
         let nodeOrigin: Vec3;
         if (hasVoxels) {
             nodeOrigin = voxelOrigin;
@@ -215,7 +158,6 @@ export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selecti
         }
     }
 
-    // ── label ──
     const parts: string[] = [];
     if (hasVoxels) {
         parts.push(`${size[0]}x${size[1]}x${size[2]}`);
@@ -239,13 +181,7 @@ export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selecti
     };
 }
 
-// ── selection → ScenePayload (blueprint persistence) ──────────────
-//
-// captures the same content as `copySelection` but emits a ScenePayload
-// ready to hand to `ContentManager.saveScene`, a synthetic root with the
-// selected nodes as children + serialized voxels in local space. used by
-// the "save selection as blueprint" flow (chat command, context menu).
-
+/** captures a selection as a ScenePayload for `ContentManager.saveScene` ("save selection as blueprint"). */
 export function selectionToScenePayload(
     worldVoxels: Voxels,
     sceneTree: SceneTree,
@@ -267,14 +203,7 @@ export function selectionToScenePayload(
     };
 }
 
-// ── scene blueprint (placed-from-inventory) ───────────────────────
-//
-// build a Blueprint from a registered scene's payload. blueprint scenes
-// (saved via selectionToScenePayload) carry voxels in local space and a
-// synthetic root whose children are origin-relative nodes, exactly the
-// shape Blueprint already wants. we just deserialize voxels, scan the
-// AABB for size, and clone children.
-
+/** builds a Blueprint from a registered scene's payload (voxels in local space, origin-relative children). */
 export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Blocks): Blueprint | null {
     const payload = useEditor.getState().blueprints.get(sceneId);
     if (!payload) return null;
@@ -316,9 +245,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
             }
         }
         if (blockCount > 0) {
-            // saved blueprints are already local-space (min ≈ 0). general scenes
-            // may not be, shift into local space so buildPasteOps can use
-            // `chunk.wx + anchor` directly.
+            // saved blueprints are already local-space; general scenes may not be, so shift into local space.
             if (minX === 0 && minY === 0 && minZ === 0) {
                 voxels = tmp;
             } else {
@@ -368,22 +295,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
     };
 }
 
-// ── prefab blueprint (frozen instance) ─────────────────────────────
-
-/**
- * build a Blueprint by instantiating a prefab into a synthetic root and
- * snapshotting the resulting voxels + child nodes. this lets prefab placement
- * flow through the same `enterPlacement` / `rotatePlacement` / `commitPlacement`
- * code path as ctrl+v paste, the preview shows the expanded content cheaply
- * without re-running the prefab fn on every ghost frame.
- *
- * the resulting blueprint carries `sourcePrefab`, so commit emits a single
- * wrapper node with the prefab config attached (linkage preserved) and the
- * runtime re-instantiates the contents on the real node. for a "freeze"
- * (concretize) flow, drop `sourcePrefab` before committing.
- *
- * returns null if the prefab id is not registered.
- */
+/** instantiates a prefab into a synthetic root and snapshots the resulting voxels + child nodes into a Blueprint. */
 export function createPrefabBlueprint(
     prefabId: string,
     anchor: Vec3,
@@ -403,11 +315,8 @@ export function createPrefabBlueprint(
     tempRoot.prefab = config;
     addTrait(tempRoot, TransformTrait);
 
-    // single source of truth: scene children + apply. returns prepared voxels
-    // when the def has them; null otherwise.
     const preparedVoxels = expandPrefab(tempRoot, runtime, registry);
 
-    // ── compute voxel AABB ──
     let minX = Infinity;
     let minY = Infinity;
     let minZ = Infinity;
@@ -468,11 +377,7 @@ export function createPrefabBlueprint(
         }
     }
 
-    // ── snapshot child nodes ──
-    // serializeNode captures the full subtree (children, traits, prefab linkage,
-    // realm). we only shift the top-level transform.position so it's
-    // origin-relative; children's positions are parent-relative and rotate
-    // naturally with their parent at paste time.
+    // only the top-level transform.position shifts to origin-relative; children stay parent-relative.
     const blueprintNodes: SerializedNode[] = [];
     for (const child of tempRoot.children) {
         const serialized = serializeNode(child);
@@ -515,44 +420,17 @@ export function createPrefabBlueprint(
     };
 }
 
-// ── rotate ─────────────────────────────────────────────────────────
-
-/**
- * rotate a blueprint around the Y axis by 90-degree increments.
- * returns a new Blueprint, the original is not mutated.
- *
- * voxel data: grid is remapped. for each voxel at (x, y, z) in a
- * volume of size (sx, sy, sz):
- *   turn 1 (90 cw):  new pos = (sz - 1 - z, y, x),      new size = (sz, sy, sx)
- *   turn 2 (180):    new pos = (sx - 1 - x, y, sz - 1 - z), new size = (sx, sy, sz)
- *   turn 3 (270 cw): new pos = (z, y, sx - 1 - x),      new size = (sz, sy, sx)
- *
- * node data: localPosition is rotated around Y by the same angle.
- * quaternion is composed with the rotation.
- */
 export type RotationAxis = 'x' | 'y' | 'z';
 
-/**
- * rotate a blueprint 90 degrees around the given axis.
- * direction: +1 = CW looking down the positive axis, -1 = CCW.
- *
- * this rebuilds the voxel data with remapped coordinates and rotates
- * node local positions + quaternions to match.
- */
+/** rotates a blueprint 90 degrees around the given axis (direction: +1 = CW, -1 = CCW looking down the axis), returning a new Blueprint. */
 export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 1 | -1): Blueprint {
     const [sx, sy, sz] = blueprint.size;
 
-    // ── rotate voxels ──
     let newVoxels: Voxels | null = null;
     let newSize: Vec3 = blueprint.size;
     let newBlockCount = blueprint.blockCount;
 
-    // direction=+1 means CW looking down the positive axis, matching the
-    // block-model convention (block-model.ts rotatePos step=1: +X → -Z).
-    // direction=-1 means CCW.
-
     if (blueprint.voxels && blueprint.hasVoxels) {
-        // new bounding size after rotation
         if (axis === 'y') {
             newSize = [sz, sy, sx];
         } else if (axis === 'x') {
@@ -579,8 +457,6 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
 
                         let nx: number, ny: number, nz: number;
                         if (axis === 'y') {
-                            // CW from +Y: (x,z) → (z, sx-1-x)  i.e. +X → -Z
-                            // CCW:        (x,z) → (sz-1-z, x)   i.e. +X → +Z
                             if (direction === 1) {
                                 nx = wz;
                                 ny = wy;
@@ -591,8 +467,6 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
                                 nz = wx;
                             }
                         } else if (axis === 'x') {
-                            // CW from +X: (y,z) → (z, sy-1-y)
-                            // CCW:        (y,z) → (sz-1-z, y)
                             if (direction === 1) {
                                 nx = wx;
                                 ny = wz;
@@ -603,8 +477,6 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
                                 nz = wy;
                             }
                         } else {
-                            // CW from +Z: (x,y) → (y, sx-1-x)
-                            // CCW:        (x,y) → (sy-1-y, x)
                             if (direction === 1) {
                                 nx = wy;
                                 ny = sx - 1 - wx;
@@ -625,7 +497,6 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
         }
     }
 
-    // ── rotate nodes ──
     const angle = direction * (Math.PI / 2);
     const halfAngle = angle / 2;
     let rotQuat: Quat;
@@ -658,7 +529,6 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
         return cloned;
     });
 
-    // ── label ──
     const parts: string[] = [];
     if (blueprint.hasVoxels) {
         parts.push(`${newSize[0]}x${newSize[1]}x${newSize[2]}`);
@@ -682,7 +552,7 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
     };
 }
 
-/** rotate around Y by 0-3 turns (legacy helper, delegates to rotateAxis). */
+/** rotates a blueprint around Y by 0-3 turns, delegating to rotateAxis. */
 export function rotate(blueprint: Blueprint, turns: 0 | 1 | 2 | 3): Blueprint {
     if (turns === 0) return blueprint;
     let result = blueprint;
@@ -692,22 +562,10 @@ export function rotate(blueprint: Blueprint, turns: 0 | 1 | 2 | 3): Blueprint {
     return result;
 }
 
-// ── flip ──────────────────────────────────────────────────────────
-//
-// mirror across the plane perpendicular to `axis` passing through the
-// blueprint origin. companion to rotateAxis, uses flipBlockKey from
-// block-transform for per-block state handling.
-
-/**
- * mirror a blueprint across the plane perpendicular to the given axis.
- * voxels: cells on the chosen axis are reflected: x → sx-1-x (and analogously
- * for y/z). nodes: position component on `axis` is negated; quaternion is
- * mirrored across the same plane (the two perpendicular components flip sign).
- */
+/** mirrors a blueprint across the plane perpendicular to `axis`, through the blueprint origin. */
 export function flipAxis(blueprint: Blueprint, axis: RotationAxis): Blueprint {
     const [sx, sy, sz] = blueprint.size;
 
-    // ── flip voxels ──
     let newVoxels: Voxels | null = null;
     let newBlockCount = blueprint.blockCount;
 
@@ -741,11 +599,7 @@ export function flipAxis(blueprint: Blueprint, axis: RotationAxis): Blueprint {
         }
     }
 
-    // ── flip nodes ──
-    // mirror across the plane perpendicular to `axis` through origin: negate
-    // that position component. for the quaternion, mirroring a rotation
-    // across a plane normal to axis A flips the two quat components NOT on A
-    // (and the scalar w stays). e.g. axis=x: (qx, qy, qz, qw) → (qx, -qy, -qz, qw).
+    // mirroring across a plane normal to axis A flips the two quat components not on A; w stays.
     const newNodes: SerializedNode[] = blueprint.nodes.map((node) => {
         const cloned = structuredClone(node);
         const tProps = readTransformProps(cloned);
@@ -768,7 +622,6 @@ export function flipAxis(blueprint: Blueprint, axis: RotationAxis): Blueprint {
         return cloned;
     });
 
-    // ── label ──
     const parts: string[] = [];
     if (blueprint.hasVoxels) {
         parts.push(`${sx}x${sy}x${sz}`);
@@ -792,20 +645,9 @@ export function flipAxis(blueprint: Blueprint, axis: RotationAxis): Blueprint {
     };
 }
 
-// ── paste ops (voxels) ─────────────────────────────────────────────
-
 export type VoxelOp = { wx: number; wy: number; wz: number; key: string };
 
-/**
- * build forward/reverse voxel ops for committing a blueprint's voxels
- * to the world at a given anchor position.
- *
- * anchor is the world-space position of the blueprint's local (0,0,0).
- * forward ops write blueprint blocks into the world.
- * reverse ops capture the current world state at those positions (for undo).
- *
- * returns empty arrays if the blueprint has no voxels.
- */
+/** anchor is the world-space position of the blueprint's local (0,0,0); reverse ops capture current world state for undo. */
 export function buildPasteOps(
     blueprint: Blueprint,
     anchor: Vec3,
@@ -829,7 +671,6 @@ export function buildPasteOps(
                     const wy = chunk.wy + ly + anchor[1];
                     const wz = chunk.wz + lz + anchor[2];
 
-                    // capture current world block for undo
                     const existingKey = getBlock(worldVoxels, wx, wy, wz);
                     reverse.push({ wx, wy, wz, key: existingKey });
                     forward.push({ wx, wy, wz, key });
@@ -841,22 +682,7 @@ export function buildPasteOps(
     return { forward, reverse };
 }
 
-// ── paste commands (nodes) ─────────────────────────────────────────
-
-/**
- * build node creation data for committing a blueprint's nodes into the
- * scene at a given offset + rotation from the original blueprint origin.
- *
- * each entry is a fully-formed SerializedNode whose top-level
- * transform.position/quaternion has been re-anchored to world space and
- * rotated by `rotation`. children are untouched (their positions are
- * parent-relative and the engine compounds at render time).
- *
- * the caller is responsible for actually creating nodes and sending
- * commands, this function only produces the data.
- *
- * returns empty entries if the blueprint has no nodes.
- */
+/** each entry's top-level transform is re-anchored to world space and rotated; children stay parent-relative. */
 export function buildNodePaste(blueprint: Blueprint, offset: Vec3, rotation: Quat): { entries: SerializedNode[] } {
     const entries: SerializedNode[] = [];
     if (!blueprint.hasNodes) return { entries };
@@ -877,9 +703,7 @@ export function buildNodePaste(blueprint: Blueprint, offset: Vec3, rotation: Qua
     return { entries };
 }
 
-// ── math helpers (inline to avoid import deps) ─────────────────────
-
-// quaternion multiply: a * b
+// inline to avoid import deps
 function quatMultiply(a: Quat, b: Quat): Quat {
     const [ax, ay, az, aw] = a;
     const [bx, by, bz, bw] = b;
@@ -891,18 +715,17 @@ function quatMultiply(a: Quat, b: Quat): Quat {
     ];
 }
 
-// rotate a vec3 by a quaternion: q * v * q^-1
+// q * v * q^-1, v treated as quaternion [vx, vy, vz, 0]
 function rotateVec3ByQuat(v: Vec3, q: Quat): Vec3 {
     const [qx, qy, qz, qw] = q;
     const [vx, vy, vz] = v;
 
-    // q * v (treat v as quaternion [vx, vy, vz, 0])
     const ix = qw * vx + qy * vz - qz * vy;
     const iy = qw * vy + qz * vx - qx * vz;
     const iz = qw * vz + qx * vy - qy * vx;
     const iw = -qx * vx - qy * vy - qz * vz;
 
-    // (q * v) * q^-1 (conjugate for unit quaternion is [-x,-y,-z,w])
+    // conjugate of a unit quaternion is [-x,-y,-z,w]
     return [
         ix * qw + iw * -qx + iy * -qz - iz * -qy,
         iy * qw + iw * -qy + iz * -qx - ix * -qz,
@@ -910,16 +733,7 @@ function rotateVec3ByQuat(v: Vec3, q: Quat): Vec3 {
     ];
 }
 
-// ── clipboard serialization ────────────────────────────────────────
-//
-// blueprints are written to the system clipboard as JSON strings.
-// the format is identified by a `type: "blocks-blueprint"` field.
-// voxel data uses the same base64-encoded chunk format as mapfile
-// persistence (via voxel-savefile), so it's compact and stable across
-// registry rebuilds.
-//
-// this means you can ctrl+c in one browser tab and ctrl+v in another.
-
+// voxel data uses the same base64-encoded chunk format as voxel-savefile, so it round-trips through the system clipboard.
 const CLIPBOARD_TYPE = 'blocks-blueprint';
 const CLIPBOARD_VERSION = 1;
 
@@ -935,9 +749,6 @@ type ClipboardBlueprint = {
     nodes: SerializedNode[];
 };
 
-/**
- * serialize a blueprint to a JSON string suitable for the system clipboard.
- */
 export function toClipboardString(blueprint: Blueprint): string {
     const payload: ClipboardBlueprint = {
         type: CLIPBOARD_TYPE,
@@ -953,13 +764,7 @@ export function toClipboardString(blueprint: Blueprint): string {
     return JSON.stringify(payload);
 }
 
-/**
- * attempt to deserialize a clipboard string into a Blueprint.
- * returns null if the string is not a valid blocks blueprint.
- *
- * the registry is needed to rebuild runtime palette ids from the
- * stable string keys stored in the serialized voxel data.
- */
+/** registry rebuilds runtime palette ids from the stable string keys stored in the serialized voxel data. */
 export function fromClipboardString(text: string, registry: Blocks): Blueprint | null {
     let parsed: ClipboardBlueprint;
     try {
@@ -970,14 +775,12 @@ export function fromClipboardString(text: string, registry: Blocks): Blueprint |
 
     if (!parsed || parsed.type !== CLIPBOARD_TYPE) return null;
 
-    // rebuild voxels from serialized data
     let voxels: Voxels | null = null;
     if (parsed.voxels && parsed.hasVoxels) {
         voxels = createVoxels(registry);
         loadVoxels(voxels, parsed.voxels, registry);
     }
 
-    // rebuild label
     const parts: string[] = [];
     if (parsed.hasVoxels) {
         parts.push(`${parsed.size[0]}x${parsed.size[1]}x${parsed.size[2]}`);

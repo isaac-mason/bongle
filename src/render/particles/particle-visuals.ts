@@ -1,18 +1,3 @@
-// ParticleVisuals, billboard-only instanced renderer for the particle pool.
-//
-// Material lives engine-global on `ParticleResources`. This per-room
-// struct owns the geometry and per-instance buffers; they route to the
-// engine-global material by name via `geometry.setBuffer(name, buf)`.
-//
-// The pool keeps a dense alive prefix `[0, count)`, so the draw is a
-// single instanced `drawIndexed(6, pool.count, 0)`, no per-slot cull
-// compute needed. `update()` sets `mesh.count = pool.count` each frame.
-// Instance data lives in two storage buffers indexed by `instanceIndex`
-// in the shader. Reads instance data from the per-room SoA ParticlePool
-// rather than scene-graph traits. Sits next to particles.ts as a sibling
-// subsystem so the pool owner stays a pure data module, no scene/Renderer
-// imports leak in.
-
 import { packTo, type Scene } from 'gpucat';
 import type { ParticleHandle, ParticlePool } from '../../core/particles/particles';
 import type { SpriteResources } from '../sprites/sprite-resources';
@@ -24,8 +9,6 @@ import {
     resetParticleBatch,
 } from './particle-resources';
 
-// ── types ───────────────────────────────────────────────────────────
-
 export type ParticleVisuals = {
     /** this room's scene, where the client-global `batch.mesh` is added on init. */
     scene: Scene;
@@ -33,14 +16,10 @@ export type ParticleVisuals = {
     spriteResources: SpriteResources;
 };
 
-// ── init ────────────────────────────────────────────────────────────
-
 /**
- * Create per-room particle visuals: ready the client-global instance batch
- * (draw nothing until the first update; buffers untouched) and mount its Mesh
- * into this room's scene. The batch — plane Mesh, per-instance buffers — is owned
- * by `ParticleResources` and survives room swaps; this room contributes only the
- * scene anchor. `spriteResources` is the engine-global atlas ref read per frame.
+ * Creates per-room particle visuals: readies the client-global instance batch and mounts
+ * its Mesh into this room's scene. The batch (plane Mesh, per-instance buffers) is owned by
+ * `ParticleResources` and survives room swaps; this room contributes only the scene anchor.
  */
 export function init(batch: ParticleBatch, scene: Scene, spriteResources: SpriteResources): ParticleVisuals {
     resetParticleBatch(batch);
@@ -48,21 +27,16 @@ export function init(batch: ParticleBatch, scene: Scene, spriteResources: Sprite
     return { scene, spriteResources };
 }
 
-// ── update ──────────────────────────────────────────────────────────
-
 /**
- * Per-frame update. Walks `pool[0..count)`, resolves the sprite frame
- * index per slot from the handle's playback mode, packs pose + material.
- *
- * No camera arg, the billboard basis is reconstructed in-shader from
- * cameraViewMatrix.
+ * Per-frame update. Walks `pool[0..count)`, resolves the sprite frame index per slot from
+ * the handle's playback mode, and packs pose + material. No camera arg, the billboard basis
+ * is reconstructed in-shader from cameraViewMatrix.
  */
-
 export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: ParticlePool, nowSec: number): void {
     const count = pool.count;
 
-    // mesh.count is the instance count drawIndexed sees; gating it on
-    // pool.count is the only "cull" needed since the pool is dense.
+    // gating the drawn instance count on pool.count is the only "cull" needed since the
+    // pool is dense.
     batch.mesh.count = count;
 
     if (count === 0) return;
@@ -112,25 +86,18 @@ export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: Par
         });
     }
 
-    // the pool is dense [0, count), so only that prefix is ever read by the draw. upload it
-    // rather than the whole INSTANCE_CAPACITY allocation — a blanket `needsUpdate` here
-    // re-sends 8192 slots' worth of pose + material every frame a single particle is alive.
+    // upload only the dense [0, count) prefix, not the whole INSTANCE_CAPACITY allocation.
     batch.instancePoseBuf.addUpdateRange(0, count * poseFloatStride);
     batch.instancePoseBuf.needsUpdate = true;
     batch.instanceMaterialBuf.addUpdateRange(0, (count * INSTANCE_MATERIAL_STRIDE) / 4);
     batch.instanceMaterialBuf.needsUpdate = true;
 }
 
-/**
- * Dispose per-room particle visuals: detach the batch Mesh from this room's
- * scene. The batch's GPU buffers are NOT freed — they survive for the next
- * room's `init`.
- */
+/** Detaches the batch Mesh from this room's scene. Its GPU buffers are not freed, they
+ *  survive for the next room's `init`. */
 export function dispose(visuals: ParticleVisuals, batch: ParticleBatch): void {
     visuals.scene.remove(batch.mesh);
 }
-
-// ── frame resolution ────────────────────────────────────────────────
 
 type ResolvedFrame = {
     u: number;
@@ -144,10 +111,8 @@ type ResolvedFrame = {
 
 const _resolved: ResolvedFrame = { u: 0, v: 0, w: 0, h: 0, frameW: 1, frameH: 1 };
 
-/** Resolve atlas UV + world dims for slot `i` from the handle's playback
- *  mode. Returns null when the sprite isn't in the atlas yet (lazy load
- *  / atlas swap mid-flight). Single-frame sprites degenerate to "frame 0"
- *  in all modes. */
+/** Resolves atlas UV and world dims for slot `i` from the handle's playback mode. Returns
+ *  null when the sprite isn't in the atlas yet (lazy load or atlas swap mid-flight). */
 function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: number, lifetime: number): ResolvedFrame | null {
     const entry = resources.frames.get(handle.def.sprite.def.spriteId);
     if (!entry) return null;
