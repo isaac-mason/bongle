@@ -55,7 +55,7 @@ importers:
         version: https://codeload.github.com/isaac-mason/gatho/tar.gz/cb8c8b4d3f18c903d287d43019b927b8f022511a
       gpucat:
         specifier: github:isaac-mason/gpucat#main
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/538db9b2d3172fa6b1d3dcc182bbc75c44af758c
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/47f893ecb8a022f7e23750bfd706d7b3bb040bb7
       magic-string:
         specifier: ^0.30.21
         version: 0.30.21
@@ -1616,8 +1616,8 @@ packages:
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/538db9b2d3172fa6b1d3dcc182bbc75c44af758c:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/538db9b2d3172fa6b1d3dcc182bbc75c44af758c}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/47f893ecb8a022f7e23750bfd706d7b3bb040bb7:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/47f893ecb8a022f7e23750bfd706d7b3bb040bb7}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -3399,7 +3399,7 @@ snapshots:
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/538db9b2d3172fa6b1d3dcc182bbc75c44af758c:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/47f893ecb8a022f7e23750bfd706d7b3bb040bb7:
     dependencies:
       math: 0.1.0
 
