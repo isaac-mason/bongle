@@ -39,7 +39,7 @@ export type { PivotPreset } from './placement';
 
 import type { VoxelOp } from '../blueprint';
 import { SetTraitCommand } from '../commands';
-import type { ActiveFrame, EditRoomStoreApi } from '../edit-room-store';
+import type { ActiveFrame, EditRoomStoreApi, SnapTo } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { unionSubtreeWorldAabb } from '../node-aabb';
@@ -188,7 +188,7 @@ export function createTransformTool(
         }
 
         if (mode === 'translate') {
-            const faceCenter = effectiveSnapTo(state.store) === 'face-center';
+            const snapTo = effectiveSnapTo(state.store);
             const step = state.translateStep;
 
             const dx = proxy.position[0] - state.proxyStartPosition[0];
@@ -201,9 +201,9 @@ export function createTransformTool(
                 if (!node) continue;
                 const t = getTrait(node, TransformTrait);
                 if (!t) continue;
-                t.position[0] = snapAxis(snap.position[0] + dx, step, faceCenter);
-                t.position[1] = snapAxis(snap.position[1] + dy, step, false);
-                t.position[2] = snapAxis(snap.position[2] + dz, step, faceCenter);
+                t.position[0] = snapAxis(snap.position[0] + dx, step, snapTo, 0);
+                t.position[1] = snapAxis(snap.position[1] + dy, step, snapTo, 1);
+                t.position[2] = snapAxis(snap.position[2] + dz, step, snapTo, 2);
                 markTransformDirty(t);
                 if (first === null) {
                     first = snap;
@@ -404,10 +404,11 @@ const _pointer = { x: 0, y: 0, button: 0 };
 
 const DRAG_MOVE_BUTTON = -1;
 
-// corner: the grid; face-center: the middle of the cell on the horizontal axes; no step: free.
-function snapAxis(value: number, step: number | null, faceCenter: boolean): number {
+// corner: the grid. face-top-center: cell centre across, grid up. block-center: cell centre on every axis. no step: free.
+export function snapAxis(value: number, step: number | null, snapTo: SnapTo, axis: 0 | 1 | 2): number {
     if (step === null) return value;
-    if (faceCenter) return Math.floor(value / step) * step + step / 2;
+    const cellCentre = snapTo === 'block-center' || (snapTo === 'face-top-center' && axis !== 1);
+    if (cellCentre) return Math.floor(value / step) * step + step / 2;
     return Math.round(value / step) * step;
 }
 
@@ -753,9 +754,9 @@ function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 
         next = {
             ...next,
             [drag.position]: [
-                snapAxis(_frameLocalPosition[0], step, false),
-                snapAxis(_frameLocalPosition[1], step, false),
-                snapAxis(_frameLocalPosition[2], step, false),
+                snapAxis(_frameLocalPosition[0], step, 'corner', 0),
+                snapAxis(_frameLocalPosition[1], step, 'corner', 1),
+                snapAxis(_frameLocalPosition[2], step, 'corner', 2),
             ],
         };
     } else if (mode === 'rotate' && drag.quaternion) {
@@ -1011,7 +1012,7 @@ function selectionHasVoxels(state: TransformToolState, sceneTree: SceneTree): bo
 }
 
 /** the store's snapTo, forced to 'corner' when voxel content is involved. */
-export function effectiveSnapTo(store: EditRoomStoreApi): 'face-center' | 'corner' {
+export function effectiveSnapTo(store: EditRoomStoreApi): SnapTo {
     const s = store.getState();
     return s.transformHasVoxels ? 'corner' : s.snapTo;
 }

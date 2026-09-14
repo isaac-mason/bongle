@@ -46,7 +46,8 @@ export type SelectorMode = 'laser' | 'air';
 export type TransformMode = 'translate' | 'rotate' | 'scale' | 'place' | 'grab';
 export type TransformSpace = 'world' | 'local';
 
-export type SnapTo = 'face-center' | 'corner';
+/** where a node origin lands on the block grid: the centre of a block's top face, the centre of a block, or a grid corner. */
+export type SnapTo = 'face-top-center' | 'block-center' | 'corner';
 
 export type SelectTarget = 'all' | 'nodes' | 'voxels';
 
@@ -397,7 +398,7 @@ function initialFields() {
         translationSnap: 1 as number | null,
         rotationSnap: 45 as number | null,
         scaleSnap: null as number | null,
-        snapTo: 'face-center' as SnapTo,
+        snapTo: 'face-top-center' as SnapTo,
         selectionPivot: 'center' as PivotPreset,
         transformPivotOffset: [0, 0, 0] as Vec3,
         placementActive: false,

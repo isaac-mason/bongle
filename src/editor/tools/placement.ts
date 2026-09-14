@@ -22,7 +22,7 @@ import type { Blueprint as BlueprintData, VoxelOp } from '../blueprint';
 import * as Blueprint from '../blueprint';
 import { readNudgeDelta, snapCardinal, yawFromQuat } from '../camera';
 import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand } from '../commands';
-import type { EditRoomStoreApi } from '../edit-room-store';
+import type { EditRoomStoreApi, SnapTo } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';
 import { commitVoxelOps } from '../voxel-edit';
 import type { TransformSnapshot, TransformToolState } from './transform';
@@ -180,11 +180,12 @@ export function placePointOnFace(
     hitVoxel: [number, number, number],
     hitNormal: [number, number, number],
     hitPoint: [number, number, number] | null,
-    snapTo: 'face-center' | 'corner',
+    snapTo: SnapTo,
 ): Vec3 {
     const [hx, hy, hz] = hitVoxel;
     const [nx, ny, nz] = hitNormal;
-    if (snapTo === 'face-center') return [hx + nx + (nx === 0 ? 0.5 : 0), hy + ny, hz + nz + (nz === 0 ? 0.5 : 0)];
+    if (snapTo === 'face-top-center') return [hx + nx + (nx === 0 ? 0.5 : 0), hy + ny, hz + nz + (nz === 0 ? 0.5 : 0)];
+    if (snapTo === 'block-center') return [hx + nx + 0.5, hy + ny + 0.5, hz + nz + 0.5];
     if (hitPoint) {
         // axes across the face snap to the nearest integer corner; the normal axis takes the cell in front.
         return [
@@ -415,23 +416,7 @@ export function updatePlacementFromRaycast(
 
     // node-only prefabs have no voxel footprint (size is [0,0,0]); place a single point on the hovered face.
     if (!placement.blueprint.hasVoxels) {
-        const useFaceCenter = TransformTool.effectiveSnapTo(state.store) === 'face-center';
-        let qx: number;
-        let qy: number;
-        let qz: number;
-        if (useFaceCenter) {
-            qx = hx + nx + (nx === 0 ? 0.5 : 0);
-            qy = hy + ny + (ny === 0 ? 0 : 0);
-            qz = hz + nz + (nz === 0 ? 0.5 : 0);
-        } else if (hitPoint) {
-            qx = nx !== 0 ? hx + nx : Math.round(hitPoint[0]);
-            qy = ny !== 0 ? hy + ny : Math.round(hitPoint[1]);
-            qz = nz !== 0 ? hz + nz : Math.round(hitPoint[2]);
-        } else {
-            qx = hx + nx;
-            qy = hy + ny;
-            qz = hz + nz;
-        }
+        const [qx, qy, qz] = placePointOnFace(hitVoxel, hitNormal, hitPoint, TransformTool.effectiveSnapTo(state.store));
         _placeScratch[0] = qx + px;
         _placeScratch[1] = qy + py;
         _placeScratch[2] = qz + pz;

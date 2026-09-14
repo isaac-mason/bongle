@@ -967,11 +967,18 @@ export function TransformOptions() {
             {transformMode !== 'grab' && (
                 <Row label="snap to">
                     <ToggleBtn
-                        active={!transformHasVoxels && snapTo === 'face-center'}
-                        onClick={() => setSnapTo('face-center')}
+                        active={!transformHasVoxels && snapTo === 'face-top-center'}
+                        onClick={() => setSnapTo('face-top-center')}
                         disabled={transformHasVoxels}
                     >
-                        face center
+                        face top
+                    </ToggleBtn>
+                    <ToggleBtn
+                        active={!transformHasVoxels && snapTo === 'block-center'}
+                        onClick={() => setSnapTo('block-center')}
+                        disabled={transformHasVoxels}
+                    >
+                        block center
                     </ToggleBtn>
                     <ToggleBtn active={transformHasVoxels || snapTo === 'corner'} onClick={() => setSnapTo('corner')}>
                         block corner
