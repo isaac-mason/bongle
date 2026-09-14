@@ -482,8 +482,14 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
     const { showOutlines, showRelationshipLines, showNames, showMarkers } = useEditor.getState();
     const toggles: NodeCard.CardToggles = { outlines: showOutlines, names: showNames, relationshipLines: showRelationshipLines };
     // the transform tool is the gizmo's: selected nodes keep their box and nothing else in its way.
-    const transforming = storeState.activeTool === 'transform' || s.handles.armed !== null;
-    const selectedToggles: NodeCard.CardToggles = transforming ? { ...toggles, names: false, outlines: false } : toggles;
+    // a handle drag keeps the outline it is reshaping and only drops the text under the readout.
+    const transforming = storeState.activeTool === 'transform';
+    const handling = s.handles.armed !== null;
+    const selectedToggles: NodeCard.CardToggles = transforming
+        ? { ...toggles, names: false, outlines: false }
+        : handling
+          ? { ...toggles, names: false }
+          : toggles;
     const batches: NodeCard.CardBatches = {
         lines: v.lines,
         quads: v.quads,
@@ -515,7 +521,7 @@ function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
             node,
             transform,
             NodeCard.cardFor(node),
-            node.id === activeId && !transforming ? 'active' : 'selected',
+            node.id === activeId && !transforming && !handling ? 'active' : 'selected',
             eye,
             selectedToggles,
             root,
