@@ -72,6 +72,7 @@ export type VoxelMeshVisuals = {
 export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree): VoxelMeshVisuals {
     resetVoxelMeshBatch(batch);
     scene.add(batch.mesh);
+    scene.add(batch.outlineMesh);
     return {
         aliveStates: [],
         _query: query(sceneTree, [VoxelMeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
@@ -179,6 +180,7 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
             if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
         }
 
+        const outline = trait.outline;
         packTo(InstanceParams, instArr, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
             tint: trait.tint,
             flash: trait.flash,
@@ -186,6 +188,10 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
             dither: trait.dither,
+            outlineColor: outline.color,
+            // width 0 is the off switch on the GPU; `enabled` keeps a configured width across toggles.
+            outlineWidth: outline.enabled ? outline.width : 0,
+            outlineSpace: outline.space === 'world' ? 0 : 1,
         });
         if (slot < dirtyMinSlot) dirtyMinSlot = slot;
         if (slot > dirtyMaxSlot) dirtyMaxSlot = slot;
@@ -288,6 +294,7 @@ export function dispose(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibi
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
     visuals.scene.remove(batch.mesh);
+    visuals.scene.remove(batch.outlineMesh);
 }
 
 /** Drops a VoxelModel's baked geometry so the next reference re-bakes, since bakes are
@@ -335,6 +342,9 @@ function destroyInstance(
         unlit: 0,
         litMin: 0,
         dither: 0,
+        outlineColor: [0, 0, 0, 0],
+        outlineWidth: 0,
+        outlineSpace: 0,
     });
     batch.instanceDataBuf.addUpdateRange(
         slot * MODEL_INSTANCE_STRIDE_F32 + MODEL_INSTANCE_PARAMS_OFFSET / 4,

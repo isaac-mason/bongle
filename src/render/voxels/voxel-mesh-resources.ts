@@ -3,6 +3,7 @@ import {
     BufferLifecycle,
     cameraProjectionMatrix,
     cameraViewMatrix,
+    clamp,
     d,
     f32,
     floor,
@@ -31,6 +32,7 @@ import {
 import type { Vec3 } from 'math';
 import { FLAGS_OFFSET, META_OFFSET, QUAD_META_DIAG_FLIP_BIT, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
+import { createOutlineShellMaterial } from '../dsl/outline';
 import { shadeTinted } from '../dsl/shade';
 import type { TimeResources } from '../time';
 import { arenaDispose, createSegmentArena, type SegmentArena } from './voxel-arena';
@@ -38,12 +40,14 @@ import {
     buildEnvSky,
     buildVoxelFragment,
     computeVertexAnimation,
+    decodeQuadCentroid,
     decodeQuadCorner,
     decodeQuadFlags,
     makePassMaterial,
     POS_DECODE_ORIGIN,
     POS_DECODE_SCALE,
     pickCornerIdx,
+    sampleVoxelAlbedo,
 } from './voxel-material';
 
 export const InstanceParams = struct('VoxelMeshInstanceParams', {
@@ -58,10 +62,15 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
     litMin: d.f32,
     /** screen-door fade 0..1. 0 = solid, 1 = fully invisible. */
     dither: d.f32,
+    outlineColor: d.vec4f,
+    /** 0 = no outline. Units depend on outlineSpace. */
+    outlineWidth: d.f32,
+    /** 1 = screen pixels (constant width), 0 = world units (shrinks with distance). */
+    outlineSpace: d.f32,
 });
 
-// Per-slot stable instance record: mat4x4f (64B) then InstanceParams (64B, no pad),
-// 128B per slot, struct align 16. Same shape as mesh-resources.ModelInstance.
+// Per-slot stable instance record: mat4x4f (64B) then InstanceParams (80B),
+// 144B per slot, struct align 16. Same shape as mesh-resources.ModelInstance.
 export const ModelInstance = struct('VoxelMeshModelInstance', {
     worldMatrix: d.mat4x4f,
     params: InstanceParams,
@@ -90,7 +99,7 @@ export const SLOT_BITS = 24;
 export const SLOT_MASK = (1 << SLOT_BITS) - 1;
 export const MAX_BUCKETS = 1 << (32 - SLOT_BITS);
 
-/** f32 count per `ModelInstance` slot (128B / 4 = 32). */
+/** f32 count per `ModelInstance` slot (144B / 4 = 36). */
 export const MODEL_INSTANCE_STRIDE_F32 = MODEL_INSTANCE_STRIDE / 4;
 
 // the shared meshArena, per-slot instance buffer, slotMap, chunkInfoTable, and model
@@ -145,11 +154,13 @@ export type VoxelMeshBatch = {
     /** one Mesh(geometry, material); added to the active room's scene on `init`,
      *  removed on `dispose`. Never disposed on a room swap. */
     mesh: Mesh;
+    /** the outline shell, sharing this batch's geometry, buffers and draw list. */
+    outlineMesh: Mesh;
     geometry: Geometry;
     /** shared interleaved quad arena, packs every registered model's quads with
      *  per-corner light at u32[10..13] of each 14-u32 stride. Client-global. */
     meshArena: VoxelMeshMeshArena;
-    /** stable per-slot {worldMatrix, params}, 128B/slot; read-only storage. */
+    /** stable per-slot {worldMatrix, params}, 144B/slot; read-only storage. */
     instanceDataBuf: GpuBufferType;
     /** per-frame packed entries (realSlot | bucketId<<SLOT_BITS). */
     slotMapBuf: GpuBufferType;
@@ -173,7 +184,7 @@ export type VoxelMeshBatch = {
 /** Build the client-global instance batch: the shared mesh arena + per-slot
  *  instance/slotMap/chunkInfo storage bound into one Geometry, wrapped in a Mesh
  *  with the engine-global material. Not added to any scene until a room `init`s. */
-function createVoxelMeshBatch(material: Material): VoxelMeshBatch {
+function createVoxelMeshBatch(material: Material, outlineMaterial: Material): VoxelMeshBatch {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
     const maxBuckets = INITIAL_MAX_BUCKETS;
 
@@ -212,8 +223,16 @@ function createVoxelMeshBatch(material: Material): VoxelMeshBatch {
     mesh.frustumCulled = false;
     mesh.draws = draws;
 
+    // same instances drawn a second time with the shell material; renderOrder puts it after the mesh.
+    const outlineMesh = new Mesh(geometry, outlineMaterial);
+    outlineMesh.name = 'voxel-mesh-visuals-outline';
+    outlineMesh.frustumCulled = false;
+    outlineMesh.draws = draws;
+    outlineMesh.renderOrder = 1;
+
     return {
         mesh,
+        outlineMesh,
         geometry,
         meshArena,
         instanceDataBuf,
@@ -310,6 +329,8 @@ function disposeVoxelMeshBatch(batch: VoxelMeshBatch): void {
 export type VoxelMeshResources = {
     /** engine-global baked-mesh material, binds per-room buffers by name. */
     material: Material;
+    /** engine-global outline shell material, drawn by `batch.outlineMesh`. */
+    outlineMaterial: Material;
     /** client-global instance batch, reused across room swaps; per-room VoxelMeshVisuals drive it. */
     batch: VoxelMeshBatch;
 };
@@ -321,25 +342,25 @@ import type { VoxelTextures } from './voxel-textures';
 
 export function init(textures: VoxelTextures, time: TimeResources, env: EnvironmentResources): VoxelMeshResources {
     const material = createBakedMeshMaterial(textures, time.elapsedTime, env);
-    const batch = createVoxelMeshBatch(material);
-    return { material, batch };
+    const outlineMaterial = createVoxelMeshOutlineMaterial(textures, time.elapsedTime);
+    const batch = createVoxelMeshBatch(material, outlineMaterial);
+    return { material, outlineMaterial, batch };
 }
 
 export function dispose(resources: VoxelMeshResources): void {
     disposeVoxelMeshBatch(resources.batch);
     resources.material.dispose();
+    resources.outlineMaterial.dispose();
 }
 
-function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f32>, env: EnvironmentResources): Material {
-    // per-name storage bindings
+// vertex pull shared by the base pass and the outline shell: slotMap entry to quad corner to animated world position.
+function pullVoxelMeshVertex(elapsedTime: Node<d.f32>) {
     const meshQuads = storage('meshQuads', d.array(d.u32), 'read');
     const instanceDataStorage = storage('instanceData', d.array(ModelInstance), 'read');
     const slotMap = storage('slotMap', d.array(d.u32), 'read');
     const chunkInfoTable = storage('chunkInfoTable', d.array(ChunkInfo), 'read');
 
-    // resolve (realSlot, bucketId) from the packed slotMap entry. instanceIndex
-    // spans the whole slotMap; each indirect draw's firstInstance + offset
-    // lands at the corresponding bucket's run.
+    // (realSlot, bucketId) from the packed slotMap entry; each draw's firstInstance lands at its bucket's run.
     const slotEntry = index(slotMap, instanceIndex).toVar('slotEntry');
     const realSlot = slotEntry.bitwiseAnd(u32(SLOT_MASK)).toVar('realSlot');
     const bucketId = slotEntry.shiftRight(u32(SLOT_BITS)).toVar('bucketId');
@@ -362,24 +383,21 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
 
     const { texIndex, animType } = decodeQuadFlags(flags);
 
-    // diagFlip is baked by meshChunk into the meta word (bit 16). Pull it
-    // before picking the corner since it controls the triangulation diagonal.
+    // diagFlip (meta bit 16) controls the triangulation diagonal, so it picks the corner.
     const meta = index(meshQuads, add(headerBase, u32(META_OFFSET))).toVar('vmMeta');
     const diagFlip = meta.shiftRight(u32(QUAD_META_DIAG_FLIP_BIT)).bitwiseAnd(u32(1)).toVar('diagFlip');
 
     const cornerIdx = pickCornerIdx(diagFlip, vertInQuad);
     const { chunkLocalByte, uv, modelNormal } = decodeQuadCorner(meshQuads, realQuadId, cornerIdx);
-    // inverse of mesher pos16's 255/16 scale (byte 0 -> 0, byte 255 -> 16), matching the
-    // chunk shader so sub-chunk boundaries within a baked mesh meet seamlessly.
+    // inverse of the mesher's pos16 scale, matching the chunk shader so sub-chunk boundaries meet seamlessly.
     const chunkLocal = chunkLocalByte.mul(f32(POS_DECODE_SCALE)).sub(f32(POS_DECODE_ORIGIN)).toVar('chunkLocal');
+    // corner offset from the quad's centroid, in voxels: zero along the normal, at least half a voxel in-plane.
+    const cornerOffset = chunkLocal.sub(decodeQuadCentroid(meshQuads, realQuadId)).toVar('cornerOffset');
 
-    // chunk-local to model-local to world (before animation)
     const modelLocal = add(subOrigin, chunkLocal).toVar('modelLocal');
     const worldPosBase = mul(worldMatrix, vec4f(modelLocal, f32(1.0))).toVar('worldPosBase');
 
-    // baked meshes have arbitrary instance transforms; derive the block
-    // center from world position so sway phases agree with neighbouring
-    // chunk voxels regardless of model rotation/scale.
+    // block centre from world position so sway phases agree with neighbouring chunk voxels under any transform.
     const blockCenter = vec3f(
         add(floor(worldPosBase.x), f32(0.5)),
         add(floor(worldPosBase.y), f32(0.5)),
@@ -391,10 +409,15 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
     const zDisp = animResult.y;
     const depthBias = animResult.z;
 
-    const worldPos = vec4f(add(worldPosBase.x, xDisp), worldPosBase.y, add(worldPosBase.z, zDisp), worldPosBase.w).toVar(
-        'worldPos',
-    );
-    const viewPos = mul(cameraViewMatrix, worldPos).toVar('viewPos');
+    const worldPos = vec3f(add(worldPosBase.x, xDisp), worldPosBase.y, add(worldPosBase.z, zDisp)).toVar('worldPos');
+
+    return { worldPos, depthBias, worldMatrix, instParams, modelNormal, cornerOffset, uv, texIndex };
+}
+
+function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f32>, env: EnvironmentResources): Material {
+    const { worldPos, depthBias, worldMatrix, instParams, modelNormal, uv, texIndex } = pullVoxelMeshVertex(elapsedTime);
+
+    const viewPos = mul(cameraViewMatrix, vec4f(worldPos, f32(1.0))).toVar('viewPos');
     const rawClipPos = mul(cameraProjectionMatrix, viewPos).toVar('rawClipPos');
     const clipPos = vec4f(rawClipPos.x, rawClipPos.y, add(rawClipPos.z, depthBias), rawClipPos.w).toVar('clipPos');
 
@@ -405,26 +428,22 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
     const normalMat = mat3(col0, col1, col2).toVar('normalMat');
     const worldNormal = normalize(mul(normalMat, modelNormal)).toVar('worldNormal');
 
-    // env-derived sky/sun
     const { sunDirection, sunIntensity, skyBrightness, ambientMinimum } = buildEnvSky(env);
 
-    // per-instance light sampled from the GPU light volume at the instance origin, combined
-    // with block RGB the same way unpackVoxelLight does so both paths share a scale.
-    const instLight = sampleWorldLight(bindLightVolume(env), worldMatrix.element(u32(3)).xyz).toVar('instLight');
-    const instSkyContrib = vec3f(
-        mul(instLight.x, skyBrightness),
-        mul(instLight.x, skyBrightness),
-        mul(instLight.x, skyBrightness),
-    ).toVar('instSkyContrib');
-    const instFloor = max(instLight.yzw, instSkyContrib).toVar('instFloor');
+    // light volume sampled at the vertex's own world position, so a model straddling a shadow shades across it.
+    const vertexLight = sampleWorldLight(bindLightVolume(env), worldPos).toVar('vertexLight');
+    const vertexSkyContrib = vec3f(
+        mul(vertexLight.x, skyBrightness),
+        mul(vertexLight.x, skyBrightness),
+        mul(vertexLight.x, skyBrightness),
+    ).toVar('vertexSkyContrib');
+    const vertexFloor = max(vertexLight.yzw, vertexSkyContrib).toVar('vertexFloor');
 
     const instLitMin = instParams.field('litMin').toVar('instLitMin');
     const litMinFloor = vec3f(instLitMin, instLitMin, instLitMin).toVar('litMinFloor');
-    // a block model moves, so per-corner light baked at mesh time would go stale; the
-    // per-instance volume sample is the only live source, so it is the light, not a floor.
-    const voxelLight = max(instFloor, litMinFloor).toVar('voxelLight');
+    // a block model moves, so light baked at mesh time would go stale; the volume sample is the light, not a floor.
+    const voxelLight = max(vertexFloor, litMinFloor).toVar('voxelLight');
 
-    // varyings
     const vUv = varying(uv, 'vmUv');
     const vLight = varying(voxelLight, 'vmLight');
     const vNormal = varying(worldNormal, 'vmNormal');
@@ -447,11 +466,10 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
     );
 
     const tintedRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
-    const foggedRgb = applyFog(env, tintedRgb, fogDistance(worldPos.xyz, 'vmFogDist'));
+    const foggedRgb = applyFog(env, tintedRgb, fogDistance(worldPos, 'vmFogDist'));
     const bakedColor = vec4(foggedRgb, texColor.a).toVar('bakedColor');
 
-    // cutout + screen-door pass: the dither knob feeds the shared discard
-    // via makePassMaterial.
+    // cutout + screen-door pass: the dither knob feeds the shared discard via makePassMaterial.
     return makePassMaterial({
         name: 'voxel-mesh-baked',
         pass: 'transparent',
@@ -459,5 +477,36 @@ function createBakedMeshMaterial(textures: VoxelTextures, elapsedTime: Node<d.f3
         fragColor: bakedColor,
         texColor,
         dither: vDither,
+    });
+}
+
+// the outline shell: each quad pushed out along its normal and grown in-plane, so perpendicular faces meet square at every edge.
+function createVoxelMeshOutlineMaterial(textures: VoxelTextures, elapsedTime: Node<d.f32>): Material {
+    const { worldPos, worldMatrix, instParams, modelNormal, cornerOffset, uv, texIndex } = pullVoxelMeshVertex(elapsedTime);
+
+    const col0 = worldMatrix.element(u32(0)).xyz;
+    const col1 = worldMatrix.element(u32(1)).xyz;
+    const col2 = worldMatrix.element(u32(2)).xyz;
+    // normalised basis columns drop non-uniform scale.
+    const rot = mat3(normalize(col0), normalize(col1), normalize(col2)).toVar('voRot');
+    // normal plus the in-plane corner signs: one width along each axis, the solid offset by a cube.
+    const minusOne = vec3f(f32(-1), f32(-1), f32(-1));
+    const plusOne = vec3f(f32(1), f32(1), f32(1));
+    const cornerSign = clamp(cornerOffset.mul(f32(1000)), minusOne, plusOne).toVar('voCornerSign');
+    const worldGrow = mul(rot, add(modelNormal, cornerSign)).toVar('voWorldGrow');
+
+    // honour the block's own cutout so a plant or a fence outlines its texture, not its quad.
+    const vUv = varying(uv, 'voUv');
+    const texAlpha = sampleVoxelAlbedo(textures, texIndex, vUv, elapsedTime).a.toVar('voTexAlpha');
+
+    return createOutlineShellMaterial({
+        name: 'voxel-mesh-outline',
+        worldPos,
+        worldGrow,
+        width: instParams.field('outlineWidth'),
+        space: instParams.field('outlineSpace'),
+        color: instParams.field('outlineColor'),
+        dither: instParams.field('dither'),
+        alpha: texAlpha,
     });
 }

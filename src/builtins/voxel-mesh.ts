@@ -29,12 +29,6 @@ export const VoxelMeshTrait = trait(
         /** transient overlay [r, g, b, a], applied as `mix(surface, rgb, a)` over the tint but under lighting. [0,0,0,0] = none. Client-only. */
         flash: [0, 0, 0, 0] as Vec4,
 
-        /**
-         * per-instance light [sky, r, g, b], each 0-1. Client-only, auto-sampled each frame from the room's
-         * voxel light grid at the node's world position; floors the per-corner baked-mesh light.
-         */
-        light: [0, 0, 0, 0] as Vec4,
-
         /** emissive glow intensity 0-1, added to final color. Client-only. */
         glow: 0,
 
@@ -46,6 +40,20 @@ export const VoxelMeshTrait = trait(
 
         /** screen-door fade 0-1, fragments drop via `discard` against an interleaved-gradient threshold. Stays in the opaque pipeline. Client-only. */
         dither: 0,
+
+        /**
+         * per-instance outline, drawn as an expanded shell behind the mesh and masked to the rim by depth.
+         * Square-cornered: each face grows one `width` along its normal and its in-plane axes.
+         * `enabled` rather than `width: 0` so a configured width survives being toggled off. Client-only.
+         */
+        outline: {
+            enabled: false,
+            /** thickness, in the units `space` selects. */
+            width: 1,
+            /** 'screen' holds a constant pixel thickness at any distance; 'world' shrinks with distance like geometry. */
+            space: 'screen' as 'screen' | 'world',
+            color: [0, 0, 0, 1] as Vec4,
+        },
 
         /** whether this voxel mesh renders; the slot stays allocated when false. Client-only. */
         visible: true,

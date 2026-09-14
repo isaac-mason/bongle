@@ -22,7 +22,6 @@ import {
     mul,
     type Node,
     normalize,
-    screenSize,
     select,
     sin,
     smoothstep,
@@ -41,6 +40,7 @@ import type { Model } from '../../core/models/model';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { ModelPayload, Resources } from '../../core/resources';
 import { ditherDiscard } from '../dsl/dither';
+import { createOutlineShellMaterial } from '../dsl/outline';
 import { shadeTinted } from '../dsl/shade';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
@@ -279,6 +279,7 @@ function releaseGeometry(pool: ModelGeometryPool, meshKey: string): void {
 
 function disposeGeometryPool(pool: ModelGeometryPool): void {
     pool.vertices.dispose();
+    pool.smoothNormals.dispose();
     pool.indices.dispose();
     pool.slots.clear();
 }
@@ -585,6 +586,8 @@ export type MeshResources = {
     whiteUv: [number, number];
     // engine-global model material, HW instanced.
     material: Material;
+    // engine-global outline shell material, drawn by `batch.outlineMesh`.
+    outlineMaterial: Material;
     // client-global instance batch, reused across room swaps; per-room MeshVisuals drive it via enter/exit.
     batch: MeshBatch;
 };
@@ -620,6 +623,7 @@ export function init(env: EnvironmentResources): MeshResources {
         uploaded: new Map(),
         whiteUv,
         material,
+        outlineMaterial,
         batch,
     };
 }
@@ -651,6 +655,7 @@ export function dispose(modelResources: MeshResources): void {
     MeshAtlas.dispose(modelResources.atlas);
     disposeGeometryPool(modelResources.geometry);
     modelResources.material.dispose();
+    modelResources.outlineMaterial.dispose();
     modelResources.uploaded.clear();
 }
 
@@ -922,10 +927,8 @@ function createMeshOutlineMaterial(atlas: MeshAtlas.MeshAtlas): Material {
     const instRec = instanceData.element(realSlot);
     const worldMatrix = instRec.field('worldMatrix').toVar('moWorldMatrix');
     const instParams = instRec.field('params').toVar('moInstParams');
-    const width = instParams.field('outlineWidth').toVar('moWidth');
-    const space = instParams.field('outlineSpace').toVar('moSpace');
 
-    const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('moWorldPos');
+    const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).xyz.toVar('moWorldPos');
 
     const col0 = worldMatrix.element(u32(0)).xyz;
     const col1 = worldMatrix.element(u32(1)).xyz;
@@ -934,40 +937,21 @@ function createMeshOutlineMaterial(atlas: MeshAtlas.MeshAtlas): Material {
     const rot = mat3(normalize(col0), normalize(col1), normalize(col2)).toVar('moRot');
     const worldGrow = normalize(mul(rot, aSmoothNormal)).toVar('moWorldGrow');
 
-    // expand in world space, not clip-space: a vertex growing toward the camera has near-zero clip-space xy.
-    const viewPos = mul(cameraViewMatrix, worldPos).toVar('moViewPos');
-    const viewDepth = max(viewPos.z.mul(f32(-1)), f32(0.001)).toVar('moViewDepth');
-    const screen = max(screenSize, vec2f(f32(1), f32(1))).toVar('moScreen');
-    const projYY = max(cameraProjectionMatrix.element(u32(1)).y, f32(0.001)).toVar('moProjYY');
-    const worldPerPixel = f32(2).div(projYY.mul(screen.y)).mul(viewDepth).toVar('moWorldPerPixel');
-    // world-space mode is the same expansion with the depth term dropped, one multiply apart.
-    const perUnit = mix(f32(1), worldPerPixel, space).toVar('moPerUnit');
-
-    const grownWorld = worldPos.xyz.add(worldGrow.mul(width).mul(perUnit)).toVar('moGrownWorld');
-    const viewProj = mul(cameraProjectionMatrix, cameraViewMatrix).toVar('moViewProj');
-    const grown = mul(viewProj, vec4f(grownWorld, f32(1.0))).toVar('moGrown');
-    // width 0: push the whole triangle outside the frustum instead of relying on a zero-size shell.
-    const OFF = vec4f(f32(2), f32(2), f32(2), f32(1));
-    const vertex = select(OFF, grown, width.greaterThan(f32(0))).toVar('moVertex');
-
     const uvOffset = instParams.field('uvOffset');
     const uvScale = instParams.field('uvScale');
     const vUv = varying(add(mul(aUv, uvScale), uvOffset), 'moAtlasUv').setInterpolation('perspective', 'centroid');
-    const vColor = varying(instParams.field('outlineColor'), 'moColor');
 
     // honour the mesh's own cutout so a leaf or hair card outlines its actual silhouette, not its quad.
     const texAlpha = texture(atlas.texture).sample(vUv).a.toVar('moTexAlpha');
-    const fragment = ditherDiscard(vColor, texAlpha, f32(0)).toVar('moFragment');
 
-    return new Material({
+    return createOutlineShellMaterial({
         name: 'model-outline',
-        vertex,
-        fragment: fragment,
-        cullMode: 'front', // shell's back faces, occluded by the mesh's own front faces
-        depthTest: true,
-        // writing depth makes overlapping outlines resolve by distance rather than draw order.
-        depthWrite: true,
-        // transparent would sort into the no-depth-write bucket and paint over water behind it.
-        transparent: false,
+        worldPos,
+        worldGrow,
+        width: instParams.field('outlineWidth'),
+        space: instParams.field('outlineSpace'),
+        color: instParams.field('outlineColor'),
+        dither: instParams.field('dither'),
+        alpha: texAlpha,
     });
 }

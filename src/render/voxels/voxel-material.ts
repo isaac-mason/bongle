@@ -319,17 +319,13 @@ const RGSS_OFFSETS: [number, number][] = [
 const round = (x: Node<d.vec2f>) => floor(x.add(vec2f(f32(0.5), f32(0.5))));
 
 // frame resolution runs in the vertex stage: the current and next frame's rects, and the mix between them.
-export function buildVoxelFragment(
+// atlas albedo at `vUv` for `texIndex`: frames resolved in the vertex stage, nearest-snapped and RGSS-blended in the fragment.
+export function sampleVoxelAlbedo(
     textures: VoxelTextures,
     texIndex: Node<d.f32>,
     vUv: Node<d.vec2f>,
-    vLight: Node<d.vec3f>,
-    vNormal: Node<d.vec3f>,
-    sunDirection: Node<d.vec3f>,
-    sunIntensity: Node<d.f32>,
-    ambientMinimum: Node<d.vec3f>,
     elapsedTime: Node<d.f32>,
-) {
+): Node<d.vec4f> {
     const entries = storage(textures.entriesBuffer, 'read');
     const baseIndex = i32(texIndex).toVar('baseIndex');
     const animInfo = entries.element(baseIndex).field('anim').toVar('animInfo');
@@ -411,7 +407,21 @@ export function buildVoxelFragment(
 
     const colorA = sampleAtlas(uvA, 'colorA');
     const colorB = sampleAtlas(uvB, 'colorB');
-    const texColor = (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
+    return (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
+}
+
+export function buildVoxelFragment(
+    textures: VoxelTextures,
+    texIndex: Node<d.f32>,
+    vUv: Node<d.vec2f>,
+    vLight: Node<d.vec3f>,
+    vNormal: Node<d.vec3f>,
+    sunDirection: Node<d.vec3f>,
+    sunIntensity: Node<d.f32>,
+    ambientMinimum: Node<d.vec3f>,
+    elapsedTime: Node<d.f32>,
+) {
+    const texColor = sampleVoxelAlbedo(textures, texIndex, vUv, elapsedTime);
 
     // sunShade and the ambient floor stay per-fragment since they depend on vNormal vs sun.
     const ndotl = max(dot(vNormal, sunDirection), f32(0.0)).toVar('ndotl');
