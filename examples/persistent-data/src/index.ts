@@ -102,7 +102,7 @@ script(GameplayTrait, 'session', (ctx) => {
                 const rb = addTrait(mesh, RigidBodyTrait);
                 rb.def = {
                     shape: {
-                        type: 'box3',
+                        type: 'box',
                         halfExtents: [SPARK_HALF_EXTENT, SPARK_HALF_EXTENT, SPARK_HALF_EXTENT],
                     },
                     motionType: MotionType.STATIC,

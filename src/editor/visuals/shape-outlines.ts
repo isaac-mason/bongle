@@ -63,7 +63,7 @@ function segment(
 }
 
 function drawShape(lines: Lines.LineBatch, kind: ShapeKind, local: Record<string, unknown>, matrix: Mat4, color: Rgba): void {
-    if (kind === 'box3') {
+    if (kind === 'box') {
         const half = local.halfExtents as Vec3 | undefined;
         if (half) box(lines, matrix, half[0], half[1], half[2], color);
     } else if (kind === 'sphere') {

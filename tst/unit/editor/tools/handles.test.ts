@@ -213,7 +213,7 @@ let harnessCount = 0;
 
 describe('shape handles: drags and spaces', () => {
     it('dragging a box face along its axis resizes that extent, snapped, with one history entry on release', () => {
-        const h = harness(prop.box3(), { type: 'box3', halfExtents: [1, 1, 1] });
+        const h = harness(prop.box(), { type: 'box', halfExtents: [1, 1, 1] });
         h.aim([1, 0, 0]);
         h.tick();
         expect(h.handles.handles[h.handles.hovered]).toMatchObject({ kind: 'box-face', axis: 0, sign: 1 });

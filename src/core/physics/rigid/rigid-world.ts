@@ -195,7 +195,7 @@ function effectiveMotionType(rb: RigidBodyTrait, identity: PlayerId | null, simu
 
 function resolveLiteralShape(shapeDef: ShapeDef): Shape | null {
     switch (shapeDef.type) {
-        case 'box3':
+        case 'box':
             return box.create({ halfExtents: shapeDef.halfExtents });
         case 'sphere':
             return sphere.create({ radius: shapeDef.radius });

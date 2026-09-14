@@ -938,7 +938,7 @@ export function fitShapeToBoundsAction(
     const centre = boundsCenter(bounds);
     const half = halfExtentsInFrame(bounds, centre, _fitShapeFrame);
     const fitted: Record<string, unknown> =
-        schema.kind === 'box3' ? { ...local, halfExtents: half } : { ...local, radius: Math.max(half[0], half[1], half[2]) };
+        schema.kind === 'box' ? { ...local, halfExtents: half } : { ...local, radius: Math.max(half[0], half[1], half[2]) };
     let value = setAtPath(shape.value, shape.site.path, fitted);
 
     let nextTransformProps: Record<string, unknown> | null = null;
@@ -1067,7 +1067,7 @@ export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection
     const cy = _fitShapeFrame[13]!;
     const cz = _fitShapeFrame[14]!;
     const selection = Selection.create();
-    if (schema.kind === 'box3') {
+    if (schema.kind === 'box') {
         const half = local.halfExtents as Vec3;
         Selection.setAABB(
             selection,

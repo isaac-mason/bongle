@@ -52,7 +52,7 @@ export type TupleSchema = {
 };
 
 /** an object with a fixed layout the editor knows: a shape sits at its frame's origin and gets outlines and handles, a pose frames what it holds. */
-export type ObjectKind = 'sphere' | 'box3' | 'segment' | 'pose';
+export type ObjectKind = 'sphere' | 'box' | 'segment' | 'pose';
 
 export type ObjectSchema = {
     type: 'object';
@@ -291,18 +291,18 @@ export const sphere = (
     ...opts,
 });
 
-/** value `{ type: 'box3', halfExtents }`, centred on and aligned to the enclosing frame; a sibling pose places and turns it. */
-export const box3 = (
+/** value `{ type: 'box', halfExtents }`, centred on and aligned to the enclosing frame; a sibling pose places and turns it. */
+export const box = (
     opts?: ShapeOptions,
 ): {
     type: 'object';
-    kind: 'box3';
-    fields: { type: { type: 'literal'; value: 'box3' }; halfExtents: Vector3Schema };
+    kind: 'box';
+    fields: { type: { type: 'literal'; value: 'box' }; halfExtents: Vector3Schema };
     space?: 'local' | 'world';
 } => ({
     type: 'object',
-    kind: 'box3',
-    fields: { type: literal('box3'), halfExtents: vec3() },
+    kind: 'box',
+    fields: { type: literal('box'), halfExtents: vec3() },
     ...opts,
 });
 

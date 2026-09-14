@@ -11,11 +11,11 @@ describe('shape and pose value types', () => {
             kind: 'sphere',
             fields: { type: prop.literal('sphere'), radius: prop.radius() },
         });
-        expect(prop.box3({ space: 'world' })).toMatchObject({ kind: 'box3', space: 'world' });
+        expect(prop.box({ space: 'world' })).toMatchObject({ kind: 'box', space: 'world' });
         expect(Object.keys(prop.segment().fields)).toEqual(['type', 'from', 'to']);
-        const Zone = prop.union('type', [prop.box3(), prop.sphere()]);
+        const Zone = prop.union('type', [prop.box(), prop.sphere()]);
         expect(validate(Zone, { type: 'sphere', radius: 1 })).toEqual([]);
-        expect(validate(Zone, { type: 'box3', halfExtents: [1, 1, 1] })).toEqual([]);
+        expect(validate(Zone, { type: 'box', halfExtents: [1, 1, 1] })).toEqual([]);
         expect(validate(Zone, { type: 'sphere' }).length).toBeGreaterThan(0);
     });
 
@@ -52,9 +52,9 @@ describe('shape and pose value types', () => {
         expect(at(Beside, beside)).toEqual(['pose@11,0,0', 'sphere@10,0,0']);
         expect(findShape(Beside, beside)).toMatchObject({ path: ['zone'], posePath: null });
 
-        const Nested = prop.object({ outer: prop.pose({ inner: prop.pose({ shape: prop.box3() }) }) });
-        const nested = { outer: { ...pose, inner: { ...pose, shape: { type: 'box3', halfExtents: [1, 1, 1] } } } };
-        expect(at(Nested, nested)).toEqual(['pose@11,0,0', 'pose@12,0,0', 'box3@12,0,0']);
+        const Nested = prop.object({ outer: prop.pose({ inner: prop.pose({ shape: prop.box() }) }) });
+        const nested = { outer: { ...pose, inner: { ...pose, shape: { type: 'box', halfExtents: [1, 1, 1] } } } };
+        expect(at(Nested, nested)).toEqual(['pose@11,0,0', 'pose@12,0,0', 'box@12,0,0']);
         expect(findShape(Nested, nested)!.posePath).toEqual(['outer', 'inner']);
 
         const World = prop.object({ zone: prop.pose({ shape: prop.sphere() }, { space: 'world' }) });

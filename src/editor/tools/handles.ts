@@ -468,7 +468,7 @@ function take(
 }
 
 function shapeHandles(kind: Exclude<ShapeKind, 'segment'>, local: Record<string, unknown>, matrix: Mat4, path: PropPath): void {
-    if (kind === 'box3') {
+    if (kind === 'box') {
         const half = local.halfExtents as Vec3 | undefined;
         if (!half) return;
         take('box-face', path, 'halfExtents', 0, 1, matrix, half[0], 0, 0);
