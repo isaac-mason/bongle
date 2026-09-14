@@ -3,7 +3,7 @@ import { unproject } from 'gpucat';
 import { type Mat4, mat4, type Quat, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import type { Cursor, MouseKeyboardInput } from '../../client/input';
-import { getCursor, isModDown, isMouseDown, isMouseJustDown } from '../../client/input';
+import { getCursor, isModDown, isMouseDown, isMouseJustDown, isMouseLocked } from '../../client/input';
 import { registry } from '../../core/registry';
 import { type PropPath, setAtPath } from '../../core/scene/prop/path';
 import type { ObjectSchema, Schema, ShapeSpecData } from '../../core/scene/prop/prop';
@@ -21,6 +21,8 @@ import type { EditRoomStoreApi } from '../edit-room-store';
 import { silhouette } from '../visuals/shape-outlines';
 
 const HANDLE_HALF_SIZE_PX = 9.5;
+/** the pointer under pointer lock: the screen centre. */
+const CROSSHAIR: Cursor = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
 const HANDLE_DOT_PX = 14;
 const HANDLE_DOT_HOT_PX = 18;
 const FRAME_DOT_PX = 10;
@@ -102,7 +104,7 @@ export function update(
     const storeState = store.getState();
     const activeId = enabled ? Selection.activeNode(storeState.selection) : null;
     const node = activeId !== null ? getNodeById(sceneTree, activeId) : undefined;
-    const cursor = getCursor(mk);
+    const cursor = isMouseLocked(mk) ? CROSSHAIR : getCursor(mk);
 
     if (state.armed) {
         if (!isMouseDown(mk, 'left')) {

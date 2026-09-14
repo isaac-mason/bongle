@@ -420,10 +420,12 @@ const SNAP_DEFAULT_SCALE = 0.25;
 export function feedPointer(state: TransformToolState, mk: MouseKeyboardInput): void {
     state.consumedClick = false;
     state.invertSnap = isModDown(mk);
-    if (!state.gizmoAttached || isMouseLocked(mk)) return;
+    if (!state.gizmoAttached) return;
+    // under pointer lock the cursor is the crosshair: the centre ray picks, and looking around drives the drag.
     const cursor = getCursor(mk);
-    _pointer.x = cursor.ndcX;
-    _pointer.y = cursor.ndcY;
+    const locked = isMouseLocked(mk);
+    _pointer.x = locked ? 0 : cursor.ndcX;
+    _pointer.y = locked ? 0 : cursor.ndcY;
     const gizmo = state.gizmo;
     if (state.instantDrag) {
         if (isMouseJustDown(mk, 'left')) {
