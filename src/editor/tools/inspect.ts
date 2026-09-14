@@ -28,6 +28,8 @@ import type { State as PivotPoint } from '../visuals/pivot-point';
 import * as PivotPointMod from '../visuals/pivot-point';
 import type { SelectionMeshState } from '../visuals/selection-mesh';
 import { updateSelectionMeshes } from '../visuals/selection-mesh';
+import type { GrabTool } from './grab';
+import * as Grab from './grab';
 import { type HandlesState, isEngaged } from './handles';
 import type { TransformToolState } from './transform';
 import * as TransformTool from './transform';
@@ -165,6 +167,7 @@ export function updateInspect(
     ctx: ScriptContext,
     nodeBodies: NodeBodies,
     transformToolState: TransformToolState,
+    grab: GrabTool,
     handles: HandlesState,
     pivotPoint: PivotPoint,
     meshState: SelectionMeshState,
@@ -237,7 +240,9 @@ export function updateInspect(
                 hoverPointAtFrame,
             );
         }
-        const pivotPos = TransformTool.updateTransformTool(transformToolState, room.scene, client.state!.resources);
+        const pivotPos =
+            TransformTool.updateTransformTool(transformToolState, room.scene, client.state!.resources) ??
+            Grab.pivotPosition(grab, room.scene);
         PivotPointMod.update(pivotPoint, pivotPos ?? [0, 0, 0], pivotPos !== null);
     } else {
         TransformTool.detachGizmo(transformToolState);
@@ -260,11 +265,11 @@ export function updateInspect(
 
     // Tool/mode switch force-release happens in editor/client.ts before this runs.
     if (inGrabMode) {
-        if (TransformTool.isInGrab(transformToolState)) {
+        if (Grab.isInGrab(grab)) {
             if (isMouseJustUp(client.input.mouseKeyboard, 'left') || !isMouseDown(client.input.mouseKeyboard, 'left')) {
-                TransformTool.exitGrab(transformToolState, room.scene, room.physics, ctx);
+                Grab.exitGrab(grab, room.scene, room.physics, ctx);
             } else {
-                TransformTool.updateGrab(transformToolState, client.input.mouseKeyboard);
+                Grab.updateGrab(grab, client.input.mouseKeyboard);
             }
         } else if (clicked && !gizmoDragging) {
             unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
@@ -295,7 +300,7 @@ export function updateInspect(
                     cur = cur.parent;
                 }
                 store.getState().selectNode(target.id);
-                TransformTool.enterGrab(transformToolState, target.id, room.scene, room.physics, client.state!.resources, camera);
+                Grab.enterGrab(grab, target.id, room.scene, room.physics, client.state!.resources, camera);
             }
         }
     }
@@ -413,7 +418,15 @@ export function updateInspect(
                 else if (Selection.countVoxels(store.getState().selection) > 0) store.getState().clearSelection();
             }
         } else if (activeTool === 'transform') {
-            TransformTool.handleTransformKeys(mk, client.input, camera.quaternion, transformToolState, room.scene, ctx);
+            TransformTool.handleTransformKeys(
+                mk,
+                client.input,
+                camera.quaternion,
+                transformToolState,
+                room.scene,
+                ctx,
+                Grab.isInGrab(grab),
+            );
         }
     }
 

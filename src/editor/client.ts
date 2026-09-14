@@ -73,6 +73,7 @@ import { createBrushState, updateBrush } from './tools/brush-build';
 import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
 import { updateBuild } from './tools/build';
 import { createElevationState, updateElevation } from './tools/elevation';
+import * as Grab from './tools/grab';
 import * as Handles from './tools/handles';
 import { openViewportContextMenu, resolveSelectionTarget, updateInspect } from './tools/inspect';
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
@@ -137,16 +138,16 @@ script(
         // PD runs before physics integrates; writeback runs after so interpolation smooths
         // the body's pose between fixed-step ticks. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
-            if (!TransformTool.isInGrab(transform)) return;
+            if (!Grab.isInGrab(s.grab)) return;
             const camera = povCamera(s);
-            if (camera) TransformTool.prePhysicsGrab(transform, room.physics, camera);
+            if (camera) Grab.prePhysicsGrab(s.grab, room.physics, camera);
         });
-        onPostPhysicsStep(ctx, () => TransformTool.postPhysicsGrab(transform, room.scene, room.physics));
+        onPostPhysicsStep(ctx, () => Grab.postPhysicsGrab(s.grab, room.scene, room.physics));
 
         // input pre-passes run before the fly/orbit/character controllers consume
         // the same mouse delta or wheel.
         onInput(ctx, () => updateGrabRotate(s));
-        onInput(ctx, () => updateShortcuts(s.shortcuts, client.input.mouseKeyboard, store, transform));
+        onInput(ctx, () => updateShortcuts(s.shortcuts, client.input.mouseKeyboard, store, s.grab));
 
         onFrame(ctx, () => {
             mirrorRuntimeState(s);
@@ -198,8 +199,8 @@ script(
 
             // covers tool switches and transformMode flips between frames, when updateInspect won't fire to clean up.
             const { activeTool } = store.getState();
-            if (TransformTool.isInGrab(transform) && (activeTool !== 'transform' || store.getState().transformMode !== 'grab')) {
-                TransformTool.exitGrab(transform, room.scene, room.physics, ctx);
+            if (Grab.isInGrab(s.grab) && (activeTool !== 'transform' || store.getState().transformMode !== 'grab')) {
+                Grab.exitGrab(s.grab, room.scene, room.physics, ctx);
             }
 
             if (activeTool === 'inspect' || activeTool === 'transform') {
@@ -212,6 +213,7 @@ script(
                     ctx,
                     s.nodeBodies,
                     transform,
+                    s.grab,
                     s.handles,
                     s.visuals.pivot,
                     s.visuals.selection,
@@ -250,6 +252,7 @@ type Session = {
     room: ClientRoom;
     store: EditRoomStoreApi;
     transform: TransformTool.TransformToolState;
+    grab: Grab.GrabTool;
     handles: Handles.HandlesState;
     nodeBodies: NodeBodies.NodeBodies;
     visuals: Visuals;
@@ -300,6 +303,7 @@ function openSession(ctx: ScriptContext): Session {
         room,
         store,
         transform,
+        grab: Grab.init(store),
         handles: Handles.init(),
         nodeBodies,
         visuals: initVisuals(client.render.scene),
@@ -696,12 +700,7 @@ function initShortcuts(): Shortcuts {
     return { heldCategory: null, consumed: false };
 }
 
-function updateShortcuts(
-    sc: Shortcuts,
-    mk: MouseKeyboardInput,
-    store: EditRoomStoreApi,
-    transform: TransformTool.TransformToolState,
-): void {
+function updateShortcuts(sc: Shortcuts, mk: MouseKeyboardInput, store: EditRoomStoreApi, grab: Grab.GrabTool): void {
     // cmd/ctrl combos are handled at the DOM layer (edit-ui.tsx) so they fire while a tool-option
     // input holds focus; swallow here so a held modifier doesn't trigger letter-key shortcuts.
     if (isModDown(mk)) return;
@@ -767,7 +766,7 @@ function updateShortcuts(
         (wheelTool === 'build' || wheelTool === 'brush') &&
         mk._wheelDeltaY !== 0 &&
         !isPointerCapturedByUi(mk) &&
-        !TransformTool.isInGrab(transform)
+        !Grab.isInGrab(grab)
     ) {
         store.getState().cycleActiveSlot(Math.sign(mk._wheelDeltaY));
         mk._wheelDeltaY = 0;
@@ -778,22 +777,22 @@ function updateShortcuts(
  *  body's rotation and is consumed (zeroed) so neither the fly nor character
  *  controller swings the camera. */
 function updateGrabRotate(s: Session): void {
-    const { transform, room, client } = s;
-    if (!TransformTool.isInGrab(transform)) return;
+    const { room, client } = s;
+    if (!Grab.isInGrab(s.grab)) return;
     const camera = povCamera(s);
     if (!camera) return;
     const mk = client.input.mouseKeyboard;
-    const grab = transform.grab!;
+    const grab = s.grab.current!;
     const isRot = isKeyDown(mk, 'KeyR');
 
     if (isRot && !grab.rotating) {
-        TransformTool.beginRotate(transform, room.physics);
+        Grab.beginRotate(s.grab, room.physics);
     } else if (!isRot && grab.rotating) {
-        TransformTool.endRotate(transform, room.physics, camera);
+        Grab.endRotate(s.grab, room.physics, camera);
     }
 
     if (grab.rotating) {
-        TransformTool.applyRotateDelta(transform, mk._dx, mk._dy, camera);
+        Grab.applyRotateDelta(s.grab, mk._dx, mk._dy, camera);
         mk._dx = 0;
         mk._dy = 0;
     }
@@ -843,19 +842,14 @@ function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
  *  active block, Backspace deletes, P picks, arrows + [ ] nudge the committed
  *  selection. all skipped while an input field holds focus. */
 function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
-    const { store, client, transform } = s;
+    const { store, client } = s;
     const mk = client.input.mouseKeyboard;
 
     // skipped while grab is active, R drives free-rotate there
     const sBefore = store.getState();
     const hasSelection = !Selection.isEmpty(sBefore.selection);
     const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
-    if (
-        (hasSelection || hasInProgressTool) &&
-        !isInputFocused() &&
-        isKeyJustDown(mk, 'KeyR') &&
-        !TransformTool.isInGrab(transform)
-    ) {
+    if ((hasSelection || hasInProgressTool) && !isInputFocused() && isKeyJustDown(mk, 'KeyR') && !Grab.isInGrab(s.grab)) {
         clearBoxSelect(store);
         clearLassoStroke(store);
         if (hasSelection) store.getState().clearSelection();

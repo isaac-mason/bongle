@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../../client/ui/components';
 import type { Node } from '../../core/scene/scene-tree';
@@ -220,20 +220,10 @@ function isVector(value: unknown, kind: Kind): value is ArrayLike<number> {
     return true;
 }
 
-// 2 to 4 numbers edit as one row, each component in place; a quaternion-named row also reads as euler degrees.
+// 2 to 4 numbers edit as one field holding the whole vector; a quaternion-named row also reads as euler degrees.
 function VectorValue({ label, value }: { label: string; value: ArrayLike<number> & Record<number, number> }) {
-    const parts: ReactNode[] = [];
-    for (let i = 0; i < value.length; i++) {
-        parts.push(
-            <PrimitiveValue
-                key={String(i)}
-                value={value[i]}
-                set={(v) => {
-                    value[i] = v as number;
-                }}
-            />,
-        );
-    }
+    const [draft, setDraft] = useState<string | null>(null);
+    const text = Array.from({ length: value.length }, (_, i) => formatPrimitive(value[i])).join(', ');
     let euler: string | null = null;
     if (value.length === 4 && /quat|rotation/i.test(label)) {
         const [x, y, z, w] = [value[0]!, value[1]!, value[2]!, value[3]!];
@@ -245,17 +235,46 @@ function VectorValue({ label, value }: { label: string; value: ArrayLike<number>
         const deg = (r: number) => (r * RAD_TO_DEG).toFixed(0);
         euler = `${deg(Math.atan2(sinr, cosr))} ${deg(Math.asin(sinp))} ${deg(Math.atan2(siny, cosy))} deg`;
     }
+    if (draft !== null) {
+        const commit = () => {
+            const parts = draft
+                .replace(/[[\]]/g, '')
+                .split(/[\s,]+/)
+                .filter((part) => part !== '');
+            const numbers = parts.map(Number);
+            if (numbers.length === value.length && numbers.every((n) => !Number.isNaN(n))) {
+                for (let i = 0; i < value.length; i++) value[i] = numbers[i]!;
+            }
+            setDraft(null);
+        };
+        return (
+            <input
+                type="text"
+                value={draft}
+                // biome-ignore lint/a11y/noAutofocus: the field opens from the click on the vector it replaces
+                autoFocus
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') commit();
+                    if (e.key === 'Escape') setDraft(null);
+                    e.stopPropagation();
+                }}
+                className="bg-surface border border-accent px-1 text-[10px] font-mono text-fg outline-none w-48"
+            />
+        );
+    }
     return (
-        <span className="flex items-center gap-1">
-            <span className="text-fg-muted">[</span>
-            {parts.map((part, i) => (
-                <span key={String(i)} className="flex items-center gap-1">
-                    {part}
-                    {i < parts.length - 1 && <span className="text-fg-muted">,</span>}
-                </span>
-            ))}
-            <span className="text-fg-muted">]</span>
-            {euler && <span className="text-fg-muted italic">{euler}</span>}
+        <span className="flex items-center gap-1 min-w-0">
+            <button
+                type="button"
+                title="live edit: writes straight onto the instance, no history"
+                className="text-accent hover:underline cursor-text truncate"
+                onClick={() => setDraft(text)}
+            >
+                [{text}]
+            </button>
+            {euler && <span className="text-fg-muted italic shrink-0">{euler}</span>}
         </span>
     );
 }
