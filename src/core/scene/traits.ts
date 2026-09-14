@@ -11,6 +11,8 @@ export type TraitOptions = {
     name?: string;
     /** Default true; false for runtime-only traits. */
     persist?: boolean;
+    /** sprite id drawn for the trait in the hierarchy, inspector and markers. */
+    icon?: string;
 };
 
 type Factory<T> = () => T;
@@ -174,6 +176,7 @@ export type TraitDef = {
     name: string;
     body: Record<string, unknown>;
     persist: boolean;
+    icon: string | null;
     controls: ControlDef[];
     sync: SyncDef[];
     scripts: ScriptDef[];

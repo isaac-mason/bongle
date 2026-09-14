@@ -165,6 +165,6 @@ export function updateMagicSelect(
         next.nodes = new Set(s.selection.nodes); // preserve current node selection
     }
 
-    store.setState({ selection: next });
+    store.getState().replaceSelection(next);
     playSelected(ctx, effectiveBehavior === 'add');
 }

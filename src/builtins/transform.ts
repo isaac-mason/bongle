@@ -1,15 +1,13 @@
 import type { Mat4, Quat, Vec3 } from 'math';
 import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
+import { control, sync, trait } from '../core/registry';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
-import { type TraitType } from '../core/scene/traits';
-import { trait } from '../core/registry';
-import { control, sync } from '../core/registry';
-import { traverse } from '../core/scene/traverse';
+import type { TraitType } from '../core/scene/traits';
 import {
     markTransformChanged,
     markWorldDirty,
@@ -19,70 +17,75 @@ import {
     worldToLocalPosition,
     worldToLocalQuaternion,
 } from '../core/scene/transform';
+import { traverse } from '../core/scene/traverse';
 
 // runtime lives in core so the scene tree can use it without importing this module's trait().
 export * from '../core/scene/transform';
 
 // _dirty is a bitmask on TransformTrait, one bit per derived cache (see TRANSFORM_DIRTY_* in core/scene/transform).
 
-export const TransformTrait = trait('transform', {
-    position: vec3.create(),
-    quaternion: quat.create(),
-    scale: vec3.fromValues(1, 1, 1),
+export const TransformTrait = trait(
+    'transform',
+    {
+        position: vec3.create(),
+        quaternion: quat.create(),
+        scale: vec3.fromValues(1, 1, 1),
 
-    /** sync-only teleport counter. when it changes, client snaps instead of interpolating */
-    teleport: 0,
+        /** sync-only teleport counter. when it changes, client snaps instead of interpolating */
+        teleport: 0,
 
-    worldPosition: vec3.create(),
-    worldQuaternion: quat.create(),
-    worldScale: vec3.fromValues(1, 1, 1),
-    worldMatrix: mat4.create(),
+        worldPosition: vec3.create(),
+        worldQuaternion: quat.create(),
+        worldScale: vec3.fromValues(1, 1, 1),
+        worldMatrix: mat4.create(),
 
-    // chunk coord of worldPosition (cx,cy,cz), lazily recomputed by getWorldChunk.
-    worldChunk: null as Vec3 | null,
+        // chunk coord of worldPosition (cx,cy,cz), lazily recomputed by getWorldChunk.
+        worldChunk: null as Vec3 | null,
 
-    // parallel chain to worldMatrix for rendering, composed from parent.interpolatedWorldMatrix * local.
-    interpolatedWorldPosition: null as Vec3 | null,
-    interpolatedWorldQuaternion: null as Quat | null,
-    interpolatedWorldScale: null as Vec3 | null,
-    interpolatedWorldMatrix: null as Mat4 | null,
+        // parallel chain to worldMatrix for rendering, composed from parent.interpolatedWorldMatrix * local.
+        interpolatedWorldPosition: null as Vec3 | null,
+        interpolatedWorldQuaternion: null as Quat | null,
+        interpolatedWorldScale: null as Vec3 | null,
+        interpolatedWorldMatrix: null as Mat4 | null,
 
-    lastTeleport: 0,
+        lastTeleport: 0,
 
-    // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
-    _dirty: TRANSFORM_DIRTY_ALL,
+        // starts at TRANSFORM_DIRTY_ALL so first read computes everything.
+        _dirty: TRANSFORM_DIRTY_ALL,
 
-    // sticky bit: 1 once interpolatedWorld* has been touched; when 0, visual getters use the world chain.
-    _interpolated: 0 as 0 | 1,
+        // sticky bit: 1 once interpolatedWorld* has been touched; when 0, visual getters use the world chain.
+        _interpolated: 0 as 0 | 1,
 
-    /** sticky flag toggled by `setInterpolation(node, on)`; enrolls this transform in the per-frame `interpolating` set. */
-    interpolate: 0 as 0 | 1,
-    /** local pose at the start of the current fixed tick; remote-driven transforms chase-latest instead. */
-    prevPosition: null as Vec3 | null,
-    prevQuaternion: null as Quat | null,
+        /** sticky flag toggled by `setInterpolation(node, on)`; enrolls this transform in the per-frame `interpolating` set. */
+        interpolate: 0 as 0 | 1,
+        /** local pose at the start of the current fixed tick; remote-driven transforms chase-latest instead. */
+        prevPosition: null as Vec3 | null,
+        prevQuaternion: null as Quat | null,
 
-    /** remote chase-latest translator (client-only), lazily allocated on the first remote pose. */
-    _remoteInterpolation: null as RemoteInterpolation | null,
+        /** remote chase-latest translator (client-only), lazily allocated on the first remote pose. */
+        _remoteInterpolation: null as RemoteInterpolation | null,
 
-    /** frames remaining in an active correction blend; 0 when idle */
-    _correctionFrames: 0,
-    _correctionTarget: null as Vec3 | null,
-    _correctionTargetQuat: null as Quat | null,
+        /** frames remaining in an active correction blend; 0 when idle */
+        _correctionFrames: 0,
+        _correctionTarget: null as Vec3 | null,
+        _correctionTargetQuat: null as Quat | null,
 
-    _version: 0,
+        _version: 0,
 
-    /** local TRS moved since the last `Interpolation.snapshot` drain; only meaningful while `interpolate` is set. */
-    _movedSinceSnapshot: 0 as 0 | 1,
+        /** local TRS moved since the last `Interpolation.snapshot` drain; only meaningful while `interpolate` is set. */
+        _movedSinceSnapshot: 0 as 0 | 1,
 
-    /** nearest transform-bearing ancestor, or null at a transform root; typed `any`, narrowed on the exported type. */
-    _parent: null as any,
+        /** nearest transform-bearing ancestor, or null at a transform root; typed `any`, narrowed on the exported type. */
+        _parent: null as any,
 
-    /** the transforms directly below this one, passthrough nodes already skipped. */
-    _children: [] as any[],
+        /** the transforms directly below this one, passthrough nodes already skipped. */
+        _children: [] as any[],
 
-    /** this transform's slot in `_parent._children`, or -1 when it has no parent; avoids an O(n^2) removal scan. */
-    _childIndex: -1,
-});
+        /** this transform's slot in `_parent._children`, or -1 when it has no parent; avoids an O(n^2) removal scan. */
+        _childIndex: -1,
+    },
+    { icon: 'kit:icon:transform' },
+);
 
 export type TransformTrait = Omit<TraitType<typeof TransformTrait>, '_parent' | '_children'> & {
     _parent: TransformTrait | null;

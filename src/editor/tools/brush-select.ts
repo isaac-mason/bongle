@@ -36,7 +36,7 @@ export function updateBrushSelect(
         });
         // a stroke fully masked out leaves the selection intact rather than wiping it
         if (selectedAny || behavior === 'add') {
-            store.setState({ selection: next });
+            store.getState().replaceSelection(next);
             playSelected(ctx, behavior === 'add');
         }
     });

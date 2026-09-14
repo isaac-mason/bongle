@@ -1,5 +1,5 @@
-import { type TraitType } from '../core/scene/traits';
 import { trait } from '../core/registry';
+import type { TraitType } from '../core/scene/traits';
 
 /**
  * plain projection data (fov/near/far) for a scene-tree node. World pose lives on the sibling
@@ -17,7 +17,7 @@ export const CameraTrait = trait(
         /** far clip plane. */
         far: 1000,
     },
-    { persist: false },
+    { icon: 'kit:icon:camera', persist: false },
 );
 
 export type CameraTrait = TraitType<typeof CameraTrait>;

@@ -49,6 +49,7 @@ export * from './builtins/contacts';
 export * from './builtins/extruded-sprite';
 export * from './builtins/fly-controller';
 export * from './builtins/html';
+export * from './builtins/marker';
 export * from './builtins/mesh';
 export * from './builtins/model';
 export * from './builtins/orbit-controller';

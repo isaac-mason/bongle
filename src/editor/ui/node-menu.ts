@@ -20,6 +20,11 @@ export type NodeMenuActions = {
     duplicate: () => void;
     bake: () => void;
     delete: () => void;
+    /** present when the node has a shape field; `fitToSelection` only while a voxel selection exists. */
+    fitToSelection?: () => void;
+    selectInside?: () => void;
+    /** opens the trait picker at the menu. */
+    addTrait?: () => void;
 };
 
 export type NodeMenuOptions = {
@@ -46,9 +51,30 @@ export function nodeMenuEntries(opts: NodeMenuOptions): NodeMenuEntry[] {
     });
     entries.push({ kind: 'item', id: 'copy', Icon: Icons.ClipboardCopy, label: 'Copy', onSelect: actions.copy });
     if (!isMulti) {
+        if (actions.addTrait) {
+            entries.push({ kind: 'item', id: 'add-trait', Icon: Icons.Plus, label: 'Add Trait', onSelect: actions.addTrait });
+        }
         entries.push({ kind: 'item', id: 'duplicate', Icon: Icons.Copy, label: 'Duplicate', onSelect: actions.duplicate });
         if (node?.prefab) {
             entries.push({ kind: 'item', id: 'bake', Icon: Icons.Hammer, label: 'Bake Prefab', onSelect: actions.bake });
+        }
+        if (actions.fitToSelection) {
+            entries.push({
+                kind: 'item',
+                id: 'fit',
+                Icon: Icons.BoxSelect,
+                label: 'Fit to Selection',
+                onSelect: actions.fitToSelection,
+            });
+        }
+        if (actions.selectInside) {
+            entries.push({
+                kind: 'item',
+                id: 'select-inside',
+                Icon: Icons.BoxSelect,
+                label: 'Select Inside',
+                onSelect: actions.selectInside,
+            });
         }
     }
     entries.push({ kind: 'separator', id: 'sep-destroy' });

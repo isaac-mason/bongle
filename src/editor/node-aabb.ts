@@ -1,3 +1,4 @@
+import { type Mat4, mat4 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../api/transforms';
 import { MeshTrait } from '../builtins/mesh';
@@ -34,6 +35,32 @@ function nodeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
         return true;
     }
     return false;
+}
+
+const _invRoot: Mat4 = mat4.create();
+const _toRoot: Mat4 = mat4.create();
+
+/** the subtree's bounds in `node`'s own frame, so a box drawn through its world matrix rotates and scales with it. */
+export function unionSubtreeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
+    const transform = getTrait(node, TransformTrait);
+    if (!transform) return false;
+    if (!mat4.invert(_invRoot, getVisualWorldMatrix(transform))) return false;
+    return unionIntoFrame(node, resources, _invRoot, out);
+}
+
+function unionIntoFrame(node: Node, resources: Resources, invRoot: Mat4, out: Box3): boolean {
+    let found = false;
+    const transform = getTrait(node, TransformTrait);
+    if (transform && nodeLocalAabb(node, resources, _scratchLocal)) {
+        mat4.multiply(_toRoot, invRoot, getVisualWorldMatrix(transform));
+        box3.transformMat4(_scratchWorld, _scratchLocal, _toRoot);
+        box3.union(out, out, _scratchWorld);
+        found = true;
+    }
+    for (const child of node.children) {
+        if (unionIntoFrame(child, resources, invRoot, out)) found = true;
+    }
+    return found;
 }
 
 /** `out` must start empty (`box3.create()` then set to +/-Infinity). returns true if at least one aabb was unioned. */

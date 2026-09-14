@@ -21,9 +21,11 @@ import { InventoryItemIcon } from './inventory-icon';
 import { LeftToolbar } from './left-toolbar';
 import { LibraryOverlay } from './library';
 import { OrientationCube } from './orientation-cube';
+import { PromotePicker } from './promote-picker';
 import { RightPanel } from './right-panel';
 import { ToolActions } from './tool-actions';
 import { TopToolbar } from './top-toolbar';
+import { TraitPicker } from './trait-picker';
 import { ViewportContextMenu } from './viewport-context-menu';
 
 function isInputFocused(): boolean {
@@ -237,6 +239,8 @@ function EditUI() {
                         <>
                             <LassoOverlay />
                             <ViewportContextMenu />
+                            <PromotePicker />
+                            <TraitPicker />
                             <ToolActions />
                             <ControlModeWidget />
                             <FlySpeedIndicator />

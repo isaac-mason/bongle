@@ -90,6 +90,42 @@ describe('bakeTextures', () => {
         );
     });
 
+    it('bakes a region as a smoothing-off copy of its source at the negated offset', async () => {
+        const raster = fakeRaster();
+        const draws: unknown[][] = [];
+        raster.makeCanvas = (w, h) => {
+            raster.made.push([w, h]);
+            const ctx = {
+                imageSmoothingEnabled: true,
+                fillStyle: '',
+                fillRect: () => {},
+                drawImage: (...args: unknown[]) => draws.push([ctx.imageSmoothingEnabled, ...args]),
+            };
+            return { canvas: { width: w, height: h } as unknown as RasterCanvas, ctx: ctx as never };
+        };
+        const sheet = texture('sheet', { src: 'sheet.png' });
+        texture('sheet:cut', { of: sheet, region: [8, 16, 5, 7] });
+
+        const baked = await bakeTextures(textureStore, { loader: fakeLoader(), raster });
+
+        expect(baked.get('sheet:cut')).toMatchObject({ width: 5, height: 7 });
+        expect(draws).toEqual([[false, { width: 16, height: 16 }, -8, -16]]);
+    });
+
+    it('bakes a region of a computed texture after the texture it cuts from', async () => {
+        const base = texture('base', { size: [4, 4], fn: () => {} });
+        texture('base:cut', { of: base, region: [1, 1, 2, 2] });
+
+        const raster = fakeRaster();
+        const baked = await bakeTextures(textureStore, { loader: fakeLoader(), raster });
+
+        expect([...baked.keys()].sort()).toEqual(['base', 'base:cut']);
+        expect(raster.made).toEqual([
+            [4, 4],
+            [2, 2],
+        ]);
+    });
+
     it('substitutes a placeholder when a source file is missing', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const missing = texture('gone', { src: 'gone.png' });

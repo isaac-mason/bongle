@@ -2,7 +2,6 @@ import { type BodyVisitor, broadphase, type RigidBody } from 'crashcat';
 import type { Box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
-import type { Physics } from '../../core/physics/physics';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
@@ -30,16 +29,11 @@ const _collector = {
 
 /**
  * Replaces `sel.nodes` with nodes whose visual world origin (floored to a voxel) is set in `sel.chunks`.
- * Pass `null` for physics/nodeBodies to clear nodes.
+ * Pass `null` for nodeBodies to clear nodes.
  */
-export function rebuildNodeSelection(
-    sel: Selection.Selection,
-    ctx: ScriptContext,
-    physics: Physics | null,
-    nodeBodies: NodeBodies | null,
-): void {
+export function rebuildNodeSelection(sel: Selection.Selection, ctx: ScriptContext, nodeBodies: NodeBodies | null): void {
     sel.nodes.clear();
-    if (!physics || !nodeBodies) return;
+    if (!nodeBodies) return;
 
     const b = Selection.bounds(sel);
     if (!b) return;
@@ -53,7 +47,7 @@ export function rebuildNodeSelection(
     _queryBox[5] = b.max[2] + 1;
 
     _collector.reset(nodeBodies);
-    broadphase.intersectAABB(physics.rigid.world, _queryBox, nodeBodies.queryFilter, _collector);
+    broadphase.intersectAABB(nodeBodies.world, _queryBox, nodeBodies.queryFilter, _collector);
 
     for (const nid of _collector.nodeIds) {
         const node = getNodeById(ctx.scene, nid);

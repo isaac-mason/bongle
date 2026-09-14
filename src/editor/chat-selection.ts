@@ -2,7 +2,6 @@ import type { ChatClient } from '../client/chat';
 import * as ClientChat from '../client/chat';
 import type { ArgType, CommandHandler, CommandSpec, Suggestion } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
-import type { Physics } from '../core/physics/physics';
 import { registry } from '../core/registry';
 import type { ScriptContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
@@ -167,7 +166,6 @@ export function installSelectionChatCommands(
     chat: ChatClient,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
-    physics: Physics | null,
     nodeBodies: NodeBodies | null,
     unsubs: Array<() => void>,
 ): void {
@@ -196,7 +194,7 @@ export function installSelectionChatCommands(
 
     function commitShape(scratch: Selection.Selection, flags: Record<string, boolean>, target: Target): void {
         if (target.nodes) {
-            rebuildNodeSelection(scratch, ctx, physics, nodeBodies);
+            rebuildNodeSelection(scratch, ctx, nodeBodies);
         } else {
             scratch.nodes.clear();
         }
@@ -204,7 +202,7 @@ export function installSelectionChatCommands(
         if (target.voxels) ensureVoxelSelectionToolActive();
 
         const next = compose(store.getState().selection, scratch, flags);
-        store.setState({ selection: next });
+        store.getState().replaceSelection(next);
     }
 
     /** floored midpoint of the current selection's bounds, or the hovered voxel; null if neither is available. */
@@ -340,7 +338,7 @@ export function installSelectionChatCommands(
     );
 
     install({ name: '/desel', description: 'clear the current selection', args: [] }, () => {
-        store.setState({ selection: Selection.create() });
+        store.getState().clearSelection();
         emit('selection cleared');
     });
 
@@ -385,7 +383,7 @@ export function installSelectionChatCommands(
         // about to be reverted, that lets `--nodes --no-voxels` track what
         // the transform would have selected without disturbing voxels.
         if (target.nodes) {
-            rebuildNodeSelection(next, ctx, physics, nodeBodies);
+            rebuildNodeSelection(next, ctx, nodeBodies);
         } else {
             const prev = store.getState().selection;
             next.nodes.clear();
@@ -398,7 +396,7 @@ export function installSelectionChatCommands(
                 next.chunks.set(k, { bits: new Uint32Array(c.bits) });
             }
         }
-        store.setState({ selection: next });
+        store.getState().replaceSelection(next);
     }
 
     install(

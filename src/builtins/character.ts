@@ -276,7 +276,7 @@ export const CharacterTrait = trait(
             nodes: emptyRigNodes(),
         }),
     },
-    { persist: false },
+    { icon: 'kit:icon:character', persist: false },
 );
 
 export type CharacterTrait = TraitType<typeof CharacterTrait>;

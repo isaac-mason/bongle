@@ -1,6 +1,6 @@
 import { type PerspectiveCamera, type Scene, unproject } from 'gpucat';
-import type { Quat, Spherical, Vec3 } from 'math';
-import { spherical, vec3 } from 'math';
+import type { EulerOrder, Quat, Spherical, Vec3 } from 'math';
+import { euler, spherical, vec3 } from 'math';
 import { CharacterControllerTrait } from '../builtins/character-controller';
 import { FlyControllerTrait } from '../builtins/fly-controller';
 import { OrbitControllerTrait } from '../builtins/orbit-controller';
@@ -25,7 +25,9 @@ import {
     type MouseKeyboardInput,
 } from '../client/input';
 import { type ClientRoom, resolveRoomCamera } from '../client/rooms';
+import { useClient } from '../client/ui/stores/client-store';
 import { script } from '../core/registry';
+import type { Node } from '../core/scene/scene-tree';
 import { addTrait, getNodeById, getTrait, hasTrait, removeTrait } from '../core/scene/scene-tree';
 import {
     type ClientContext,
@@ -39,8 +41,16 @@ import {
     type ScriptContext,
 } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
+import { blockStateAabb } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
+import { chunkKey, toChunkCoord } from '../core/voxels/voxels';
 import { env } from '../env';
+import * as MarkerVisuals from '../render/markers/marker-visuals';
+import * as Lines from '../render/overlay/lines';
+import * as Quads from '../render/overlay/quads';
+import * as Text from '../render/overlay/text';
+import type { SpriteResources } from '../render/sprites/sprite-resources';
+import * as Actions from './actions';
 import { initBlueprints } from './blueprints';
 import { readNudgeDelta } from './camera';
 import { installEditorChatCommands } from './chat-commands';
@@ -55,6 +65,7 @@ import { activeBlockKeyOf } from './inventory';
 import { lensOf } from './lens';
 import * as NodeBodies from './node-bodies';
 import { parsePattern } from './scene/pattern';
+import * as Selector from './selector';
 import { playDeselected } from './sounds';
 import { findCategoryByTool, TOOL_CATEGORIES } from './tool-categories';
 import { clearBoxSelect, updateBoxSelect } from './tools/box-select';
@@ -62,7 +73,8 @@ import { createBrushState, updateBrush } from './tools/brush-build';
 import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
 import { updateBuild } from './tools/build';
 import { createElevationState, updateElevation } from './tools/elevation';
-import { openViewportContextMenu, updateInspect } from './tools/inspect';
+import * as Handles from './tools/handles';
+import { openViewportContextMenu, resolveSelectionTarget, updateInspect } from './tools/inspect';
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
 import { createPainterState, updatePainter } from './tools/painter';
@@ -71,9 +83,11 @@ import * as TransformTool from './tools/transform';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';
 import * as DebugVisuals from './visuals/debug-visuals';
 import * as GridVisuals from './visuals/grid-visuals';
-import * as InspectMesh from './visuals/inspect-mesh';
+import * as NodeCard from './visuals/node-card';
+import { LABEL_LIFT_PX, LABEL_SCALE } from './visuals/node-card';
 import * as PivotPoint from './visuals/pivot-point';
 import * as PrefabVisuals from './visuals/prefab-visuals';
+import * as SelectionBox from './visuals/selection-box';
 import {
     createSelectionMeshState,
     disposeSelectionMeshState,
@@ -89,6 +103,9 @@ const _hoverRayResult = createVoxelRaycastResult();
 const _nearWorld: Vec3 = [0, 0, 0];
 const _farWorld: Vec3 = [0, 0, 0];
 const _rayDir: Vec3 = [0, 0, 0];
+const _hoverNodeHits: Selector.NodeHit[] = [];
+const _noEye: Vec3 = [0, 0, 0];
+const _pinnedOwners = new Set<number>();
 
 const _snapPos: Vec3 = [0, 0, 0];
 const _snapQuat: Quat = [0, 0, 0, 1];
@@ -142,6 +159,7 @@ script(
             // backstop for any path that dropped the placement without a clean teardown.
             TransformTool.reconcilePlacementGhosts(transform);
             if (!active) {
+                MarkerVisuals.clear(s.markers, room.visibility);
                 hideVisuals(s.visuals, transform);
                 return;
             }
@@ -151,11 +169,32 @@ script(
             const camera = povCamera(s);
             if (!camera) return;
             transform.gizmo.camera = camera;
+            transform.gizmo.pickerScale = client.state!.inputManager.inputMode === 'touch' ? TOUCH_PICKER_SCALE : 1;
             const time = client.state!.renderer.time;
 
-            NodeBodies.update(s.nodeBodies, room.physics, room.scene, store, client.state!.resources);
+            NodeBodies.update(s.nodeBodies, room.visibility, room.scene, store);
+            Actions.drainPendingShapeFits(store.getState(), ctx);
             updateWorldVisuals(s.visuals, s);
-            updateHover(client.input.mouseKeyboard, camera, ctx, store);
+            // shape handles take the pointer first, then the gizmo: a press either claims sets
+            // its drag state before the tools below read it, so neither click also selects.
+            const canvas = client.state!.renderer.canvas;
+            Handles.update(
+                s.handles,
+                useEditor.getState().showHandles,
+                client.input.mouseKeyboard,
+                camera,
+                canvas.clientWidth,
+                canvas.clientHeight,
+                room.scene,
+                ctx,
+                store,
+                s.visuals.quads,
+                s.visuals.text,
+            );
+            if (!Handles.isEngaged(s.handles)) TransformTool.feedPointer(transform, client.input.mouseKeyboard);
+            updateHover(client.input.mouseKeyboard, camera, ctx, store, s.nodeBodies, room);
+            if (useEditor.getState().showMarkers) MarkerVisuals.update(s.markers, room.visibility);
+            else MarkerVisuals.clear(s.markers, room.visibility);
 
             // covers tool switches and transformMode flips between frames, when updateInspect won't fire to clean up.
             const { activeTool } = store.getState();
@@ -173,11 +212,14 @@ script(
                     ctx,
                     s.nodeBodies,
                     transform,
+                    s.handles,
                     s.visuals.pivot,
                     s.visuals.selection,
                     camera,
                 );
+                TransformTool.layoutGizmo(transform);
                 redrawInspectMesh(s.visuals, s, time);
+                endOverlays(s.visuals);
                 return;
             }
 
@@ -185,7 +227,9 @@ script(
             updateSelectionKeys(s, camera);
             updateBrushPreview(s.brushPreview, store, activeTool);
             updateSelectionMeshes(s.visuals.selection, store.getState(), time);
+            TransformTool.layoutGizmo(transform);
             redrawInspectMesh(s.visuals, s, time);
+            endOverlays(s.visuals);
         });
 
         onTick(ctx, () => reconcileController(room, store));
@@ -206,8 +250,10 @@ type Session = {
     room: ClientRoom;
     store: EditRoomStoreApi;
     transform: TransformTool.TransformToolState;
+    handles: Handles.HandlesState;
     nodeBodies: NodeBodies.NodeBodies;
     visuals: Visuals;
+    markers: MarkerVisuals.MarkerVisuals;
     strokes: Strokes;
     shortcuts: Shortcuts;
     brushPreview: BrushPreview;
@@ -219,18 +265,16 @@ type Session = {
 function openSession(ctx: ScriptContext): Session {
     const client = ctx.client!;
     const room = client.room!;
-    const canvas = client.state!.renderer.canvas;
-
     // forward-ref: the store references the transform tool in its closures
     // (paste/cut, placement pivot, ...), and the gizmo closures inside the tool
     // read store on user interaction. Create the tool first with a placeholder
     // store, then the store, then patch transform.store. the initial POV camera
     // seeds the gizmo; the per-frame sync keeps it on the active POV.
     const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
-    const transform = TransformTool.createTransformTool(initialCamera, canvas, client.render.scene, room.scene, ctx);
+    const transform = TransformTool.createTransformTool(initialCamera, client.render.scene, room.scene, ctx);
     const store = createEditRoomStore({ ctx, room, transformToolState: transform });
     transform.store = store;
-    const nodeBodies = NodeBodies.init(store);
+    const nodeBodies = NodeBodies.init(store, room.physics);
     useEditor.getState().registerEditRoomStore(room, store);
 
     // clipboard: page-level listeners (installed by mountEditUI) dispatch to the
@@ -240,7 +284,7 @@ function openSession(ctx: ScriptContext): Session {
     const unsubs: Array<() => void> = [];
     // builtin slash commands (/set, undo, redo, help, selection ops).
     installEditorChatCommands(room.chat, store, ctx, unsubs);
-    installSelectionChatCommands(room.chat, store, ctx, room.physics, nodeBodies, unsubs);
+    installSelectionChatCommands(room.chat, store, ctx, nodeBodies, unsubs);
     // /relight, client-side spec only; the listener lives on the server.
     // registered here so it disappears in play mode.
     ClientChat.registerCommand(room.chat, {
@@ -256,8 +300,10 @@ function openSession(ctx: ScriptContext): Session {
         room,
         store,
         transform,
+        handles: Handles.init(),
         nodeBodies,
         visuals: initVisuals(client.render.scene),
+        markers: MarkerVisuals.init(room.scene),
         strokes: initStrokes(),
         shortcuts: initShortcuts(),
         brushPreview: initBrushPreview(),
@@ -268,8 +314,9 @@ function openSession(ctx: ScriptContext): Session {
 function closeSession(s: Session): void {
     for (const u of s.unsubs) u();
     useEditor.getState().registerEditRoomStore(s.room, null);
-    NodeBodies.dispose(s.nodeBodies, s.room.physics);
+    NodeBodies.dispose(s.nodeBodies);
     TransformTool.disposeTransformTool(s.transform);
+    MarkerVisuals.dispose(s.markers, s.room.visibility);
     disposeVisuals(s.visuals, s.client.render.scene);
 }
 
@@ -286,6 +333,12 @@ function povCamera(s: Session): PerspectiveCamera | null {
  *  an inactive room's Input reads zero structurally (the engine routes DOM
  *  events only into the active room), so the active-room check here is about
  *  visuals and the gizmo, not about clicks leaking across rooms. */
+/** the sprite atlas and batch, absent until the renderer has loaded resources. */
+function withSpriteResources(s: Session, fn: (sprite: SpriteResources) => void): void {
+    const sprite = s.client.state!.renderer.atlases().sprite;
+    if (sprite) fn(sprite);
+}
+
 function editorViewActive(room: ClientRoom): boolean {
     if (room.client.state!.rooms.activePlayerId !== room.playerId) return false;
     const lens = lensOf(room);
@@ -300,6 +353,14 @@ function mirrorRuntimeState(s: Session): void {
     const { room, store } = s;
     const sceneRevision = room.scene.replication.versionCounter;
     if (sceneRevision !== store.getState().sceneRevision) store.setState({ sceneRevision });
+    const inspected = store.getState().inspectedVoxel;
+    if (inspected) {
+        const chunk = room.voxels.chunks.get(
+            chunkKey(toChunkCoord(inspected.wx), toChunkCoord(inspected.wy), toChunkCoord(inspected.wz)),
+        );
+        const voxelRevision = chunk ? chunk.version : 0;
+        if (voxelRevision !== store.getState().voxelRevision) store.setState({ voxelRevision });
+    }
 
     const fly = getTrait(lensOf(room)?.subject ?? room.playerNode, FlyControllerTrait);
     if (fly && fly.speed !== store.getState().flySpeed) {
@@ -310,23 +371,34 @@ function mirrorRuntimeState(s: Session): void {
 
 type Visuals = {
     selection: SelectionMeshState;
-    inspect: InspectMesh.InspectMeshState;
     pivot: PivotPoint.State;
     debug: DebugVisuals.DebugVisualsState;
     grid: GridVisuals.GridVisualsState;
     chunkBounds: ChunkBoundsVisuals.ChunkBoundsVisualsState;
     prefabs: PrefabVisuals.PrefabVisuals;
+    /** frame batches: cleared in `updateWorldVisuals`, uploaded in `endOverlays`. */
+    lines: Lines.LineBatch;
+    quads: Quads.QuadBatch;
+    text: Text.TextBatch;
 };
 
+const LINE_CAPACITY = 100_000;
+const LINE_WIDTH_PX = 5;
+const QUAD_CAPACITY = 4096;
+const TOUCH_PICKER_SCALE = 1.6;
+
 function initVisuals(scene: Scene): Visuals {
+    const quads = Quads.init(scene, QUAD_CAPACITY);
     return {
         selection: createSelectionMeshState(scene),
-        inspect: InspectMesh.init(scene),
         pivot: PivotPoint.create(scene),
-        debug: DebugVisuals.init(scene),
+        debug: DebugVisuals.init(),
         grid: GridVisuals.init(scene),
         chunkBounds: ChunkBoundsVisuals.init(scene),
         prefabs: PrefabVisuals.init(),
+        lines: Lines.init(scene, LINE_CAPACITY, LINE_WIDTH_PX),
+        quads,
+        text: Text.init(quads),
     };
 }
 
@@ -339,16 +411,14 @@ function hideVisuals(v: Visuals, transform: TransformTool.TransformToolState): v
     v.grid.majorLines.visible = false;
     v.grid.xAxisLines.visible = false;
     v.grid.zAxisLines.visible = false;
-    v.debug.mesh.visible = false;
     v.chunkBounds.lines.visible = false;
     PivotPoint.setVisible(v.pivot, false);
-    if (v.inspect.mesh) v.inspect.mesh.visible = false;
     setSelectionMeshesVisible(v.selection, false);
-    const helper = transform.gizmo.getHelper?.();
-    if (helper) (helper as { visible: boolean }).visible = false;
-    // the gizmo owns its own canvas pointer listeners (gpucat TransformControls),
-    // outside the engine's per-room input routing. a hidden helper still hit-tests,
-    // so disable it too or a play-room drag across a handle moves an edit-room node.
+    v.lines.mesh.visible = false;
+    v.quads.mesh.visible = false;
+    transform.gizmo.root.visible = false;
+    // the gizmo only sees pointer input through `feedPointer`, which the inactive frame
+    // never reaches; `enabled` is belt and braces for any path that still hit-tests.
     transform.gizmo.enabled = false;
 }
 
@@ -362,9 +432,16 @@ function showVisuals(v: Visuals, transform: TransformTool.TransformToolState): v
  *  across rooms via useEditor). */
 function updateWorldVisuals(v: Visuals, s: Session): void {
     const { room, ctx } = s;
+    Lines.begin(v.lines);
+    Quads.begin(v.quads);
+    withSpriteResources(s, (sprite) => {
+        Quads.bindAtlas(v.quads, sprite);
+        Text.bind(v.text, sprite);
+    });
     PrefabVisuals.update(v.prefabs, room.scene, room.context, ctx.voxels.registry);
     const toggles = useEditor.getState();
-    DebugVisuals.update(v.debug, room.physics.rigid.world, toggles.showPhysicsColliders);
+    const { showPhysicsColliders, showPhysicsContacts } = useClient.getState();
+    DebugVisuals.update(v.debug, room.physics, showPhysicsColliders, showPhysicsContacts, v.lines, v.quads);
     GridVisuals.update(v.grid, toggles.showGrid);
     ChunkBoundsVisuals.update(v.chunkBounds, ctx.voxels, toggles.showChunkBoundaries);
 }
@@ -374,24 +451,129 @@ function updateWorldVisuals(v: Visuals, s: Session): void {
  *  or any voxel tool. during voxel placement the placement root has no
  *  geometry, so the ghost's voxel node stands in so the box reflects content. */
 function redrawInspectMesh(v: Visuals, s: Session, time: TimeResources): void {
-    const placement = s.transform.placement;
     const selectedNodes = [];
     for (const nid of s.store.getState().selection.nodes) {
-        if (placement && nid === placement.rootNode.id && placement.voxelNode) {
-            selectedNodes.push(placement.voxelNode);
-            continue;
-        }
         const n = getNodeById(s.room.scene, nid);
         if (n) selectedNodes.push(n);
     }
-    InspectMesh.update(v.inspect, selectedNodes, s.client.state!.resources, time);
+    for (const node of selectedNodes) {
+        if (node !== s.room.scene.root) SelectionBox.draw(v.lines, node, s.client.state!.resources, time.seconds);
+    }
+    // the placement ghost is a preview the transform tool owns, never selected: its box, no card.
+    const placement = s.transform.placement;
+    if (placement) SelectionBox.draw(v.lines, placement.voxelNode ?? placement.rootNode, s.client.state!.resources, time.seconds);
+    drawCards(v, s, selectedNodes);
+    drawDragReadout(v, s);
+}
+
+// one pass over every node with a card: pinned markers, the selection, the hovered node.
+function drawCards(v: Visuals, s: Session, selectedNodes: Node[]): void {
+    const storeState = s.store.getState();
+    const { showOutlines, showRelationshipLines, showNames, showMarkers } = useEditor.getState();
+    const toggles: NodeCard.CardToggles = { outlines: showOutlines, names: showNames, relationshipLines: showRelationshipLines };
+    // the gizmo sits at the node origin, so the selection's text and strip get out of its way.
+    const gizmoOnSelection = (storeState.activeTool === 'transform' && s.transform.gizmoAttached) || s.handles.armed !== null;
+    const selectedToggles: NodeCard.CardToggles = gizmoOnSelection ? { ...toggles, names: false } : toggles;
+    const batches: NodeCard.CardBatches = {
+        lines: v.lines,
+        quads: v.quads,
+        text: v.text,
+        sprite: s.client.state!.renderer.atlases().sprite,
+    };
+    const eye = povCamera(s)?.position ?? _noEye;
+    const root = s.room.scene.root;
+    const selectedIds = storeState.selection.nodes;
+    const activeId = Selection.activeNode(storeState.selection);
+
+    if (showMarkers) {
+        _pinnedOwners.clear();
+        for (const [marker] of MarkerVisuals.markers(s.markers)) {
+            if (!marker.enabled) continue;
+            const owner = NodeCard.ownerOf(marker._node);
+            if (selectedIds.has(owner.id) || _pinnedOwners.has(owner.id)) continue;
+            const transform = getTrait(owner, TransformTrait);
+            if (!transform) continue;
+            _pinnedOwners.add(owner.id);
+            NodeCard.drawCard(batches, owner, transform, NodeCard.cardFor(owner), 'pinned', eye, toggles, root);
+        }
+    }
+    for (const node of selectedNodes) {
+        const transform = getTrait(node, TransformTrait);
+        if (!transform) continue;
+        NodeCard.drawCard(
+            batches,
+            node,
+            transform,
+            NodeCard.cardFor(node),
+            node.id === activeId && !gizmoOnSelection ? 'active' : 'selected',
+            eye,
+            selectedToggles,
+            root,
+        );
+    }
+    const hoverNode = storeState.hoverNodeId !== null ? getNodeById(s.room.scene, storeState.hoverNodeId) : undefined;
+    const hoverTransform = hoverNode ? getTrait(hoverNode, TransformTrait) : null;
+    if (hoverNode && hoverTransform && !selectedIds.has(hoverNode.id)) {
+        NodeCard.drawCard(batches, hoverNode, hoverTransform, NodeCard.cardFor(hoverNode), 'hover', eye, toggles, root);
+    }
+}
+
+const READOUT_COLOR: [number, number, number, number] = [1, 0.85, 0.1, 1];
+const RAD_TO_DEG = 180 / Math.PI;
+const _readoutEuler: [number, number, number, EulerOrder] = [0, 0, 0, 'xyz'];
+
+// the live value of whatever is being dragged, under the gizmo or handle.
+function drawDragReadout(v: Visuals, s: Session): void {
+    const handle = Handles.readout(s.handles, s.room.scene);
+    if (handle) {
+        Text.labelLeft(
+            v.text,
+            handle.at[0],
+            handle.at[1],
+            handle.at[2],
+            handle.text,
+            LABEL_SCALE,
+            handle.dxPx,
+            0,
+            ...READOUT_COLOR,
+        );
+        return;
+    }
+    const transform = s.transform;
+    if (!transform.dragging) return;
+    const proxy = transform.proxy;
+    let text: string;
+    if (transform.gizmo.mode === 'rotate') {
+        euler.fromQuat(_readoutEuler, proxy.quaternion, 'xyz');
+        text = `${(_readoutEuler[0] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[1] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[2] * RAD_TO_DEG).toFixed(0)} deg`;
+    } else if (transform.gizmo.mode === 'scale') {
+        text = `x${proxy.scale[0].toFixed(2)} x${proxy.scale[1].toFixed(2)} x${proxy.scale[2].toFixed(2)}`;
+    } else {
+        text = `${proxy.position[0].toFixed(2)} ${proxy.position[1].toFixed(2)} ${proxy.position[2].toFixed(2)}`;
+    }
+    Text.label(
+        v.text,
+        proxy.position[0],
+        proxy.position[1],
+        proxy.position[2],
+        text,
+        LABEL_SCALE,
+        -LABEL_LIFT_PX,
+        ...READOUT_COLOR,
+    );
+}
+
+/** last call of the frame in every tool branch. */
+function endOverlays(v: Visuals): void {
+    Lines.end(v.lines);
+    Quads.end(v.quads);
 }
 
 function disposeVisuals(v: Visuals, scene: Scene): void {
     PivotPoint.dispose(v.pivot);
     disposeSelectionMeshState(v.selection);
-    InspectMesh.dispose(v.inspect);
-    DebugVisuals.dispose(v.debug, scene);
+    Lines.dispose(v.lines, scene);
+    Quads.dispose(v.quads, scene);
     GridVisuals.dispose(v.grid, scene);
     ChunkBoundsVisuals.dispose(v.chunkBounds, scene);
     PrefabVisuals.dispose(v.prefabs);
@@ -418,12 +600,40 @@ function initStrokes(): Strokes {
 
 /** the hover AABB hugs the block's collider shape (slabs, stairs, fences) rather than the full
  *  cell; cube colliders and the synthesized air-mode hover use the unit cube. */
-function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: ScriptContext, store: EditRoomStoreApi): void {
+function updateHover(
+    mk: MouseKeyboardInput,
+    camera: PerspectiveCamera,
+    ctx: ScriptContext,
+    store: EditRoomStoreApi,
+    nodeBodies: NodeBodies.NodeBodies,
+    room: ClientRoom,
+): void {
     const cursor = getCursor(mk);
     unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
     unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
     vec3.subtract(_rayDir, _farWorld, _nearWorld);
     vec3.normalize(_rayDir, _rayDir);
+
+    _hoverNodeHits.length = 0;
+    Selector.castNodeRay(
+        nodeBodies,
+        room.scene,
+        _nearWorld[0],
+        _nearWorld[1],
+        _nearWorld[2],
+        _rayDir[0],
+        _rayDir[1],
+        _rayDir[2],
+        MAX_RAY_DIST,
+        _hoverNodeHits,
+    );
+    let hoverNodeId: number | null = null;
+    let nearest = Infinity;
+    for (const hit of _hoverNodeHits) {
+        if (hit.distance >= nearest) continue;
+        nearest = hit.distance;
+        hoverNodeId = resolveSelectionTarget(hit.node, store.getState().selection.nodes, room.scene.root).id;
+    }
     raycastVoxels(
         _hoverRayResult,
         ctx.voxels,
@@ -443,29 +653,8 @@ function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: Scr
 
     let hoverAabb: [number, number, number, number, number, number] | null = null;
     if (_hoverRayResult.hit) {
-        const sid = _hoverRayResult.stateId;
-        const cid = ctx.blocks.colliderId[sid]!;
         const [vx, vy, vz] = hoverVoxel!;
-        if (cid === 0) {
-            hoverAabb = [vx, vy, vz, vx + 1, vy + 1, vz + 1];
-        } else {
-            const boxes = ctx.blocks.shapeAabbs[cid]!;
-            let nx = Infinity,
-                ny = Infinity,
-                nz = Infinity,
-                xx = -Infinity,
-                xy = -Infinity,
-                xz = -Infinity;
-            for (const b of boxes) {
-                if (b[0] < nx) nx = b[0];
-                if (b[1] < ny) ny = b[1];
-                if (b[2] < nz) nz = b[2];
-                if (b[3] > xx) xx = b[3];
-                if (b[4] > xy) xy = b[4];
-                if (b[5] > xz) xz = b[5];
-            }
-            hoverAabb = [vx + nx, vy + ny, vz + nz, vx + xx, vy + xy, vz + xz];
-        }
+        hoverAabb = blockStateAabb(ctx.blocks, _hoverRayResult.stateId, vx, vy, vz);
     }
 
     // air mode: synthesize a hover position in empty space
@@ -491,6 +680,7 @@ function updateHover(mk: MouseKeyboardInput, camera: PerspectiveCamera, ctx: Scr
         hoverNormal,
         hoverPoint,
         hoverAabb,
+        hoverNodeId,
         lastHoverVoxel: hoverVoxel ?? cur.lastHoverVoxel,
     }));
 }
@@ -620,7 +810,7 @@ function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
     if (activeTool === 'box-select') {
         const boxNudge = !isInputFocused() ? readNudgeDelta(client.input, camera.quaternion) : null;
         const boxEnter = !isInputFocused() && isKeyJustDown(mk, 'Enter');
-        updateBoxSelect(store, ctx, client.input, room.physics, nodeBodies, boxNudge, boxEnter);
+        updateBoxSelect(store, ctx, client.input, nodeBodies, boxNudge, boxEnter);
     }
     if (activeTool === 'magic-select') {
         updateMagicSelect(store, ctx, client.input, ctx.voxels, ctx.blocks);
@@ -660,20 +850,15 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
     const sBefore = store.getState();
     const hasSelection = !Selection.isEmpty(sBefore.selection);
     const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
-    const hasInspectedVoxel = sBefore.inspectedVoxel !== null;
     if (
-        (hasSelection || hasInProgressTool || hasInspectedVoxel) &&
+        (hasSelection || hasInProgressTool) &&
         !isInputFocused() &&
         isKeyJustDown(mk, 'KeyR') &&
         !TransformTool.isInGrab(transform)
     ) {
         clearBoxSelect(store);
         clearLassoStroke(store);
-        if (hasSelection) {
-            store.setState({ selection: Selection.create(), inspectedVoxel: null });
-        } else if (hasInspectedVoxel) {
-            store.setState({ inspectedVoxel: null });
-        }
+        if (hasSelection) store.getState().clearSelection();
     }
 
     if (!isInputFocused() && isKeyJustDown(mk, 'Escape')) {
@@ -682,10 +867,8 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
             clearBoxSelect(store);
             clearLassoStroke(store);
         } else if (hasSelection) {
-            store.setState({ selection: Selection.create(), inspectedVoxel: null });
+            store.getState().clearSelection();
             playDeselected(s.ctx);
-        } else if (hasInspectedVoxel) {
-            store.setState({ inspectedVoxel: null });
         } else {
             store.setState({ activeTool: 'inspect' });
         }
@@ -708,7 +891,7 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
             const [dx, dy, dz] = nudge;
             const next = Selection.create();
             Selection.nudge(next, sNudge.selection, dx, dy, dz);
-            store.setState({ selection: next });
+            store.getState().replaceSelection(next);
         }
     }
 }

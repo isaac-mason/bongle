@@ -1,6 +1,5 @@
 import { CastRayStatus, createAllCastRayCollector, createDefaultCastRaySettings, castRay as queryCastRay } from 'crashcat';
 import type { Vec3 } from 'math';
-import type { Physics } from '../core/physics/physics';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getNodeById } from '../core/scene/scene-tree';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
@@ -36,6 +35,7 @@ export type NodeHit = {
 export type SelectorHit = VoxelHit | NodeHit;
 
 const _voxelResult = createVoxelRaycastResult();
+const _nodeHits: NodeHit[] = [];
 const _origin: Vec3 = [0, 0, 0];
 const _direction: Vec3 = [0, 0, 0];
 const _rayCollector = createAllCastRayCollector();
@@ -43,7 +43,6 @@ const _raySettings = createDefaultCastRaySettings();
 
 /** returns all hits sorted nearest-first; callers are responsible for any further filtering (player exclusion etc). */
 export function castRay(
-    physics: Physics,
     nodeBodies: NodeBodies,
     sceneTree: SceneTree,
     voxels: Voxels,
@@ -77,6 +76,27 @@ export function castRay(
         });
     }
 
+    _nodeHits.length = 0;
+    castNodeRay(nodeBodies, sceneTree, ox, oy, oz, dx, dy, dz, maxDist, _nodeHits);
+    for (const hit of _nodeHits) hits.push(hit);
+
+    hits.sort((a, b) => a.distance - b.distance);
+    return hits;
+}
+
+/** node hits only, appended to `out` unsorted. */
+export function castNodeRay(
+    nodeBodies: NodeBodies,
+    sceneTree: SceneTree,
+    ox: number,
+    oy: number,
+    oz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    maxDist: number,
+    out: NodeHit[],
+): void {
     _origin[0] = ox;
     _origin[1] = oy;
     _origin[2] = oz;
@@ -85,7 +105,7 @@ export function castRay(
     _direction[2] = dz;
     _rayCollector.reset();
 
-    queryCastRay(physics.rigid.world, _rayCollector, _raySettings, _origin, _direction, maxDist, nodeBodies.queryFilter);
+    queryCastRay(nodeBodies.world, _rayCollector, _raySettings, _origin, _direction, maxDist, nodeBodies.queryFilter);
 
     for (const hit of _rayCollector.hits) {
         if (hit.status !== CastRayStatus.COLLIDING) continue;
@@ -97,7 +117,7 @@ export function castRay(
         if (!node) continue;
 
         const dist = hit.fraction * maxDist;
-        hits.push({
+        out.push({
             kind: 'node',
             node,
             distance: dist,
@@ -106,7 +126,4 @@ export function castRay(
             pz: oz + dz * dist,
         });
     }
-
-    hits.sort((a, b) => a.distance - b.distance);
-    return hits;
 }

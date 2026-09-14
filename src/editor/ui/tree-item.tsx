@@ -2,7 +2,10 @@ import { useSortable } from '@dnd-kit/react/sortable';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
 import { IconButton } from '../../client/ui/components';
+import * as Selection from '../../core/scene/selection';
 import { useEditRoom } from '../edit-room-store';
+import { nodeIcons } from '../visuals/node-card';
+import { SpriteIcon } from './sprite-icon';
 import type { FlattenedNode } from './tree-utils';
 
 const INDENTATION = 20;
@@ -42,7 +45,9 @@ export const TreeItem = memo(function TreeItem({
 }) {
     // subscribe to a boolean so this item only rerenders when its own selection changes
     const isSelected = useEditRoom((s) => s.selection.nodes.has(item.nodeId));
+    const isActive = useEditRoom((s) => s.selection.nodes.size > 1 && Selection.activeNode(s.selection) === item.nodeId);
     const hasChildren = item.node.children.length > 0;
+    const icons = nodeIcons(item.node);
 
     const [renameValue, setRenameValue] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -112,7 +117,7 @@ export const TreeItem = memo(function TreeItem({
             className={`
                 absolute left-0 right-0 flex items-center gap-1 py-0.5 pr-1 select-none font-mono text-[10px] outline-none focus:ring-1 focus:ring-accent
                 ${isDragSource ? 'opacity-40' : ''}
-                ${isSelected ? 'bg-accent/25' : 'hover:bg-surface-muted'}
+                ${isActive ? 'bg-accent/45' : isSelected ? 'bg-accent/25' : 'hover:bg-surface-muted'}
             `}
             style={{ top: virtualStart, paddingLeft: item.depth * INDENTATION + 4, contain: 'layout style paint' }}
             onClick={handleClick}
@@ -162,6 +167,13 @@ export const TreeItem = memo(function TreeItem({
             ) : (
                 <span className={`truncate ${item.effectivePersist ? 'text-fg' : 'text-fg-muted italic'}`}>
                     {item.node.name || `Node ${item.nodeId}`}
+                </span>
+            )}
+            {icons.length > 0 && (
+                <span className="flex items-center gap-0.5 shrink-0 opacity-70">
+                    {icons.map((icon) => (
+                        <SpriteIcon key={icon} id={icon} size={12} />
+                    ))}
                 </span>
             )}
 

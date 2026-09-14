@@ -120,6 +120,8 @@ export type SpriteBatch = {
     /** slot to owning state, parallel to the GPU buffers; freeSlot's swap-pop
      *  reads this to find the moved state and rewrite its `slot`. */
     slotOwner: (SlotOwner | null)[];
+    /** bumps on every reset; a slot from an older epoch is gone, not freeable. */
+    epoch: number;
 };
 
 /** Build the client-global instance batch: a shared 1x1 plane with per-instance
@@ -158,6 +160,7 @@ function createSpriteBatch(material: Material): SpriteBatch {
         head: 0,
         instanceCapacity,
         slotOwner: new Array(instanceCapacity).fill(null),
+        epoch: 0,
     };
 }
 
@@ -166,6 +169,7 @@ export function resetSpriteBatch(batch: SpriteBatch): void {
     batch.head = 0;
     batch.mesh.count = 0;
     batch.slotOwner.fill(null);
+    batch.epoch++;
 }
 
 // gpucat tracks buffer swaps by GpuBuffer identity; routing a fresh wrapper via

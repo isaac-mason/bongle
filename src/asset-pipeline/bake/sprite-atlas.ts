@@ -150,7 +150,7 @@ async function loadFrame(
         );
         return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: `missing:${item.textureId}` };
     }
-    if (def.from === 'computed') {
+    if (def.from !== 'file') {
         const canvas = baked.get(item.textureId);
         if (!canvas) {
             console.warn(

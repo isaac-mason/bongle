@@ -4,11 +4,10 @@ import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
 import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame } from '../api/scripts';
-import { script } from '../core/registry';
 import { getCamera, getSubject } from '../api/subject';
-import { type TraitType } from '../api/traits';
-import { control, trait } from '../core/registry';
+import type { TraitType } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { control, script, trait } from '../core/registry';
 import { env } from '../env';
 import { TransformTrait } from './transform';
 
@@ -68,7 +67,7 @@ export const FlyControllerTrait = trait(
          *  default); higher = smoother for cinematic capture (try 0.1-0.3). */
         damping: 0,
     },
-    { persist: false },
+    { icon: 'kit:icon:controller', persist: false },
 );
 
 /** instance type for FlyControllerTrait */

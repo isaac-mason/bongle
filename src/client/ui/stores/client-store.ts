@@ -41,6 +41,12 @@ export type ClientStore = {
      *  only shown when the debug dashboard is open AND this is on. */
     showGpucatInspector: boolean;
     setShowGpucatInspector: (show: boolean) => void;
+    /** draw every physics body's collider as a wireframe (physics tab). */
+    showPhysicsColliders: boolean;
+    setShowPhysicsColliders: (show: boolean) => void;
+    /** draw this step's contact points and normals (physics tab). */
+    showPhysicsContacts: boolean;
+    setShowPhysicsContacts: (show: boolean) => void;
 
     /** the client's frame profiler (state.profiler on EngineClient): one ring of
      *  per-frame span trees for the page, covering every room the loop touches. */
@@ -91,6 +97,10 @@ export const useClient = create<ClientStore>((set) => ({
 
     showGpucatInspector: false,
     setShowGpucatInspector: (showGpucatInspector) => set({ showGpucatInspector }),
+    showPhysicsColliders: false,
+    setShowPhysicsColliders: (showPhysicsColliders) => set({ showPhysicsColliders }),
+    showPhysicsContacts: false,
+    setShowPhysicsContacts: (showPhysicsContacts) => set({ showPhysicsContacts }),
 
     clientProfiler: null,
     setClientProfiler: (clientProfiler) => set({ clientProfiler }),

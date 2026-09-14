@@ -35,5 +35,10 @@ export const HOVER_OUTLINE: Rgba = [1.0, 1.0, 1.0, 0.9];
 /** outline color for the inspect-tool node bounding box */
 export const INSPECT_OUTLINE: [number, number, number, number] = [0.3, 0.6, 1.0, 1.0];
 
+/** shape-field outlines: every selected node, the active one, and the hovered one as a preview. */
+export const SHAPE_OUTLINE_SELECTED: Rgba = [0.3, 0.6, 1.0, 0.7];
+export const SHAPE_OUTLINE_ACTIVE: Rgba = [1.0, 0.85, 0.1, 1.0];
+export const SHAPE_OUTLINE_HOVER: Rgba = [1.0, 1.0, 1.0, 0.35];
+
 /** color of the pivot point sphere shown when the transform tool is active */
 export const PIVOT_DOT: [number, number, number, number] = [1.0, 0.85, 0.1, 1.0];

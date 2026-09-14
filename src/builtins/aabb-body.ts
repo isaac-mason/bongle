@@ -2,10 +2,10 @@ import { type Vec3, vec3 } from 'math';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
 import { dirty, rate, type TraitType } from '../api/traits';
-import { control, sync, trait } from '../core/registry';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import * as AabbPhysics from '../core/physics/aabb';
 import { COLLISION_GROUP_NODES } from '../core/physics/rigid/rigid-world-settings';
+import { control, sync, trait } from '../core/registry';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 
 // wraps an `AabbPhysics.Body` and routes its contacts through `ContactsTrait` fan-out. For callers
@@ -14,38 +14,42 @@ import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 export const AabbBodyMotionType = AabbPhysics.MotionType;
 export type AabbBodyMotionType = AabbPhysics.MotionType;
 
-export const AabbBodyTrait = trait('aabbbody', {
-    halfExtents: [0.5, 0.5, 0.5] as Vec3,
+export const AabbBodyTrait = trait(
+    'aabbbody',
+    {
+        halfExtents: [0.5, 0.5, 0.5] as Vec3,
 
-    motionType: AabbBodyMotionType.DYNAMIC as AabbBodyMotionType,
+        motionType: AabbBodyMotionType.DYNAMIC as AabbBodyMotionType,
 
-    mass: 1,
+        mass: 1,
 
-    prediction: true,
+        prediction: true,
 
-    linearVelocity: vec3.create(),
+        linearVelocity: vec3.create(),
 
-    gravityFactor: 1,
+        gravityFactor: 1,
 
-    collisionGroups: COLLISION_GROUP_NODES,
+        collisionGroups: COLLISION_GROUP_NODES,
 
-    collisionMask: 0xffffffff,
+        collisionMask: 0xffffffff,
 
-    voxelFlagsMask: BLOCK_FLAG_COLLISION,
+        voxelFlagsMask: BLOCK_FLAG_COLLISION,
 
-    friction: 0.5,
+        friction: 0.5,
 
-    restitution: 0,
+        restitution: 0,
 
-    sensor: false,
+        sensor: false,
 
-    pushable: false,
+        pushable: false,
 
-    rigidBodyImpostor: false,
+        rigidBodyImpostor: false,
 
-    /** runtime: the live AabbPhysics.Body. always non-null after install. */
-    body: null as unknown as AabbPhysics.Body,
-});
+        /** runtime: the live AabbPhysics.Body. always non-null after install. */
+        body: null as unknown as AabbPhysics.Body,
+    },
+    { icon: 'kit:icon:body' },
+);
 
 export type AabbBodyTrait = TraitType<typeof AabbBodyTrait>;
 

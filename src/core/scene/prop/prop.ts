@@ -6,19 +6,25 @@ export type StringSchema = {
     type: 'string';
 };
 
+export type NumberSubtype = 'radius' | 'angle';
+
 export type NumberSchema = {
     type: 'number';
     min?: number;
     max?: number;
     step?: number;
+    subtype?: NumberSubtype;
 };
 
 export type Vector2Schema = {
     type: 'vector2';
 };
 
+export type Vector3Subtype = 'point' | 'direction';
+
 export type Vector3Schema = {
     type: 'vector3';
+    subtype?: Vector3Subtype;
 };
 
 export type Vector4Schema = {
@@ -45,9 +51,40 @@ export type TupleSchema = {
     of: Schema[];
 };
 
+/** the keys of `F` whose schema extends `S`. */
+export type Field<F, S> = { [K in keyof F]: F[K] extends S ? K : never }[keyof F];
+
+export type SphereSpec<F> = {
+    kind: 'sphere';
+    radius: Field<F, { subtype: 'radius' }>;
+    center?: Field<F, { subtype: 'point' }>;
+};
+export type Box3Spec<F> = { kind: 'box3'; halfExtents: Field<F, Vector3Schema> };
+export type SegmentSpec<F> = {
+    kind: 'segment';
+    from: Field<F, { subtype: 'point' }>;
+    to: Field<F, { subtype: 'point' }>;
+};
+/** which fields of an object make it a shape; drawn and given handles by the editor. */
+export type ShapeSpec<F> = SphereSpec<F> | Box3Spec<F> | SegmentSpec<F>;
+/** which fields of an object position its children. */
+export type FrameSpec<F> = {
+    position?: Field<F, { subtype: 'point' }>;
+    quaternion?: Field<F, QuaternionSchema>;
+};
+
+/** the stored form: field names as plain strings, checked by `checkSpecs`. */
+export type ShapeSpecData =
+    | { kind: 'sphere'; radius: string; center?: string }
+    | { kind: 'box3'; halfExtents: string }
+    | { kind: 'segment'; from: string; to: string };
+export type FrameSpecData = { position?: string; quaternion?: string };
+
 export type ObjectSchema = {
     type: 'object';
     fields: Record<string, Schema>;
+    shape?: ShapeSpecData;
+    frame?: FrameSpecData;
 };
 
 export type RecordSchema = {
@@ -100,6 +137,11 @@ export type BlockRefSchema = {
     type: 'block';
 };
 
+/** a sprite id. */
+export type SpriteRefSchema = {
+    type: 'sprite';
+};
+
 export type UnionSchema = {
     type: 'union';
     key: string;
@@ -129,7 +171,8 @@ export type Schema =
     | NullishSchema
     | MeshSchema
     | PrefabRefSchema
-    | BlockRefSchema;
+    | BlockRefSchema
+    | SpriteRefSchema;
 
 type RepeatTypeMap<T> = {
     0: [];
@@ -190,6 +233,7 @@ export type SchemaType<S extends Schema> =
     S extends UnionSchema ? SchemaType<S['variants'][number]> :
     S extends PrefabRefSchema ? string :
     S extends BlockRefSchema ? string :
+    S extends SpriteRefSchema ? string :
     never;
 
 /* lightweight helpers that just return objects */
@@ -203,9 +247,37 @@ export const number = (opts?: { min?: number; max?: number; step?: number }): Nu
     ...opts,
 });
 
+/** a length from a centre; never negative. */
+export const radius = (opts?: {
+    max?: number;
+    step?: number;
+}): { type: 'number'; subtype: 'radius'; min: number; max?: number; step?: number } => ({
+    type: 'number',
+    subtype: 'radius',
+    min: 0,
+    ...opts,
+});
+
+/** radians. */
+export const angle = (opts?: {
+    min?: number;
+    max?: number;
+    step?: number;
+}): { type: 'number'; subtype: 'angle'; min?: number; max?: number; step?: number } => ({
+    type: 'number',
+    subtype: 'angle',
+    ...opts,
+});
+
 export const vec2 = (): Vector2Schema => ({ type: 'vector2' });
 
 export const vec3 = (): Vector3Schema => ({ type: 'vector3' });
+
+/** a position in the owning node's frame. */
+export const point = (): { type: 'vector3'; subtype: 'point' } => ({ type: 'vector3', subtype: 'point' });
+
+/** a unit vector in the owning node's frame. */
+export const direction = (): { type: 'vector3'; subtype: 'direction' } => ({ type: 'vector3', subtype: 'direction' });
 
 export const vec4 = (): Vector4Schema => ({ type: 'vector4' });
 
@@ -222,9 +294,13 @@ export const tuple = <T extends Schema[]>(of: [...T]): { type: 'tuple'; of: [...
     of,
 });
 
-export const object = <F extends Record<string, Schema>>(fields: F): { type: 'object'; fields: F } => ({
+export const object = <F extends Record<string, Schema>>(
+    fields: F,
+    opts?: { shape?: ShapeSpec<F>; frame?: FrameSpec<F> },
+): { type: 'object'; fields: F; shape?: ShapeSpec<F>; frame?: FrameSpec<F> } => ({
     type: 'object',
     fields,
+    ...opts,
 });
 
 export const record = <F extends Schema>(field: F): { type: 'record'; field: F } => ({
@@ -265,3 +341,5 @@ export const mesh = (): MeshSchema => ({ type: 'mesh' });
 export const prefab = (): PrefabRefSchema => ({ type: 'prefab' });
 
 export const block = (): BlockRefSchema => ({ type: 'block' });
+
+export const sprite = (): SpriteRefSchema => ({ type: 'sprite' });

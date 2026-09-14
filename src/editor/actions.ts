@@ -1,6 +1,8 @@
-import type { Quat } from 'math';
-import { TransformTrait } from '../builtins/transform';
+import type { Quat, Vec3 } from 'math';
+import { getWorldPosition, TransformTrait, worldToLocalPosition } from '../builtins/transform';
 import { registry } from '../core/registry';
+import { setAtPath } from '../core/scene/prop/path';
+import { findShape, type ShapeSite } from '../core/scene/prop/specs';
 import {
     addChild,
     addTraitBySlot,
@@ -477,6 +479,25 @@ export function createNodeAction(ctx: ScriptContext, parentId: number, index: nu
     });
 }
 
+/** returns the id the node lands with, allocated up front the way placement does. */
+export function createNodeAtAction(ctx: ScriptContext, position: Vec3, name = 'New Node'): number {
+    const scene = ctx.scene;
+    const id = scene.nextServerId++;
+    send(ctx, CreateNodeCommand, {
+        id,
+        parentId: scene.root.id,
+        index: scene.root.children.length,
+        name,
+        persist: undefined,
+        traits: JSON.stringify([
+            { id: 'transform', controls: { position: [...position], quaternion: [0, 0, 0, 1], scale: [1, 1, 1] } },
+        ]),
+        children: undefined,
+        prefab: undefined,
+    });
+    return id;
+}
+
 export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
     const node = getNodeById(ctx.scene, nodeId);
     if (!node?.parent) return;
@@ -823,6 +844,176 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
     }
     bumpTraitVersion(sceneTree, node, handle.slot);
     bumpNodeVersion(sceneTree, node);
+}
+
+export type PendingShapeFit = { nodeId: number; bounds: Selection.Bounds; framesLeft: number };
+const PENDING_FIT_FRAMES = 600;
+
+/** the first shape-annotated control on any of the node's traits. */
+export function findNodeShape(node: Node): { traitId: string; controlId: string; value: unknown; site: ShapeSite } | null {
+    for (let slot = 0; slot < node.traits.length; slot++) {
+        const instance = node.traits[slot];
+        const handle = registry.slotToTrait[slot];
+        if (!instance || !handle) continue;
+        for (const reg of handle.def.controls) {
+            const value = reg.get(instance);
+            const site = findShape(reg.schema, value);
+            if (site) return { traitId: handle.def.id, controlId: reg.controlId, value, site };
+        }
+    }
+    return null;
+}
+
+function boundsCenter(bounds: Selection.Bounds): Vec3 {
+    return [
+        (bounds.min[0] + bounds.max[0] + 1) / 2,
+        (bounds.min[1] + bounds.max[1] + 1) / 2,
+        (bounds.min[2] + bounds.max[2] + 1) / 2,
+    ];
+}
+
+function fittedShape(site: ShapeSite, bounds: Selection.Bounds): Record<string, unknown> | null {
+    const [dx, dy, dz] = bounds.dimensions;
+    const spec = site.spec;
+    if (spec.kind === 'box3') return { ...site.local, [spec.halfExtents]: [dx / 2, dy / 2, dz / 2] };
+    if (spec.kind === 'sphere') {
+        const next = { ...site.local, [spec.radius]: Math.max(dx, dy, dz) / 2 };
+        if (spec.center) next[spec.center] = [0, 0, 0];
+        return next;
+    }
+    return null;
+}
+
+/** moves the node to the bounds' centre and sizes its first shape field to the bounds; false when the node has no fittable shape. */
+export function fitShapeToBoundsAction(
+    state: EditRoomState,
+    ctx: ScriptContext,
+    nodeId: number,
+    bounds: Selection.Bounds,
+): boolean {
+    const node = getNodeById(ctx.scene, nodeId);
+    if (!node) return false;
+    const shape = findNodeShape(node);
+    if (!shape) return false;
+    const fitted = fittedShape(shape.site, bounds);
+    if (!fitted) return false;
+    const transform = getTrait(node, TransformTrait);
+    const nextShapeProps = { [shape.controlId]: setAtPath(shape.value, shape.site.path, fitted) };
+    const prevShapeProps = captureTraitProps(node, shape.traitId);
+    const prevTransformProps = transform ? captureTraitProps(node, 'transform') : null;
+    const nextTransformProps = transform ? { position: worldToLocalPosition(transform, boundsCenter(bounds), [0, 0, 0]) } : null;
+
+    const write = (shapeProps: Record<string, unknown> | null, transformProps: Record<string, unknown> | null) => {
+        const n = getNodeById(ctx.scene, nodeId);
+        if (!n) return;
+        if (shapeProps) {
+            setTraitProps(ctx.scene, n, shape.traitId, shapeProps);
+            send(ctx, SetTraitCommand, { id: nodeId, traitId: shape.traitId, props: JSON.stringify(shapeProps) });
+        }
+        if (transformProps) {
+            setTraitProps(ctx.scene, n, 'transform', transformProps);
+            send(ctx, SetTraitCommand, { id: nodeId, traitId: 'transform', props: JSON.stringify(transformProps) });
+        }
+    };
+    state.action({
+        label: 'fit to selection',
+        do: () => write(nextShapeProps, nextTransformProps),
+        undo: () => write(prevShapeProps, prevTransformProps),
+    });
+    return true;
+}
+
+/** a prefab node at the selection's centre; its shape is fitted once the node lands from the server. */
+export function createFromSelectionAction(
+    state: EditRoomState,
+    ctx: ScriptContext,
+    prefabId: string,
+    bounds: Selection.Bounds,
+): void {
+    const def = registry.prefabs.byId.get(prefabId);
+    if (!def) return;
+    const scene = ctx.scene;
+    const id = scene.nextServerId++;
+    const prefab: PrefabConfig = { prefabId, args: def.args ? structuredClone(def.args.default) : {} };
+    const center = boundsCenter(bounds);
+    state.action({
+        label: `create ${prefabId} from selection`,
+        do() {
+            send(ctx, CreateNodeCommand, {
+                id,
+                parentId: scene.root.id,
+                index: scene.root.children.length,
+                name: prefabId,
+                persist: true,
+                traits: JSON.stringify([
+                    { id: 'transform', controls: { position: center, quaternion: [0, 0, 0, 1], scale: [1, 1, 1] } },
+                ]),
+                children: JSON.stringify([]),
+                prefab: JSON.stringify(prefab),
+            });
+        },
+        undo() {
+            send(ctx, DestroyNodeCommand, { id });
+        },
+    });
+    state.pendingShapeFits.push({ nodeId: id, bounds, framesLeft: PENDING_FIT_FRAMES });
+}
+
+/** once per frame: fits shapes on nodes created from a selection as soon as they exist with a fittable trait. */
+export function drainPendingShapeFits(state: EditRoomState, ctx: ScriptContext): void {
+    const pending = state.pendingShapeFits;
+    for (let i = pending.length - 1; i >= 0; i--) {
+        const fit = pending[i]!;
+        const node = getNodeById(ctx.scene, fit.nodeId);
+        const done =
+            node !== undefined && findNodeShape(node) !== null && fitShapeToBoundsAction(state, ctx, fit.nodeId, fit.bounds);
+        if (done || --fit.framesLeft <= 0) pending.splice(i, 1);
+    }
+}
+
+// voxels whose centre lies inside the node's shape; rotation and scale are ignored, the shape is placed at the node's world position.
+export function selectInsideShape(ctx: ScriptContext, nodeId: number): Selection.Selection | null {
+    const node = getNodeById(ctx.scene, nodeId);
+    const transform = node ? getTrait(node, TransformTrait) : null;
+    if (!node || !transform) return null;
+    const shape = findNodeShape(node);
+    if (!shape) return null;
+    const { spec, local } = shape.site;
+    const origin = getWorldPosition(transform);
+    const selection = Selection.create();
+    if (spec.kind === 'box3') {
+        const half = local[spec.halfExtents] as Vec3;
+        Selection.setAABB(
+            selection,
+            Math.ceil(origin[0] - half[0] - 0.5),
+            Math.ceil(origin[1] - half[1] - 0.5),
+            Math.ceil(origin[2] - half[2] - 0.5),
+            Math.floor(origin[0] + half[0] - 0.5),
+            Math.floor(origin[1] + half[1] - 0.5),
+            Math.floor(origin[2] + half[2] - 0.5),
+        );
+        return selection;
+    }
+    if (spec.kind === 'sphere') {
+        const radius = local[spec.radius] as number;
+        const center = spec.center ? (local[spec.center] as Vec3) : [0, 0, 0];
+        const cx = origin[0] + center[0];
+        const cy = origin[1] + center[1];
+        const cz = origin[2] + center[2];
+        const r2 = radius * radius;
+        for (let wx = Math.ceil(cx - radius - 0.5); wx <= Math.floor(cx + radius - 0.5); wx++) {
+            for (let wy = Math.ceil(cy - radius - 0.5); wy <= Math.floor(cy + radius - 0.5); wy++) {
+                for (let wz = Math.ceil(cz - radius - 0.5); wz <= Math.floor(cz + radius - 0.5); wz++) {
+                    const ex = wx + 0.5 - cx;
+                    const ey = wy + 0.5 - cy;
+                    const ez = wz + 0.5 - cz;
+                    if (ex * ex + ey * ey + ez * ez <= r2) Selection.set(selection, wx, wy, wz);
+                }
+            }
+        }
+        return selection;
+    }
+    return null;
 }
 
 export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, config: PrefabConfig): void {

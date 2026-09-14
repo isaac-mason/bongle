@@ -183,7 +183,7 @@ export const PlayerControllerTrait = trait(
             },
         }),
     },
-    { persist: false },
+    { icon: 'kit:icon:controller', persist: false },
 );
 
 export type PlayerControllerTrait = TraitType<typeof PlayerControllerTrait>;

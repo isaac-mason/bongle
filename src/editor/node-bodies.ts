@@ -1,100 +1,86 @@
-// no userData on the rigid body; instead a bidirectional map of bodyId <-> nodeId.
-import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
-import { type Mat4, mat4, type Vec3 } from 'math';
+import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody, type World } from 'crashcat';
+import type { Vec3 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
-import { getVisualWorldMatrix } from '../api/transforms';
 import { CameraTrait } from '../builtins/camera';
-import { PlayerTrait } from '../builtins/player';
+import { CharacterTrait } from '../builtins/character';
 import { TransformTrait } from '../builtins/transform';
 import type { Physics } from '../core/physics/physics';
 import { OBJECT_LAYER_EDITOR_NODES, settings } from '../core/physics/physics';
-import type { Resources } from '../core/resources';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
-import { getNodeById, getTrait, isAncestorOf, query } from '../core/scene/scene-tree';
+import { getNodeById, getTrait } from '../core/scene/scene-tree';
+import type { Visibility } from '../render/visibility/visibility';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { EditorTrait } from './editor-trait';
-import { unionSubtreeWorldAabb } from './node-aabb';
 
 type BodyEntry = {
     bodyId: BodyId;
     shape: BoxShape;
-    /** subtree mesh-AABB union in this node's local frame; snapshotted at first sync and
-     *  re-derived only when the frontier rebuilds. animation moving bones inside the rig does
-     *  not re-tighten this. */
-    localAabb: Box3 | null;
-    /** transform._version at last body sync; an int-compare short-circuits the per-frame update when the rig hasn't moved. */
-    lastVersion: number;
 };
 
 export type NodeBodies = {
+    world: World;
     nodeToBody: Map<number, BodyEntry>;
     bodyToNode: Map<BodyId, number>;
     queryFilter: Filter;
-    playerNodeId: number;
     targetable: Set<number>;
-    _lastSelectionVersion: number;
     _unsubscribe: () => void;
     targetableDirty: boolean;
+    syncedGeneration: number;
 };
 
-export function init(store: EditRoomStoreApi): NodeBodies {
+export function init(store: EditRoomStoreApi, physics: Physics): NodeBodies {
     const qf = filterMod.createEmpty();
     filterMod.enableObjectLayer(qf, settings.layers, OBJECT_LAYER_EDITOR_NODES);
     qf.collisionMask = ~0;
     qf.collisionGroups = ~0;
 
     const state: NodeBodies = {
+        world: physics.rigid.world,
         nodeToBody: new Map(),
         bodyToNode: new Map(),
         queryFilter: qf,
-        playerNodeId: -1,
         targetable: new Set(),
-        _lastSelectionVersion: -1,
         _unsubscribe: () => {},
         targetableDirty: true,
+        syncedGeneration: -1,
     };
 
-    // any change to selection or scene structure (sceneRevision bump) flips the
-    // dirty bit; the next update() rebuilds the frontier.
     state._unsubscribe = store.subscribe((s, prev) => {
-        if (s.selection !== prev.selection || s.sceneRevision !== prev.sceneRevision) {
-            state.targetableDirty = true;
-        }
+        if (s.selection !== prev.selection) state.targetableDirty = true;
     });
 
     return state;
 }
 
-export function dispose(state: NodeBodies, physics: Physics): void {
+export function dispose(state: NodeBodies): void {
     state._unsubscribe();
-    const { nodeToBody, bodyToNode } = state;
+    const { nodeToBody, bodyToNode, world } = state;
     for (const entry of nodeToBody.values()) {
-        const body = rigidBody.get(physics.rigid.world, entry.bodyId);
-        if (body) rigidBody.remove(physics.rigid.world, body);
+        const body = rigidBody.get(world, entry.bodyId);
+        if (body) rigidBody.remove(world, body);
     }
     nodeToBody.clear();
     bodyToNode.clear();
     state.targetable.clear();
 }
 
-/** excludes the scene root, the player, and the editor's own lens nodes (runtime-only view artifacts, never level content). */
-function isFrontierEligible(node: Node, playerNodeId: number, root: Node): boolean {
+/** a click inside a character rig or a prefab's generated internals selects the root that owns them. */
+export function isOwnershipBoundary(node: Node): boolean {
+    return node.prefab !== null || getTrait(node, CharacterTrait) !== undefined;
+}
+
+function isFrontierEligible(node: Node, root: Node): boolean {
     if (node === root) return false;
-    if (node.id === playerNodeId) return false;
     if (!getTrait(node, TransformTrait)) return false;
     if (getTrait(node, CameraTrait)) return false;
     if (getTrait(node, EditorTrait)) return false;
     return true;
 }
 
-/** add direct frontier-eligible children of `parent` to `out`. returns whether any were added. */
-function addEligibleChildren(parent: Node, playerNode: Node | null, root: Node, out: Set<number>): boolean {
+function addEligibleChildren(parent: Node, root: Node, out: Set<number>): boolean {
     let added = false;
-    const playerId = playerNode ? playerNode.id : -1;
     for (const child of parent.children) {
-        if (!isFrontierEligible(child, playerId, root)) continue;
-        // skip descendants of the player
-        if (playerNode && isAncestorOf(playerNode, child)) continue;
+        if (!isFrontierEligible(child, root)) continue;
         out.add(child.id);
         added = true;
     }
@@ -105,43 +91,29 @@ function recomputeFrontier(state: NodeBodies, sceneTree: SceneTree, store: EditR
     const { targetable } = state;
     targetable.clear();
 
-    // refresh cached player id
-    let playerNode: Node | null = null;
-    for (const [player] of query(sceneTree, [PlayerTrait])) {
-        playerNode = player._node!;
-        break;
-    }
-    state.playerNodeId = playerNode ? playerNode.id : -1;
-
     const root = sceneTree.root;
     const selectedIds = store.getState().selection.nodes;
 
-    // root.children are always part of the frontier (so a different top-level
-    // object can be picked without deselecting first).
-    addEligibleChildren(root, playerNode, root, targetable);
+    addEligibleChildren(root, root, targetable);
 
-    // for each selected node: add its direct eligible children. if any were
-    // added, drop the selected node from the frontier (drill-down). otherwise
-    // keep the leaf-selected node so it remains clickable.
+    // drill-down: a selected node's children replace it; a selected leaf stays
     for (const sid of selectedIds) {
         const sel = getNodeById(sceneTree, sid);
-        if (!sel || sel === root) continue;
-        const childrenAdded = addEligibleChildren(sel, playerNode, root, targetable);
+        if (!sel || sel === root || isOwnershipBoundary(sel)) continue;
+        const childrenAdded = addEligibleChildren(sel, root, targetable);
         if (childrenAdded) {
             targetable.delete(sel.id);
         }
     }
 }
 
-const _worldAabb: Box3 = box3.create();
-const _invMat: Mat4 = mat4.create();
 const _scratchPos: Vec3 = [0, 0, 0];
+const _unions = new Map<number, Box3>();
+const _boxPool: Box3[] = [];
+const _toRemove: number[] = [];
 
-// 0.5-unit cube centered on the world origin of a transform-only node with no mesh/voxel geometry in its subtree.
-const FALLBACK_PICK_HALF_EXTENT = 0.25;
-
-function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): void {
-    const body = rigidBody.get(physics.rigid.world, entry.bodyId);
+function syncBodyToWorldAabb(world: World, entry: BodyEntry, aabb: Box3): void {
+    const body = rigidBody.get(world, entry.bodyId);
     if (!body) return;
 
     const hx = Math.max((aabb[3] - aabb[0]) * 0.5, 0.01);
@@ -155,109 +127,84 @@ function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): vo
     entry.shape.halfExtents[1] = hy;
     entry.shape.halfExtents[2] = hz;
     box.update(entry.shape);
-    rigidBody.updateShape(physics.rigid.world, body);
-    rigidBody.setPosition(physics.rigid.world, body, _scratchPos, false);
+    rigidBody.updateShape(world, body);
+    rigidBody.setPosition(world, body, _scratchPos, false);
 }
 
-export function update(
-    state: NodeBodies,
-    physics: Physics,
-    sceneTree: SceneTree,
-    store: EditRoomStoreApi,
-    resources: Resources,
-): void {
-    const { nodeToBody, bodyToNode, targetable } = state;
-    const world = physics.rigid.world;
+function removeBody(state: NodeBodies, nodeId: number): void {
+    const entry = state.nodeToBody.get(nodeId);
+    if (!entry) return;
+    const body = rigidBody.get(state.world, entry.bodyId);
+    if (body) rigidBody.remove(state.world, body);
+    state.bodyToNode.delete(entry.bodyId);
+    state.nodeToBody.delete(nodeId);
+}
 
+function unionPartsByFrontierNode(state: NodeBodies, visibility: Visibility): void {
+    const { targetable } = state;
+    const entries = visibility.entries;
+    const transforms = visibility.transforms;
+    _unions.clear();
+    let poolIndex = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        let node: Node | null = transforms[i]!._node;
+        while (node !== null && !targetable.has(node.id)) node = node.parent;
+        if (node === null) continue;
+
+        let union = _unions.get(node.id);
+        if (union === undefined) {
+            if (poolIndex === _boxPool.length) _boxPool.push(box3.create());
+            union = _boxPool[poolIndex]!;
+            poolIndex++;
+            box3.empty(union);
+            _unions.set(node.id, union);
+        }
+        box3.union(union, union, entries[i]!.worldAabb);
+    }
+}
+
+export function update(state: NodeBodies, visibility: Visibility, sceneTree: SceneTree, store: EditRoomStoreApi): void {
     if (state.targetableDirty) {
         recomputeFrontier(state, sceneTree, store);
         state.targetableDirty = false;
-
-        // remove bodies for nodes that left the frontier
-        const toRemove: number[] = [];
-        for (const nodeId of nodeToBody.keys()) {
-            if (!targetable.has(nodeId)) toRemove.push(nodeId);
-        }
-        for (const nodeId of toRemove) {
-            const entry = nodeToBody.get(nodeId)!;
-            const body = rigidBody.get(world, entry.bodyId);
-            if (body) rigidBody.remove(world, body);
-            bodyToNode.delete(entry.bodyId);
-            nodeToBody.delete(nodeId);
-        }
-
-        // structure may have changed (children added/removed, mesh swapped, etc.),
-        // force surviving entries to re-derive their cached local AABB next sync.
-        for (const entry of nodeToBody.values()) entry.localAabb = null;
+    } else if (state.syncedGeneration === visibility.generation) {
+        return;
     }
+    state.syncedGeneration = visibility.generation;
 
-    for (const nodeId of targetable) {
-        const node = getNodeById(sceneTree, nodeId);
-        if (!node) continue;
-        const transform = getTrait(node, TransformTrait);
-        if (!transform) continue;
+    const { nodeToBody, bodyToNode, targetable, world } = state;
 
+    unionPartsByFrontierNode(state, visibility);
+
+    _toRemove.length = 0;
+    for (const nodeId of nodeToBody.keys()) {
+        if (!targetable.has(nodeId) || !_unions.has(nodeId)) _toRemove.push(nodeId);
+    }
+    for (const nodeId of _toRemove) removeBody(state, nodeId);
+
+    for (const [nodeId, union] of _unions) {
         const existing = nodeToBody.get(nodeId);
-
-        if (existing?.localAabb) {
-            if (existing.lastVersion === transform._version) {
-                continue;
-            }
-            const iwm = getVisualWorldMatrix(transform);
-            box3.transformMat4(_worldAabb, existing.localAabb, iwm);
-            existing.lastVersion = transform._version;
-            syncBodyToWorldAabb(physics, existing, _worldAabb);
-            continue;
-        }
-
-        box3.set(_worldAabb, Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
-        if (!unionSubtreeWorldAabb(node, resources, _worldAabb)) {
-            const wm = getVisualWorldMatrix(transform);
-            const wx = wm[12];
-            const wy = wm[13];
-            const wz = wm[14];
-            box3.set(
-                _worldAabb,
-                wx - FALLBACK_PICK_HALF_EXTENT,
-                wy - FALLBACK_PICK_HALF_EXTENT,
-                wz - FALLBACK_PICK_HALF_EXTENT,
-                wx + FALLBACK_PICK_HALF_EXTENT,
-                wy + FALLBACK_PICK_HALF_EXTENT,
-                wz + FALLBACK_PICK_HALF_EXTENT,
-            );
-        }
-
-        // derive node-local AABB once: localAabb = inverse(rootWorld) * worldAabb
-        const rootIwm = getVisualWorldMatrix(transform);
-        if (!mat4.invert(_invMat, rootIwm)) {
-            // singular matrix (zero scale, etc.), skip; will retry next frame.
-            continue;
-        }
-        const localAabb = box3.create();
-        box3.transformMat4(localAabb, _worldAabb, _invMat);
-
         if (existing) {
-            existing.localAabb = localAabb;
-            existing.lastVersion = transform._version;
-            syncBodyToWorldAabb(physics, existing, _worldAabb);
-        } else {
-            const hx = Math.max((_worldAabb[3] - _worldAabb[0]) * 0.5, 0.01);
-            const hy = Math.max((_worldAabb[4] - _worldAabb[1]) * 0.5, 0.01);
-            const hz = Math.max((_worldAabb[5] - _worldAabb[2]) * 0.5, 0.01);
-            const cx = (_worldAabb[0] + _worldAabb[3]) * 0.5;
-            const cy = (_worldAabb[1] + _worldAabb[4]) * 0.5;
-            const cz = (_worldAabb[2] + _worldAabb[5]) * 0.5;
-            const shape = box.create({ halfExtents: [hx, hy, hz] });
-            const body = rigidBody.create(world, {
-                shape,
-                objectLayer: OBJECT_LAYER_EDITOR_NODES,
-                motionType: MotionType.STATIC,
-                position: [cx, cy, cz],
-                sensor: true,
-            });
-            nodeToBody.set(nodeId, { bodyId: body.id, shape, localAabb, lastVersion: transform._version });
-            bodyToNode.set(body.id, nodeId);
+            syncBodyToWorldAabb(world, existing, union);
+            continue;
         }
+        const hx = Math.max((union[3] - union[0]) * 0.5, 0.01);
+        const hy = Math.max((union[4] - union[1]) * 0.5, 0.01);
+        const hz = Math.max((union[5] - union[2]) * 0.5, 0.01);
+        const cx = (union[0] + union[3]) * 0.5;
+        const cy = (union[1] + union[4]) * 0.5;
+        const cz = (union[2] + union[5]) * 0.5;
+        const shape = box.create({ halfExtents: [hx, hy, hz] });
+        const body = rigidBody.create(world, {
+            shape,
+            objectLayer: OBJECT_LAYER_EDITOR_NODES,
+            motionType: MotionType.STATIC,
+            position: [cx, cy, cz],
+            sensor: true,
+        });
+        nodeToBody.set(nodeId, { bodyId: body.id, shape });
+        bodyToNode.set(body.id, nodeId);
     }
 }
 

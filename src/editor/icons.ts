@@ -1,5 +1,6 @@
 import type { EngineClient } from '../client/client';
 import { prefabIconRelPath } from '../client/prefab-icons';
+import type { Resources } from '../core/resources';
 import { useEditor } from './editor-store';
 
 /** the object URL the store currently holds, revoked when it is replaced. */
@@ -61,6 +62,33 @@ async function loadBakedBlockIcons(): Promise<void> {
     } catch (err) {
         // the bake said the artifact was there, so a failure here is real, not a race with a write.
         console.error('[editor] block icon atlas failed to load', err);
+    }
+}
+
+let spriteAtlasInFlight: string | null = null;
+
+/** called by `SpriteIcon` on display; reloads when the resources' atlas hash moves past the published one. */
+export function ensureSpriteAtlasUrl(): void {
+    const resources = useEditor.getState().resources;
+    const meta = resources?.spriteAtlas;
+    if (!resources || !meta) return;
+    if (useEditor.getState().spriteAtlasHash === meta.hash || spriteAtlasInFlight === meta.hash) return;
+    spriteAtlasInFlight = meta.hash;
+    void loadSpriteAtlasUrl(resources.loader, meta.hash);
+}
+
+async function loadSpriteAtlasUrl(loader: Resources['loader'], hash: string): Promise<void> {
+    try {
+        const png = await loader.loadBytes('sprites-atlas.png');
+        if (spriteAtlasInFlight !== hash) return;
+        const url = pngBytesToObjectUrl(png);
+        const previous = useEditor.getState().spriteAtlasUrl;
+        if (previous) URL.revokeObjectURL(previous);
+        useEditor.setState({ spriteAtlasUrl: url, spriteAtlasHash: hash });
+    } catch (err) {
+        console.error('[editor] sprite atlas failed to load', err);
+    } finally {
+        if (spriteAtlasInFlight === hash) spriteAtlasInFlight = null;
     }
 }
 

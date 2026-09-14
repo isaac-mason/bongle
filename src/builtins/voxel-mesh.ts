@@ -1,6 +1,6 @@
 import type { Vec4 } from 'math';
-import { type TraitType } from '../core/scene/traits';
 import { trait } from '../core/registry';
+import type { TraitType } from '../core/scene/traits';
 import { VoxelModel } from '../core/voxels/voxel-model';
 import type { Voxels } from '../core/voxels/voxels';
 import type { VoxelMeshState } from '../render/voxels/voxel-mesh-visuals';
@@ -61,7 +61,7 @@ export const VoxelMeshTrait = trait(
         /** renderer-internal allocation state. */
         _state: null as VoxelMeshState | null,
     },
-    { persist: false },
+    { icon: 'kit:icon:voxels', persist: false },
 );
 
 export type VoxelMeshTrait = TraitType<typeof VoxelMeshTrait>;

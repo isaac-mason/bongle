@@ -660,8 +660,17 @@ function build(): DebugDashboard {
     // player and predicted bodies. non-owned dynamic bodies run kinematic on the client
     // and edit mode clamps everything static, so the motion-type split differs by side.
     const physics = tabs.tab('physics');
+    const clientPhysics = physics.folder('client');
+    clientPhysics.add(
+        { get: () => useClient.getState().showPhysicsColliders, set: (v) => useClient.getState().setShowPhysicsColliders(v) },
+        { label: 'colliders', listen: true },
+    );
+    clientPhysics.add(
+        { get: () => useClient.getState().showPhysicsContacts, set: (v) => useClient.getState().setShowPhysicsContacts(v) },
+        { label: 'contacts', listen: true },
+    );
+    addPhysicsSide(clientPhysics, clientProfiler, SMOOTH_TICK);
     addPhysicsSide(physics.folder('server'), serverProfiler, SMOOTH_SERVER);
-    addPhysicsSide(physics.folder('client'), clientProfiler, SMOOTH_TICK);
 
     // net/in/*, net/out/* per-message-type breakdowns are recorded client-side only;
     // the server records only its totals.

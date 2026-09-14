@@ -52,6 +52,9 @@ export type EditorStore = {
     blockIconRows: number;
     /** prefabId -> object URL, rendered per-prefab in-browser on demand. absent = not yet rendered. */
     prefabIconUrls: Record<string, string>;
+    /** the baked sprite atlas png as an object URL, for kit icons drawn in the DOM; `spriteAtlasHash` says which bake it is. */
+    spriteAtlasUrl: string | null;
+    spriteAtlasHash: string | null;
 
     /** which perspective the user is viewing the scene through; only present while a play-mode
      *  player has a lens, seeded by enterLocalEditorView and cleared by exitLocalEditorView. */
@@ -70,8 +73,18 @@ export type EditorStore = {
     netSimBurstMs: number;
     netSimBurstChance: number;
 
-    showPhysicsColliders: boolean;
     showGrid: boolean;
+    /** edit-lens overlays, each independently switchable from the options tab. */
+    showMarkers: boolean;
+    showOutlines: boolean;
+    showHandles: boolean;
+    showRelationshipLines: boolean;
+    showNames: boolean;
+    setShowMarkers: (show: boolean) => void;
+    setShowOutlines: (show: boolean) => void;
+    setShowHandles: (show: boolean) => void;
+    setShowRelationshipLines: (show: boolean) => void;
+    setShowNames: (show: boolean) => void;
     showOrientationCube: boolean;
     showChunkBoundaries: boolean;
 
@@ -98,7 +111,6 @@ export type EditorStore = {
     setNetSimJitterMs: (ms: number) => void;
     setNetSimBurstMs: (ms: number) => void;
     setNetSimBurstChance: (chance: number) => void;
-    setShowPhysicsColliders: (show: boolean) => void;
     setShowGrid: (show: boolean) => void;
     setShowOrientationCube: (show: boolean) => void;
     setShowChunkBoundaries: (show: boolean) => void;
@@ -145,6 +157,8 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     blockIconCols: 0,
     blockIconRows: 0,
     prefabIconUrls: {},
+    spriteAtlasUrl: null,
+    spriteAtlasHash: null,
 
     playerToView: new Map(),
     lenses: new Map(),
@@ -155,8 +169,17 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     netSimBurstMs: 0,
     netSimBurstChance: 0.02,
 
-    showPhysicsColliders: false,
     showGrid: false,
+    showMarkers: true,
+    showOutlines: true,
+    showHandles: true,
+    showRelationshipLines: true,
+    showNames: true,
+    setShowMarkers: (showMarkers) => set({ showMarkers }),
+    setShowOutlines: (showOutlines) => set({ showOutlines }),
+    setShowHandles: (showHandles) => set({ showHandles }),
+    setShowRelationshipLines: (showRelationshipLines) => set({ showRelationshipLines }),
+    setShowNames: (showNames) => set({ showNames }),
     showOrientationCube: false,
     showChunkBoundaries: false,
 
@@ -241,7 +264,6 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setNetSimJitterMs: (netSimJitterMs) => set({ netSimJitterMs }),
     setNetSimBurstMs: (netSimBurstMs) => set({ netSimBurstMs }),
     setNetSimBurstChance: (netSimBurstChance) => set({ netSimBurstChance }),
-    setShowPhysicsColliders: (showPhysicsColliders) => set({ showPhysicsColliders }),
     setShowGrid: (showGrid) => set({ showGrid }),
     setShowOrientationCube: (showOrientationCube) => set({ showOrientationCube }),
     setShowChunkBoundaries: (showChunkBoundaries) => set({ showChunkBoundaries }),

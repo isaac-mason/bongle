@@ -18,14 +18,22 @@ export type TextureComputedOptions<I extends Record<string, TextureHandle>, P ex
     fn: DrawFn<DrawInputs, P>;
 };
 
+/** A texture that is a rectangle of another texture. */
+export type TextureRegionOptions = {
+    of: TextureHandle;
+    /** x, y, w, h in source pixels. */
+    region: [number, number, number, number];
+};
+
 export type TextureOptions<
     I extends Record<string, TextureHandle> = Record<string, TextureHandle>,
     P extends DrawParams = DrawParams,
-> = TextureFileOptions | TextureComputedOptions<I, P>;
+> = TextureFileOptions | TextureComputedOptions<I, P> | TextureRegionOptions;
 
 /** The declared data for one texture, hashed and swapped wholesale on re-declaration. `inputs` holds `DepKey`s rather than live handles so the def stays plain data. */
 export type TextureDef =
     | { id: string; from: 'file'; src: string }
+    | { id: string; from: 'region'; of: DepKey; region: [number, number, number, number] }
     | {
           id: string;
           from: 'computed';
@@ -51,8 +59,15 @@ export function isComputedOptions<I extends Record<string, TextureHandle>, P ext
     return 'fn' in options;
 }
 
+export function isRegionOptions<I extends Record<string, TextureHandle>, P extends DrawParams>(
+    options: TextureOptions<I, P>,
+): options is TextureRegionOptions {
+    return 'region' in options;
+}
+
 /** The texture ids a computed texture draws from, for `deps`. A file texture has none. */
 export function textureInputDeps(def: TextureDef): DepKey[] {
     if (def.from === 'file') return [];
+    if (def.from === 'region') return [def.of];
     return Object.values(def.inputs);
 }

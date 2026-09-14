@@ -10,18 +10,72 @@ export type Chunk = {
 export type Selection = {
     chunks: Map<string, Chunk>;
     nodes: Set<number>;
+    /** the node handles, the detail card and the inspector focus on; null falls back to the last node added. */
+    active: number | null;
 };
 
 export function create(): Selection {
-    return { chunks: new Map(), nodes: new Set() };
+    return { chunks: new Map(), nodes: new Set(), active: null };
 }
 
 export function clone(src: Selection): Selection {
-    const dst: Selection = { chunks: new Map(), nodes: new Set(src.nodes) };
+    const dst: Selection = { chunks: new Map(), nodes: new Set(src.nodes), active: src.active };
     for (const [key, chunk] of src.chunks) {
         dst.chunks.set(key, { bits: new Uint32Array(chunk.bits) });
     }
     return dst;
+}
+
+// transitions: every editor change to a selection is one of these; nothing else spells out the shape.
+// node-only transitions share the voxel chunks by reference, voxel transitions copy them first.
+
+export function ofNode(nodeId: number): Selection {
+    return { chunks: new Map(), nodes: new Set([nodeId]), active: nodeId };
+}
+
+export function withNode(sel: Selection, nodeId: number): Selection {
+    const nodes = new Set(sel.nodes);
+    nodes.add(nodeId);
+    return { chunks: sel.chunks, nodes, active: nodeId };
+}
+
+export function withoutNode(sel: Selection, nodeId: number): Selection {
+    const nodes = new Set(sel.nodes);
+    nodes.delete(nodeId);
+    return { chunks: sel.chunks, nodes, active: sel.active === nodeId ? null : sel.active };
+}
+
+/** replaces the nodes, keeps the voxels; `active` defaults to the last id given. */
+export function withNodes(sel: Selection, nodeIds: Iterable<number>, active: number | null = null): Selection {
+    return { chunks: sel.chunks, nodes: new Set(nodeIds), active };
+}
+
+export function nodesOnly(sel: Selection): Selection {
+    return { chunks: new Map(), nodes: sel.nodes, active: sel.active };
+}
+
+export function voxelsOnly(sel: Selection): Selection {
+    return { chunks: sel.chunks, nodes: new Set(), active: null };
+}
+
+export function ofVoxel(wx: number, wy: number, wz: number): Selection {
+    const sel = create();
+    set(sel, wx, wy, wz);
+    return sel;
+}
+
+export function withVoxelToggled(sel: Selection, wx: number, wy: number, wz: number): Selection {
+    const next = clone(sel);
+    if (has(next, wx, wy, wz)) unset(next, wx, wy, wz);
+    else set(next, wx, wy, wz);
+    return next;
+}
+
+export function activeNode(sel: Selection): number | null {
+    if (sel.active !== null && sel.nodes.has(sel.active)) return sel.active;
+    let last: number | null = null;
+    for (const id of sel.nodes) last = id;
+    return last;
 }
 
 function ensureChunk(sel: Selection, cx: number, cy: number, cz: number): Chunk {

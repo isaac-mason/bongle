@@ -72,6 +72,25 @@ describe('buildSpriteAtlas', () => {
         expect(meta.sprites.sword.frames).toHaveLength(1);
     });
 
+    it('takes a region frame from the baked map like a computed one', async () => {
+        const sheet = texture('sheet', { src: 'sheet.png' });
+        const cut = texture('sheet:a', { of: sheet, region: [0, 0, 5, 7] });
+        sprite('glyph-a', { frames: [cut], mipmap: false });
+
+        const fs = fakeFs();
+        await buildSpriteAtlas(registry.sprites, {
+            bakedTextures: new Map([['sheet:a', { width: 5, height: 7 } as unknown as RasterCanvas]]),
+            textures: textureStore,
+            cache: false,
+            loader: fakeLoader,
+            fs,
+            raster: fakeRaster(),
+        });
+
+        const frame = sidecar(fs).sprites['glyph-a'].frames[0];
+        expect(frame).toMatchObject({ w: 5, h: 7 });
+    });
+
     it('takes a computed frame from the baked map, keyed by texture id', async () => {
         const tex = texture('spark', { size: [4, 4], fn: () => {} });
         sprite('spark', { frames: [tex] });

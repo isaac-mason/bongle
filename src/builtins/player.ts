@@ -1,8 +1,7 @@
+import { sync, trait } from '../core/registry';
 import { pack } from '../core/scene/pack';
 import { dirty } from '../core/scene/sync/sync-rate';
-import { type TraitType } from '../core/scene/traits';
-import { trait } from '../core/registry';
-import { sync } from '../core/registry';
+import type { TraitType } from '../core/scene/traits';
 
 /**
  * marks a node as the in-scene body of a specific Player, one (client, room, mode) view.
@@ -29,7 +28,7 @@ export const PlayerTrait = trait(
          */
         viewRadius: 8,
     },
-    { persist: false },
+    { icon: 'kit:icon:player', persist: false },
 );
 
 export type PlayerTrait = TraitType<typeof PlayerTrait>;

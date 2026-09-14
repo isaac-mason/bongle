@@ -1,9 +1,11 @@
 import { type BodyId, box, dof, MotionType, rigidBody } from 'crashcat';
 import type { PerspectiveCamera } from 'gpucat';
-import { Object3D, type Scene, TransformControls } from 'gpucat';
-import { type Quat, quat, type Vec3, vec3 } from 'math';
+import { Object3D, type Scene } from 'gpucat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
+import { MarkerTrait } from '../../builtins/marker';
 import {
+    getVisualWorldMatrix,
     getVisualWorldPosition,
     getVisualWorldQuaternion,
     markTransformDirty,
@@ -12,17 +14,28 @@ import {
 } from '../../builtins/transform';
 import { createVoxelModel, VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import type { Input, MouseKeyboardInput } from '../../client/input';
-import { isKeyJustDown } from '../../client/input';
+import {
+    getCursor,
+    isKeyDown,
+    isKeyJustDown,
+    isModDown,
+    isMouseDown,
+    isMouseJustDown,
+    isMouseJustUp,
+    isMouseLocked,
+} from '../../client/input';
 import type { Physics } from '../../core/physics/physics';
 import { OBJECT_LAYER_NODE_MOVING } from '../../core/physics/physics';
 import { registry } from '../../core/registry';
 import type { Resources } from '../../core/resources';
 import { prefabHasVoxels } from '../../core/scene/prefab';
+import { getAtPath, setAtPath } from '../../core/scene/prop/path';
 import type { Node, SceneTree, SerializedNode } from '../../core/scene/scene-tree';
 import { addChild, addTrait, createNode, deserializeNode, destroyNode, getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
+import { type ControlDef, cloneTraitValue, type TraitBase } from '../../core/scene/traits';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { setTraitProps } from '../actions';
@@ -30,10 +43,11 @@ import type { Blueprint as BlueprintData, VoxelOp } from '../blueprint';
 import * as Blueprint from '../blueprint';
 import { readNudgeDelta, snapCardinal, yawFromQuat } from '../camera';
 import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand } from '../commands';
-import type { EditRoomStoreApi } from '../edit-room-store';
+import type { ActiveFrame, EditRoomStoreApi } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { unionSubtreeWorldAabb } from '../node-aabb';
+import * as TransformControls from '../transform-controls';
 import { commitVoxelOps } from '../voxel-edit';
 
 type TransformSnapshot = {
@@ -90,6 +104,18 @@ export type PlacementState = {
 };
 
 // single nullable object on TransformToolState; the body is created directly in the physics world and destroyed the moment grab ends.
+type FrameDrag = ActiveFrame & { startValue: unknown };
+
+type ResolvedFrame = {
+    activeFrame: ActiveFrame;
+    node: Node;
+    transform: TransformTrait;
+    control: ControlDef;
+    instance: TraitBase;
+    /** the object at `activeFrame.path` inside the control's value. */
+    local: Record<string, unknown>;
+};
+
 export type GrabState = {
     nodeId: number;
     bodyId: BodyId;
@@ -111,7 +137,7 @@ export type GrabState = {
 
 export type TransformToolState = {
     store: EditRoomStoreApi;
-    gizmo: TransformControls;
+    gizmo: TransformControls.TransformControls;
     proxy: Object3D;
     scene: Scene;
 
@@ -125,6 +151,16 @@ export type TransformToolState = {
 
     _unsubs: (() => void)[];
     dragging: boolean;
+    /** set for the duration of a drag that writes a sub-frame instead of node transforms. */
+    frameDrag: FrameDrag | null;
+    /** a keyboard-started drag: the pointer moves it without a button held, a click commits, Escape cancels. */
+    instantDrag: boolean;
+    /** the click that committed an instant drag this frame; the inspect tool must not also select with it. */
+    consumedClick: boolean;
+    /** the snap modifier is held: snapping flips for the drag. */
+    invertSnap: boolean;
+    /** the translate grid for this frame's drag, null = free; nodes snap to it, the gizmo follows the node. */
+    translateStep: number | null;
 
     // null outside placement mode; set in enterPlacement, cleared in _exitPlacementState.
     placement: PlacementState | null;
@@ -145,7 +181,6 @@ export type TransformToolState = {
 // callers must keep `state.gizmo.camera` pointed at the active POV camera each frame.
 export function createTransformTool(
     camera: PerspectiveCamera,
-    canvas: HTMLElement,
     scene: Scene,
     sceneTree: SceneTree,
     ctx: ScriptContext,
@@ -154,8 +189,8 @@ export function createTransformTool(
     // proxy must be in the scene so gizmo can read parent world matrix
     scene.add(proxy);
 
-    const gizmo = new TransformControls(camera, canvas);
-    scene.add(gizmo.getHelper());
+    const gizmo = TransformControls.init(camera);
+    scene.add(gizmo.root);
 
     const state: TransformToolState = {
         store: null as unknown as EditRoomStoreApi,
@@ -169,6 +204,11 @@ export function createTransformTool(
         proxyStartScale: vec3.fromValues(1, 1, 1),
         _unsubs: [],
         dragging: false,
+        frameDrag: null,
+        instantDrag: false,
+        consumedClick: false,
+        invertSnap: false,
+        translateStep: null,
         placement: null,
         _ghostNodes: new Set(),
         grab: null,
@@ -178,6 +218,16 @@ export function createTransformTool(
 
     const unsubDown = gizmo.onMouseDown.add(() => {
         state.dragging = true;
+
+        const frame = _resolveActiveFrame(state, sceneTree);
+        if (frame) {
+            state.frameDrag = { ...frame.activeFrame, startValue: cloneTraitValue(frame.control.get(frame.instance) as object) };
+            state.snapshots = [];
+            vec3.copy(state.proxyStartPosition, proxy.position);
+            quat.copy(state.proxyStartQuaternion, proxy.quaternion);
+            return;
+        }
+        state.frameDrag = null;
 
         if (state.placement && !state.placement.placed) {
             state.placement.placed = true;
@@ -217,31 +267,36 @@ export function createTransformTool(
 
         const mode = gizmo.mode;
 
+        if (state.frameDrag) {
+            _applyFrameDrag(state, sceneTree, mode);
+            return;
+        }
+
         if (mode === 'translate') {
-            // face-center snaps X/Z to integer+0.5 and Y to integer; corner snaps to the integer voxel grid.
-            const useFaceCenter = _effectiveSnapTo(state) === 'face-center';
+            const faceCenter = _effectiveSnapTo(state) === 'face-center';
+            const step = state.translateStep;
 
             const dx = proxy.position[0] - state.proxyStartPosition[0];
             const dy = proxy.position[1] - state.proxyStartPosition[1];
             const dz = proxy.position[2] - state.proxyStartPosition[2];
 
+            let first: TransformSnapshot | null = null;
             for (const snap of state.snapshots) {
                 const node = getNodeById(sceneTree, snap.nodeId);
                 if (!node) continue;
                 const t = getTrait(node, TransformTrait);
                 if (!t) continue;
-                let nx = snap.position[0] + dx;
-                let ny = snap.position[1] + dy;
-                let nz = snap.position[2] + dz;
-                if (useFaceCenter) {
-                    nx = Math.floor(nx) + 0.5;
-                    ny = Math.round(ny);
-                    nz = Math.floor(nz) + 0.5;
-                }
-                t.position[0] = nx;
-                t.position[1] = ny;
-                t.position[2] = nz;
+                t.position[0] = snapAxis(snap.position[0] + dx, step, faceCenter);
+                t.position[1] = snapAxis(snap.position[1] + dy, step, false);
+                t.position[2] = snapAxis(snap.position[2] + dz, step, faceCenter);
                 markTransformDirty(t);
+                if (first === null) {
+                    first = snap;
+                    // the gizmo sits on the node: the proxy takes the snapped delta, the next pointer move re-derives from start.
+                    proxy.position[0] = state.proxyStartPosition[0] + (t.position[0] - snap.position[0]);
+                    proxy.position[1] = state.proxyStartPosition[1] + (t.position[1] - snap.position[1]);
+                    proxy.position[2] = state.proxyStartPosition[2] + (t.position[2] - snap.position[2]);
+                }
             }
         } else if (mode === 'rotate') {
             const invStart: Quat = quat.create();
@@ -372,6 +427,10 @@ export function createTransformTool(
 
     const unsubUp = gizmo.onMouseUp.add(() => {
         state.dragging = false;
+        if (state.frameDrag) {
+            _commitFrameDrag(state, sceneTree, ctx);
+            return;
+        }
         if (state.snapshots.length === 0) return;
 
         // placement drags are ephemeral, no undo entry until commit
@@ -439,17 +498,111 @@ export function createTransformTool(
     return state;
 }
 
+const _pointer = { x: 0, y: 0, button: 0 };
+const DRAG_MOVE_BUTTON = -1;
+
+// corner: the grid; face-center: the middle of the cell on the horizontal axes; no step: free.
+function snapAxis(value: number, step: number | null, faceCenter: boolean): number {
+    if (step === null) return value;
+    if (faceCenter) return Math.floor(value / step) * step + step / 2;
+    return Math.round(value / step) * step;
+}
+const SNAP_DEFAULT_TRANSLATION = 1;
+const SNAP_DEFAULT_ROTATION_DEG = 15;
+const SNAP_DEFAULT_SCALE = 0.25;
+
+export function feedPointer(state: TransformToolState, mk: MouseKeyboardInput): void {
+    state.consumedClick = false;
+    state.invertSnap = isModDown(mk);
+    if (!state.gizmoAttached || isMouseLocked(mk)) return;
+    const cursor = getCursor(mk);
+    _pointer.x = cursor.ndcX;
+    _pointer.y = cursor.ndcY;
+    const gizmo = state.gizmo;
+    if (state.instantDrag) {
+        if (isMouseJustDown(mk, 'left')) {
+            _pointer.button = 0;
+            TransformControls.pointerUp(gizmo, _pointer);
+            state.instantDrag = false;
+            state.consumedClick = true;
+        } else if (isMouseJustDown(mk, 'right')) {
+            cancelDrag(state);
+        } else {
+            _pointer.button = DRAG_MOVE_BUTTON;
+            TransformControls.pointerMove(gizmo, _pointer);
+        }
+        return;
+    }
+    if (isMouseJustDown(mk, 'left')) {
+        _pointer.button = 0;
+        TransformControls.pointerHover(gizmo, _pointer);
+        TransformControls.pointerDown(gizmo, _pointer);
+    } else if (isMouseJustUp(mk, 'left')) {
+        _pointer.button = 0;
+        TransformControls.pointerUp(gizmo, _pointer);
+    } else if (gizmo.dragging && isMouseDown(mk, 'left')) {
+        _pointer.button = DRAG_MOVE_BUTTON;
+        TransformControls.pointerMove(gizmo, _pointer);
+    } else {
+        _pointer.button = 0;
+        TransformControls.pointerHover(gizmo, _pointer);
+    }
+}
+
+export function layoutGizmo(state: TransformToolState): void {
+    if (state.gizmoAttached) TransformControls.update(state.gizmo);
+}
+
+const INSTANT_DRAG_AXIS = { translate: 'XYZ', rotate: 'E', scale: 'XYZ' } as const;
+
+/** start a drag of `mode` from the cursor without a handle press. */
+export function beginInstantDrag(state: TransformToolState, mode: 'translate' | 'rotate' | 'scale'): void {
+    if (!state.gizmoAttached || state.gizmo.dragging || state.placement || state.grab) return;
+    state.store.setState({ transformMode: mode });
+    state.gizmo.mode = mode;
+    TransformControls.update(state.gizmo);
+    TransformControls.beginDrag(state.gizmo, _pointer, INSTANT_DRAG_AXIS[mode]);
+    state.instantDrag = state.gizmo.dragging;
+}
+
+/** abandon the current drag; nodes return to their start poses with no history entry. */
+export function cancelDrag(state: TransformToolState): void {
+    if (!state.gizmo.dragging) return;
+    TransformControls.cancelDrag(state.gizmo);
+    state.dragging = false;
+    state.snapshots = [];
+    state.frameDrag = null;
+    state.instantDrag = false;
+}
+
+const AXIS_LOCK_KEYS: Array<{ key: string; axis: 'X' | 'Y' | 'Z'; plane: 'YZ' | 'XZ' | 'XY' }> = [
+    { key: 'KeyX', axis: 'X', plane: 'YZ' },
+    { key: 'KeyY', axis: 'Y', plane: 'XZ' },
+    { key: 'KeyZ', axis: 'Z', plane: 'XY' },
+];
+
+// X / Y / Z lock the drag to an axis, Shift + key to the plane across it (translate and scale only); the same key again frees it.
+function handleAxisLockKeys(state: TransformToolState, mk: MouseKeyboardInput): void {
+    const gizmo = state.gizmo;
+    for (const { key, axis, plane } of AXIS_LOCK_KEYS) {
+        if (!isKeyJustDown(mk, key)) continue;
+        const wantPlane = gizmo.mode !== 'rotate' && (isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight'));
+        const next = wantPlane ? plane : axis;
+        const free = gizmo.mode === 'rotate' ? 'E' : 'XYZ';
+        TransformControls.setDragAxis(gizmo, _pointer, gizmo.axis === next ? free : next);
+    }
+}
+
 export function disposeTransformTool(state: TransformToolState): void {
     for (const unsub of state._unsubs) unsub();
     state._unsubs.length = 0;
 
     if (state.gizmoAttached) {
-        state.gizmo.detach();
+        TransformControls.detach(state.gizmo);
         state.gizmoAttached = false;
     }
-    state.gizmo.disconnect();
-    state.scene.remove(state.gizmo.getHelper());
-    state.gizmo.dispose();
+    state.scene.remove(state.gizmo.root);
+    TransformControls.dispose(state.gizmo);
     state.scene.remove(state.proxy);
 }
 
@@ -457,9 +610,9 @@ const _centroid: Vec3 = [0, 0, 0];
 const _placeScratch: Vec3 = [0, 0, 0];
 
 /** sync the gizmo with the current selection (or placement root) and store settings; call every frame while activeTool === 'transform'. */
-export function updateTransformTool(state: TransformToolState, sceneTree: SceneTree): Vec3 | null {
+export function updateTransformTool(state: TransformToolState, sceneTree: SceneTree, resources: Resources): Vec3 | null {
     const storeState = state.store.getState();
-    const { transformMode, transformSpace, translationSnap, rotationSnap, scaleSnap } = storeState;
+    const { transformMode, transformSpace, translationSnap, rotationSnap, scaleSnap, selectionPivot } = storeState;
 
     // place mode: no gizmo, ghost follows cursor (driven externally via updatePlacementFromRaycast)
     if (transformMode === 'place') {
@@ -488,25 +641,51 @@ export function updateTransformTool(state: TransformToolState, sceneTree: SceneT
         return null;
     }
 
+    const frame = state.dragging && state.frameDrag ? null : _resolveActiveFrame(state, sceneTree);
+
     // voxel content lives on the integer grid and can't be sub-unit scaled, so force grid-aligned snaps and block scale mode.
     let gizmoMode = transformMode as 'translate' | 'rotate' | 'scale';
     let effectiveTranslationSnap = translationSnap;
     let effectiveRotationSnap = rotationSnap;
-    const effectiveScaleSnap = scaleSnap;
-    if (computeTransformHasVoxels(state, sceneTree)) {
+    let effectiveScaleSnap = scaleSnap;
+    let snapForced = false;
+    if (frame || state.frameDrag) {
+        if (gizmoMode === 'scale') {
+            gizmoMode = 'translate';
+            state.store.setState({ transformMode: 'translate' });
+        }
+    } else if (computeTransformHasVoxels(state, sceneTree)) {
         effectiveTranslationSnap = 1;
         effectiveRotationSnap = 90;
+        snapForced = true;
         if (gizmoMode === 'scale') {
             gizmoMode = 'translate';
             state.store.setState({ transformMode: 'translate' });
         }
     }
+    // the modifier flips snapping for the drag: off becomes the default step, on becomes free.
+    if (state.invertSnap && !snapForced) {
+        effectiveTranslationSnap = effectiveTranslationSnap ? null : SNAP_DEFAULT_TRANSLATION;
+        effectiveRotationSnap = effectiveRotationSnap ? null : SNAP_DEFAULT_ROTATION_DEG;
+        effectiveScaleSnap = effectiveScaleSnap ? null : SNAP_DEFAULT_SCALE;
+    }
 
-    if (state.gizmo.mode !== gizmoMode) state.gizmo.setMode(gizmoMode);
-    if (state.gizmo.space !== transformSpace) state.gizmo.setSpace(transformSpace);
-    state.gizmo.setTranslationSnap(effectiveTranslationSnap);
-    state.gizmo.setRotationSnap(effectiveRotationSnap != null ? effectiveRotationSnap * (Math.PI / 180) : null);
-    state.gizmo.setScaleSnap(effectiveScaleSnap);
+    state.gizmo.mode = gizmoMode;
+    state.gizmo.space = transformSpace;
+    state.gizmo.translationSnap = null;
+    state.translateStep = effectiveTranslationSnap;
+    state.gizmo.rotationSnap = effectiveRotationSnap != null ? effectiveRotationSnap * (Math.PI / 180) : null;
+    state.gizmo.scaleSnap = effectiveScaleSnap;
+
+    if (state.frameDrag) {
+        _ensureGizmoAttached(state);
+        return [...state.proxy.position] as Vec3;
+    }
+    if (frame) {
+        _ensureGizmoAttached(state);
+        if (!state.dragging) _frameWorldPose(frame, state.proxy);
+        return [...state.proxy.position] as Vec3;
+    }
 
     // in placement mode, drive proxy from root ghost node only
     if (state.placement) {
@@ -531,7 +710,10 @@ export function updateTransformTool(state: TransformToolState, sceneTree: SceneT
     _ensureGizmoAttached(state);
 
     if (!state.dragging) {
-        if (selectedNodes.length === 1) {
+        if (selectionPivot !== 'center' && _selectionPivotCorner(selectedNodes, resources, selectionPivot, _centroid)) {
+            vec3.copy(state.proxy.position, _centroid);
+            quat.identity(state.proxy.quaternion);
+        } else if (selectedNodes.length === 1) {
             const t = selectedNodes[0]!.transform;
             vec3.copy(state.proxy.position, getVisualWorldPosition(t));
             quat.copy(state.proxy.quaternion, getVisualWorldQuaternion(t));
@@ -605,14 +787,14 @@ function _syncProxyFromPlacementRoot(state: TransformToolState): Vec3 | null {
 
 function _ensureGizmoAttached(state: TransformToolState): void {
     if (!state.gizmoAttached) {
-        state.gizmo.attach(state.proxy);
+        TransformControls.attach(state.gizmo, state.proxy);
         state.gizmoAttached = true;
     }
 }
 
 function _detachGizmo(state: TransformToolState): void {
     if (state.gizmoAttached) {
-        state.gizmo.detach();
+        TransformControls.detach(state.gizmo);
         state.gizmoAttached = false;
     }
 }
@@ -622,12 +804,146 @@ export function detachGizmo(state: TransformToolState): void {
     _detachGizmo(state);
 }
 
+/** where a node lands when placed against a block face: the cell in front of the face, at its face centre or nearest corner. */
+export function placePointOnFace(
+    hitVoxel: [number, number, number],
+    hitNormal: [number, number, number],
+    hitPoint: [number, number, number] | null,
+    snapTo: 'face-center' | 'corner',
+): Vec3 {
+    const [hx, hy, hz] = hitVoxel;
+    const [nx, ny, nz] = hitNormal;
+    if (snapTo === 'face-center') return [hx + nx + (nx === 0 ? 0.5 : 0), hy + ny, hz + nz + (nz === 0 ? 0.5 : 0)];
+    if (hitPoint) {
+        // axes across the face snap to the nearest integer corner; the normal axis takes the cell in front.
+        return [
+            nx !== 0 ? hx + nx : Math.round(hitPoint[0]),
+            ny !== 0 ? hy + ny : Math.round(hitPoint[1]),
+            nz !== 0 ? hz + nz : Math.round(hitPoint[2]),
+        ];
+    }
+    return [hx + nx, hy + ny, hz + nz];
+}
+
 // during placement this is just the root ghost; otherwise it's the current selection.
 function _activeNodeIds(state: TransformToolState): number[] {
     if (state.placement) {
         return [state.placement.rootNode.id];
     }
     return [...state.store.getState().selection.nodes];
+}
+
+const _pivotAabb: Box3 = box3.create();
+
+// min / max corner of the selection's world AABB; false when nothing in the selection has bounds.
+function _selectionPivotCorner(selectedNodes: { node: Node }[], resources: Resources, preset: PivotPreset, out: Vec3): boolean {
+    box3.empty(_pivotAabb);
+    let found = false;
+    for (const { node } of selectedNodes) found = unionSubtreeWorldAabb(node, resources, _pivotAabb) || found;
+    if (!found) return false;
+    if (preset === 'min') vec3.set(out, _pivotAabb[0], _pivotAabb[1], _pivotAabb[2]);
+    else vec3.set(out, _pivotAabb[3], _pivotAabb[4], _pivotAabb[5]);
+    return true;
+}
+
+const _frameLocalPosition: Vec3 = [0, 0, 0];
+const _frameLocalQuaternion: Quat = [0, 0, 0, 1];
+const _frameInvWorld: Mat4 = mat4.create();
+const _frameInvWorldQuaternion: Quat = [0, 0, 0, 1];
+
+// the store's `activeFrame` is a request; it resolves only while its node is the active selection and the path still lands on an object.
+function _resolveActiveFrame(state: TransformToolState, sceneTree: SceneTree): ResolvedFrame | null {
+    const storeState = state.store.getState();
+    const activeFrame = storeState.activeFrame;
+    if (!activeFrame || state.placement) return null;
+    const resolved = _resolveFrame(activeFrame, sceneTree);
+    if (!resolved || Selection.activeNode(storeState.selection) !== activeFrame.nodeId) {
+        state.store.setState({ activeFrame: null });
+        return null;
+    }
+    return resolved;
+}
+
+function _resolveFrame(activeFrame: ActiveFrame, sceneTree: SceneTree): ResolvedFrame | null {
+    const node = getNodeById(sceneTree, activeFrame.nodeId);
+    if (!node) return null;
+    const transform = getTrait(node, TransformTrait);
+    if (!transform) return null;
+    const handle = registry.traits.handles.get(activeFrame.traitId);
+    if (!handle) return null;
+    const control = handle.def.controls.find((c) => c.controlId === activeFrame.controlId);
+    const instance = node.traits[handle.slot];
+    if (!control || !instance) return null;
+    const local = getAtPath(control.get(instance), activeFrame.path);
+    if (local === null || typeof local !== 'object' || Array.isArray(local)) return null;
+    return { activeFrame, node, transform, control, instance, local: local as Record<string, unknown> };
+}
+
+function _frameWorldPose(frame: ResolvedFrame, proxy: Object3D): void {
+    const { position, quaternion } = frame.activeFrame;
+    const localPosition = position ? (frame.local[position] as Vec3 | undefined) : undefined;
+    const localQuaternion = quaternion ? (frame.local[quaternion] as Quat | undefined) : undefined;
+    vec3.transformMat4(
+        proxy.position,
+        localPosition ?? vec3.set(_frameLocalPosition, 0, 0, 0),
+        getVisualWorldMatrix(frame.transform),
+    );
+    quat.multiply(
+        proxy.quaternion,
+        getVisualWorldQuaternion(frame.transform),
+        localQuaternion ?? quat.identity(_frameLocalQuaternion),
+    );
+    vec3.set(proxy.scale, 1, 1, 1);
+}
+
+function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 'translate' | 'rotate' | 'scale'): void {
+    const drag = state.frameDrag!;
+    const frame = _resolveFrame(drag, sceneTree);
+    if (!frame) return;
+    let next: Record<string, unknown> = frame.local;
+    if (mode === 'translate' && drag.position) {
+        mat4.invert(_frameInvWorld, getVisualWorldMatrix(frame.transform));
+        vec3.transformMat4(_frameLocalPosition, state.proxy.position, _frameInvWorld);
+        const step = state.translateStep;
+        next = {
+            ...next,
+            [drag.position]: [
+                snapAxis(_frameLocalPosition[0], step, false),
+                snapAxis(_frameLocalPosition[1], step, false),
+                snapAxis(_frameLocalPosition[2], step, false),
+            ],
+        };
+    } else if (mode === 'rotate' && drag.quaternion) {
+        quat.invert(_frameInvWorldQuaternion, getVisualWorldQuaternion(frame.transform));
+        quat.multiply(_frameLocalQuaternion, _frameInvWorldQuaternion, state.proxy.quaternion);
+        next = { ...next, [drag.quaternion]: [..._frameLocalQuaternion] };
+    } else {
+        return;
+    }
+    const value = setAtPath(frame.control.get(frame.instance), drag.path, next);
+    setTraitProps(sceneTree, frame.node, drag.traitId, { [drag.controlId]: value });
+}
+
+function _commitFrameDrag(state: TransformToolState, sceneTree: SceneTree, ctx: ScriptContext): void {
+    const drag = state.frameDrag!;
+    state.frameDrag = null;
+    const frame = _resolveFrame(drag, sceneTree);
+    if (!frame) return;
+    const finalValue = cloneTraitValue(frame.control.get(frame.instance) as object);
+    const startValue = drag.startValue;
+    const { nodeId, traitId, controlId } = drag;
+    const write = (value: unknown) => {
+        const node = getNodeById(sceneTree, nodeId);
+        if (!node) return;
+        const props = { [controlId]: value };
+        setTraitProps(sceneTree, node, traitId, props);
+        send(ctx, SetTraitCommand, { id: nodeId, traitId, props: JSON.stringify(props) });
+    };
+    state.store.getState().action({
+        label: `transform ${traitId}.${controlId} frame`,
+        do: () => write(finalValue),
+        undo: () => write(startValue),
+    });
 }
 
 /** computes the pivot offset for a preset and blueprint size; 'custom' returns the current store value unchanged. */
@@ -724,7 +1040,7 @@ export function enterPlacement(
         for (const bpNode of blueprint.nodes) {
             const ghostNode = deserializeNode(bpNode);
             addChild(rootNode, ghostNode);
-            _initGhostInterpolation(ghostNode);
+            _quietGhostMarkers(ghostNode);
         }
     }
 
@@ -758,13 +1074,12 @@ export function enterPlacement(
         state.store.setState({ transformMode: 'place' });
     }
 
-    state.store.setState((cur) => ({
-        selection: { chunks: cur.selection.chunks, nodes: new Set([rootNode.id]) },
+    state.store.setState({
         activeTool: 'transform',
         placementActive: true,
         placementIsNodeOnly: !blueprint.hasVoxels,
         transformPivotOffset: [...pivotOffset] as Vec3,
-    }));
+    });
 }
 
 /** updates placement ghost position from a voxel raycast hit, computing positioning based on the hit face normal. */
@@ -784,25 +1099,7 @@ export function updatePlacementFromRaycast(
         const selectedNodeIds = state.store.getState().selection.nodes;
         if (selectedNodeIds.size === 0) return;
 
-        const useFaceCenter = _effectiveSnapTo(state) === 'face-center';
-        let tx: number;
-        let ty: number;
-        let tz: number;
-        if (useFaceCenter) {
-            tx = hx + nx + (nx === 0 ? 0.5 : 0);
-            ty = hy + ny + (ny === 0 ? 0 : 0);
-            tz = hz + nz + (nz === 0 ? 0.5 : 0);
-        } else if (hitPoint) {
-            // for axes perpendicular to the normal, snap to nearest integer corner
-            // of the hovered face. for the normal axis, take the cell-adjacent value.
-            tx = nx !== 0 ? hx + nx : Math.round(hitPoint[0]);
-            ty = ny !== 0 ? hy + ny : Math.round(hitPoint[1]);
-            tz = nz !== 0 ? hz + nz : Math.round(hitPoint[2]);
-        } else {
-            tx = hx + nx;
-            ty = hy + ny;
-            tz = hz + nz;
-        }
+        const [tx, ty, tz] = placePointOnFace(hitVoxel, hitNormal, hitPoint, _effectiveSnapTo(state));
 
         let cxAvg = 0;
         let cyAvg = 0;
@@ -1326,10 +1623,12 @@ export function commitPlacement(state: TransformToolState, sceneTree: SceneTree,
         return;
     }
 
-    state.store.setState((cur) => ({
-        activeTool: 'inspect',
-        selection: { chunks: cur.selection.chunks, nodes: new Set() },
-    }));
+    // what landed is the selection: the created nodes, or the pasted cells.
+    const landed = Selection.withNodes(Selection.create(), createdIds);
+    if (!sourcePrefab) {
+        for (const op of voxelForward) if (op.key !== BLOCK_AIR) Selection.set(landed, op.wx, op.wy, op.wz);
+    }
+    state.store.setState({ activeTool: 'inspect', selection: landed });
 }
 
 /** cancels placement: destroys ghosts and restores cut content if applicable. */
@@ -1340,15 +1639,14 @@ export function cancelPlacement(state: TransformToolState, ctx: ScriptContext): 
     _destroyGhosts(state);
     _exitPlacementState(state);
 
+    // a cancelled cut puts the cells back, and they stay selected the way they were before the cut.
+    const restored = Selection.create();
     if (cutReverseOps && cutReverseOps.length > 0) {
         commitVoxelOps(ctx, cutReverseOps);
+        for (const op of cutReverseOps) if (op.key !== BLOCK_AIR) Selection.set(restored, op.wx, op.wy, op.wz);
     }
 
-    state.store.setState((cur) => ({
-        activeTool: 'inspect',
-        selection: { chunks: cur.selection.chunks, nodes: new Set() },
-        placementContinuous: false,
-    }));
+    state.store.setState({ activeTool: 'inspect', selection: restored, placementContinuous: false });
 }
 
 /** reverts place-mode-with-selection cursor-follow back to the snapshot positions; no history entry is created. */
@@ -1491,12 +1789,11 @@ export function isVoxelPlacement(state: TransformToolState): boolean {
     return state.placement !== null && state.placement.rotation !== null;
 }
 
-// inits interpolated transform values across a freshly deserialized ghost subtree so the first frame doesn't snap from zero.
-function _initGhostInterpolation(node: Node): void {
-    const t = getTrait(node, TransformTrait);
-    if (t) {
-    }
-    for (const child of node.children) _initGhostInterpolation(child);
+// a freshly deserialized ghost subtree is a preview: its markers stay quiet until the placement commits into real nodes.
+function _quietGhostMarkers(node: Node): void {
+    const marker = getTrait(node, MarkerTrait);
+    if (marker) marker.enabled = false;
+    for (const child of node.children) _quietGhostMarkers(child);
 }
 
 function _destroyGhosts(state: TransformToolState): void {
@@ -2007,14 +2304,26 @@ export function handleTransformKeys(
             }
         }
     } else {
-        // switch gizmo mode; suppressed while grabbing so R-hold can drive grab-rotate
+        // mid-drag the keys belong to the drag: axis locks, Escape cancels, nothing else fires.
+        if (state.gizmo.dragging) {
+            handleAxisLockKeys(state, mk);
+            if (isKeyJustDown(mk, 'Escape')) cancelDrag(state);
+            return;
+        }
+
+        // switch gizmo mode; the mode's own key again starts an instant drag from the cursor.
+        // suppressed while grabbing so R-hold can drive grab-rotate.
         if (!isInGrab(state)) {
+            const mode = state.store.getState().transformMode;
             if (isKeyJustDown(mk, TRANSFORM_GIZMO_KEYS.rotate)) {
-                state.store.setState({ transformMode: 'rotate' });
+                if (mode === 'rotate') beginInstantDrag(state, 'rotate');
+                else state.store.setState({ transformMode: 'rotate' });
             } else if (isKeyJustDown(mk, TRANSFORM_GIZMO_KEYS.translate)) {
-                state.store.setState({ transformMode: 'translate' });
+                if (mode === 'translate') beginInstantDrag(state, 'translate');
+                else state.store.setState({ transformMode: 'translate' });
             } else if (isKeyJustDown(mk, TRANSFORM_GIZMO_KEYS.scale)) {
-                state.store.setState({ transformMode: 'scale' });
+                if (mode === 'scale') beginInstantDrag(state, 'scale');
+                else state.store.setState({ transformMode: 'scale' });
             } else if (isKeyJustDown(mk, TRANSFORM_GIZMO_KEYS.place)) {
                 state.store.setState({ transformMode: 'place' });
             } else if (isKeyJustDown(mk, TRANSFORM_GIZMO_KEYS.grab)) {
@@ -2022,19 +2331,12 @@ export function handleTransformKeys(
             }
         }
 
-        // P toggles pivot preset (no-op when not in placement; setPlacementPivot itself bails)
-        if (isKeyJustDown(mk, TRANSFORM_OTHER_KEYS.togglePivot)) {
-            const current = state.placement?.pivotPreset ?? 'center';
-            const presets: PivotPreset[] = ['min', 'center', 'max'];
-            const idx = presets.indexOf(current);
-            const next = presets[(idx + 1) % 3];
-            setPlacementPivot(state, next);
-        }
-
-        // Escape clears selection first, then returns to inspect
+        // Escape returns the gizmo to the node, then clears selection, then returns to inspect
         if (isKeyJustDown(mk, 'Escape')) {
-            if (state.store.getState().selection.nodes.size > 0) {
-                state.store.getState().clearSelection();
+            if (state.store.getState().activeFrame !== null) {
+                state.store.setState({ activeFrame: null });
+            } else if (state.store.getState().selection.nodes.size > 0) {
+                state.store.getState().clearNodeSelection();
             } else {
                 state.store.setState({ activeTool: 'inspect' });
             }

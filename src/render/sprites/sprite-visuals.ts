@@ -285,7 +285,7 @@ function destroyInstance(
 /** Release `state.slot` via swap-pop: move the slot at `head-1` into the
  *  freed position so `[0, head)` stays dense. Copies the GPU-mirror bytes
  *  on the CPU side; caller flushes `needsUpdate` once at end of frame. */
-function freeSlot(batch: SpriteBatch, state: SpriteVisualState): void {
+export function freeSlot(batch: SpriteBatch, state: { slot: number }): void {
     const s = state.slot;
     const last = --batch.head;
     if (s !== last) {

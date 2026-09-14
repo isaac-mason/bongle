@@ -6,13 +6,12 @@ import { pack } from '../api/pack';
 import { COLLISION_GROUP_CHARACTERS, exceptGroups, type Physics } from '../api/physics';
 import { getTrait } from '../api/scene-tree';
 import { isOwner, onDispose, onFrame, onInit, onTick } from '../api/scripts';
-import { script } from '../core/registry';
-import { type TraitType } from '../api/traits';
-import { sync, trait } from '../core/registry';
+import type { TraitType } from '../api/traits';
 import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import { pushVccRigidContact, pushVccVoxelContact } from '../core/physics/physics';
 import * as vcc from '../core/physics/vcc/vcc';
+import { script, sync, trait } from '../core/registry';
 import {
     BLOCK_FLAG_CLIMBABLE,
     BLOCK_FLAG_COLLISION,
@@ -381,7 +380,7 @@ export const CharacterControllerTrait = trait(
             direction: vec3.create(),
         }),
     },
-    { persist: false },
+    { icon: 'kit:icon:controller', persist: false },
 );
 
 export type CharacterControllerTrait = TraitType<typeof CharacterControllerTrait>;

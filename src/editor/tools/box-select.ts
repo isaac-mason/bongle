@@ -1,6 +1,5 @@
 import type { Input } from '../../client/input';
 import { isKeyDown, isMouseJustDown } from '../../client/input';
-import type { Physics } from '../../core/physics/physics';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { EditRoomStoreApi, SelectionBehavior, SelectTarget } from '../edit-room-store';
@@ -22,7 +21,6 @@ export function updateBoxSelect(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     input: Input,
-    physics: Physics | null,
     nodeBodies: NodeBodies | null,
     /** camera-relative nudge from arrow keys, or null if no nudge this frame */
     nudgeDelta: [number, number, number] | null,
@@ -65,7 +63,7 @@ export function updateBoxSelect(
             const mk = input.mouseKeyboard;
             const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
             const effective = shiftHeld ? 'add' : after.selectionBehavior;
-            commitBoxSelect(store, ctx, after.cursor, physics, nodeBodies, effective, after.selectTarget);
+            commitBoxSelect(store, ctx, after.cursor, nodeBodies, effective, after.selectTarget);
             store.setState({ cursor: null });
         }
         return;
@@ -102,7 +100,7 @@ export function updateBoxSelect(
         const mk = input.mouseKeyboard;
         const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
         const effective = shiftHeld ? 'add' : after.selectionBehavior;
-        commitBoxSelect(store, ctx, cornerB, physics, nodeBodies, effective, after.selectTarget);
+        commitBoxSelect(store, ctx, cornerB, nodeBodies, effective, after.selectTarget);
     }
 }
 
@@ -111,7 +109,6 @@ export function commitBoxSelect(
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     cornerB: [number, number, number],
-    physics: Physics | null,
     nodeBodies: NodeBodies | null,
     selectionBehavior: SelectionBehavior,
     selectTarget: SelectTarget,
@@ -139,13 +136,11 @@ export function commitBoxSelect(
         _queryRegion.chunks.clear();
         _queryRegion.nodes.clear();
         Selection.setAABB(_queryRegion, minX, minY, minZ, maxX, maxY, maxZ);
-        rebuildNodeSelection(_queryRegion, ctx, physics, nodeBodies);
+        rebuildNodeSelection(_queryRegion, ctx, nodeBodies);
         for (const nid of _queryRegion.nodes) next.nodes.add(nid);
     }
 
-    store.setState({
-        selection: next,
-        boxSelect: undefined,
-    });
+    store.getState().replaceSelection(next);
+    store.setState({ boxSelect: undefined });
     playSelected(ctx, selectionBehavior === 'add');
 }

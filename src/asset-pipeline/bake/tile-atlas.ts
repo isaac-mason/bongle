@@ -107,7 +107,7 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
                     );
                     return { kind: 'draw', canvas: null, hashPart: `missing:${src.textureId}` };
                 }
-                if (def.from === 'computed') {
+                if (def.from !== 'file') {
                     const canvas = bakedTextures.get(src.textureId) ?? null;
                     if (!canvas) {
                         console.warn(

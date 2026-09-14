@@ -6,7 +6,6 @@ import type { EditRoomStoreApi } from './edit-room-store';
 import { isInputFocused } from './input';
 import type { TransformToolState } from './tools/transform';
 import * as TransformTool from './tools/transform';
-import { commitVoxelOps } from './voxel-edit';
 
 export type ClipboardHandlers = {
     onCopy: (e: ClipboardEvent) => void;
@@ -86,30 +85,14 @@ export function createClipboardHandlers(
         TransformTool.enterPlacement(transformToolState, blueprint, false, null, room.scene, ctx);
     };
 
+    // one cut: the store's action does the work, the clipboard event only carries the text out.
     const onCut = (e: ClipboardEvent) => {
         if (isInputFocused()) return;
-        const sel = buildCurrentSelection(api);
-        if (Selection.isEmpty(sel)) return;
-
-        const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, sel);
-        const clipText = Blueprint.toClipboardString(blueprint);
-
+        const blueprint = api.getState().cutMove(shiftHeldAtTrigger);
+        if (!blueprint) return;
         e.preventDefault();
-        e.clipboardData?.setData('text/plain', clipText);
-        api.setState({ activeBlueprint: blueprint });
+        e.clipboardData?.setData('text/plain', Blueprint.toClipboardString(blueprint));
         console.log(`[bongle] cut blueprint: ${blueprint.label}`);
-
-        // cutReverseOps restores voxels on cancel; cutSourceOps' occupied cells are erased now.
-        const { forward: cutSourceOps, reverse: cutReverseOps } = Blueprint.buildPasteOps(
-            blueprint,
-            blueprint.origin,
-            ctx.voxels,
-        );
-        const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
-        commitVoxelOps(ctx, airOps);
-
-        api.setState({ placementContinuous: shiftHeldAtTrigger });
-        TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.scene, ctx);
     };
 
     return { onCopy, onCut, onPaste, onKeyDown };

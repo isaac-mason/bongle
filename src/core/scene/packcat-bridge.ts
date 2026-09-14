@@ -285,6 +285,7 @@ export function propToPack(schema: PropSchema): PackcatSchema | null {
             );
         case 'prefab':
         case 'block':
+        case 'sprite':
             // Refs serialize as bare strings (prefab id / block-key); wrap with nullable() at the schema level if "unset" needs to roundtrip.
             return p.string();
         default:

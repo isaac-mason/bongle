@@ -10,6 +10,7 @@ import { createModelPlaceholderDef, type ModelHandleMap, type ModelOptions } fro
 import type { ParticleDef, ParticleHandle, ParticleOptions } from './particles/particles';
 import type { CommandDef, CommandHandle, RpcDirection } from './rpc';
 import type { PrefabApplyContext } from './scene/prefab';
+import { checkSpecs } from './scene/prop';
 import type { Schema, SchemaType } from './scene/prop/prop';
 import { createSceneDef, createSceneHandle, type SceneDef, type SceneHandle, type SceneOptions } from './scene/scene-handle';
 import type { Realm } from './scene/scene-tree';
@@ -41,6 +42,7 @@ import type { ImageSource, SpriteDef, SpriteHandle, SpriteOptions } from './spri
 import type { DrawFn, DrawInputs, DrawParams } from './textures/draw-fn';
 import {
     isComputedOptions,
+    isRegionOptions,
     type TextureDef,
     type TextureHandle,
     type TextureOptions,
@@ -552,7 +554,7 @@ export type Registry = {
 const tileHash = (t: TileDef) => structuralHash(t);
 const spriteHash = (s: SpriteDef) => structuralHash(s);
 // a computed texture hashes as undefined: `fn` hashes as source text, blind to what it closes over.
-const textureHash = (t: TextureDef) => (t.from === 'file' ? structuralHash(t) : undefined);
+const textureHash = (t: TextureDef) => (t.from === 'computed' ? undefined : structuralHash(t));
 
 /** the voxel atlas packs tiles in cells of this size; every tile frame is a multiple of it per side. */
 export const BLOCK_TILE_SIZE = 16;
@@ -835,12 +837,14 @@ export function trait<S extends TraitBody = Record<string, never>>(
     const nextBody = body ?? ({} as S);
     const name = options?.name ?? id;
     const persist = options?.persist ?? true;
+    const icon = options?.icon ?? null;
 
     const handle = declare(traitStore, id, {
         id,
         name,
         body: nextBody,
         persist,
+        icon,
         // control()/sync()/script() re-register into these right after; starting empty lets a body edit actually land.
         controls: [],
         sync: [],
@@ -857,6 +861,7 @@ export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlI
         console.warn(`[bongle] trait '${target.id}' already has a control with id '${controlId}'; ignoring re-register`);
         return;
     }
+    for (const problem of checkSpecs(body.schema)) console.warn(`[bongle] trait '${target.id}' control '${controlId}'${problem}`);
     // into the per-kind store so HMR detects individual control edits without flipping the parent trait hash.
     const key = `${target.id}.${controlId}`;
     const reg = declare(controlStore, key, { ...body, traitId: target.id, controlId } as unknown as ControlDef).def;
@@ -914,6 +919,9 @@ export function texture<I extends Record<string, TextureHandle>, P extends DrawP
     id: string,
     options: TextureOptions<I, P>,
 ): TextureHandle {
+    if (isRegionOptions(options)) {
+        return declare(textureStore, id, { id, from: 'region', of: options.of.dependency, region: options.region });
+    }
     if (!isComputedOptions(options)) {
         return declare(textureStore, id, { id, from: 'file', src: options.src });
     }

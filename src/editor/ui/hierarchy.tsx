@@ -14,6 +14,11 @@ import {
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { nodeMenuEntries } from './node-menu';
+
+function clientPointAsCoords(p: { x: number; y: number }): { clientX: number; clientY: number } {
+    return { clientX: p.x, clientY: p.y };
+}
+
 import { TreeItem, TreeItemOverlay } from './tree-item';
 import {
     computeReorderOps,
@@ -65,6 +70,8 @@ export function HierarchyPanel() {
     const copyToClipboard = useEditRoom((s) => s.copyToClipboard);
     const setName = useEditRoom((s) => s.setName);
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
+    const setTraitPicker = useEditRoom((s) => s.setTraitPicker);
+    const contextClientPoint = useRef({ x: 0, y: 0 });
     const sceneTree = room?.scene ?? null;
 
     // when non-empty, the tree shows only matching nodes + their ancestors, ignoring collapsed state.
@@ -302,6 +309,7 @@ export function HierarchyPanel() {
             }
             const nodeId = Number(li.dataset.nodeId);
             if (Number.isNaN(nodeId)) return;
+            contextClientPoint.current = { x: e.clientX, y: e.clientY };
             setContextNodeId(nodeId);
             // only select if it isn't already part of the selection, so right-click preserves multi-select.
             if (!activeEditRoomStore().getState().selection.nodes.has(nodeId)) {
@@ -346,6 +354,11 @@ export function HierarchyPanel() {
                           if (!node) return;
                           createNode(node.parent?.id ?? 0, node.parent?.children.length ?? 0, `${node.name} (copy)`);
                       },
+                      addTrait:
+                          contextNodeId !== null && !contextInMultiSelect
+                              ? () =>
+                                    setTraitPicker({ nodeId: contextNodeId, ...clientPointAsCoords(contextClientPoint.current) })
+                              : undefined,
                       bake: () => {
                           if (contextNodeId !== null) bakePrefab(contextNodeId);
                       },

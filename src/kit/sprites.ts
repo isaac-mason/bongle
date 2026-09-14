@@ -1,15 +1,56 @@
-import { asset, sprite } from 'bongle';
+import { asset, sprite, texture } from 'bongle';
 import {
     beetrootItem as beetrootItemTexture,
     blueberryItem as blueberryItemTexture,
     cabbageItem as cabbageItemTexture,
     carrotItem as carrotItemTexture,
     cornItem as cornItemTexture,
+    fontSheet,
     potatoItem as potatoItemTexture,
     strawberryItem as strawberryItemTexture,
     wheatItem as wheatItemTexture,
     white as whiteTexture,
 } from './textures';
+
+const GLYPH_FIRST_CODE = 0x20;
+const GLYPH_COUNT = 95;
+const GLYPH_CELL = 8;
+const GLYPH_COLUMNS = 16;
+const GLYPH_WIDTH = 5;
+const GLYPH_HEIGHT = 7;
+
+/** one static sprite per printable ASCII character, `kit:glyph:<code>`. */
+export const glyphs = Array.from({ length: GLYPH_COUNT }, (_, i) => {
+    const id = `kit:glyph:${GLYPH_FIRST_CODE + i}`;
+    const x = (i % GLYPH_COLUMNS) * GLYPH_CELL;
+    const y = Math.floor(i / GLYPH_COLUMNS) * GLYPH_CELL;
+    return sprite(id, { frames: [texture(id, { of: fontSheet, region: [x, y, GLYPH_WIDTH, GLYPH_HEIGHT] })], mipmap: false });
+});
+
+/** one white 8x8 icon per builtin trait family, `kit:icon:<name>`; `trait(id, body, { icon })` names them. */
+export const icons = {
+    transform: sprite('kit:icon:transform', {
+        src: asset('./assets/textures/icons/transform.png', import.meta.url),
+        mipmap: false,
+    }),
+    body: sprite('kit:icon:body', { src: asset('./assets/textures/icons/body.png', import.meta.url), mipmap: false }),
+    character: sprite('kit:icon:character', {
+        src: asset('./assets/textures/icons/character.png', import.meta.url),
+        mipmap: false,
+    }),
+    camera: sprite('kit:icon:camera', { src: asset('./assets/textures/icons/camera.png', import.meta.url), mipmap: false }),
+    sprite: sprite('kit:icon:sprite', { src: asset('./assets/textures/icons/sprite.png', import.meta.url), mipmap: false }),
+    mesh: sprite('kit:icon:mesh', { src: asset('./assets/textures/icons/mesh.png', import.meta.url), mipmap: false }),
+    voxels: sprite('kit:icon:voxels', { src: asset('./assets/textures/icons/voxels.png', import.meta.url), mipmap: false }),
+    player: sprite('kit:icon:player', { src: asset('./assets/textures/icons/player.png', import.meta.url), mipmap: false }),
+    sound: sprite('kit:icon:sound', { src: asset('./assets/textures/icons/sound.png', import.meta.url), mipmap: false }),
+    controller: sprite('kit:icon:controller', {
+        src: asset('./assets/textures/icons/controller.png', import.meta.url),
+        mipmap: false,
+    }),
+    animator: sprite('kit:icon:animator', { src: asset('./assets/textures/icons/animator.png', import.meta.url), mipmap: false }),
+    canvas: sprite('kit:icon:canvas', { src: asset('./assets/textures/icons/canvas.png', import.meta.url), mipmap: false }),
+} as const;
 
 /**
  * A single opaque white pixel, for anything tinted at runtime rather than
@@ -21,6 +62,12 @@ import {
  */
 export const white = sprite('kit:white', {
     frames: [whiteTexture],
+    mipmap: false,
+});
+
+/** 8x8 white pin, tinted by the marker that draws it. */
+export const marker = sprite('kit:marker', {
+    src: asset('./assets/textures/marker.png', import.meta.url),
     mipmap: false,
 });
 

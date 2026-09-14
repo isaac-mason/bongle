@@ -224,7 +224,7 @@ function commitLasso(
         }
     }
 
-    store.setState({ selection: next });
+    store.getState().replaceSelection(next);
     playSelected(ctx, effective === 'add');
 }
 

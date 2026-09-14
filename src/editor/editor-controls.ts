@@ -11,7 +11,6 @@ export const TRANSFORM_GIZMO_KEYS = {
 } as const;
 
 export const TRANSFORM_OTHER_KEYS = {
-    togglePivot: 'KeyP',
     toggleSpace: 'KeyX',
     commit: 'Enter', // placement mode only
     cancel: 'Escape', // placement mode + normal
@@ -122,7 +121,9 @@ export const EDITOR_KEYBINDINGS: Record<string, KeybindGroup[]> = {
         { key: TRANSFORM_GIZMO_KEYS.grab, label: 'grab' },
     ],
     transform: [
-        { key: TRANSFORM_OTHER_KEYS.togglePivot, label: 'pivot' },
+        { key: 'mode key again', label: 'drag from cursor (click commits, Esc cancels)' },
+        { key: 'X / Y / Z', label: 'axis lock while dragging (Shift = plane)' },
+        { key: 'hold ctrl/cmd', label: 'flip snapping while dragging' },
         { key: TRANSFORM_OTHER_KEYS.toggleSpace, label: 'world/local' },
     ],
     selection: [

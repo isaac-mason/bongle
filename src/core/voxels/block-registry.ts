@@ -1192,3 +1192,32 @@ function resolveBlockParticles<P extends PropsDef>(
     if (!dust && !build && !breakP) return undefined;
     return { dust, build, break: breakP };
 }
+
+/** the world-space bounds of the block state at a voxel: the unit cell for cubes, the union of its collider boxes otherwise. */
+export function blockStateAabb(
+    blocks: Pick<Blocks, 'colliderId' | 'shapeAabbs'>,
+    stateId: number,
+    wx: number,
+    wy: number,
+    wz: number,
+): [number, number, number, number, number, number] {
+    const cid = blocks.colliderId[stateId]!;
+    if (cid === 0) return [wx, wy, wz, wx + 1, wy + 1, wz + 1];
+    const boxes = blocks.shapeAabbs[cid];
+    if (!boxes || boxes.length === 0) return [wx, wy, wz, wx + 1, wy + 1, wz + 1];
+    let nx = Infinity;
+    let ny = Infinity;
+    let nz = Infinity;
+    let xx = -Infinity;
+    let xy = -Infinity;
+    let xz = -Infinity;
+    for (const b of boxes) {
+        if (b[0] < nx) nx = b[0];
+        if (b[1] < ny) ny = b[1];
+        if (b[2] < nz) nz = b[2];
+        if (b[3] > xx) xx = b[3];
+        if (b[4] > xy) xy = b[4];
+        if (b[5] > xz) xz = b[5];
+    }
+    return [wx + nx, wy + ny, wz + nz, wx + xx, wy + xy, wz + xz];
+}

@@ -816,6 +816,28 @@ export function InspectOptions() {
     );
 }
 
+function SelectionPivotRow() {
+    const placementActive = useEditRoom((s) => s.placementActive);
+    const pivot = useEditRoom((s) => s.selectionPivot);
+    const setPivot = useEditRoom((s) => s.setSelectionPivot);
+    if (placementActive) return null;
+    const presets: Array<{ preset: PivotPreset; label: string }> = [
+        { preset: 'min', label: 'min' },
+        { preset: 'center', label: 'center' },
+        { preset: 'max', label: 'max' },
+    ];
+    return (
+        <div className="flex items-center gap-1">
+            <span className="text-[10px] font-mono text-fg-muted w-12 shrink-0">pivot</span>
+            {presets.map(({ preset, label }) => (
+                <ToggleBtn key={preset} active={pivot === preset} onClick={() => setPivot(preset)}>
+                    {label}
+                </ToggleBtn>
+            ))}
+        </div>
+    );
+}
+
 function PivotRow() {
     const placementActive = useEditRoom((s) => s.placementActive);
     const pivotOffset = useEditRoom((s) => s.transformPivotOffset);
@@ -957,6 +979,7 @@ export function TransformOptions() {
                 </Row>
             )}
             {transformMode !== 'grab' && <PivotRow />}
+            {(transformMode === 'translate' || transformMode === 'rotate' || transformMode === 'scale') && <SelectionPivotRow />}
         </div>
     );
 }

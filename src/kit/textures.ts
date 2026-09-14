@@ -15,6 +15,11 @@ import { asset, texture } from 'bongle';
  * The atlas does not edge-extend into its padding gutter, so under a linear
  * sampler this size would bleed to transparent at the quad edges.
  */
+/** 5x7 glyphs on an 8x8 grid, 16 per row, printable ASCII in order from space; `sprites.glyphs` cuts it up. */
+export const fontSheet = texture('kit:font-sheet', {
+    src: asset('./assets/textures/font.png', import.meta.url),
+});
+
 export const white = texture('kit:white', {
     size: [1, 1],
     fn: (ctx) => {

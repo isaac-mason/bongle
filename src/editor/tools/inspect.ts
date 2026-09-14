@@ -1,5 +1,5 @@
 import { type PerspectiveCamera, unproject } from 'gpucat';
-import { vec3 } from 'math';
+import { type Vec3, vec3 } from 'math';
 import { TransformTrait } from '../../builtins/transform';
 import {
     getCanvasTouches,
@@ -13,7 +13,7 @@ import {
 } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
 import type { Node } from '../../core/scene/scene-tree';
-import { getTrait, isAncestorOf } from '../../core/scene/scene-tree';
+import { getTrait } from '../../core/scene/scene-tree';
 import type { ClientContext, ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import { getBlock } from '../../core/voxels/voxels';
@@ -22,22 +22,25 @@ import { INSPECT_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { isInputFocused } from '../input';
 import { lensOf } from '../lens';
-import type { NodeBodies } from '../node-bodies';
+import { isOwnershipBoundary, type NodeBodies } from '../node-bodies';
 import * as Selector from '../selector';
 import type { State as PivotPoint } from '../visuals/pivot-point';
 import * as PivotPointMod from '../visuals/pivot-point';
 import type { SelectionMeshState } from '../visuals/selection-mesh';
 import { updateSelectionMeshes } from '../visuals/selection-mesh';
+import { type HandlesState, isEngaged } from './handles';
 import type { TransformToolState } from './transform';
 import * as TransformTool from './transform';
 
 // Builds the chain of TransformTrait-bearing ancestors from topmost (under
 // sceneRoot) to the hit node; first click selects the topmost, each subsequent
 // click on an already-selected chain member drills one tier toward the leaf.
-function resolveSelectionTarget(hitNode: Node, selectedNodeIds: Set<number>, sceneRoot: Node): Node {
-    const chain: Node[] = [];
+// An ownership boundary drops everything below it, so the drill stops there.
+export function resolveSelectionTarget(hitNode: Node, selectedNodeIds: Set<number>, sceneRoot: Node): Node {
+    let chain: Node[] = [];
     let cur: Node | null = hitNode;
     while (cur && cur !== sceneRoot) {
+        if (isOwnershipBoundary(cur)) chain = [];
         if (getTrait(cur, TransformTrait)) chain.push(cur);
         cur = cur.parent;
     }
@@ -89,7 +92,6 @@ export function openViewportContextMenu(
     vec3.normalize(_rayDir, _rayDir);
 
     const hits = Selector.castRay(
-        room.physics,
         nodeBodies,
         room.scene,
         ctx.voxels,
@@ -102,12 +104,8 @@ export function openViewportContextMenu(
         MAX_RAY_DIST,
     );
 
-    const playerNode = room.playerNode;
     const editorNode = lensOf(room)?.subject;
-    const nodeHit = hits.find(
-        (h): h is Selector.NodeHit =>
-            h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
-    );
+    const nodeHit = hits.find((h): h is Selector.NodeHit => h.kind === 'node' && h.node !== editorNode);
     const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
     const voxelWins = voxelHit !== undefined && (nodeHit === undefined || voxelHit.distance < nodeHit.distance);
 
@@ -129,12 +127,33 @@ export function openViewportContextMenu(
         shouldOpen = true;
     } else if (voxelWins && Selection.countVoxels(s.selection) > 0) {
         shouldOpen = true;
+    } else if (voxelWins && voxelHit) {
+        store.getState().replaceSelection(Selection.ofVoxel(voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ));
+        shouldOpen = true;
     } else if (s.selection.nodes.size > 0 || Selection.countVoxels(s.selection) > 0) {
         shouldOpen = true;
     }
 
     if (shouldOpen) {
-        s.openViewportContextMenu(cursor.x, cursor.y);
+        const world: Vec3 | null =
+            voxelWins && voxelHit
+                ? TransformTool.placePointOnFace(
+                      [voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ],
+                      [voxelHit.nx, voxelHit.ny, voxelHit.nz],
+                      [voxelHit.px, voxelHit.py, voxelHit.pz],
+                      s.snapTo,
+                  )
+                : null;
+        const block =
+            voxelWins && voxelHit
+                ? {
+                      wx: voxelHit.voxelX,
+                      wy: voxelHit.voxelY,
+                      wz: voxelHit.voxelZ,
+                      key: getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ),
+                  }
+                : null;
+        s.openViewportContextMenu(cursor.x, cursor.y, world, block);
     }
 }
 
@@ -146,6 +165,7 @@ export function updateInspect(
     ctx: ScriptContext,
     nodeBodies: NodeBodies,
     transformToolState: TransformToolState,
+    handles: HandlesState,
     pivotPoint: PivotPoint,
     meshState: SelectionMeshState,
     camera: PerspectiveCamera,
@@ -167,9 +187,8 @@ export function updateInspect(
     const hoverNormalAtFrame = s.hoverNormal;
     const hoverPointAtFrame = s.hoverPoint;
 
-    // Inspect/transform suppress the voxel tool path entirely, keeping the node
-    // selection intact.
-    const dirty = s.hoverVoxel !== null || s.boxSelect !== undefined || s.brush !== null || s.selection.chunks.size > 0;
+    // Inspect/transform suppress the voxel tools' transient state; the selection itself stays.
+    const dirty = s.hoverVoxel !== null || s.boxSelect !== undefined || s.brush !== null;
     if (dirty) {
         store.setState((cur) => ({
             hoverVoxel: null,
@@ -178,13 +197,9 @@ export function updateInspect(
             lastHoverVoxel: hoverVoxelAtFrame ?? cur.lastHoverVoxel,
             boxSelect: undefined,
             brush: null,
-            selection: cur.selection.chunks.size > 0 ? { chunks: new Map(), nodes: cur.selection.nodes } : cur.selection,
         }));
-        updateSelectionMeshes(meshState, store.getState(), client.state!.renderer.time);
     }
-    if (activeTool !== 'inspect' && store.getState().inspectedVoxel !== null) {
-        store.setState({ inspectedVoxel: null });
-    }
+    updateSelectionMeshes(meshState, store.getState(), client.state!.renderer.time);
 
     if (activeTool === 'transform') {
         // placementContinuous marks a placement started by the build tool (a plain
@@ -222,14 +237,15 @@ export function updateInspect(
                 hoverPointAtFrame,
             );
         }
-        const pivotPos = TransformTool.updateTransformTool(transformToolState, room.scene);
+        const pivotPos = TransformTool.updateTransformTool(transformToolState, room.scene, client.state!.resources);
         PivotPointMod.update(pivotPoint, pivotPos ?? [0, 0, 0], pivotPos !== null);
     } else {
         TransformTool.detachGizmo(transformToolState);
         PivotPointMod.update(pivotPoint, [0, 0, 0], false);
     }
 
-    const gizmoDragging = activeTool === 'transform' && transformToolState.dragging;
+    const gizmoDragging =
+        (activeTool === 'transform' && (transformToolState.dragging || transformToolState.consumedClick)) || isEngaged(handles);
     const transformModeNow = store.getState().transformMode;
     const inPlaceMode = activeTool === 'transform' && transformModeNow === 'place';
     const inGrabMode = activeTool === 'transform' && transformModeNow === 'grab';
@@ -256,7 +272,6 @@ export function updateInspect(
             vec3.subtract(_rayDir, _farWorld, _nearWorld);
             vec3.normalize(_rayDir, _rayDir);
             const hits = Selector.castRay(
-                room.physics,
                 nodeBodies,
                 room.scene,
                 ctx.voxels,
@@ -268,12 +283,8 @@ export function updateInspect(
                 _rayDir[2],
                 MAX_RAY_DIST,
             );
-            const playerNode = room.playerNode;
             const editorNode = lensOf(room)?.subject;
-            const nodeHit = hits.find(
-                (h): h is Selector.NodeHit =>
-                    h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
-            );
+            const nodeHit = hits.find((h): h is Selector.NodeHit => h.kind === 'node' && h.node !== editorNode);
             if (nodeHit) {
                 // Grab always targets the topmost transform-bearing ancestor; drilling
                 // into subnodes mid-grab would grab the wrong child of a selected parent.
@@ -313,7 +324,6 @@ export function updateInspect(
         vec3.normalize(_rayDir, _rayDir);
 
         const hits = Selector.castRay(
-            room.physics,
             nodeBodies,
             room.scene,
             ctx.voxels,
@@ -327,15 +337,11 @@ export function updateInspect(
         );
 
         // Excludes the local player node + descendants, and the editor lens node.
-        const playerNode = room.playerNode;
         const editorNode = lensOf(room)?.subject;
 
         // Hits are distance-sorted; take the nearest of each type, then let
         // distance arbitrate which one wins when both are present.
-        const nodeHit = hits.find(
-            (h): h is Selector.NodeHit =>
-                h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
-        );
+        const nodeHit = hits.find((h): h is Selector.NodeHit => h.kind === 'node' && h.node !== editorNode);
         const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
 
         const voxelWins = voxelHit !== undefined && (nodeHit === undefined || voxelHit.distance < nodeHit.distance);
@@ -359,19 +365,22 @@ export function updateInspect(
             }
         }
 
+        // a block click is a voxel selection: shift toggles the voxel, plain replaces; a miss clears.
         if (activeTool === 'inspect' && selectTarget !== 'nodes') {
+            const mk = client.input.mouseKeyboard;
+            const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
+            const cur = store.getState().selection;
             if (voxelHit && (voxelWins || selectTarget === 'voxels')) {
-                const key = getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ);
-                store.setState({
-                    inspectedVoxel: {
-                        wx: voxelHit.voxelX,
-                        wy: voxelHit.voxelY,
-                        wz: voxelHit.voxelZ,
-                        key,
-                    },
-                });
-            } else {
-                store.setState({ inspectedVoxel: null });
+                const { voxelX, voxelY, voxelZ } = voxelHit;
+                store
+                    .getState()
+                    .replaceSelection(
+                        shiftHeld
+                            ? Selection.withVoxelToggled(cur, voxelX, voxelY, voxelZ)
+                            : Selection.ofVoxel(voxelX, voxelY, voxelZ),
+                    );
+            } else if (!shiftHeld && cur.chunks.size > 0) {
+                store.getState().replaceSelection(Selection.nodesOnly(cur));
             }
         }
     }
@@ -398,13 +407,10 @@ export function updateInspect(
                 }
             }
 
-            // Escape clears the node selection first, then the inspected voxel.
+            // Escape clears the node selection first, then the voxel selection.
             if (isKeyJustDown(mk, 'Escape')) {
-                if (hasNodeSelection) {
-                    store.getState().clearSelection();
-                } else if (store.getState().inspectedVoxel !== null) {
-                    store.setState({ inspectedVoxel: null });
-                }
+                if (hasNodeSelection) store.getState().clearNodeSelection();
+                else if (Selection.countVoxels(store.getState().selection) > 0) store.getState().clearSelection();
             }
         } else if (activeTool === 'transform') {
             TransformTool.handleTransformKeys(mk, client.input, camera.quaternion, transformToolState, room.scene, ctx);

@@ -6,8 +6,8 @@ import { type Vec3, vec3 } from 'math';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';
 import { dirty, rate, type TraitType } from '../api/traits';
-import { control, sync, trait } from '../core/registry';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
+import { control, sync, trait } from '../core/registry';
 
 // observer-normalized contact lifecycle lives on `ContactsTrait` (see builtins/contacts.ts), driven by physics.ts fan-out.
 
@@ -17,31 +17,43 @@ export const AutoShapeDef = prop.object({
     shape: prop.enumeration(['box', 'sphere', 'capsule', 'hull', 'mesh']),
 });
 
-export const BoxShapeDef = prop.object({
-    type: prop.literal('box'),
-    halfExtents: prop.vec3(),
-});
+export const BoxShapeDef = prop.object(
+    {
+        type: prop.literal('box'),
+        halfExtents: prop.vec3(),
+    },
+    { shape: { kind: 'box3', halfExtents: 'halfExtents' } },
+);
 
-export const SphereShapeDef = prop.object({
-    type: prop.literal('sphere'),
-    radius: prop.number(),
-});
+export const SphereShapeDef = prop.object(
+    {
+        type: prop.literal('sphere'),
+        radius: prop.radius(),
+    },
+    { shape: { kind: 'sphere', radius: 'radius' } },
+);
 
-export const TransformedShapeDef = prop.object({
-    type: prop.literal('transformed'),
-    shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
-    position: prop.vec3(),
-    quaternion: prop.quaternion(),
-});
+export const TransformedShapeDef = prop.object(
+    {
+        type: prop.literal('transformed'),
+        shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
+        position: prop.point(),
+        quaternion: prop.quaternion(),
+    },
+    { frame: { position: 'position', quaternion: 'quaternion' } },
+);
 
 export const CompoundShapeDef = prop.object({
     type: prop.literal('compound'),
     shapes: prop.list(
-        prop.object({
-            shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
-            position: prop.vec3(),
-            quaternion: prop.quaternion(),
-        }),
+        prop.object(
+            {
+                shape: prop.union('type', [BoxShapeDef, SphereShapeDef]),
+                position: prop.point(),
+                quaternion: prop.quaternion(),
+            },
+            { frame: { position: 'position', quaternion: 'quaternion' } },
+        ),
     ),
 });
 
@@ -122,25 +134,29 @@ export type RigidBodyDef = {
     collideKinematicVsNonDynamic?: boolean;
 };
 
-export const RigidBodyTrait = trait('rigidbody', {
-    /** declarative recipe; when set, the installer builds + owns the body from this. Null puts the trait in adopt mode: a script assigns `body` directly. */
-    def: null as RigidBodyDef | null,
+export const RigidBodyTrait = trait(
+    'rigidbody',
+    {
+        /** declarative recipe; when set, the installer builds + owns the body from this. Null puts the trait in adopt mode: a script assigns `body` directly. */
+        def: null as RigidBodyDef | null,
 
-    /** the live crashcat body, installer-built or script-adopted. Removed on dispose unless the script nulls `body` first (bodies shared across traits). */
-    body: null as RigidBody | null,
+        /** the live crashcat body, installer-built or script-adopted. Removed on dispose unless the script nulls `body` first (bodies shared across traits). */
+        body: null as RigidBody | null,
 
-    /** intent, drives `effectiveMotionType` under authority/prediction rules. Seeded from `def.motionType` at install time when present. */
-    motionType: MotionType.DYNAMIC as MotionType,
+        /** intent, drives `effectiveMotionType` under authority/prediction rules. Seeded from `def.motionType` at install time when present. */
+        motionType: MotionType.DYNAMIC as MotionType,
 
-    /** if true, non-owner clients run dynamic locally for prediction. Seeded from `def.prediction` at install time when present. */
-    prediction: true,
+        /** if true, non-owner clients run dynamic locally for prediction. Seeded from `def.prediction` at install time when present. */
+        prediction: true,
 
-    /** canonical linear velocity. */
-    linearVelocity: vec3.create() as Vec3,
+        /** canonical linear velocity. */
+        linearVelocity: vec3.create() as Vec3,
 
-    /** canonical angular velocity. */
-    angularVelocity: vec3.create() as Vec3,
-});
+        /** canonical angular velocity. */
+        angularVelocity: vec3.create() as Vec3,
+    },
+    { icon: 'kit:icon:body' },
+);
 
 export type RigidBodyTrait = TraitType<typeof RigidBodyTrait>;
 

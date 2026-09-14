@@ -4,7 +4,7 @@ import type { TextureDef } from '../../core/textures/textures';
 import { BAKE_CONCURRENCY, mapConcurrent } from './concurrency';
 import type { Raster, RasterCanvas, RasterContext2D, RasterImage } from './raster';
 
-/** baked computed textures, keyed by texture id. */
+/** baked computed and region textures, keyed by texture id. */
 export type BakedTextures = Map<string, RasterCanvas>;
 
 export type BakeTexturesOptions = {
@@ -37,10 +37,10 @@ export async function bakeTextures(textures: KindStore<TextureDef>, opts: BakeTe
     const imageCache: ImageCache = new Map();
     const inFlight: InFlight = new Map();
 
-    const computed = [...textures.byId.values()].filter((def) => def.from === 'computed');
+    const computed = [...textures.byId.values()].filter((def) => def.from !== 'file');
     if (computed.length === 0) return baked;
 
-    console.log(`[bongle] baking ${computed.length} computed texture(s)...`);
+    console.log(`[bongle] baking ${computed.length} texture(s)...`);
     // each root gets its own cycle guard (tracks ancestry within one chain, not global
     // in-flight-ness), while `inFlight` is shared so a texture several others draw from still bakes once.
     await mapConcurrent(computed, BAKE_CONCURRENCY, (def) =>
@@ -49,7 +49,7 @@ export async function bakeTextures(textures: KindStore<TextureDef>, opts: BakeTe
     return baked;
 }
 
-/** bake one computed texture by id, depth-first through its inputs. Memoised by id. */
+/** bake one computed or region texture by id, depth-first through its inputs. Memoised by id. */
 function bakeOne(
     id: string,
     textures: KindStore<TextureDef>,
@@ -70,12 +70,22 @@ function bakeOne(
     if (existing) return existing;
 
     const def = textures.byId.get(id);
-    if (def === undefined || def.from !== 'computed') {
+    if (def === undefined || def.from === 'file') {
         return Promise.reject(new Error(`[bongle] texture '${id}' is not a computed texture`));
     }
 
     const run = async (): Promise<RasterCanvas> => {
         ancestry.add(id);
+        if (def.from === 'region') {
+            const source = await resolveInput(def.of.id, textures, baked, inFlight, imageCache, loader, raster, ancestry);
+            const [x, y, w, h] = def.region;
+            const { canvas, ctx } = raster.makeCanvas(w, h);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(source, -x, -y);
+            ancestry.delete(id);
+            baked.set(id, canvas);
+            return canvas;
+        }
         const entries = await Promise.all(
             Object.entries(def.inputs).map(async ([key, dep]) => {
                 const resolved = await resolveInput(dep.id, textures, baked, inFlight, imageCache, loader, raster, ancestry);
@@ -113,7 +123,7 @@ function resolveInput(
         console.warn(`[bongle] texture input '${id}' is not declared (magenta placeholder)`);
         return Promise.resolve(makePlaceholderImage(raster));
     }
-    if (def.from === 'computed') {
+    if (def.from !== 'file') {
         return bakeOne(id, textures, baked, inFlight, imageCache, loader, raster, ancestry);
     }
 

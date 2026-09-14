@@ -5,10 +5,12 @@ import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtin
 import { isStandaloneBuild, startStandaloneRoom } from '../client/client';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
+import type { PropPath } from '../core/scene/prop/path';
 import type { PrefabConfig, Realm } from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { EDITOR_JOIN_KEY, type ScriptContext, send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
+import { env } from '../env';
 import * as Actions from './actions';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
@@ -172,6 +174,17 @@ export type LassoState = {
     points: ReadonlyArray<readonly [number, number]>;
 };
 
+export type InspectedBlock = { wx: number; wy: number; wz: number; key: string };
+
+export type ActiveFrame = {
+    nodeId: number;
+    traitId: string;
+    controlId: string;
+    path: PropPath;
+    position: string | undefined;
+    quaternion: string | undefined;
+};
+
 export type EditRoomState = {
     activeTool: EditorTool;
 
@@ -181,6 +194,8 @@ export type EditRoomState = {
     rotationSnap: number | null;
     scaleSnap: number | null;
     snapTo: SnapTo;
+    /** where the gizmo sits on a selection: its origin / centroid, or the min or max corner of its bounds. */
+    selectionPivot: PivotPreset;
     transformPivotOffset: Vec3;
     placementActive: boolean;
     placementIsNodeOnly: boolean;
@@ -188,6 +203,12 @@ export type EditRoomState = {
 
     /** never null (empty = Selection.create()); tools assign a fresh ref on each mutation as the zustand re-render signal. */
     selection: Selection.Selection;
+    /** a frame-annotated object inside a control of the active node; the transform gizmo attaches at its pose. */
+    activeFrame: ActiveFrame | null;
+    /** nodes created from a voxel selection whose shape is fitted once they land; drained every frame. */
+    pendingShapeFits: Actions.PendingShapeFit[];
+    /** the prefab picker for "create from selection", at the viewport position it was asked from. */
+    promotePicker: { x: number; y: number } | null;
     /** sparse bitset visualised as the brush overlay; null when nothing is shown. */
     brush: Selection.Selection | null;
     /** null = default cyan. selection-mesh dirty-checks by reference, so a fresh tuple each frame animates. */
@@ -200,6 +221,8 @@ export type EditRoomState = {
     hoverPoint: [number, number, number] | null;
     /** [x0,y0,z0,x1,y1,z1]. unit cube for cube blocks; tight union of collider AABBs for non-cube blocks. */
     hoverAabb: [number, number, number, number, number, number] | null;
+    /** the node a click would select right now; drives the hover outline. */
+    hoverNodeId: number | null;
     /** in-progress box-select (corner A placed, aiming for corner B). */
     boxSelect: BoxSelectState | undefined;
     lasso: LassoState | null;
@@ -208,7 +231,10 @@ export type EditRoomState = {
     /** last hovered voxel, persists after clear, for paste placement origin. */
     lastHoverVoxel: [number, number, number] | null;
     /** last-clicked voxel info shown in the inspector. */
-    inspectedVoxel: { wx: number; wy: number; wz: number; key: string } | null;
+    /** the selection's one voxel when it holds exactly one; derived from the selection, the panel reads the block live. */
+    inspectedVoxel: { wx: number; wy: number; wz: number } | null;
+    /** the inspected voxel's chunk version, mirrored per frame so the panel re-reads after any edit, local or remote. */
+    voxelRevision: number;
 
     selectionBehavior: SelectionBehavior;
     selectTarget: SelectTarget;
@@ -227,7 +253,10 @@ export type EditRoomState = {
     elevationOptions: ElevationOptions;
 
     /** when non-null, the ViewportContextMenu opens anchored at these canvas-pixel coords. */
-    viewportContextMenu: { x: number; y: number } | null;
+    /** `world` is the surface point under the cursor when the menu opened on a block. */
+    viewportContextMenu: { x: number; y: number; world: Vec3 | null; block: InspectedBlock | null } | null;
+    /** the add-trait picker, at client coordinates so it opens at either the viewport or hierarchy menu. */
+    traitPicker: { nodeId: number; clientX: number; clientY: number } | null;
 
     activeBlueprint: Blueprint.Blueprint | null;
 
@@ -280,13 +309,21 @@ export type EditRoomState = {
     addToSelection: (nodeId: number) => void;
     removeFromSelection: (nodeId: number) => void;
     setSelection: (nodeIds: Iterable<number>) => void;
+    /** drops the nodes, keeps the voxels. */
+    clearNodeSelection: () => void;
+    /** drops everything. */
     clearSelection: () => void;
+    /** installs a selection a tool built through `Selection` transitions; the only way in from outside the store. */
+    replaceSelection: (selection: Selection.Selection) => void;
     focusNode: (nodeId: number) => void;
     copyToClipboard: () => void;
     /** saves the current selection as a persistent blueprint scene; omitted name allocates `blueprint-NNN`. */
     saveBlueprint: (name?: string) => void;
     destroySelectedNodes: () => void;
-    openViewportContextMenu: (x: number, y: number) => void;
+    openViewportContextMenu: (x: number, y: number, world?: Vec3 | null, block?: InspectedBlock | null) => void;
+    setTraitPicker: (picker: { nodeId: number; clientX: number; clientY: number } | null) => void;
+    /** a bare transform node at a world position under the scene root. */
+    createNodeAt: (position: Vec3, name?: string) => void;
     closeViewportContextMenu: () => void;
 
     fill: (pattern: Pattern, mask?: Mask) => number;
@@ -294,7 +331,8 @@ export type EditRoomState = {
     replace: (pattern: Pattern, from?: Mask) => number;
     overlay: (pattern: Pattern) => number;
     pick: () => void;
-    cutMove: () => void;
+    /** cuts the selection into a placement ghost; returns the blueprint (for the clipboard) or null when nothing is selected. */
+    cutMove: (continuous?: boolean) => Blueprint.Blueprint | null;
     /** positive = CW looking down the positive axis. not undoable, clipboard ops don't touch the world. */
     rotate: (yawTurns: number, pitchTurns: number, rollTurns: number) => boolean;
     /** mirrors the active blueprint (and live placement preview) across the plane perpendicular to `axis`. not undoable. */
@@ -309,10 +347,18 @@ export type EditRoomState = {
     setRotationSnap: (snap: number | null) => void;
     setScaleSnap: (snap: number | null) => void;
     setSnapTo: (snap: SnapTo) => void;
+    setSelectionPivot: (preset: PivotPreset) => void;
     setTransformPivotOffset: (offset: Vec3) => void;
     setControlMode: (mode: ControlMode) => void;
-    setInspectedVoxel: (v: { wx: number; wy: number; wz: number; key: string } | null) => void;
     setSelectionBehavior: (mode: SelectionBehavior) => void;
+    setActiveFrame: (frame: ActiveFrame | null) => void;
+    setPromotePicker: (at: { x: number; y: number } | null) => void;
+    /** a prefab node at the voxel selection's centre, its first shape field sized to the selection. */
+    createFromSelection: (prefabId: string) => void;
+    /** moves the node to the voxel selection's centre and sizes its first shape field to it. */
+    fitToSelection: (nodeId: number) => void;
+    /** replaces the voxel selection with the voxels inside the node's first shape field. */
+    selectInside: (nodeId: number) => void;
     setSelectTarget: (filter: SelectTarget) => void;
     setSelectorMode: (mode: SelectorMode) => void;
     setAirDistance: (d: number) => void;
@@ -352,12 +398,16 @@ function initialFields() {
         rotationSnap: 45 as number | null,
         scaleSnap: null as number | null,
         snapTo: 'face-center' as SnapTo,
+        selectionPivot: 'center' as PivotPreset,
         transformPivotOffset: [0, 0, 0] as Vec3,
         placementActive: false,
         placementIsNodeOnly: false,
         transformHasVoxels: false,
 
         selection: Selection.create(),
+        activeFrame: null as ActiveFrame | null,
+        pendingShapeFits: [] as Actions.PendingShapeFit[],
+        promotePicker: null as { x: number; y: number } | null,
         brush: null as Selection.Selection | null,
         brushFill: null as Rgba | null,
         brushEdges: null as Rgba | null,
@@ -365,11 +415,13 @@ function initialFields() {
         hoverNormal: null as [number, number, number] | null,
         hoverPoint: null as [number, number, number] | null,
         hoverAabb: null as [number, number, number, number, number, number] | null,
+        hoverNodeId: null as number | null,
         boxSelect: undefined as BoxSelectState | undefined,
         lasso: null as LassoState | null,
         cursor: null as [number, number, number] | null,
         lastHoverVoxel: null as [number, number, number] | null,
         inspectedVoxel: null as EditRoomState['inspectedVoxel'],
+        voxelRevision: 0,
 
         selectionBehavior: 'replace' as SelectionBehavior,
         selectTarget: 'all' as SelectTarget,
@@ -445,6 +497,7 @@ function initialFields() {
         } as ElevationOptions,
 
         viewportContextMenu: null as EditRoomState['viewportContextMenu'],
+        traitPicker: null as EditRoomState['traitPicker'],
 
         activeBlueprint: null as EditRoomState['activeBlueprint'],
 
@@ -542,13 +595,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 };
             });
         },
-        clearVoxelSelection: () => {
-            const s = get();
-            // keep node selection intact, only drop voxel chunks
-            set({
-                selection: { chunks: new Map(), nodes: s.selection.nodes },
-            });
-        },
+        clearVoxelSelection: () => set({ selection: Selection.nodesOnly(get().selection) }),
 
         createNode: (parentId, index, name) => Actions.createNodeAction(ctx, parentId, index, name),
         destroyNode: (nodeId) => Actions.destroyNodeAction(get(), ctx, nodeId),
@@ -560,48 +607,36 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         addTrait: (nodeId, traitId) => Actions.addTraitAction(get(), ctx, nodeId, traitId),
         removeTrait: (nodeId, traitId) => Actions.removeTraitAction(get(), ctx, nodeId, traitId),
         setPrefab: (nodeId, config) => Actions.setPrefabAction(get(), ctx, nodeId, config),
+        createFromSelection: (prefabId) => {
+            const s = get();
+            const bounds = Selection.bounds(s.selection);
+            if (!bounds) return;
+            Actions.createFromSelectionAction(s, ctx, prefabId, bounds);
+            set({ promotePicker: null });
+        },
+        fitToSelection: (nodeId) => {
+            const s = get();
+            const bounds = Selection.bounds(s.selection);
+            if (bounds) Actions.fitShapeToBoundsAction(s, ctx, nodeId, bounds);
+        },
+        selectInside: (nodeId) => {
+            const selection = Actions.selectInsideShape(ctx, nodeId);
+            if (selection) set({ selection });
+        },
         clearPrefab: (nodeId) => Actions.clearPrefabAction(get(), ctx, nodeId),
         bakePrefab: (nodeId) => Actions.bakePrefabAction(get(), ctx, nodeId),
 
+        // a plain node click is the whole selection; null only drops the nodes.
         selectNode: (nodeId) => {
             const s = get();
-            const nodes = new Set<number>();
-            if (nodeId !== null) nodes.add(nodeId);
-            set({
-                selection: { chunks: s.selection.chunks, nodes },
-                inspectedVoxel: nodeId !== null ? null : s.inspectedVoxel,
-            });
+            set({ selection: nodeId === null ? Selection.voxelsOnly(s.selection) : Selection.ofNode(nodeId) });
         },
-        addToSelection: (nodeId) => {
-            const s = get();
-            const nodes = new Set(s.selection.nodes);
-            nodes.add(nodeId);
-            set({
-                selection: { chunks: s.selection.chunks, nodes },
-                inspectedVoxel: null,
-            });
-        },
-        removeFromSelection: (nodeId) => {
-            const s = get();
-            const nodes = new Set(s.selection.nodes);
-            nodes.delete(nodeId);
-            set({
-                selection: { chunks: s.selection.chunks, nodes },
-            });
-        },
-        setSelection: (nodeIds) => {
-            const s = get();
-            set({
-                selection: { chunks: s.selection.chunks, nodes: new Set(nodeIds) },
-                inspectedVoxel: null,
-            });
-        },
-        clearSelection: () => {
-            const s = get();
-            set({
-                selection: { chunks: s.selection.chunks, nodes: new Set() },
-            });
-        },
+        addToSelection: (nodeId) => set({ selection: Selection.withNode(get().selection, nodeId) }),
+        removeFromSelection: (nodeId) => set({ selection: Selection.withoutNode(get().selection, nodeId) }),
+        setSelection: (nodeIds) => set({ selection: Selection.withNodes(get().selection, nodeIds) }),
+        clearNodeSelection: () => set({ selection: Selection.voxelsOnly(get().selection) }),
+        clearSelection: () => set({ selection: Selection.create() }),
+        replaceSelection: (selection) => set({ selection }),
         focusNode: (nodeId) => {
             focusCamera(api, room, ctx.client!.state!.resources, nodeId);
         },
@@ -617,11 +652,14 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const ids = s.selection.nodes;
             if (ids.size === 0) return;
             Actions.destroyNodesAction(s, ctx, ids);
-            set({
-                selection: { chunks: s.selection.chunks, nodes: new Set() },
-            });
+            set({ selection: Selection.voxelsOnly(s.selection) });
         },
-        openViewportContextMenu: (x, y) => set({ viewportContextMenu: { x, y } }),
+        openViewportContextMenu: (x, y, world = null, block = null) => set({ viewportContextMenu: { x, y, world, block } }),
+        setTraitPicker: (traitPicker) => set({ traitPicker }),
+        createNodeAt: (position, name) => {
+            const id = Actions.createNodeAtAction(ctx, position, name);
+            get().selectNode(id);
+        },
         closeViewportContextMenu: () => set({ viewportContextMenu: null }),
 
         fill: (pattern, mask) => Actions.fill(get(), ctx, pattern, mask),
@@ -631,12 +669,12 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         pick: () => {
             Actions.pickBlock(get(), ctx);
         },
-        cutMove: () => {
+        cutMove: (continuous = false) => {
             const s = get();
             const sel = s.selection;
-            if (Selection.isEmpty(sel)) return;
+            if (Selection.isEmpty(sel)) return null;
             const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, sel);
-            set({ activeBlueprint: blueprint });
+            set({ activeBlueprint: blueprint, placementContinuous: continuous });
 
             const { forward: cutSourceOps, reverse: cutReverseOps } = Blueprint.buildPasteOps(
                 blueprint,
@@ -646,11 +684,10 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
             commitVoxelOps(ctx, airOps);
 
-            set({
-                selection: { chunks: new Map(), nodes: new Set() },
-            });
+            set({ selection: Selection.create() });
 
             TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.scene, ctx);
+            return blueprint;
         },
         rotate: (yawTurns, pitchTurns, rollTurns) => {
             const bp = get().activeBlueprint;
@@ -685,7 +722,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         },
         setBlock: (wx, wy, wz, key) => {
             commitVoxelOps(ctx, [{ wx, wy, wz, key }]);
-            set({ inspectedVoxel: { wx, wy, wz, key } });
         },
         setPlacementPivotPreset: (preset) => {
             TransformTool.setPlacementPivot(transformToolState, preset);
@@ -698,10 +734,12 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setRotationSnap: (rotationSnap) => set({ rotationSnap }),
         setScaleSnap: (scaleSnap) => set({ scaleSnap }),
         setSnapTo: (snapTo) => set({ snapTo }),
+        setSelectionPivot: (selectionPivot) => set({ selectionPivot }),
         setTransformPivotOffset: (transformPivotOffset) => set({ transformPivotOffset }),
         setControlMode: (controlMode) => set({ controlMode }),
-        setInspectedVoxel: (inspectedVoxel) => set({ inspectedVoxel }),
         setSelectionBehavior: (mode) => set({ selectionBehavior: mode }),
+        setActiveFrame: (frame) => set({ activeFrame: frame }),
+        setPromotePicker: (at) => set({ promotePicker: at }),
         setSelectTarget: (filter) => set({ selectTarget: filter }),
         setSelectorMode: (mode) => set({ selectorMode: mode }),
         setAirDistance: (d) => set({ airDistance: d }),
@@ -730,7 +768,37 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setPlacementContinuous: (placementContinuous) => set({ placementContinuous }),
     }));
     api = store;
+    store.subscribe((state, previous) => {
+        if (state.selection === previous.selection) return;
+        if (env.editor) checkSelectionInvariants(state.selection, transformToolState);
+        const inspectedVoxel = inspectedVoxelOf(state.selection);
+        if (!sameInspectedVoxel(inspectedVoxel, state.inspectedVoxel)) store.setState({ inspectedVoxel });
+    });
     return store;
+}
+
+// placement ghosts are previews the transform tool owns; the active id is one of the selected nodes or nothing.
+function checkSelectionInvariants(selection: Selection.Selection, transformToolState: TransformToolState): void {
+    for (const ghost of transformToolState._ghostNodes) {
+        if (selection.nodes.has(ghost.id)) console.error(`[bongle] selection holds placement ghost '${ghost.name}'`);
+    }
+    if (selection.active !== null && !selection.nodes.has(selection.active)) {
+        console.error(`[bongle] selection's active node ${selection.active} is not selected`);
+    }
+}
+
+function inspectedVoxelOf(selection: Selection.Selection): EditRoomState['inspectedVoxel'] {
+    if (selection.nodes.size > 0 || Selection.countVoxels(selection) !== 1) return null;
+    let found: EditRoomState['inspectedVoxel'] = null;
+    Selection.forEach(selection, (wx, wy, wz) => {
+        found = { wx, wy, wz };
+    });
+    return found;
+}
+
+function sameInspectedVoxel(a: EditRoomState['inspectedVoxel'], b: EditRoomState['inspectedVoxel']): boolean {
+    if (a === null || b === null) return a === b;
+    return a.wx === b.wx && a.wy === b.wy && a.wz === b.wz;
 }
 
 /** noop store used as a placeholder until any room registers. */
@@ -755,25 +823,32 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     addTrait: () => {},
     removeTrait: () => {},
     setPrefab: () => {},
+    createFromSelection: () => {},
+    fitToSelection: () => {},
+    selectInside: () => {},
     clearPrefab: () => {},
     bakePrefab: () => {},
     selectNode: () => {},
     addToSelection: () => {},
     removeFromSelection: () => {},
     setSelection: () => {},
+    clearNodeSelection: () => {},
     clearSelection: () => {},
+    replaceSelection: () => {},
     focusNode: () => {},
     copyToClipboard: () => {},
     saveBlueprint: () => {},
     destroySelectedNodes: () => {},
     openViewportContextMenu: () => {},
+    setTraitPicker: () => {},
+    createNodeAt: () => {},
     closeViewportContextMenu: () => {},
     fill: () => 0,
     delete: () => {},
     replace: () => 0,
     overlay: () => 0,
     pick: () => {},
-    cutMove: () => {},
+    cutMove: () => null,
     rotate: () => false,
     flip: () => false,
     setBlock: () => {},
@@ -785,10 +860,12 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setRotationSnap: (rotationSnap) => set({ rotationSnap }),
     setScaleSnap: (scaleSnap) => set({ scaleSnap }),
     setSnapTo: (snapTo) => set({ snapTo }),
+    setSelectionPivot: (selectionPivot) => set({ selectionPivot }),
     setTransformPivotOffset: (transformPivotOffset) => set({ transformPivotOffset }),
     setControlMode: (controlMode) => set({ controlMode }),
-    setInspectedVoxel: (inspectedVoxel) => set({ inspectedVoxel }),
     setSelectionBehavior: (mode) => set({ selectionBehavior: mode }),
+    setActiveFrame: (frame) => set({ activeFrame: frame }),
+    setPromotePicker: (at) => set({ promotePicker: at }),
     setSelectTarget: (filter) => set({ selectTarget: filter }),
     setSelectorMode: (mode) => set({ selectorMode: mode }),
     setAirDistance: (d) => set({ airDistance: d }),

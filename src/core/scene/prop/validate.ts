@@ -59,6 +59,11 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
                 const v = value[i];
                 if (typeof v !== 'number' || Number.isNaN(v)) push(issues, [...path, i], `expected number, got ${describe(v)}`);
             }
+            if (schema.type === 'vector3' && schema.subtype === 'direction' && value.length === 3) {
+                const length = Math.hypot(value[0], value[1], value[2]);
+                if (Math.abs(length - 1) > 1e-3)
+                    push(issues, path, `direction has length ${length.toFixed(3)}, expected 1`, 'warn');
+            }
             return;
         }
         case 'list': {
@@ -141,6 +146,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
             return;
         case 'prefab':
         case 'block':
+        case 'sprite':
             if (typeof value !== 'string') push(issues, path, `expected ${schema.type} ref (string), got ${describe(value)}`);
             return;
         case 'union': {

@@ -10,11 +10,10 @@ import {
 import { setPointerLock } from '../api/pointer-lock';
 import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame } from '../api/scripts';
-import { script } from '../core/registry';
 import { getCamera, getSubject } from '../api/subject';
-import { type TraitType } from '../api/traits';
-import { trait } from '../core/registry';
+import type { TraitType } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { script, trait } from '../core/registry';
 import { env } from '../env';
 import { CameraTrait } from './camera';
 import { TransformTrait } from './transform';
@@ -35,7 +34,7 @@ export const OrbitControllerTrait = trait(
         target: () => [0, 0, -INITIAL_TARGET_DISTANCE] as Vec3,
         eye: null as Vec3 | null,
     },
-    { persist: false },
+    { icon: 'kit:icon:controller', persist: false },
 );
 
 export type OrbitControllerTrait = TraitType<typeof OrbitControllerTrait>;

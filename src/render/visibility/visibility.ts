@@ -41,6 +41,8 @@ export type Visibility = {
     transforms: TransformTrait[];
     /** parallel to `entries`: `transform._version` as last folded into the leaf. */
     versions: number[];
+    /** bumps on add, remove and refit. */
+    generation: number;
 };
 
 export function init(): Visibility {
@@ -50,6 +52,7 @@ export function init(): Visibility {
         entries: [],
         transforms: [],
         versions: [],
+        generation: 0,
     };
 }
 
@@ -70,6 +73,7 @@ export function add(v: Visibility, aabb: Box3, transform: TransformTrait): CullS
     v.entries.push(cull);
     v.transforms.push(transform);
     v.versions.push(transform._version);
+    v.generation++;
     return cull;
 }
 
@@ -88,6 +92,7 @@ export function remove(v: Visibility, cull: CullState): void {
         v.versions[slot] = movedVersion;
         dbvt.setData(v.tree, moved.leaf, slot);
     }
+    v.generation++;
 }
 
 /** refit moved leaves, reset every `visible`, then frustum + distance cull. */
@@ -97,6 +102,7 @@ export function update(v: Visibility, camera: Camera, viewRadius: number): void 
     const versions = v.versions;
     const count = entries.length;
 
+    let refit = false;
     for (let i = 0; i < count; i++) {
         const transform = transforms[i]!;
         const version = transform._version;
@@ -105,7 +111,9 @@ export function update(v: Visibility, camera: Camera, viewRadius: number): void 
         const cull = entries[i]!;
         box3.transformMat4(cull.worldAabb, cull.aabb, getVisualWorldMatrix(transform));
         dbvt.update(v.tree, cull.leaf, cull.worldAabb);
+        refit = true;
     }
+    if (refit) v.generation++;
 
     for (let i = 0; i < count; i++) {
         const cull = entries[i]!;

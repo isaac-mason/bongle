@@ -1,22 +1,23 @@
 import { type EulerOrder, euler, type Quat, quat } from 'math';
-import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ComponentProps, createContext, forwardRef, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
 import { Button, IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
 import { registry } from '../../core/registry';
-import type { BlockRefSchema, PrefabRefSchema, Schema } from '../../core/scene/prop/prop';
+import { type PropPath, samePath } from '../../core/scene/prop/path';
+import type { BlockRefSchema, ObjectSchema, PrefabRefSchema, Schema, SpriteRefSchema } from '../../core/scene/prop/prop';
 import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/prop';
 import type { Node, Realm } from '../../core/scene/scene-tree';
 import { createPrefabConfig, getNodeById } from '../../core/scene/scene-tree';
 import * as Selection from '../../core/scene/selection';
 import type { ControlDef, TraitHandle } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
-import { useEditRoom } from '../edit-room-store';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
+import { type ActiveFrame, activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { prefabSelectItems } from './prefab-items';
 import { PrefabThumb } from './prefab-thumb';
-
-function useTraits(): TraitHandle[] {
-    return [...registry.traits.handles.values()];
-}
+import { SpriteIcon } from './sprite-icon';
+import { traitSelectItems } from './trait-items';
 
 function useTraitsBySlot(): Array<TraitHandle | undefined> {
     return registry.slotToTrait;
@@ -198,14 +199,56 @@ function EnumEditor({
     return <SearchableSelect<string | number> items={items} value={value} onSelect={onChange} placeholder="search…" />;
 }
 
+const ControlContext = createContext<{ nodeId: number; traitId: string; controlId: string } | null>(null);
+
+function FrameToggle({ schema, path }: { schema: ObjectSchema; path: PropPath }) {
+    const control = useContext(ControlContext);
+    const activeFrame = useEditRoom((s) => s.activeFrame);
+    const setActiveFrame = useEditRoom((s) => s.setActiveFrame);
+    const frame = schema.frame;
+    if (!control || !frame) return null;
+    const armed =
+        activeFrame !== null &&
+        activeFrame.nodeId === control.nodeId &&
+        activeFrame.traitId === control.traitId &&
+        activeFrame.controlId === control.controlId &&
+        samePath(activeFrame.path, path);
+    return (
+        <button
+            type="button"
+            title={armed ? 'gizmo follows the node' : 'gizmo follows this frame'}
+            onClick={() => {
+                if (armed) {
+                    setActiveFrame(null);
+                    return;
+                }
+                const next: ActiveFrame = { ...control, path, position: frame.position, quaternion: frame.quaternion };
+                setActiveFrame(next);
+                const store = activeEditRoomStore();
+                const { activeTool, transformMode } = store.getState();
+                if (activeTool !== 'transform' || (transformMode !== 'translate' && transformMode !== 'rotate')) {
+                    store.setState({ activeTool: 'transform', transformMode: 'translate' });
+                }
+            }}
+            className={`flex items-center gap-0.5 px-1 text-[10px] font-mono cursor-pointer ${
+                armed ? 'bg-accent text-on-accent' : 'bg-surface-muted text-fg-muted hover:text-fg'
+            }`}
+        >
+            <Icons.Move size={12} /> frame
+        </button>
+    );
+}
+
 function TupleEditor({
     value,
     schema,
     onChange,
+    path,
 }: {
     value: unknown[];
     schema: { type: 'tuple'; of: Schema[] };
     onChange: (v: unknown[]) => void;
+    path: PropPath;
 }) {
     return (
         <div className="space-y-1">
@@ -215,6 +258,7 @@ function TupleEditor({
                     <PropertyEditor
                         schema={itemSchema}
                         value={value[i]}
+                        path={[...path, i]}
                         onChange={(newVal) => {
                             const next = [...value];
                             next[i] = newVal;
@@ -231,19 +275,23 @@ function ObjectEditor({
     value,
     schema,
     onChange,
+    path,
 }: {
     value: Record<string, unknown>;
-    schema: { type: 'object'; fields: Record<string, Schema> };
+    schema: ObjectSchema;
     onChange: (v: Record<string, unknown>) => void;
+    path: PropPath;
 }) {
     return (
         <div className="space-y-1 pl-2 border-l border-border">
+            <FrameToggle schema={schema} path={path} />
             {Object.entries(schema.fields).map(([key, fieldSchema]) => (
                 <div key={key}>
                     <span className="block text-[10px] font-mono text-fg mb-0.5">{key}</span>
                     <PropertyEditor
                         schema={fieldSchema}
                         value={value?.[key]}
+                        path={[...path, key]}
                         onChange={(newVal) => {
                             onChange({ ...value, [key]: newVal });
                         }}
@@ -258,10 +306,12 @@ function ListEditor({
     value,
     schema,
     onChange,
+    path,
 }: {
     value: unknown[];
     schema: { type: 'list'; of: Schema };
     onChange: (v: unknown[]) => void;
+    path: PropPath;
 }) {
     return (
         <div className="space-y-1">
@@ -272,6 +322,7 @@ function ListEditor({
                         <PropertyEditor
                             schema={schema.of}
                             value={item}
+                            path={[...path, i]}
                             onChange={(newVal) => {
                                 const next = [...value];
                                 next[i] = newVal;
@@ -305,10 +356,12 @@ function UnionEditor({
     value,
     schema,
     onChange,
+    path,
 }: {
     value: Record<string, unknown>;
-    schema: { type: 'union'; key: string; variants: Array<{ type: 'object'; fields: Record<string, Schema> }> };
+    schema: { type: 'union'; key: string; variants: ObjectSchema[] };
     onChange: (v: Record<string, unknown>) => void;
+    path: PropPath;
 }) {
     const discriminator = value?.[schema.key];
     const selectedVariant = schema.variants.find((v) => {
@@ -354,6 +407,7 @@ function UnionEditor({
             />
             {selectedVariant && (
                 <div className="pl-2 border-l border-border">
+                    <FrameToggle schema={selectedVariant} path={path} />
                     {Object.entries(selectedVariant.fields)
                         .filter(([k]) => k !== schema.key)
                         .map(([key, fieldSchema]) => (
@@ -362,6 +416,7 @@ function UnionEditor({
                                 <PropertyEditor
                                     schema={fieldSchema}
                                     value={value?.[key]}
+                                    path={[...path, key]}
                                     onChange={(newVal) => {
                                         onChange({ ...value, [key]: newVal });
                                     }}
@@ -415,6 +470,7 @@ function defaultForSchema(schema: Schema): unknown {
             return null;
         case 'prefab':
         case 'block':
+        case 'sprite':
             return '';
         case 'union': {
             const variant = schema.variants[0];
@@ -430,11 +486,13 @@ function OptionalEditor({
     schema,
     onChange,
     label,
+    path,
 }: {
     value: unknown;
     schema: { type: 'optional' | 'nullable' | 'nullish'; of: Schema };
     onChange: (v: unknown) => void;
     label: string;
+    path: PropPath;
 }) {
     const hasValue = value !== undefined && value !== null;
 
@@ -457,7 +515,7 @@ function OptionalEditor({
             </label>
             {hasValue && (
                 <div className="pl-2 border-l border-border">
-                    <PropertyEditor schema={schema.of} value={value} onChange={onChange} />
+                    <PropertyEditor schema={schema.of} value={value} path={path} onChange={onChange} />
                 </div>
             )}
         </div>
@@ -510,18 +568,7 @@ function MeshEditor({
 function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRefSchema; onChange: (v: string) => void }) {
     const room = useEditor((s) => s.room);
     if (!room) return null;
-    const prefabDefs = registry.prefabs.byId;
-    const ids = Array.from(prefabDefs.keys()).sort();
-    const thumbSize = 16;
-    const items: SearchableSelectItem<string>[] = [
-        { id: '', label: 'none' },
-        ...ids.map((id) => {
-            const def = prefabDefs.get(id);
-            const name = def?.name ?? id;
-            const leading = <PrefabThumb key={id} prefabId={id} size={thumbSize} className="overflow-hidden shrink-0" />;
-            return { id, label: name, sublabel: name === id ? undefined : id, keywords: def?.tags, leading };
-        }),
-    ];
+    const items: SearchableSelectItem<string>[] = [{ id: '', label: 'none' }, ...prefabSelectItems(16)];
     return (
         <SearchableSelect<string>
             items={items}
@@ -530,6 +577,21 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
             placeholder="search prefabs…"
             emptyLabel="none"
         />
+    );
+}
+
+function SpriteRefEditor({ value, onChange }: { value: string; schema: SpriteRefSchema; onChange: (v: string) => void }) {
+    const items: SearchableSelectItem<string>[] = [
+        { id: '', label: 'none' },
+        ...[...registry.sprites.byId.keys()].map((id) => ({ id, label: id, leading: <SpriteIcon key={id} id={id} size={12} /> })),
+    ];
+    return (
+        <div className="flex items-center gap-1.5">
+            {value && <SpriteIcon id={value} size={12} />}
+            <div className="flex-1 min-w-0">
+                <SearchableSelect<string> items={items} value={value} onSelect={onChange} placeholder="search sprites…" />
+            </div>
+        </div>
     );
 }
 
@@ -585,10 +647,12 @@ function RecordEditor({
     value,
     schema,
     onChange,
+    path,
 }: {
     value: Record<string, unknown>;
     schema: { type: 'record'; field: Schema };
     onChange: (v: Record<string, unknown>) => void;
+    path: PropPath;
 }) {
     const entries = Object.entries(value ?? {});
 
@@ -601,6 +665,7 @@ function RecordEditor({
                         <PropertyEditor
                             schema={schema.field}
                             value={v}
+                            path={[...path, k]}
                             onChange={(newVal) => {
                                 onChange({ ...value, [k]: newVal });
                             }}
@@ -632,7 +697,17 @@ function RecordEditor({
     );
 }
 
-function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: unknown; onChange: (v: unknown) => void }) {
+function PropertyEditor({
+    schema,
+    value,
+    onChange,
+    path,
+}: {
+    schema: Schema;
+    value: unknown;
+    onChange: (v: unknown) => void;
+    path: PropPath;
+}) {
     switch (schema.type) {
         case 'number':
             return <NumberEditor value={(value as number) ?? 0} schema={schema} onChange={onChange} />;
@@ -651,29 +726,37 @@ function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: un
         case 'enumeration':
             return <EnumEditor value={value as string | number} options={schema.values} onChange={onChange} />;
         case 'tuple':
-            return <TupleEditor value={(value as unknown[]) ?? []} schema={schema} onChange={onChange} />;
+            return <TupleEditor value={(value as unknown[]) ?? []} schema={schema} path={path} onChange={onChange} />;
         case 'object':
-            return <ObjectEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} onChange={onChange} />;
+            return (
+                <ObjectEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} path={path} onChange={onChange} />
+            );
         case 'list':
-            return <ListEditor value={(value as unknown[]) ?? []} schema={schema} onChange={onChange} />;
+            return <ListEditor value={(value as unknown[]) ?? []} schema={schema} path={path} onChange={onChange} />;
         case 'union':
-            return <UnionEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} onChange={onChange} />;
+            return (
+                <UnionEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} path={path} onChange={onChange} />
+            );
         case 'optional':
-            return <OptionalEditor value={value} schema={schema} onChange={onChange} label="optional" />;
+            return <OptionalEditor value={value} schema={schema} path={path} onChange={onChange} label="optional" />;
         case 'nullable':
-            return <OptionalEditor value={value} schema={schema} onChange={onChange} label="nullable" />;
+            return <OptionalEditor value={value} schema={schema} path={path} onChange={onChange} label="nullable" />;
         case 'nullish':
-            return <OptionalEditor value={value} schema={schema} onChange={onChange} label="nullish" />;
+            return <OptionalEditor value={value} schema={schema} path={path} onChange={onChange} label="nullish" />;
         case 'literal':
             return <LiteralEditor value={value} />;
         case 'record':
-            return <RecordEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} onChange={onChange} />;
+            return (
+                <RecordEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} path={path} onChange={onChange} />
+            );
         case 'mesh':
             return <MeshEditor value={(value as { modelId: string; meshName: string } | null) ?? null} onChange={onChange} />;
         case 'prefab':
             return <PrefabRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
         case 'block':
             return <BlockRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
+        case 'sprite':
+            return <SpriteRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
         default:
             return <span className="text-[10px] font-mono text-fg break-all">{JSON.stringify(value)}</span>;
     }
@@ -703,7 +786,10 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     return (
         <div className="border border-border">
             <div className="flex items-center justify-between px-2 py-1 bg-surface-muted">
-                <span className="text-[11px] font-mono font-semibold text-fg">{handle.def.id}</span>
+                <span className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-fg">
+                    {handle.def.icon && <SpriteIcon id={handle.def.icon} size={12} />}
+                    {handle.def.id}
+                </span>
                 {node.scene && isEditorOwned && <Icons.Lock size={12} className="text-fg-muted" />}
                 {node.scene && !isEditorOwned && (
                     <IconButton
@@ -721,16 +807,19 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
             ) : (
                 <div className="px-2 py-1.5 space-y-1.5">
                     {propertyEntries.map(({ key, reg, value }) => (
-                        <div key={key}>
-                            <span className="block text-[10px] font-mono text-fg mb-0.5">{reg.label ?? key}</span>
-                            <PropertyEditor
-                                schema={reg.schema}
-                                value={value}
-                                onChange={(newValue) => {
-                                    setTrait(node.id, handle.def.id, { [key]: newValue });
-                                }}
-                            />
-                        </div>
+                        <ControlContext.Provider key={key} value={{ nodeId: node.id, traitId: handle.def.id, controlId: key }}>
+                            <div>
+                                <span className="block text-[10px] font-mono text-fg mb-0.5">{reg.label ?? key}</span>
+                                <PropertyEditor
+                                    schema={reg.schema}
+                                    value={value}
+                                    path={[]}
+                                    onChange={(newValue) => {
+                                        setTrait(node.id, handle.def.id, { [key]: newValue });
+                                    }}
+                                />
+                            </div>
+                        </ControlContext.Provider>
                     ))}
                 </div>
             )}
@@ -775,13 +864,10 @@ function UnresolvedTraitSection({
 function AddTraitAction({ node }: { node: Node }) {
     const room = useEditor((s) => s.room);
     const addTrait = useEditRoom((s) => s.addTrait);
-    const traits = useTraits();
 
     if (!room) return null;
 
-    const items: SearchableSelectItem<string>[] = traits
-        .filter((h) => node.traits[h.slot] === undefined)
-        .map((h) => ({ id: h.id, label: h.def.name, sublabel: h.def.name === h.id ? undefined : h.id }));
+    const items = traitSelectItems(node);
 
     if (items.length === 0) return <SectionAddButton disabled />;
 
@@ -911,6 +997,7 @@ function PrefabSection({ node }: { node: Node }) {
                         <PropertyEditor
                             schema={def.args.schema}
                             value={config.args ?? def.args.default}
+                            path={[]}
                             onChange={(args) => {
                                 setPrefab(node.id, { ...config, args });
                             }}
@@ -927,9 +1014,11 @@ function PrefabSection({ node }: { node: Node }) {
 export function InspectorPanel() {
     const room = useEditor((s) => s.room);
     const selectedNodeIds = useEditRoom((s) => s.selection.nodes);
+    const activeNodeId = useEditRoom((s) => Selection.activeNode(s.selection));
     const voxelCount = useEditRoom((s) => Selection.countVoxels(s.selection));
     const sceneRevision = useEditRoom((s) => s.sceneRevision);
     const inspectedVoxel = useEditRoom((s) => s.inspectedVoxel);
+    const voxelRevision = useEditRoom((s) => s.voxelRevision);
     const setBlock = useEditRoom((s) => s.setBlock);
     const blockIconAtlasUrl = useEditor((s) => s.blockIconAtlasUrl);
     const blockIconCoords = useEditor((s) => s.blockIconCoords);
@@ -937,19 +1026,35 @@ export function InspectorPanel() {
     const blockIconCols = useEditor((s) => s.blockIconCols);
 
     void sceneRevision;
+    void voxelRevision;
 
     if (!room) {
         return <div className="p-2 text-[10px] text-fg-muted font-mono">no scene loaded</div>;
     }
 
     if (inspectedVoxel) {
-        const { wx, wy, wz, key } = inspectedVoxel;
+        const { wx, wy, wz } = inspectedVoxel;
+        const key = getBlock(room.voxels, wx, wy, wz);
         const blockRegistry = registry.blockRegistry;
-        const stateId = blockRegistry.keyToState.get(key);
+        const stateId = key === BLOCK_AIR ? undefined : blockRegistry.keyToState.get(key);
+        const blockIndex = stateId !== undefined ? blockRegistry.stateToBlockIndex[stateId] : undefined;
+        const handle = blockIndex !== undefined ? blockRegistry.handles[blockIndex] : undefined;
 
         const iconSize = 16;
 
-        if (stateId === undefined) {
+        if (key === BLOCK_AIR) {
+            return (
+                <div className="p-2 space-y-1">
+                    <SectionDivider label="voxel" />
+                    <div className="text-[10px] font-mono text-fg-muted italic">air</div>
+                    <div className="text-[10px] font-mono text-fg-muted">
+                        {wx}, {wy}, {wz}
+                    </div>
+                </div>
+            );
+        }
+
+        if (stateId === undefined || handle === undefined) {
             return (
                 <div className="p-2 space-y-1">
                     <SectionDivider label="voxel" />
@@ -963,7 +1068,7 @@ export function InspectorPanel() {
         }
 
         // handles is keyed by reserved block index; defs is declaration order and does not line up with stateToBlockIndex.
-        const def = blockRegistry.handles[blockRegistry.stateToBlockIndex[stateId]].def;
+        const def = handle.def;
         const propNames = Object.keys(def.states.props);
         const decoded = def.states.decode(blockRegistry.stateToLocalIndex[stateId]) as Record<string, unknown>;
 
@@ -1073,15 +1178,15 @@ export function InspectorPanel() {
         return <div className="p-2 text-[10px] text-fg-muted font-mono italic">nothing selected</div>;
     }
 
-    if (selectedNodeIds.size !== 1) {
-        const parts: string[] = [];
-        if (selectedNodeIds.size > 0) parts.push(`${selectedNodeIds.size} node${selectedNodeIds.size !== 1 ? 's' : ''}`);
-        if (voxelCount > 0) parts.push(`${voxelCount.toLocaleString()} voxel${voxelCount !== 1 ? 's' : ''}`);
-        return <div className="p-2 text-[10px] text-fg-muted font-mono italic">{parts.join(' + ')} selected</div>;
+    if (activeNodeId === null) {
+        return (
+            <div className="p-2 text-[10px] text-fg-muted font-mono italic">
+                {selectionSummary(selectedNodeIds.size, voxelCount)} selected
+            </div>
+        );
     }
 
-    const selectedNodeId = selectedNodeIds.values().next().value!;
-    const node = getNodeById(room.scene, selectedNodeId);
+    const node = getNodeById(room.scene, activeNodeId);
     if (!node) {
         return <div className="p-2 text-[10px] text-fg-muted font-mono italic">node not found</div>;
     }
@@ -1094,6 +1199,11 @@ export function InspectorPanel() {
     return (
         <div className="flex flex-col max-h-full">
             <div className="overflow-y-auto flex-1 p-2 space-y-4">
+                {(selectedNodeIds.size > 1 || voxelCount > 0) && (
+                    <div className="text-[10px] text-fg-muted font-mono italic">
+                        {selectionSummary(selectedNodeIds.size, voxelCount)} selected, showing the active node
+                    </div>
+                )}
                 <div className="space-y-1.5">
                     <SectionDivider label="node" action={<AddPrefabAction node={node} />} />
 
@@ -1133,6 +1243,13 @@ export function InspectorPanel() {
             </div>
         </div>
     );
+}
+
+function selectionSummary(nodeCount: number, voxelCount: number): string {
+    const parts: string[] = [];
+    if (nodeCount > 0) parts.push(`${nodeCount} node${nodeCount !== 1 ? 's' : ''}`);
+    if (voxelCount > 0) parts.push(`${voxelCount.toLocaleString()} voxel${voxelCount !== 1 ? 's' : ''}`);
+    return parts.join(' + ');
 }
 
 function NameEditor({ node }: { node: Node }) {
