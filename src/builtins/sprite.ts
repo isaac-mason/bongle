@@ -1,5 +1,6 @@
-import type { Vec4 } from 'math';
-import { trait } from '../core/registry';
+import { type Vec4, vec4 } from 'math';
+import { control, registry, trait } from '../core/registry';
+import { prop } from '../core/scene/prop';
 import type { TraitType } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
 import type { SpriteOcclusion } from '../render/sprites/sprite-resources';
@@ -65,3 +66,129 @@ export const SpriteTrait = trait(
 export type SpriteTrait = TraitType<typeof SpriteTrait>;
 
 export type { SpriteOcclusion };
+
+control(SpriteTrait, 'sprite', {
+    label: 'Sprite',
+    schema: prop.sprite(),
+    get: (t) => t.sprite?.def.spriteId ?? '',
+    set: (t, v) => {
+        t.sprite = v === '' ? null : (registry.sprites.handles.get(v) ?? null);
+    },
+});
+
+control(SpriteTrait, 'mode', {
+    label: 'Mode',
+    schema: prop.enumeration(['world', 'billboard', 'y-billboard']),
+    get: (t) => t.mode,
+    set: (t, v) => {
+        t.mode = v as SpriteMode;
+    },
+});
+
+control(SpriteTrait, 'width', {
+    label: 'Width',
+    schema: prop.number({ min: 1, step: 1 }),
+    get: (t) => t.width,
+    set: (t, v) => {
+        t.width = v;
+    },
+});
+
+control(SpriteTrait, 'height', {
+    label: 'Height',
+    schema: prop.number({ min: 1, step: 1 }),
+    get: (t) => t.height,
+    set: (t, v) => {
+        t.height = v;
+    },
+});
+
+control(SpriteTrait, 'worldScale', {
+    label: 'World scale',
+    schema: prop.number({ min: 0 }),
+    get: (t) => t.worldScale,
+    set: (t, v) => {
+        t.worldScale = v;
+    },
+});
+
+control(SpriteTrait, 'center', {
+    label: 'Centered',
+    schema: prop.boolean(),
+    get: (t) => t.center,
+    set: (t, v) => {
+        t.center = v;
+    },
+});
+
+control(SpriteTrait, 'fps', {
+    label: 'FPS',
+    schema: prop.number({ min: 0, step: 1 }),
+    get: (t) => t.fps,
+    set: (t, v) => {
+        t.fps = v;
+    },
+});
+
+control(SpriteTrait, 'occlusion', {
+    label: 'Occlusion',
+    schema: prop.enumeration(['world', 'none']),
+    get: (t) => t.occlusion,
+    set: (t, v) => {
+        t.occlusion = v as SpriteOcclusion;
+    },
+});
+
+control(SpriteTrait, 'tint', {
+    label: 'Tint',
+    schema: prop.vec4(),
+    get: (t) => t.tint,
+    set: (t, v) => {
+        vec4.copy(t.tint, v as Vec4);
+    },
+});
+
+control(SpriteTrait, 'glow', {
+    label: 'Glow',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.glow,
+    set: (t, v) => {
+        t.glow = v;
+    },
+});
+
+control(SpriteTrait, 'unlit', {
+    label: 'Unlit',
+    schema: prop.boolean(),
+    get: (t) => t.unlit,
+    set: (t, v) => {
+        t.unlit = v;
+    },
+});
+
+control(SpriteTrait, 'litMin', {
+    label: 'Light floor',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.litMin,
+    set: (t, v) => {
+        t.litMin = v;
+    },
+});
+
+control(SpriteTrait, 'dither', {
+    label: 'Dither',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.dither,
+    set: (t, v) => {
+        t.dither = v;
+    },
+});
+
+control(SpriteTrait, 'visible', {
+    label: 'Visible',
+    schema: prop.boolean(),
+    get: (t) => t.visible,
+    set: (t, v) => {
+        t.visible = v;
+    },
+});

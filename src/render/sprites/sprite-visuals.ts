@@ -53,6 +53,8 @@ export type SpriteVisualState = {
     cull: Visibility.CullState;
     /** sprite id observed at install, re-install on swap. */
     spriteIdAtInstall: string;
+    /** the quad size the cull box was built from; editing any of them re-installs so the box keeps up. */
+    cullExtentAtInstall: number;
     /** which batch owns `slot`; a trait changing `occlusion` re-installs into the other one. */
     occlusion: SpriteOcclusion;
     /** entry from `SpriteResources.frames` captured at install. */
@@ -137,20 +139,26 @@ export function update(
 
         let state: SpriteVisualState;
         const existing = trait._state;
-        if (existing === null || existing.spriteIdAtInstall !== sprite.def.spriteId || existing.occlusion !== trait.occlusion) {
+        // own frustum-cull entry; the quad can rotate freely (billboard modes) so the local box is a
+        // conservative diagonal that contains the quad in any orientation, in world units (width/height
+        // are source pixels times worldScale).
+        const w0 = trait.width;
+        const h0 = trait.height;
+        const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5 * trait.worldScale;
+        if (
+            existing === null ||
+            existing.spriteIdAtInstall !== sprite.def.spriteId ||
+            existing.occlusion !== trait.occlusion ||
+            existing.cullExtentAtInstall !== r
+        ) {
             if (existing !== null) destroyInstance(visuals, resources, trait, visibility, dirty);
-            // own frustum-cull entry; the quad can rotate freely (billboard modes) so the local box is a
-            // conservative diagonal that contains the quad in any orientation, in world units (width/height
-            // are source pixels times worldScale).
-            const w0 = trait.width;
-            const h0 = trait.height;
-            const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5 * trait.worldScale;
             const cull = Visibility.add(visibility, box3.set(box3.create(), -r, -r, -r, r, r, r), transform);
             state = {
                 slot: -1,
                 trait,
                 cull,
                 spriteIdAtInstall: sprite.def.spriteId,
+                cullExtentAtInstall: r,
                 occlusion: trait.occlusion,
                 entry,
                 installedAtMs: nowMs,

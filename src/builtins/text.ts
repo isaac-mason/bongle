@@ -1,5 +1,6 @@
-import type { Vec4 } from 'math';
-import { trait } from '../core/registry';
+import { type Vec4, vec4 } from 'math';
+import { control, trait } from '../core/registry';
+import { prop } from '../core/scene/prop';
 import type { TraitType } from '../core/scene/traits';
 import type { SpriteOcclusion } from '../render/sprites/sprite-resources';
 import type { TextVisualState } from '../render/text/text-visuals';
@@ -54,3 +55,102 @@ export const TextTrait = trait(
 );
 
 export type TextTrait = TraitType<typeof TextTrait>;
+
+control(TextTrait, 'text', {
+    label: 'Text',
+    schema: prop.string(),
+    get: (t) => t.text,
+    set: (t, v) => {
+        t.text = v;
+    },
+});
+
+control(TextTrait, 'align', {
+    label: 'Align',
+    schema: prop.enumeration(['left', 'center', 'right']),
+    get: (t) => t.align,
+    set: (t, v) => {
+        t.align = v as TextAlign;
+    },
+});
+
+control(TextTrait, 'mode', {
+    label: 'Mode',
+    schema: prop.enumeration(['world', 'billboard', 'y-billboard']),
+    get: (t) => t.mode,
+    set: (t, v) => {
+        t.mode = v as SpriteMode;
+    },
+});
+
+control(TextTrait, 'worldScale', {
+    label: 'World scale',
+    schema: prop.number({ min: 0 }),
+    get: (t) => t.worldScale,
+    set: (t, v) => {
+        t.worldScale = v;
+    },
+});
+
+control(TextTrait, 'occlusion', {
+    label: 'Occlusion',
+    schema: prop.enumeration(['world', 'none']),
+    get: (t) => t.occlusion,
+    set: (t, v) => {
+        t.occlusion = v as SpriteOcclusion;
+    },
+});
+
+control(TextTrait, 'tint', {
+    label: 'Tint',
+    schema: prop.vec4(),
+    get: (t) => t.tint,
+    set: (t, v) => {
+        vec4.copy(t.tint, v as Vec4);
+    },
+});
+
+control(TextTrait, 'glow', {
+    label: 'Glow',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.glow,
+    set: (t, v) => {
+        t.glow = v;
+    },
+});
+
+control(TextTrait, 'unlit', {
+    label: 'Unlit',
+    schema: prop.boolean(),
+    get: (t) => t.unlit,
+    set: (t, v) => {
+        t.unlit = v;
+    },
+});
+
+control(TextTrait, 'litMin', {
+    label: 'Light floor',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.litMin,
+    set: (t, v) => {
+        t.litMin = v;
+    },
+});
+
+control(TextTrait, 'dither', {
+    label: 'Dither',
+    schema: prop.number({ min: 0, max: 1, step: 0.05 }),
+    get: (t) => t.dither,
+    set: (t, v) => {
+        t.dither = v;
+    },
+});
+
+control(TextTrait, 'visible', {
+    label: 'Visible',
+    schema: prop.boolean(),
+    get: (t) => t.visible,
+    set: (t, v) => {
+        t.visible = v;
+    },
+});
