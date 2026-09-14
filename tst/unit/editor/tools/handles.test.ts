@@ -155,3 +155,113 @@ describe('shape handles on a list of centred spheres', () => {
         expect(state.activeTool).toBe('transform');
     });
 });
+
+// a scene with one node carrying a trait whose single control is `schema`, viewed from +z.
+function harness(
+    schema: ReturnType<typeof prop.object> | ReturnType<typeof prop.list>,
+    initial: unknown,
+    nodePosition: Vec3 = [0, 0, 0],
+) {
+    const id = `test-harness-${harnessCount++}`;
+    const Trait = trait(id, { value: null as unknown });
+    control(Trait, 'value', {
+        label: 'Value',
+        schema,
+        get: (t) => t.value,
+        set: (t, v) => {
+            t.value = v;
+        },
+    });
+    reindexRegistry(registry);
+    const sceneTree = createSceneTree();
+    const node = createNode({ name: 'harness' });
+    addChild(sceneTree.root, node);
+    const transform = addTrait(node, TransformTrait);
+    vec3.copy(transform.position, nodePosition);
+    const instance = addTrait(node, Trait);
+    instance.value = initial;
+    computeWorldTransforms(sceneTree);
+
+    const camera = new PerspectiveCamera(Math.PI / 3, WIDTH / HEIGHT, 0.1, 100);
+    camera.position[2] = 12;
+    camera.lookAt([0, 0, 0]);
+    camera.updateWorldMatrix();
+    camera.updateViewMatrix();
+    camera.updateProjectionMatrix();
+
+    const actions: { label: string; do: () => void; undo: () => void }[] = [];
+    const state = {
+        selection: Selection.ofNode(node.id),
+        activeTool: 'inspect',
+        transformMode: 'translate',
+        translationSnap: 1,
+        activeFrame: null,
+        action: (a: { label: string; do: () => void; undo: () => void }) => {
+            actions.push(a);
+            a.do();
+        },
+    };
+    const store = {
+        getState: () => state,
+        setState: (patch: Record<string, unknown>) => Object.assign(state, patch),
+    } as unknown as EditRoomStoreApi;
+    const scene = new Scene();
+    const quads = Quads.init(scene, 64);
+    const text = Text.init(quads);
+    const handles = Handles.init();
+    const mk = createMouseKeyboardInput();
+    const tick = () => Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+    const aim = (world: Vec3) => {
+        const { ndcX, ndcY } = project(camera, world);
+        mk._cursor.ndcX = ndcX;
+        mk._cursor.ndcY = ndcY;
+    };
+    return { sceneTree, node, instance, camera, state, actions, handles, mk, tick, aim };
+}
+let harnessCount = 0;
+
+describe('shape handles: drags and spaces', () => {
+    it('dragging a box face along its axis resizes that extent, snapped, with one history entry on release', () => {
+        const Box = prop.object({ halfExtents: prop.vec3() }, { shape: { kind: 'box3', halfExtents: 'halfExtents' } });
+        const h = harness(Box, { halfExtents: [1, 1, 1] });
+        h.aim([1, 0, 0]);
+        h.tick();
+        expect(h.handles.handles[h.handles.hovered]).toMatchObject({ kind: 'box-face', axis: 0, sign: 1 });
+        h.mk._gestures.left.pressed = true;
+        h.mk._buttons.left = true;
+        h.tick();
+        expect(h.handles.armed).not.toBeNull();
+        h.mk._gestures.left.pressed = false;
+        h.aim([2.6, 0, 0]);
+        h.tick();
+        expect((h.instance.value as { halfExtents: number[] }).halfExtents).toEqual([3, 1, 1]);
+        h.mk._buttons.left = false;
+        h.tick();
+        expect(h.handles.armed).toBeNull();
+        expect(h.actions).toHaveLength(1);
+        h.actions[0]!.undo();
+        expect((h.instance.value as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
+    });
+
+    it('a world-space shape ignores the node transform', () => {
+        const Sphere = prop.object(
+            { center: prop.point(), radius: prop.radius() },
+            { space: 'world', shape: { kind: 'sphere', radius: 'radius', center: 'center' } },
+        );
+        const h = harness(Sphere, { center: [1, 0, 0], radius: 1 }, [5, 0, 0]);
+        h.tick();
+        const frame = h.handles.handles.find((x) => x.kind === 'frame')!;
+        expect(Array.from(frame.world)).toEqual([1, 0, 0]);
+    });
+
+    it('a local shape sits under the node transform, and a segment gets its two end handles', () => {
+        const Seg = prop.object({ from: prop.point(), to: prop.point() }, { shape: { kind: 'segment', from: 'from', to: 'to' } });
+        const h = harness(Seg, { from: [0, 0, 0], to: [2, 0, 0] }, [1, 0, 0]);
+        h.tick();
+        const ends = h.handles.handles.filter((x) => x.kind === 'segment-end').map((x) => Array.from(x.world));
+        expect(ends).toEqual([
+            [1, 0, 0],
+            [3, 0, 0],
+        ]);
+    });
+});
