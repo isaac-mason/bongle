@@ -2,6 +2,7 @@ import type { Vec4 } from 'math';
 import { trait } from '../core/registry';
 import type { TraitType } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
+import type { SpriteOcclusion } from '../render/sprites/sprite-resources';
 import type { SpriteVisualState } from '../render/sprites/sprite-visuals';
 
 export type SpriteMode = 'world' | 'billboard' | 'y-billboard';
@@ -46,6 +47,9 @@ export const SpriteTrait = trait(
         /** screen-door fade 0-1, fragments drop via `discard` against an interleaved-gradient threshold. Stays in the opaque pipeline. Client-only. */
         dither: 0,
 
+        /** what hides it: `'world'` is depth-tested like any solid, `'none'` draws over the world (nametags, markers). Client-only. */
+        occlusion: 'world' as SpriteOcclusion,
+
         /** whether this sprite renders; the slot stays allocated when false. Client-only. */
         visible: true,
 
@@ -59,3 +63,5 @@ export const SpriteTrait = trait(
 );
 
 export type SpriteTrait = TraitType<typeof SpriteTrait>;
+
+export type { SpriteOcclusion };

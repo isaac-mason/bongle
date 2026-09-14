@@ -488,7 +488,8 @@ export function initResources(
     // Every visual samples light in the shader, so route the volume's buffers to the names their materials bind.
     for (const geometry of [
         particle.batch.geometry,
-        sprite.batch.geometry,
+        sprite.batches.world.geometry,
+        sprite.batches.none.geometry,
         extrudedSprite.batch.geometry,
         model.batch.geometry,
         voxelMesh.batch.geometry,
@@ -553,7 +554,8 @@ export async function swapVoxelResources(
         // A new VoxelResources carries a new light volume, so every batch must be re-pointed, not just the one just rebuilt.
         for (const geometry of [
             r.particle.batch.geometry,
-            r.sprite.batch.geometry,
+            r.sprite.batches.world.geometry,
+            r.sprite.batches.none.geometry,
             r.extrudedSprite.batch.geometry,
             r.model.batch.geometry,
             r.voxelMesh.batch.geometry,
@@ -627,7 +629,7 @@ function build(state: WebGlState, room: ClientRoom): RoomActive {
     const model = MeshVisuals.init(res.model.batch, scene, nodes);
     // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait panels are DOM.
     const domUi = DomUi.init(overlayScene, room.viewport, nodes, state.pipeline.sceneDepthNode);
-    const sprite = SpriteVisuals.init(res.sprite.batch, scene, nodes);
+    const sprite = SpriteVisuals.init(res.sprite, scene, nodes);
     const extrudedSprite = ExtrudedSpriteVisuals.init(res.extrudedSprite.batch, scene, nodes);
     const shadow = ShadowVisuals.init(res.shadow.batch, scene, nodes);
     const particle = ParticleVisuals.init(res.particle.batch, scene, res.sprite);
@@ -650,7 +652,7 @@ export function teardown(state: WebGlState): void {
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, visibility);
     MeshVisuals.dispose(rv.model, state.resources.model.batch, visibility);
     DomUi.dispose(rv.domUi);
-    SpriteVisuals.dispose(rv.sprite, state.resources.sprite.batch, visibility);
+    SpriteVisuals.dispose(rv.sprite, state.resources.sprite, visibility);
     ExtrudedSpriteVisuals.dispose(
         rv.extrudedSprite,
         state.resources.extrudedSprite.batch,
@@ -738,7 +740,7 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
     Debug.end(ctx.profiler, 'dom-ui');
 
     Debug.begin(ctx.profiler, 'sprite');
-    SpriteVisuals.update(rv.sprite, res.sprite.batch, res.sprite, povCamera, room.visibility);
+    SpriteVisuals.update(rv.sprite, res.sprite, povCamera, room.visibility);
     Debug.end(ctx.profiler, 'sprite');
 
     Debug.begin(ctx.profiler, 'extruded-sprite');

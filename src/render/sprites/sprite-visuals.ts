@@ -15,8 +15,10 @@ import {
     MODE_WORLD,
     MODE_Y_BILLBOARD,
     resetSpriteBatch,
+    SPRITE_OCCLUSIONS,
     type SpriteBatch,
     type SpriteEntry,
+    type SpriteOcclusion,
     type SpriteResources,
 } from './sprite-resources';
 
@@ -50,6 +52,8 @@ export type SpriteVisualState = {
     cull: Visibility.CullState;
     /** sprite id observed at install, re-install on swap. */
     spriteIdAtInstall: string;
+    /** which batch owns `slot`; a trait changing `occlusion` re-installs into the other one. */
+    occlusion: SpriteOcclusion;
     /** entry from `SpriteResources.frames` captured at install. */
     entry: SpriteEntry;
     /** performance.now() at install, drives flipbook frame selection. */
@@ -78,9 +82,12 @@ export type SpriteVisuals = {
  * `SpriteResources` and survives room swaps; only this room's use of it
  * (alive-states, cull entries, scene-tree query) lives here.
  */
-export function init(batch: SpriteBatch, scene: Scene, sceneTree: SceneTree): SpriteVisuals {
-    resetSpriteBatch(batch);
-    scene.add(batch.mesh);
+export function init(resources: SpriteResources, scene: Scene, sceneTree: SceneTree): SpriteVisuals {
+    for (const occlusion of SPRITE_OCCLUSIONS) {
+        const batch = resources.batches[occlusion];
+        resetSpriteBatch(batch);
+        scene.add(batch.mesh);
+    }
     return {
         aliveStates: [],
         _query: query(sceneTree, [SpriteTrait, TransformTrait]),
@@ -104,7 +111,6 @@ const _scratchUp: [number, number, number] = [0, 0, 0];
  */
 export function update(
     visuals: SpriteVisuals,
-    batch: SpriteBatch,
     resources: SpriteResources,
     _camera: Camera,
     visibility: Visibility.Visibility,
@@ -112,17 +118,13 @@ export function update(
     const frameId = ++visuals.frameId;
     const nowMs = performance.now();
 
-    let poseArr = batch.instancePoseBuf.array as Float32Array;
-    let matArr = batch.instanceMaterialBuf.array as Float32Array;
-
-    let poseDirty = false;
-    let matDirty = false;
+    const dirty: Record<SpriteOcclusion, boolean> = { world: false, none: false };
 
     // phase 1: install/refresh state, alloc/free slots by visibility
     for (const [trait, transform] of visuals._query) {
         const sprite = trait.sprite;
         if (!sprite) {
-            if (trait._state !== null) destroyInstance(visuals, batch, trait, visibility);
+            if (trait._state !== null) destroyInstance(visuals, resources, trait, visibility, dirty);
             continue;
         }
 
@@ -134,8 +136,8 @@ export function update(
 
         let state: SpriteVisualState;
         const existing = trait._state;
-        if (existing === null || existing.spriteIdAtInstall !== sprite.def.spriteId) {
-            if (existing !== null) destroyInstance(visuals, batch, trait, visibility);
+        if (existing === null || existing.spriteIdAtInstall !== sprite.def.spriteId || existing.occlusion !== trait.occlusion) {
+            if (existing !== null) destroyInstance(visuals, resources, trait, visibility, dirty);
             // own frustum-cull entry; the quad can rotate freely (billboard modes) so the local box is a
             // conservative diagonal that contains the quad in any orientation, in world units (width/height
             // are source pixels times worldScale).
@@ -148,6 +150,7 @@ export function update(
                 trait,
                 cull,
                 spriteIdAtInstall: sprite.def.spriteId,
+                occlusion: trait.occlusion,
                 entry,
                 installedAtMs: nowMs,
                 lastSeenFrame: frameId,
@@ -159,27 +162,25 @@ export function update(
         }
         state.lastSeenFrame = frameId;
 
+        const batch = resources.batches[state.occlusion];
         const visible = state.cull.visible && trait.visible;
 
         if (!visible) {
             if (state.slot !== -1) {
                 freeSlot(batch, state);
-                poseDirty = true;
-                matDirty = true;
+                dirty[state.occlusion] = true;
             }
             continue;
         }
 
         if (state.slot === -1) {
-            if (batch.head >= batch.instanceCapacity) {
-                growSpriteBatch(batch, batch.instanceCapacity * 2);
-                poseArr = batch.instancePoseBuf.array as Float32Array;
-                matArr = batch.instanceMaterialBuf.array as Float32Array;
-            }
+            if (batch.head >= batch.instanceCapacity) growSpriteBatch(batch, batch.instanceCapacity * 2);
             const slot = batch.head++;
             state.slot = slot;
             batch.slotOwner[slot] = state;
         }
+        const poseArr = batch.instancePoseBuf.array as Float32Array;
+        const matArr = batch.instanceMaterialBuf.array as Float32Array;
 
         // pose write (per-frame)
         const worldMat = getVisualWorldMatrix(transform);
@@ -201,7 +202,6 @@ export function update(
         poseArr[poseOff + 9] = _scratchUp[1];
         poseArr[poseOff + 10] = _scratchUp[2];
         new Uint32Array(poseArr.buffer, poseArr.byteOffset, poseArr.length)[poseOff + 11] = flags;
-        poseDirty = true;
 
         // material write (per-frame; uvRect changes for flipbooks)
         const frameCount = state.entry.frames.length;
@@ -218,28 +218,23 @@ export function update(
             litMin: trait.litMin,
             dither: trait.dither,
         });
-        matDirty = true;
+        dirty[state.occlusion] = true;
     }
 
     // phase 2: cleanup stale states (trait no longer in query)
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const state = aliveStates[i]!;
-        if (state.lastSeenFrame !== frameId) {
-            destroyInstance(visuals, batch, state.trait, visibility);
-            poseDirty = true;
-            matDirty = true;
-        }
+        if (state.lastSeenFrame !== frameId) destroyInstance(visuals, resources, state.trait, visibility, dirty);
     }
 
-    batch.mesh.count = batch.head;
-
-    // dense [0, head) pool; upload that prefix, not the whole capacity allocation.
-    if (poseDirty) {
+    for (const occlusion of SPRITE_OCCLUSIONS) {
+        const batch = resources.batches[occlusion];
+        batch.mesh.count = batch.head;
+        if (!dirty[occlusion]) continue;
+        // dense [0, head) pool; upload that prefix, not the whole capacity allocation.
         batch.instancePoseBuf.addUpdateRange(0, batch.head * (INSTANCE_POSE_STRIDE / 4));
         batch.instancePoseBuf.needsUpdate = true;
-    }
-    if (matDirty) {
         batch.instanceMaterialBuf.addUpdateRange(0, batch.head * (INSTANCE_MATERIAL_STRIDE / 4));
         batch.instanceMaterialBuf.needsUpdate = true;
     }
@@ -251,23 +246,27 @@ export function update(
  * detach the batch Mesh from this room's scene. The batch's GPU buffers are not
  * freed; they survive for the next room's `init`.
  */
-export function dispose(visuals: SpriteVisuals, batch: SpriteBatch, visibility: Visibility.Visibility): void {
+export function dispose(visuals: SpriteVisuals, resources: SpriteResources, visibility: Visibility.Visibility): void {
     const arr = visuals.aliveStates;
-    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, batch, arr[i]!.trait, visibility);
-    visuals.scene.remove(batch.mesh);
+    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, resources, arr[i]!.trait, visibility, null);
+    for (const occlusion of SPRITE_OCCLUSIONS) visuals.scene.remove(resources.batches[occlusion].mesh);
 }
 
 function destroyInstance(
     visuals: SpriteVisuals,
-    batch: SpriteBatch,
+    resources: SpriteResources,
     trait: SpriteTrait,
     visibility: Visibility.Visibility,
+    dirty: Record<SpriteOcclusion, boolean> | null,
 ): void {
     const state = trait._state;
     if (state === null) return;
 
     Visibility.remove(visibility, state.cull);
-    if (state.slot !== -1) freeSlot(batch, state);
+    if (state.slot !== -1) {
+        freeSlot(resources.batches[state.occlusion], state);
+        if (dirty) dirty[state.occlusion] = true;
+    }
 
     const arr = visuals.aliveStates;
     const last = arr.length - 1;

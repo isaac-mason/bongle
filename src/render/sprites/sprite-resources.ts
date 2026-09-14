@@ -99,6 +99,14 @@ export const CENTER_BIT = 1 << 8;
 // cull entries, scene-tree query.
 const INITIAL_INSTANCE_CAPACITY = 64;
 
+/** after the world, below the editor's own overlays (which sit at `Infinity`). */
+const SPRITE_ON_TOP_RENDER_ORDER = 1000;
+
+/** what hides a sprite: the world in front of it, or nothing. */
+export type SpriteOcclusion = 'world' | 'none';
+
+export const SPRITE_OCCLUSIONS: SpriteOcclusion[] = ['world', 'none'];
+
 type GpuBufferType = GpuBuffer<any>;
 
 /** minimal shape the batch's `slotOwner` needs: the per-instance state's mutable slot. `SpriteVisualState`
@@ -127,7 +135,7 @@ export type SpriteBatch = {
 /** Build the client-global instance batch: a shared 1x1 plane with per-instance
  *  pose/material vertex buffers, wrapped in a Mesh with the engine-global
  *  material. Not added to any scene until a room `init`s. */
-function createSpriteBatch(material: Material): SpriteBatch {
+function createSpriteBatch(material: Material, occlusion: SpriteOcclusion): SpriteBatch {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
     // Shared 1x1 plane geometry; per-instance pose + material drive world
@@ -148,9 +156,10 @@ function createSpriteBatch(material: Material): SpriteBatch {
     geometry.setBuffer('instanceMaterial', instanceMaterialBuf);
 
     const mesh = new Mesh(geometry, material);
-    mesh.name = 'sprite-visuals';
+    mesh.name = occlusion === 'world' ? 'sprite-visuals' : 'sprite-visuals-on-top';
     mesh.frustumCulled = false;
     mesh.count = 0;
+    if (occlusion !== 'world') mesh.renderOrder = SPRITE_ON_TOP_RENDER_ORDER;
 
     return {
         mesh,
@@ -223,17 +232,15 @@ export type SpriteResources = {
     /** sidecar hash this struct was loaded against (`null` if no real
      *  sidecar yet). Compared in `refresh` for the short-circuit. */
     atlasHash: string | null;
-    /** engine-global batched-sprite material, binds per-instance + env
-     *  buffers by name. The atlas Texture is bound via `atlasTexNode`;
-     *  atlas swaps rebind that node without rebuilding the material. */
-    material: Material;
-    /** atlas TextureNode owned by `material`. Held here so atlas swaps
-     *  can rebind `bindingNode.value` / `samplerNode.value` without
-     *  rebuilding the compiled pipeline. */
-    atlasTexNode: TextureNode;
-    /** client-global instance batch (plane Mesh + per-instance buffers + dense
-     *  head). Reused across room swaps; per-room `SpriteVisuals` drive it. */
-    batch: SpriteBatch;
+    /** engine-global batched-sprite material per occlusion policy, binding per-instance + env buffers by name.
+     *  The atlas Texture is bound via `atlasTexNodes`; atlas swaps rebind those without rebuilding the materials. */
+    materials: Record<SpriteOcclusion, Material>;
+    /** atlas TextureNode owned by each material. Held here so atlas swaps can rebind
+     *  `bindingNode.value` / `samplerNode.value` without rebuilding the compiled pipelines. */
+    atlasTexNodes: Record<SpriteOcclusion, TextureNode>;
+    /** client-global instance batch per occlusion policy (plane Mesh + per-instance buffers + dense head).
+     *  Reused across room swaps; per-room visuals drive them, routing each instance by its trait's `occlusion`. */
+    batches: Record<SpriteOcclusion, SpriteBatch>;
 };
 
 /**
@@ -244,17 +251,17 @@ export type SpriteResources = {
  */
 export function init(env: EnvironmentResources): SpriteResources {
     const atlas = createPlaceholderTexture();
-    const { material, atlasTexNode } = createSpriteMaterial(atlas, env);
-    const batch = createSpriteBatch(material);
+    const world = createSpriteMaterial(atlas, env, 'world');
+    const none = createSpriteMaterial(atlas, env, 'none');
     return {
         atlas,
         pixels: null,
         metadata: null,
         frames: new Map(),
         atlasHash: null,
-        material,
-        atlasTexNode,
-        batch,
+        materials: { world: world.material, none: none.material },
+        atlasTexNodes: { world: world.atlasTexNode, none: none.atlasTexNode },
+        batches: { world: createSpriteBatch(world.material, 'world'), none: createSpriteBatch(none.material, 'none') },
     };
 }
 
@@ -294,9 +301,11 @@ export async function load(res: SpriteResources, loader: ResourceLoader, meta: S
 export const refresh = load;
 
 export function dispose(res: SpriteResources): void {
-    disposeSpriteBatch(res.batch);
+    for (const occlusion of SPRITE_OCCLUSIONS) {
+        disposeSpriteBatch(res.batches[occlusion]);
+        res.materials[occlusion].dispose();
+    }
     res.atlas.dispose();
-    res.material.dispose();
     res.pixels = null;
     res.metadata = null;
     res.frames.clear();
@@ -309,11 +318,14 @@ export function dispose(res: SpriteResources): void {
 function swapAtlas(res: SpriteResources, next: Texture): void {
     res.atlas.dispose();
     res.atlas = next;
-    res.atlasTexNode.bindingNode.value = next._gpuTexture;
-    // samplerNode is non-null because `texture(tex)` factory builds it
-    // from `tex._gpuSampler`. Each new Texture gets a fresh GpuSampler,
-    // so rebind it too.
-    res.atlasTexNode.samplerNode!.value = next._gpuSampler;
+    for (const occlusion of SPRITE_OCCLUSIONS) {
+        const node = res.atlasTexNodes[occlusion];
+        node.bindingNode.value = next._gpuTexture;
+        // samplerNode is non-null because `texture(tex)` factory builds it
+        // from `tex._gpuSampler`. Each new Texture gets a fresh GpuSampler,
+        // so rebind it too.
+        node.samplerNode!.value = next._gpuSampler;
+    }
 }
 
 async function fetchAtlasPixels(atlasSize: number, loader: ResourceLoader): Promise<Uint8Array | null> {
@@ -394,7 +406,11 @@ function rebuildFrames(out: Map<string, SpriteEntry>, meta: SpriteAtlasMetadata)
     }
 }
 
-function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { material: Material; atlasTexNode: TextureNode } {
+function createSpriteMaterial(
+    atlas: Texture,
+    env: EnvironmentResources,
+    occlusion: SpriteOcclusion,
+): { material: Material; atlasTexNode: TextureNode } {
     const aPosition = attribute('position', d.vec3f);
     const aUv = attribute('uv', d.vec2f);
 
@@ -503,13 +519,16 @@ function createSpriteMaterial(atlas: Texture, env: EnvironmentResources): { mate
     // cutout + screen-door fade: the dither knob feeds the shared discard.
     const fragment = ditherDiscard(tinted, sampled.a, vDither).toVar('svFragment');
 
+    // 'none' keeps the cutout look (opaque queue, discard) and simply skips the depth test, drawn after the
+    // world by `SPRITE_ON_TOP_RENDER_ORDER`, so it still takes fog, the camera tint and antialiasing.
+    const occluded = occlusion === 'world';
     const material = new Material({
-        name: 'sprite-batched',
+        name: occluded ? 'sprite-batched' : 'sprite-batched-on-top',
         vertex: clipPos,
         fragment,
         cullMode: 'none',
-        depthTest: true,
-        depthWrite: true,
+        depthTest: occluded,
+        depthWrite: occluded,
         transparent: false,
     });
 
