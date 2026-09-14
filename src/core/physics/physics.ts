@@ -4,6 +4,7 @@ import { AabbBodyTrait } from '../../builtins/aabb-body';
 import { ContactsTrait } from '../../builtins/contacts';
 import { setInterpolation } from '../../builtins/transform';
 import type { PlayerId } from '../client';
+import * as Debug from '../debug';
 import type * as Resources from '../resources';
 import type { Node, SceneTree } from '../scene/scene-tree';
 import { addTrait, getNodeById, getTrait, query, runOnPostPhysicsStep, runOnPrePhysicsStep } from '../scene/scene-tree';
@@ -288,6 +289,20 @@ export function stats(physics: Physics): PhysicsStats {
         contacts: physics.contacts.added.length + physics.contacts.persisted.length,
         vccContacts: physics.vccRigidContactCount + physics.vccVoxelContactCount,
     };
+}
+
+/** records `stats` as `physics/*` counters. both hosts call this once per frame so the
+ *  debug panel can show the two worlds side by side. gated on `enabled` since it walks the pool. */
+export function recordStats(profiler: Debug.Profiler, physics: Physics): void {
+    if (!profiler.enabled) return;
+    const s = stats(physics);
+    Debug.record(profiler, 'physics/bodies', s.bodies, 'count');
+    Debug.record(profiler, 'physics/bodies/active', s.active, 'count');
+    Debug.record(profiler, 'physics/bodies/static', s.static, 'count');
+    Debug.record(profiler, 'physics/bodies/kinematic', s.kinematic, 'count');
+    Debug.record(profiler, 'physics/bodies/dynamic', s.dynamic, 'count');
+    Debug.record(profiler, 'physics/contacts', s.contacts, 'count');
+    Debug.record(profiler, 'physics/contacts/vcc', s.vccContacts, 'count');
 }
 
 export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {

@@ -286,6 +286,35 @@ function addClientFrameStack(c: Container, height: number): void {
     });
 }
 
+/** one physics world's tick cost, body tallies and contact counts, off `profiler`'s ring. */
+function addPhysicsSide(side: Container, profiler: () => Debug.Profiler | null, smooth: number): void {
+    const int = { format: (v: number) => String(v) };
+    side.monitor(() => avgIncl(profiler(), 'physics', smooth), { label: 'physics tick', unit: 'ms' });
+    // pre (trait sync) + step (solver) + post (writeback), stacked = total cost.
+    side.series(() => scopeSeries(profiler(), PHYSICS_PHASES, CHART_HISTORY), {
+        label: 'physics tick (ms)',
+        stacked: true,
+        height: 120,
+        unit: 'ms',
+        min: 0,
+        hover: true,
+    });
+    const bodies = side.folder('bodies');
+    bodies.monitor(() => latest(profiler(), 'physics/bodies'), { label: 'total', ...int });
+    bodies.monitor(() => latest(profiler(), 'physics/bodies/active'), { label: 'active', ...int });
+    bodies.bars(
+        () => ({
+            static: latest(profiler(), 'physics/bodies/static'),
+            kinematic: latest(profiler(), 'physics/bodies/kinematic'),
+            dynamic: latest(profiler(), 'physics/bodies/dynamic'),
+        }),
+        { label: 'by motion type' },
+    );
+    const contacts = side.folder('contacts');
+    contacts.monitor(() => latest(profiler(), 'physics/contacts'), { label: 'pairs', ...int });
+    contacts.monitor(() => latest(profiler(), 'physics/contacts/vcc'), { label: 'character', ...int });
+}
+
 /** overlaid in/out throughput. `side` picks 'client'/'server'; omitted shows all four. */
 function addThroughput(c: Container, height: number, side?: 'client' | 'server'): void {
     c.series(
@@ -458,6 +487,33 @@ function build(): DebugDashboard {
         min: 0,
         hover: true,
     });
+    // WHAT sent the bytes, not just how many. Keyed by `GpuBuffer.label`; buffers that never
+    // asked for one fall back to `usage:byteLength`, which is already enough to pick the big
+    // allocations out - a multi-megabyte `storage` row is unmistakable, and the raw uniform
+    // path (per-object and per-group blocks, which own no GpuBuffer) reports as `uniform:<size>`.
+    gpu.series(() => prefixCounterSeries(clientProfiler(), 'gpu/upload/by/', CHART_HISTORY), {
+        label: 'upload by buffer (B/frame)',
+        color: (key) => hashColor(key),
+        stacked: true,
+        height: 160,
+        unit: 'B',
+        min: 0,
+        hover: true,
+    });
+    // The subset of the above that re-sent a WHOLE allocation, because `needsUpdate` was set
+    // with no queued range. Fine for a small buffer that genuinely changed everywhere; at size
+    // it is the mistake this breakdown exists to find, and the totals cannot show it - 300 kB
+    // of full re-upload and 300 kB of honest range writes read identically there.
+    gpu.series(() => prefixCounterSeries(clientProfiler(), 'gpu/upload/full/', CHART_HISTORY), {
+        label: 'full re-uploads (B/frame)',
+        color: (key) => hashColor(key),
+        stacked: true,
+        height: 120,
+        unit: 'B',
+        min: 0,
+        hover: true,
+    });
+
     // CPU half: time spent packing this frame's GPU data, per visual system.
     gpu.series(() => phaseSeries(clientProfiler(), 'visuals', CHART_HISTORY), {
         label: 'visual update (ms)',
@@ -563,42 +619,12 @@ function build(): DebugDashboard {
         () => registry.blockRegistry.textures,
     );
 
-    // physics is server-authoritative (the client runs interpolation, not the
-    // solver), so every reading comes off the server's mirrored frames.
+    // both hosts run the full solver: the server as authority, the client for its own
+    // player and predicted bodies. non-owned dynamic bodies run kinematic on the client
+    // and edit mode clamps everything static, so the motion-type split differs by side.
     const physics = tabs.tab('physics');
-    physics.monitor(() => avgIncl(serverProfiler(), 'physics', SMOOTH_SERVER), { label: 'physics tick', unit: 'ms' });
-    // pre (trait sync) + step (solver) + post (writeback), stacked = total cost.
-    physics.series(() => scopeSeries(serverProfiler(), PHYSICS_PHASES, CHART_HISTORY), {
-        label: 'physics tick (ms)',
-        stacked: true,
-        height: 160,
-        unit: 'ms',
-        min: 0,
-        hover: true,
-    });
-    const bodies = physics.folder('bodies');
-    bodies.monitor(() => latest(serverProfiler(), 'physics/bodies'), { label: 'total', ...int });
-    bodies.monitor(() => latest(serverProfiler(), 'physics/bodies/active'), {
-        label: 'active',
-        ...int,
-    });
-    bodies.bars(
-        () => ({
-            static: latest(serverProfiler(), 'physics/bodies/static'),
-            kinematic: latest(serverProfiler(), 'physics/bodies/kinematic'),
-            dynamic: latest(serverProfiler(), 'physics/bodies/dynamic'),
-        }),
-        { label: 'by motion type' },
-    );
-    const contacts = physics.folder('contacts');
-    contacts.monitor(() => latest(serverProfiler(), 'physics/contacts'), {
-        label: 'pairs',
-        ...int,
-    });
-    contacts.monitor(() => latest(serverProfiler(), 'physics/contacts/vcc'), {
-        label: 'character',
-        ...int,
-    });
+    addPhysicsSide(physics.folder('server'), serverProfiler, SMOOTH_SERVER);
+    addPhysicsSide(physics.folder('client'), clientProfiler, SMOOTH_TICK);
 
     // net/in/*, net/out/* per-message-type breakdowns are recorded client-side only;
     // the server records only its totals.

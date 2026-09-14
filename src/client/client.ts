@@ -528,12 +528,18 @@ export function update(state: EngineClient, delta: number) {
             SceneTree.runOnTick(room.scene, { delta: timestep }, state.profiler);
             Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'client');
 
-            Debug.begin(state.profiler, 'physics');
+            Debug.begin(state.profiler, 'physics/pre');
             Physics.preStep(room.physics, room.scene, state.resources, room.playerId, room.playerMode === 'play');
+            Debug.end(state.profiler, 'physics/pre');
+
+            Debug.begin(state.profiler, 'physics');
             Physics.tick(room.physics, room.scene, timestep);
+            Debug.end(state.profiler, 'physics');
+
+            Debug.begin(state.profiler, 'physics/post');
             Physics.postStep(room.physics, room.scene, room.playerId);
             Physics.flush(room.physics);
-            Debug.end(state.profiler, 'physics');
+            Debug.end(state.profiler, 'physics/post');
 
             Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
 
@@ -542,6 +548,9 @@ export function update(state: EngineClient, delta: number) {
 
         state.accumulator -= timestep;
     }
+
+    // once per frame rather than per fixed step; a catch-up frame would otherwise walk the pool repeatedly.
+    for (const room of state.rooms.rooms.values()) Physics.recordStats(state.profiler, room.physics);
 
     const alpha = state.accumulator / timestep;
     const settings = state.perf.settings;

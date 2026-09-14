@@ -478,7 +478,8 @@ export function update(state: EngineServer, delta: number) {
         physics.postStep(room.physics, room.scene, null);
         Debug.end(state.profiler, 'physics/post');
 
-        Telemetry.recordPhysicsStats(state.profiler, room.physics);
+        // inside the room's scope, so the counters ride with that room's subtree.
+        physics.recordStats(state.profiler, room.physics);
 
         // block hooks settle inline per write; this flushes accumulated light recompute.
         Debug.begin(state.profiler, 'lighting');

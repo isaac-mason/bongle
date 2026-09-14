@@ -1,6 +1,5 @@
 import type { Client } from 'bongle/interface';
 import * as Debug from '../core/debug';
-import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
 import type { NetStats } from './net';
 import * as Net from './net';
@@ -108,21 +107,6 @@ export function recordProcessStats(profiler: Debug.Profiler, delta: number): voi
     const mem = proc.memoryUsage();
     Debug.record(profiler, 'proc/rss', mem.rss / 1024 / 1024, 'mb');
     Debug.record(profiler, 'proc/heap', mem.heapUsed / 1024 / 1024, 'mb');
-}
-
-/** physics world counts (bodies by motion type, live contact pairs). called from
- *  inside the room's scope, so the counters ride with that room's subtree. gated
- *  on `enabled` since it walks the rigid body pool. */
-export function recordPhysicsStats(profiler: Debug.Profiler, world: physics.Physics): void {
-    if (!profiler.enabled) return;
-    const s = physics.stats(world);
-    Debug.record(profiler, 'physics/bodies', s.bodies, 'count');
-    Debug.record(profiler, 'physics/bodies/active', s.active, 'count');
-    Debug.record(profiler, 'physics/bodies/static', s.static, 'count');
-    Debug.record(profiler, 'physics/bodies/kinematic', s.kinematic, 'count');
-    Debug.record(profiler, 'physics/bodies/dynamic', s.dynamic, 'count');
-    Debug.record(profiler, 'physics/contacts', s.contacts, 'count');
-    Debug.record(profiler, 'physics/contacts/vcc', s.vccContacts, 'count');
 }
 
 /** push debug-log deltas to subscribed clients: for each, walk every room it
