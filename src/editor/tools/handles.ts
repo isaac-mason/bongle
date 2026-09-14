@@ -110,7 +110,7 @@ export function update(
     ctx: ScriptContext,
     store: EditRoomStoreApi,
 ): void {
-    const node = activeNode(state, enabled, sceneTree, store);
+    const node = activeNode(enabled, sceneTree, store);
     const cursor = isMouseLocked(mk) ? CROSSHAIR : getCursor(mk);
 
     if (state.armed) {
@@ -140,11 +140,11 @@ export function draw(
     quads: Quads.QuadBatch,
     text: Text.TextBatch,
 ): void {
-    refresh(state, activeNode(state, enabled, sceneTree, store), camera.position);
+    refresh(state, activeNode(enabled, sceneTree, store), camera.position);
     drawHandles(state, camera, viewportWidth, viewportHeight, quads, text);
 }
 
-function activeNode(state: HandlesState, enabled: boolean, sceneTree: SceneTree, store: EditRoomStoreApi): Node | undefined {
+function activeNode(enabled: boolean, sceneTree: SceneTree, store: EditRoomStoreApi): Node | undefined {
     const activeId = enabled ? Selection.activeNode(store.getState().selection) : null;
     return activeId !== null ? getNodeById(sceneTree, activeId) : undefined;
 }
