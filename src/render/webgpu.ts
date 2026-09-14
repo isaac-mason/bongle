@@ -46,6 +46,7 @@ import * as ExtrudedSpriteResources from './sprites/extruded-sprite-resources';
 import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
 import * as SpriteResources from './sprites/sprite-resources';
 import * as SpriteVisuals from './sprites/sprite-visuals';
+import * as TextVisuals from './text/text-visuals';
 import * as Time from './time';
 import { flushMeshQueue, meshQueueStats, readMeshPerf } from './voxels/mesher';
 import * as VoxelAoi from './voxels/voxel-aoi';
@@ -605,6 +606,7 @@ export type RoomVisuals = {
     model: MeshVisuals.MeshVisuals;
     domUi: DomUi.DomUi;
     sprite: SpriteVisuals.SpriteVisuals;
+    text: TextVisuals.TextVisuals;
     extrudedSprite: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals;
     shadow: ShadowVisuals.ShadowVisuals;
     particle: ParticleVisuals.ParticleVisuals;
@@ -639,12 +641,13 @@ function build(state: WebGpuState, room: ClientRoom): RoomActive {
     // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait panels are DOM.
     const domUi = DomUi.init(overlayScene, room.viewport, nodes, state.pipeline.sceneDepthNode);
     const sprite = SpriteVisuals.init(res.sprite, scene, nodes);
+    const text = TextVisuals.init(nodes, scene);
     const extrudedSprite = ExtrudedSpriteVisuals.init(res.extrudedSprite.batch, scene, nodes);
     const shadow = ShadowVisuals.init(res.shadow.batch, scene, nodes);
     const particle = ParticleVisuals.init(res.particle.batch, scene, res.sprite);
     const env = Environment.initEnvVisuals(scene, state.environmentResources, res.cloud);
 
-    const visuals: RoomVisuals = { voxel, voxelMesh, model, domUi, sprite, extrudedSprite, shadow, particle, env };
+    const visuals: RoomVisuals = { voxel, voxelMesh, model, domUi, sprite, text, extrudedSprite, shadow, particle, env };
 
     VoxelVisuals.mountRoom(voxel, room.voxels);
     Environment.flushActive(room.environment, state.environmentResources);
@@ -662,6 +665,7 @@ export function teardown(state: WebGpuState): void {
     MeshVisuals.dispose(rv.model, state.resources.model.batch, visibility);
     DomUi.dispose(rv.domUi);
     SpriteVisuals.dispose(rv.sprite, state.resources.sprite, visibility);
+    TextVisuals.dispose(rv.text, state.resources.sprite, visibility);
     ExtrudedSpriteVisuals.dispose(
         rv.extrudedSprite,
         state.resources.extrudedSprite.batch,
@@ -751,6 +755,11 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     Debug.begin(ctx.profiler, 'sprite');
     SpriteVisuals.update(rv.sprite, res.sprite, povCamera, room.visibility);
     Debug.end(ctx.profiler, 'sprite');
+
+    // after sprites: both write the shared batches, and the later pass is the one that flushes the final head.
+    Debug.begin(ctx.profiler, 'text');
+    TextVisuals.update(rv.text, res.sprite, povCamera, room.visibility);
+    Debug.end(ctx.profiler, 'text');
 
     Debug.begin(ctx.profiler, 'extruded-sprite');
     ExtrudedSpriteVisuals.update(rv.extrudedSprite, res.extrudedSprite.batch, res.extrudedSprite, room.visibility);

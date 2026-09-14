@@ -57,6 +57,7 @@ export * from './builtins/player-controller';
 export * from './builtins/rigid-body';
 export * from './builtins/shadow-caster';
 export * from './builtins/sprite';
+export * from './builtins/text';
 // only the trait: the transform module's other 44 exports are engine internals
 // (dirty bits, compose/sweep primitives, invalidation hooks). The user-facing
 // setters and getters come through `./api/transforms`.

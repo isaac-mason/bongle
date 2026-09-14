@@ -14,6 +14,7 @@ import {
     MODE_BILLBOARD,
     MODE_WORLD,
     MODE_Y_BILLBOARD,
+    POSE_OFFSET_F32,
     resetSpriteBatch,
     SPRITE_OCCLUSIONS,
     type SpriteBatch,
@@ -202,6 +203,8 @@ export function update(
         poseArr[poseOff + 9] = _scratchUp[1];
         poseArr[poseOff + 10] = _scratchUp[2];
         new Uint32Array(poseArr.buffer, poseArr.byteOffset, poseArr.length)[poseOff + 11] = flags;
+        poseArr[poseOff + POSE_OFFSET_F32] = 0;
+        poseArr[poseOff + POSE_OFFSET_F32 + 1] = 0;
 
         // material write (per-frame; uvRect changes for flipbooks)
         const frameCount = state.entry.frames.length;

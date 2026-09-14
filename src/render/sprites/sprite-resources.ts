@@ -68,7 +68,13 @@ export const InstancePose = struct('SpriteInstancePose', {
     height: d.f32,
     upWorld: d.vec3f,
     flags: d.u32,
+    /** shifts the quad inside its own plane, in world units along the resolved right/up. Lets one world position carry a
+     *  run of quads that stay a line under any billboard basis, which is how `TextTrait` lays out its glyphs. */
+    offset: d.vec2f,
 });
+
+/** float index of `InstancePose.offset` within one instance. */
+export const POSE_OFFSET_F32 = 12;
 
 export const InstanceMaterial = struct('SpriteInstanceMaterial', {
     uvRect: d.vec4f,
@@ -425,6 +431,7 @@ function createSpriteMaterial(
     const height = attribute('instancePose', d.f32, { instanced: true, stride: P, offset: 28 }).toVar('svH');
     const upWorld = attribute('instancePose', d.vec3f, { instanced: true, stride: P, offset: 32 }).toVar('svUpW');
     const flags = attribute('instancePose', d.u32, { instanced: true, stride: P, offset: 44 }).toVar('svFlags');
+    const planeOffset = attribute('instancePose', d.vec2f, { instanced: true, stride: P, offset: 48 }).toVar('svPlaneOffset');
 
     const mode = flags.bitwiseAnd(u32(0xff)).toVar('svMode');
     const centerBit = flags.shiftRight(u32(8)).bitwiseAnd(u32(1)).toVar('svCenter');
@@ -457,8 +464,8 @@ function createSpriteMaterial(
     const offX = add(aPosition.x, halfShift).toVar('svOffX');
     const offY = sub(aPosition.y, halfShift).toVar('svOffY');
 
-    const localX = mul(offX, width).toVar('svLocalX');
-    const localY = mul(offY, height).toVar('svLocalY');
+    const localX = add(mul(offX, width), planeOffset.x).toVar('svLocalX');
+    const localY = add(mul(offY, height), planeOffset.y).toVar('svLocalY');
 
     const worldPos3 = add(posWorld, add(mul(right, localX), mul(up, localY))).toVar('svWorldPos');
     const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, vec4f(worldPos3, f32(1)))).toVar('svClipPos');

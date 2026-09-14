@@ -1,4 +1,5 @@
 import type { SpriteResources } from '../sprites/sprite-resources';
+import { GLYPH_COUNT, glyphIndex, glyphSpriteId } from '../text/glyph-font';
 import * as Quads from './quads';
 
 export type TextBatch = {
@@ -10,10 +11,6 @@ export type TextBatch = {
     atlasHash: string | null;
 };
 
-const FIRST_CODE = 0x20;
-const GLYPH_COUNT = 95;
-const FALLBACK_INDEX = 0x3f - FIRST_CODE;
-
 export function init(quads: Quads.QuadBatch): TextBatch {
     return { quads, glyphUv: new Float32Array(GLYPH_COUNT * 4), glyphWidth: 5, glyphHeight: 7, atlasHash: null };
 }
@@ -24,7 +21,7 @@ export function bind(batch: TextBatch, sprite: SpriteResources): void {
     batch.atlasHash = sprite.atlasHash;
     const atlasSize = sprite.metadata?.atlasSize ?? 0;
     for (let i = 0; i < GLYPH_COUNT; i++) {
-        const frame = sprite.frames.get(`kit:glyph:${FIRST_CODE + i}`)?.frames[0];
+        const frame = sprite.frames.get(glyphSpriteId(i))?.frames[0];
         const u = i * 4;
         if (!frame) {
             batch.glyphUv[u] = batch.glyphUv[u + 1] = batch.glyphUv[u + 2] = batch.glyphUv[u + 3] = 0;
@@ -104,9 +101,7 @@ function run(
     const hh = (batch.glyphHeight * scale) / 2;
     let dx = startDx;
     for (let i = 0; i < text.length; i++) {
-        let index = text.charCodeAt(i) - FIRST_CODE;
-        if (index < 0 || index >= GLYPH_COUNT) index = FALLBACK_INDEX;
-        const u = index * 4;
+        const u = glyphIndex(text.charCodeAt(i)) * 4;
         Quads.quad(quads, x, y, z, dx, dyPx, hw, hh, glyphUv[u]!, glyphUv[u + 1]!, glyphUv[u + 2]!, glyphUv[u + 3]!, r, g, b, a);
         dx += advance(batch) * scale;
     }
