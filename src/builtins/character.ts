@@ -44,8 +44,10 @@ type CharacterState = {
     landingCooldownRemaining: number;
     /** screen-door dither while the target model hasn't hydrated; decays to 0 once it lands. */
     loadingDither: number;
-    /** last dither value applied via setCharacterSubtreeDither; null skips the subtree walk when unchanged. */
+    /** last dither value stamped across the rig meshes; null skips the subtree walk when unchanged. */
     appliedDither: number | null;
+    /** last visibility stamped across the rig meshes; null skips the subtree walk when unchanged. */
+    appliedVisible: boolean | null;
 
     /** the current model's mesh/visual nodes added by `mountRig`; `unmountRig` removes exactly these. */
     modelNodes: Set<Node>;
@@ -101,7 +103,6 @@ import { AnimatorTrait } from './animator';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
 import { MeshTrait } from './mesh';
-import { ModelTrait } from './model';
 import { OrbitControllerTrait } from './orbit-controller';
 import { PlayerControllerTrait } from './player-controller';
 import { TransformTrait } from './transform';
@@ -272,6 +273,7 @@ export const CharacterTrait = trait(
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: null,
+            appliedVisible: null,
             modelNodes: new Set(),
             nodes: emptyRigNodes(),
         }),
@@ -366,12 +368,11 @@ script(
                     }
                     finalDither = Math.max(proxDither, t.state.loadingDither, t.config.dither);
                 }
-                // one write on the rig root; every mesh reads inherited visibility, so a script hiding one mesh survives this toggle.
-                const characterModel = getTrait(node, ModelTrait);
-                if (characterModel) characterModel.visible = visible;
-                if (t.state.appliedDither !== finalDither) {
-                    setCharacterSubtreeDither(node, finalDither);
+                // both stamp every mesh under the rig, so only walk when one of them actually moves.
+                if (t.state.appliedDither !== finalDither || t.state.appliedVisible !== visible) {
+                    setCharacterSubtreeVisuals(node, finalDither, visible);
                     t.state.appliedDither = finalDither;
+                    t.state.appliedVisible = visible;
                 }
             }
 
@@ -636,13 +637,11 @@ function mountRig(playerNode: Node, def: ModelDef): void {
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
 
-    // the animator installs the inherited-visibility ModelTrait; ensure it exists since the server has no animator.
-    if (!getTrait(playerNode, ModelTrait)) addTrait(playerNode, ModelTrait);
-
-    // freshly added meshes carry the MeshTrait dither default; drop the cache so the next presentation pass re-walks.
+    // freshly added meshes carry the MeshTrait defaults; drop the cache so the next presentation pass re-walks.
     const character = getTrait(playerNode, CharacterTrait);
     if (character) {
         character.state.appliedDither = null;
+        character.state.appliedVisible = null;
     }
 }
 
@@ -976,11 +975,14 @@ function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, p
     }
 }
 
-/** walks the playerNode subtree and applies `dither` to every MeshTrait. */
-function setCharacterSubtreeDither(root: Node, dither: number): void {
+/** walks the playerNode subtree and stamps `dither` and `visible` onto every MeshTrait. */
+function setCharacterSubtreeVisuals(root: Node, dither: number, visible: boolean): void {
     const mesh = getTrait(root, MeshTrait);
-    if (mesh) mesh.dither = dither;
+    if (mesh) {
+        mesh.dither = dither;
+        mesh.visible = visible;
+    }
     for (const child of root.children) {
-        setCharacterSubtreeDither(child, dither);
+        setCharacterSubtreeVisuals(child, dither, visible);
     }
 }

@@ -6,8 +6,8 @@
 //
 //   move each rig root (`setPosition`, which dirties the subtree via `markDescendants`),
 //   read every bone's world matrix (the lazy walk-up-then-compose-down),
-//   iterate `[MeshTrait, TransformTrait, Optional(Up(ModelTrait))]` exactly as
-//   `mesh-visuals` phase 1 does, tuple destructure and `_state`/`meshId` check included.
+//   iterate `[MeshTrait, TransformTrait]` exactly as `mesh-visuals` phase 1 does,
+//   tuple destructure and `_state`/`meshId` check included.
 //
 // Deliberately NOT reported per phase. `markDescendants` prunes any subtree already at
 // TRANSFORM_DIRTY_ALL, so timing `move` on its own leaves everything permanently dirty and
@@ -21,16 +21,14 @@
 //
 // Rig shape is the engine's canonical 6-bone parenting (see character.ts):
 //
-//     rigRoot (ModelTrait)
+//     rigRoot
 //       ├ waist
 //       │   ├ body ├ head ├ arm_left ├ arm_right
 //       ├ leg_left
 //       └ leg_right
 
-import { ModelTrait } from '../src/builtins/model';
 import { MeshTrait } from '../src/builtins/mesh';
 import { getWorldMatrix, setPosition, TransformTrait } from '../src/builtins/transform';
-import { Optional, Up } from '../src/core/scene/conditions';
 import { addChild, addTrait, createNode, createSceneTree, type Node, query } from '../src/core/scene/scene-tree';
 
 const MAX = Number(process.argv[2] ?? 4000);
@@ -47,12 +45,11 @@ const PARENT_OF: Record<string, string | null> = {
 
 type Rig = { root: any; bones: any[] };
 
-/** one rig: a ModelTrait root plus the canonical bones, each a mesh-bearing transform. */
+/** one rig: a transform root plus the canonical bones, each a mesh-bearing transform. */
 function buildRig(sceneTree: ReturnType<typeof createSceneTree>, i: number): Rig {
     const rootNode = createNode({ name: `rig${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
 
     const byName = new Map<string, Node>();
     const bones: any[] = [];
@@ -89,7 +86,7 @@ console.log(
 
 for (const rigCount of [64, 256, 1024, 2048, MAX].filter((n, i, a) => n <= MAX && a.indexOf(n) === i)) {
     const sceneTree = createSceneTree();
-    const q = query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]);
+    const q = query(sceneTree, [MeshTrait, TransformTrait]);
     const rigs: Rig[] = [];
     for (let i = 0; i < rigCount; i++) rigs.push(buildRig(sceneTree, i));
 
@@ -109,15 +106,14 @@ for (const rigCount of [64, 256, 1024, 2048, MAX].filter((n, i, a) => n <= MAX &
     let seen = 0;
     const iterate = () => {
         frameId++;
-        for (const [meshTrait, , model] of q.matches) {
+        for (const [meshTrait] of q.matches) {
             const state = (meshTrait as any)._state;
             const meshId = (meshTrait as any).meshId;
             if (state !== null && state.meshIdRef === meshId && meshId !== null) {
                 state.lastSeenFrame = frameId;
-                state.model = model;
                 continue;
             }
-            seen += model === null ? 1 : 2;
+            seen++;
         }
     };
 

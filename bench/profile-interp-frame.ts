@@ -8,7 +8,6 @@ import fs from 'node:fs';
 import { Session } from 'node:inspector';
 import path from 'node:path';
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { getVisualWorldMatrix, setInterpolation, setPosition, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
@@ -16,8 +15,13 @@ import { concatenate, interpolate, snapshot } from '../src/render/transform/inte
 const RIGS = Number(process.argv[2] ?? 128);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 
 const sceneTree = createSceneTree();
@@ -27,7 +31,6 @@ for (let i = 0; i < RIGS; i++) {
     const rootNode = createNode({ name: `rig${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     const byName = new Map<string, Node>();
     for (const name of BONES) {
         const n = createNode({ name });

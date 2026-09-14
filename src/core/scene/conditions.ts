@@ -15,9 +15,9 @@ export enum Oper {
  * where a term looks for its trait.
  *
  * `Self` is the node itself. `Up` is the node or, failing that, its nearest
- * ancestor bearing the trait (so a node carrying both `MeshTrait` and
- * `ModelTrait` resolves to its own). `Ancestor` is strictly upward: parent,
- * then parents of parents, never the node itself.
+ * ancestor bearing the trait, so a node carrying the trait resolves to its own.
+ * `Ancestor` is strictly upward: parent, then parents of parents, never the
+ * node itself.
  *
  * Hierarchy-sourced terms are re-resolved when the tree is restructured or
  * the target trait is added/removed, so a match never holds a stale pointer.

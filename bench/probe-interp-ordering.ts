@@ -19,7 +19,6 @@
 // 2.00 composes per bone per frame on `early`, exactly 1.00 on `late`.
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { getVisualWorldMatrix, setInterpolation, setPosition, setQuaternion, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
@@ -27,8 +26,13 @@ import { concatenate, interpolate, snapshot } from '../src/render/transform/inte
 const CHARS = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 // character.ts writes these every frame: applyLimb x5 plus updateHeadOrientation
 const DRIVEN = ['waist', 'leg_left', 'leg_right', 'arm_left', 'arm_right', 'head'] as const;
@@ -42,7 +46,6 @@ function build() {
         const rootNode = createNode({ name: `char${i}` });
         addChild(sceneTree.root, rootNode);
         addTrait(rootNode, TransformTrait);
-        addTrait(rootNode, ModelTrait);
         const byName = new Map<string, Node>();
         for (const name of BONES) {
             const n = createNode({ name });
@@ -106,7 +109,10 @@ console.log(
 console.log(`${'arm'.padEnd(7)} ${'ms/frame'.padStart(9)} ${'us/char'.padStart(9)}`);
 
 const results: Record<string, number> = {};
-for (const [label, late] of [['early', false], ['late', true]] as Array<[string, boolean]>) {
+for (const [label, late] of [
+    ['early', false],
+    ['late', true],
+] as Array<[string, boolean]>) {
     const w = build();
     const ms = best(makeFrame(w, late), 40);
     results[label] = ms;

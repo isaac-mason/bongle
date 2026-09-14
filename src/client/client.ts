@@ -568,9 +568,9 @@ export function update(state: EngineClient, delta: number) {
         SceneTree.runOnFrame(room.scene, { delta }, state.profiler);
         Debug.end(state.profiler, 'on-frame');
 
-        // after the frame's last writer, before its first reader (modelLighting, then the
-        // mesher): a block write marks the chunk dirty but only queues the light, so reading
-        // it first would bake a black hole where the player dug
+        // after the frame's last writer, before its first reader (the mesher): a block write
+        // marks the chunk dirty but only queues the light, so reading it first would bake a
+        // black hole where the player dug
         Debug.begin(state.profiler, 'lighting');
         Light.flushPendingLight(room.voxels);
         Debug.end(state.profiler, 'lighting');
@@ -601,9 +601,6 @@ export function update(state: EngineClient, delta: number) {
         Debug.begin(state.profiler, 'visibility');
         Visibility.update(room.visibility, povCamera, settings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
         Debug.end(state.profiler, 'visibility');
-
-        Debug.begin(state.profiler, 'modelLighting');
-        Debug.end(state.profiler, 'modelLighting');
 
         Debug.begin(state.profiler, 'audio');
         Audio.updateForFrame(room.audio, room);

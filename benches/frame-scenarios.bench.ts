@@ -23,8 +23,8 @@ import { bench, group } from '@pmndrs/labs';
  *  is exactly the shape V8 folds away. Reading `m[12]` also forces the matrix to be
  *  materialised rather than just its reference produced. */
 let sink = 0;
+
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import {
     getVisualWorldMatrix,
     getWorldMatrix,
@@ -58,7 +58,6 @@ function makecatRig(sceneTree: SceneTree, i: number, interpolating: boolean): Ri
     const rootNode = createNode({ name: `char${i}` });
     addChild(sceneTree.root, rootNode);
     const root = addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
 
     const byName = new Map<string, Node>();
     const rotated: TransformTrait[] = [];

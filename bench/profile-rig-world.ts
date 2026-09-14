@@ -17,9 +17,7 @@ import fs from 'node:fs';
 import { Session } from 'node:inspector';
 import path from 'node:path';
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { getWorldMatrix, setPosition, TransformTrait } from '../src/builtins/transform';
-import { Optional, Up } from '../src/core/scene/conditions';
 import { addChild, addTrait, createNode, createSceneTree, type Node, query } from '../src/core/scene/scene-tree';
 
 const RIGS = Number(process.argv[2] ?? 4000);
@@ -35,7 +33,7 @@ const PARENT_OF: Record<string, string | null> = {
 };
 
 const sceneTree = createSceneTree();
-query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]);
+query(sceneTree, [MeshTrait, TransformTrait]);
 
 const roots: any[] = [];
 const bones: any[] = [];
@@ -43,7 +41,6 @@ for (let i = 0; i < RIGS; i++) {
     const rootNode = createNode({ name: `rig${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     roots.push(rootNode._traits[TransformTrait._slot]);
 
     const byName = new Map<string, Node>();

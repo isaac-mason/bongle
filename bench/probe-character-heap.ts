@@ -5,15 +5,19 @@
 //   ./node_modules/.bin/tsx --expose-gc bench/probe-character-heap.ts [chars]
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { setInterpolation, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 
 const COUNT = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 
 type Layer = 'node' | 'transform' | 'mesh' | 'full';
@@ -24,7 +28,6 @@ function build(count: number, interp: boolean, layer: Layer = 'full') {
         const rootNode = createNode({ name: `char${i}` });
         addChild(sceneTree.root, rootNode);
         if (layer !== 'node') addTrait(rootNode, TransformTrait);
-        if (layer === 'full') addTrait(rootNode, ModelTrait);
         const byName = new Map<string, Node>();
         for (const name of BONES) {
             const n = createNode({ name });
@@ -41,10 +44,12 @@ function build(count: number, interp: boolean, layer: Layer = 'full') {
 }
 
 function measure(count: number, interp: boolean, layer: Layer = 'full'): number {
-    globalThis.gc!(); globalThis.gc!();
+    globalThis.gc!();
+    globalThis.gc!();
     const before = process.memoryUsage().heapUsed;
     const tree = build(count, interp, layer);
-    globalThis.gc!(); globalThis.gc!();
+    globalThis.gc!();
+    globalThis.gc!();
     const after = process.memoryUsage().heapUsed;
     if ((tree as any).__never) console.log('');
     return after - before;
@@ -57,12 +62,15 @@ console.log(`\nworking set, ${BONES.length} bones + 1 root per character (${BONE
 const nodes = COUNT * (BONES.length + 1);
 let prev = 0;
 for (const [label, layer] of [
-    ['bare Node', 'node'], ['+ TransformTrait', 'transform'], ['+ MeshTrait', 'mesh'], ['+ ModelTrait/interp', 'full'],
+    ['bare Node', 'node'],
+    ['+ TransformTrait', 'transform'],
+    ['+ MeshTrait', 'mesh'],
+    ['+ interp', 'full'],
 ] as Array<[string, Layer]>) {
     const bytes = measure(COUNT, true, layer);
     console.log(
         `${label.padEnd(20)} ${(bytes / 1e6).toFixed(2).padStart(7)} MB  ` +
-        `${(bytes / nodes).toFixed(0).padStart(5)} B/node  (+${((bytes - prev) / nodes).toFixed(0).padStart(4)} B/node)`,
+            `${(bytes / nodes).toFixed(0).padStart(5)} B/node  (+${((bytes - prev) / nodes).toFixed(0).padStart(4)} B/node)`,
     );
     prev = bytes;
 }

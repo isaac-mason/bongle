@@ -14,7 +14,6 @@ import '../src/builtins/extruded-sprite';
 import '../src/builtins/fly-controller';
 import '../src/builtins/html';
 import '../src/builtins/mesh';
-import '../src/builtins/model';
 import '../src/builtins/orbit-controller';
 import '../src/builtins/player';
 import '../src/builtins/player-controller';

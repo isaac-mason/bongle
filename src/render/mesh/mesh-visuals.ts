@@ -2,11 +2,9 @@ import { packTo, type Scene } from 'gpucat';
 import { box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
-import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import type { MeshId } from '../../core/models/handle';
 import * as Resources from '../../core/resources';
-import { Optional, type Src, Up } from '../../core/scene/conditions';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
 import * as Visibility from '../visibility/visibility';
@@ -26,9 +24,7 @@ import {
     resetMeshBatch,
 } from './mesh-resources';
 
-type MeshQuery = ReturnType<
-    typeof query<[typeof MeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
->;
+type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrait]>>;
 
 // InstanceParams is written through `packTo` against the schema in mesh-resources.ts,
 // not by hand-numbered float indices, so adding or reordering a field is safe.
@@ -63,10 +59,6 @@ export type MeshVisualState = {
     /** this mesh's own frustum-cull entry, registered at alloc and unregistered on
      *  destroy; the shared Visibility culler writes `cull.visible`. */
     cull: Visibility.CullState;
-    /** the mesh's lighting group: the nearest `ModelTrait` above this node, or null
-     *  if the mesh samples voxel light at its own AABB centre. refreshed every frame
-     *  from the query tuple. */
-    model: ModelTrait | null;
     /** sibling `TransformTrait`, resolved at alloc and cached to skip the `_traits`
      *  Map hit; always present since the query gates on [MeshTrait, TransformTrait]. */
     transform: TransformTrait;
@@ -93,7 +85,7 @@ export function init(batch: MeshBatch, scene: Scene, sceneTree: SceneTree): Mesh
     scene.add(batch.outlineMesh);
     return {
         aliveStates: [],
-        _query: query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
+        _query: query(sceneTree, [MeshTrait, TransformTrait]),
         frameId: 0,
         scene,
     };
@@ -125,16 +117,13 @@ function refreshStates(
     frameId: number,
 ): void {
     const q = visuals._query;
-    for (const [meshTrait, , model] of q.matches) {
+    for (const [meshTrait] of q.matches) {
         let state = meshTrait._state as MeshVisualState | null;
         const meshId = meshTrait.meshId;
 
         // fast path: same MeshId ref, state already exists.
         if (state !== null && state.meshIdRef === meshId && meshId !== null) {
             state.lastSeenFrame = frameId;
-            // the query keeps the resolved group live; copy it across so phase 3
-            // (which walks aliveStates, not matches) reads the current one.
-            state.model = model;
             continue;
         }
 
@@ -182,7 +171,6 @@ function refreshStates(
             lastSeenFrame: frameId,
             transformVersionAtUpload: -1,
             cull,
-            model,
             transform,
         };
         meshTrait._state = state;
@@ -221,11 +209,8 @@ function writeInstances(visuals: MeshVisuals, batch: MeshBatch, modelResources: 
 
     for (let i = 0; i < aliveStates.length; i++) {
         const state = aliveStates[i]!;
-        const model = state.model;
 
-        // `model` is Optional: a mesh under no ModelTrait has no inherited visibility.
         if (!state.cull.visible || !state.trait.visible) continue;
-        if (model !== null && !model.visible) continue;
 
         const meshTrait = state.trait;
         const transformTrait = state.transform;

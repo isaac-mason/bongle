@@ -1,7 +1,6 @@
 import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { AnimatorTrait } from '../../builtins/animator';
 import { MeshTrait } from '../../builtins/mesh';
-import { ModelTrait } from '../../builtins/model';
 import {
     composeWorldMatrix,
     getWorldMatrix,
@@ -13,7 +12,7 @@ import {
 import { env } from '../../env';
 import type { ClipChannel, ClipChannels, ClipDef } from '../models/handle';
 import * as Resources from '../resources';
-import { addTrait, findChildByName, getTrait, type Node, query, type SceneTree } from './scene-tree';
+import { findChildByName, getTrait, type Node, query, type SceneTree } from './scene-tree';
 
 export type BlendMode = 'replace' | 'additive';
 
@@ -115,13 +114,6 @@ function createAnimatorState(): AnimatorState {
         _lodClassifiedAtFrame: -1,
         _lastVisible: 0,
     };
-}
-
-/** ensure the animator node carries a ModelTrait, the shared voxel-light slot every mesh under the rig reads. */
-function ensureModelTrait(animatorNode: Node): void {
-    if (!getTrait(animatorNode, ModelTrait)) {
-        addTrait(animatorNode, ModelTrait);
-    }
 }
 
 /** folds the rig's meshes' own cull entries into a rig-level visibility answer; distSq/extentSq come from the largest-projected visible mesh, for LOD. */
@@ -719,7 +711,6 @@ function collectMeshes(node: Node, out: MeshTrait[]): void {
 function rebuildBoneOrder(state: AnimatorState, animatorNode: Node): void {
     state._cullMeshes.length = 0;
     collectMeshes(animatorNode, state._cullMeshes);
-    ensureModelTrait(animatorNode);
 
     state.boneOrder.length = 0;
     state.bonePos.length = 0;

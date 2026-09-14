@@ -3,10 +3,8 @@ import { packTo } from 'gpucat';
 import { vec3 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
-import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
-import { Optional, type Src, Up } from '../../core/scene/conditions';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../core/voxels/chunk-mesher';
@@ -31,9 +29,7 @@ import {
     type VoxelMeshBatch,
 } from './voxel-mesh-resources';
 
-type VoxelMeshQuery = ReturnType<
-    typeof query<[typeof VoxelMeshTrait, typeof TransformTrait, ReturnType<typeof Optional<typeof ModelTrait, Src.Up>>]>
->;
+type VoxelMeshQuery = ReturnType<typeof query<[typeof VoxelMeshTrait, typeof TransformTrait]>>;
 
 export type VoxelMeshState = {
     /** stable instanceData slot, indexes into the merged transform+params buffer. */
@@ -46,8 +42,6 @@ export type VoxelMeshState = {
     /** frustum-cull entry registered with the shared Visibility culler at alloc, seeded
      *  from the VoxelModel's local AABB. The culler writes cull.visible. */
     cull: Visibility.CullState;
-    /** optional ModelTrait ancestor, for inherited visibility. */
-    model: ModelTrait | null;
     /** frame counter for stale-state sweep. */
     lastSeenFrame: number;
     /** TransformTrait._version observed at the most recent transform upload. */
@@ -75,7 +69,7 @@ export function init(batch: VoxelMeshBatch, scene: Scene, sceneTree: SceneTree):
     scene.add(batch.outlineMesh);
     return {
         aliveStates: [],
-        _query: query(sceneTree, [VoxelMeshTrait, TransformTrait, Optional(Up(ModelTrait))]),
+        _query: query(sceneTree, [VoxelMeshTrait, TransformTrait]),
         frameId: 0,
         scene,
     };
@@ -92,16 +86,13 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
     let dirtyMinSlot = Number.MAX_SAFE_INTEGER;
     let dirtyMaxSlot = -1;
 
-    for (const [vmTrait, transformTrait, modelAncestor] of q) {
+    for (const [vmTrait, transformTrait] of q) {
         let state = vmTrait._state;
         const model = vmTrait.model;
 
         // fast path: same model ref, state already exists.
         if (state !== null && state.modelRef === model && model !== null) {
             state.lastSeenFrame = frameId;
-            // the query keeps the resolved lighting group live; phase 3 walks
-            // aliveStates rather than matches, so copy it across.
-            state.model = modelAncestor;
             continue;
         }
 
@@ -137,7 +128,6 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
             modelRef: model,
             modelEntry: entry,
             cull,
-            model: modelAncestor,
             lastSeenFrame: frameId,
             transformVersionAtUpload: -1,
         };
@@ -160,9 +150,7 @@ export function update(visuals: VoxelMeshVisuals, batch: VoxelMeshBatch, visibil
         const entry = state.modelEntry;
         if (entry === null) continue;
 
-        // `state.model` is Optional: a mesh under no ModelTrait has no inherited visibility.
-        const visible = state.cull.visible && state.trait.visible && (state.model === null || state.model.visible);
-        if (!visible) continue;
+        if (!state.cull.visible || !state.trait.visible) continue;
 
         const trait = state.trait;
         const transformTrait = getTrait(trait._node, TransformTrait);

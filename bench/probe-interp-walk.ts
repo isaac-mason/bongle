@@ -14,24 +14,26 @@
 // rather than a no-op over already-dirty nodes.
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
-import { getWorldMatrix, setInterpolation, setPosition, TransformTrait } from '../src/builtins/transform';
-import { getVisualWorldMatrix } from '../src/builtins/transform';
+import { getVisualWorldMatrix, setInterpolation, setPosition, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
 
 const MAX = Number(process.argv[2] ?? 1024);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 
 function buildRig(sceneTree: ReturnType<typeof createSceneTree>, i: number) {
     const rootNode = createNode({ name: `rig${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     const byName = new Map<string, Node>();
     const bones: any[] = [];
     for (const name of BONES) {
@@ -61,7 +63,9 @@ function best(fn: () => void, reps: number): number {
 }
 
 console.log(`\nremote NPC rigs, ${BONES.length} bones + 1 root each. best-of; budget 16.67 ms/frame\n`);
-console.log(`${'rigs'.padStart(6)} ${'nodes'.padStart(7)} ${'frame'.padStart(9)} ${'us/rig'.padStart(8)} ${'ns/node'.padStart(8)}  rigs@16.67ms`);
+console.log(
+    `${'rigs'.padStart(6)} ${'nodes'.padStart(7)} ${'frame'.padStart(9)} ${'us/rig'.padStart(8)} ${'ns/node'.padStart(8)}  rigs@16.67ms`,
+);
 
 for (const rigCount of [64, 128, 256, 512, MAX].filter((n, i, a) => n <= MAX && a.indexOf(n) === i)) {
     const sceneTree = createSceneTree();

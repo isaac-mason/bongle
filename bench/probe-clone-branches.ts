@@ -2,7 +2,6 @@
 //   ./node_modules/.bin/tsx bench/probe-clone-branches.ts
 import '../src/builtins/transform';
 import '../src/builtins/mesh';
-import '../src/builtins/model';
 import '../src/builtins/character';
 import '../src/builtins/character-controller';
 import '../src/builtins/player-node';
@@ -16,18 +15,36 @@ for (const [id, def] of registry.traits.byId) {
     for (const key of Object.keys(def.body)) {
         const v = def.body[key];
         total++;
-        if (typeof v === 'function') { buckets.factory++; continue; }
-        if (v === null || typeof v !== 'object') { buckets.primitive++; continue; }
-        if (Array.isArray(v)) {
-            if (v.every((i) => i === null || typeof i !== 'object')) { buckets.arrayOfPrimitives++; continue; }
-            buckets.other++; notInlinable.push(`${id}.${key} (array of objects)`); continue;
+        if (typeof v === 'function') {
+            buckets.factory++;
+            continue;
         }
-        if (ArrayBuffer.isView(v)) { buckets.typedArray++; notInlinable.push(`${id}.${key} (typed array)`); continue; }
+        if (v === null || typeof v !== 'object') {
+            buckets.primitive++;
+            continue;
+        }
+        if (Array.isArray(v)) {
+            if (v.every((i) => i === null || typeof i !== 'object')) {
+                buckets.arrayOfPrimitives++;
+                continue;
+            }
+            buckets.other++;
+            notInlinable.push(`${id}.${key} (array of objects)`);
+            continue;
+        }
+        if (ArrayBuffer.isView(v)) {
+            buckets.typedArray++;
+            notInlinable.push(`${id}.${key} (typed array)`);
+            continue;
+        }
         const proto = Object.getPrototypeOf(v);
         if (proto === Object.prototype || proto === null) {
-            buckets.plainObject++; notInlinable.push(`${id}.${key} (plain object)`); continue;
+            buckets.plainObject++;
+            notInlinable.push(`${id}.${key} (plain object)`);
+            continue;
         }
-        buckets.other++; notInlinable.push(`${id}.${key} (${v.constructor?.name ?? 'exotic'})`);
+        buckets.other++;
+        notInlinable.push(`${id}.${key} (${v.constructor?.name ?? 'exotic'})`);
     }
 }
 

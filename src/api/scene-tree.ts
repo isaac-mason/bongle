@@ -1,11 +1,7 @@
-import { type Box3, box3 } from 'math/shapes';
-import { ModelTrait } from '../builtins/model';
 import { TransformTrait } from '../builtins/transform';
 import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/scene-tree';
 import * as SceneTree from '../core/scene/scene-tree';
 import type { TraitBase } from '../core/scene/traits';
-
-const _cloneBounds: Box3 = box3.create();
 
 export type { Node, Realm } from '../core/scene/scene-tree';
 export {
@@ -30,15 +26,9 @@ export function cloneNode(node: Node): Node {
 }
 
 /**
- * Clone a node for the visual scene: same as `cloneNode`, plus a `ModelTrait`
- * (a lighting group sharing one voxel-light value across every mesh under the
- * clone) on the clone root. Reserve `cloneNode` for non-visual duplication or
- * meshes you want lit individually. Leaves an existing `ModelTrait` in place.
- *
- * `lightOffset` is seeded to the centre of the clone's mesh AABBs so light
- * samples from inside the model's body rather than at its origin. The clone
- * root is also guaranteed a `TransformTrait`, since `ModelLighting` samples
- * the `[ModelTrait, TransformTrait]` pair each frame.
+ * Clone a node for the visual scene: same as `cloneNode`, plus a `TransformTrait`
+ * on the clone root so it can be positioned once attached. Reserve `cloneNode`
+ * for non-visual duplication.
  *
  * @example
  * const instance = cloneModel(wizard.scene);
@@ -46,11 +36,6 @@ export function cloneNode(node: Node): Node {
  */
 export function cloneModel(node: Node): Node {
     const clone = SceneTree.cloneNode(node);
-    let model = SceneTree.getTrait(clone, ModelTrait);
-    if (!model) {
-        model = SceneTree.addTrait(clone, ModelTrait);
-        box3.empty(_cloneBounds);
-    }
     if (!SceneTree.getTrait(clone, TransformTrait)) {
         SceneTree.addTrait(clone, TransformTrait);
     }

@@ -13,7 +13,6 @@
 // non-identity quaternion and takes the general path; the rest are translation-only.
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { setInterpolation, setQuaternion, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 import { concatenate, interpolate, snapshot } from '../src/render/transform/interpolation';
@@ -21,8 +20,13 @@ import { concatenate, interpolate, snapshot } from '../src/render/transform/inte
 const CHARS = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 
 /** rig shaped like a real avatar: a bone chain plus a mesh node per bone. */
@@ -34,7 +38,6 @@ function build(rotatedFraction: number) {
         const rootNode = createNode({ name: `char${i}` });
         addChild(sceneTree.root, rootNode);
         addTrait(rootNode, TransformTrait);
-        addTrait(rootNode, ModelTrait);
         const byName = new Map<string, Node>();
         let boneIdx = 0;
         for (const name of BONES) {

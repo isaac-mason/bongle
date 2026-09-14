@@ -19,7 +19,6 @@
 
 import { bench, group } from '@pmndrs/labs';
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import {
     getVisualWorldMatrix,
     getWorldMatrix,
@@ -34,8 +33,13 @@ import { concatenate, interpolate, snapshot } from '../src/render/transform/inte
 const COUNT = 1000;
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 const ROTATED = new Set(['waist', 'leg_left', 'leg_right', 'arm_left', 'arm_right', 'head']);
 
@@ -47,7 +51,6 @@ function makecatRig(sceneTree: SceneTree, i: number): Rig {
     const rootNode = createNode({ name: `char${i}` });
     addChild(sceneTree.root, rootNode);
     const root = addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     const byName = new Map<string, Node>();
     const rotated: TransformTrait[] = [];
     const all: TransformTrait[] = [];

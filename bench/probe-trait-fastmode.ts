@@ -9,7 +9,6 @@
 // instances the engine actually builds?
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree } from '../src/core/scene/scene-tree';
 
@@ -22,7 +21,6 @@ const node = createNode({ name: 'probe' });
 addChild(sceneTree.root, node);
 rows.push(['Node', node]);
 rows.push(['TransformTrait', addTrait(node, TransformTrait) as object]);
-rows.push(['ModelTrait', addTrait(node, ModelTrait) as object]);
 const mesh = addTrait(node, MeshTrait) as any;
 mesh.meshId = { modelId: 'probe', meshName: 'body' };
 rows.push(['MeshTrait', mesh]);

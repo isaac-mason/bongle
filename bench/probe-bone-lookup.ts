@@ -14,18 +14,21 @@
 //
 // Both arms do the same setQuaternion work, so the delta is lookup only.
 
-import { getTrait } from '../src/api/scene-tree';
-import { findByName } from '../src/api/scene-tree';
+import { findByName, getTrait } from '../src/api/scene-tree';
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { setQuaternion, TransformTrait } from '../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree, type Node } from '../src/core/scene/scene-tree';
 
 const COUNT = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 // the seven lookups a walking, crouching character performs each frame
 const PER_FRAME = ['head', 'waist', 'leg_left', 'leg_right', 'arm_left', 'arm_right', 'waist'] as const;
@@ -37,7 +40,6 @@ for (let i = 0; i < COUNT; i++) {
     const rootNode = createNode({ name: `char${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     const byName: Record<string, Node> = {};
     for (const name of BONES) {
         const n = createNode({ name });
@@ -91,7 +93,8 @@ function best(fn: () => void, reps: number): number {
 }
 
 // interleave, discard the first pass of each
-walkArm(); indexedArm();
+walkArm();
+indexedArm();
 const results: Array<[string, number]> = [];
 for (let round = 0; round < 3; round++) {
     results.push(['findByName', best(walkArm, 30)]);

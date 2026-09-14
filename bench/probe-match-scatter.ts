@@ -20,16 +20,19 @@
 // The loop body is `refreshStates`'s fast path verbatim.
 
 import { MeshTrait } from '../src/builtins/mesh';
-import { ModelTrait } from '../src/builtins/model';
 import { TransformTrait } from '../src/builtins/transform';
-import { Optional, Up } from '../src/core/scene/conditions';
 import { addChild, addTrait, createNode, createSceneTree, type Node, query, removeChild } from '../src/core/scene/scene-tree';
 
 const CHARS = Number(process.argv[2] ?? 1000);
 const BONES = ['waist', 'body', 'head', 'arm_left', 'arm_right', 'leg_left', 'leg_right'] as const;
 const PARENT_OF: Record<string, string | null> = {
-    waist: null, leg_left: null, leg_right: null,
-    body: 'waist', head: 'waist', arm_left: 'waist', arm_right: 'waist',
+    waist: null,
+    leg_left: null,
+    leg_right: null,
+    body: 'waist',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
 };
 
 type Mode = 'packed' | 'scattered' | 'churned';
@@ -45,7 +48,6 @@ function buildRig(sceneTree: ReturnType<typeof createSceneTree>, i: number): Nod
     const rootNode = createNode({ name: `char${i}` });
     addChild(sceneTree.root, rootNode);
     addTrait(rootNode, TransformTrait);
-    addTrait(rootNode, ModelTrait);
     const byName = new Map<string, Node>();
     for (const name of BONES) {
         const n = createNode({ name });
@@ -59,7 +61,7 @@ function buildRig(sceneTree: ReturnType<typeof createSceneTree>, i: number): Nod
 
 function build(mode: Mode) {
     const sceneTree = createSceneTree();
-    const q = query(sceneTree, [MeshTrait, TransformTrait, Optional(Up(ModelTrait))]);
+    const q = query(sceneTree, [MeshTrait, TransformTrait]);
     const roots: Node[] = [];
     for (let i = 0; i < CHARS; i++) {
         roots.push(buildRig(sceneTree, i));
@@ -83,12 +85,11 @@ function build(mode: Mode) {
 // refreshStates' fast path, verbatim
 function walk(q: any, frameId: number): number {
     let seen = 0;
-    for (const [meshTrait, , model] of q.matches) {
+    for (const [meshTrait] of q.matches) {
         const state = meshTrait._state;
         const meshId = meshTrait.meshId;
         if (state !== null && state.meshIdRef === meshId && meshId !== null) {
             state.lastSeenFrame = frameId;
-            state.model = model;
             continue;
         }
         seen++;
@@ -115,10 +116,14 @@ for (const mode of ['packed', 'scattered', 'churned'] as Mode[]) {
     let frameId = 0;
     // seed _state so the fast path is the path taken, as it is in the trace
     for (const [meshTrait] of q.matches as any) {
-        meshTrait._state = { meshIdRef: meshTrait.meshId, lastSeenFrame: 0, model: null };
+        meshTrait._state = { meshIdRef: meshTrait.meshId, lastSeenFrame: 0 };
     }
     const n = (q.matches as any).length;
-    const ms = best(() => { walk(q, ++frameId); }, 40);
-    console.log(`${mode.padEnd(10)} ${String(n).padStart(8)} ${ms.toFixed(3).padStart(9)} ${((ms * 1e6) / n).toFixed(0).padStart(9)}`);
+    const ms = best(() => {
+        walk(q, ++frameId);
+    }, 40);
+    console.log(
+        `${mode.padEnd(10)} ${String(n).padStart(8)} ${ms.toFixed(3).padStart(9)} ${((ms * 1e6) / n).toFixed(0).padStart(9)}`,
+    );
 }
 console.log();

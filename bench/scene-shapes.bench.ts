@@ -13,9 +13,9 @@
 //   reparent         a prop between containers
 //   scene load       one attach of a whole populated container
 //
-// Resolution count is 2 throughout, matching what the engine registers today:
-// both `mesh-visuals` and `voxel-mesh-visuals` query `Optional(Up(ModelTrait))`,
-// so every room has two resolving the same trait.
+// Resolution count is swept 0 vs 2 to price hierarchy-sourced queries against
+// a room that registers none. Two queries resolve the same ancestor trait, the
+// shape a game hits when it declares its own grouping trait.
 
 import { bench, group } from '@pmndrs/labs';
 import { Optional, Up } from '../src/core/scene/conditions';
@@ -34,7 +34,7 @@ import { trait } from '../src/core/scene/traits';
 
 const Mesh = trait('shape/mesh', { id: 0 });
 const VoxelMesh = trait('shape/voxel-mesh', { id: 0 });
-/** stands in for ModelTrait: the lighting group both renderers resolve. */
+/** the ancestor trait the Up-sourced queries below resolve against. */
 const Model = trait('shape/model', { light: 0 });
 /** traits nothing in the fixture carries, for registering queries that can
  *  never match — the wasted scan a trait→query index would eliminate. */
