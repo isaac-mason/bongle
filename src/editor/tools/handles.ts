@@ -141,7 +141,7 @@ export function update(
         state.hovered = nearest(state, cursor, camera, viewportWidth, viewportHeight);
         if (state.hovered !== -1 && isMouseJustDown(mk, 'left')) arm(state, state.handles[state.hovered]!, sceneTree, store);
     }
-    draw(state, quads, text);
+    draw(state, camera, viewportWidth, viewportHeight, quads, text);
 }
 
 function handleLabel(handle: Handle): string {
@@ -366,7 +366,20 @@ function nearest(state: HandlesState, cursor: Cursor, camera: PerspectiveCamera,
     return best;
 }
 
-function draw(state: HandlesState, quads: Quads.QuadBatch, text: Text.TextBatch): void {
+const LABEL_MIN_PX = 28;
+const _placedLabels: { x: number; y: number }[] = [];
+
+function draw(
+    state: HandlesState,
+    camera: PerspectiveCamera,
+    width: number,
+    height: number,
+    quads: Quads.QuadBatch,
+    text: Text.TextBatch,
+): void {
+    mat4.invert(_view, camera.matrixWorld);
+    mat4.multiply(_viewProjection, camera.projectionMatrix, _view);
+    _placedLabels.length = 0;
     for (let i = 0; i < state.handles.length; i++) {
         const handle = state.handles[i]!;
         const hot = (state.armed !== null && sameHandle(handle, state.armed)) || i === state.hovered;
@@ -374,9 +387,15 @@ function draw(state: HandlesState, quads: Quads.QuadBatch, text: Text.TextBatch)
         const size = hot ? HANDLE_DOT_HOT_PX : handle.kind === 'frame' ? FRAME_DOT_PX : HANDLE_DOT_PX;
         const [x, y, z] = handle.world;
         Quads.dot(quads, x, y, z, size, r, g, b, a);
-        if (state.armed === null || !sameHandle(handle, state.armed)) {
-            Text.labelLeft(text, x, y, z, handleLabel(handle), HANDLE_LABEL_SCALE, size / 2 + HANDLE_LABEL_GAP_PX, 0, r, g, b, a);
-        }
+        if (state.armed !== null && sameHandle(handle, state.armed)) continue;
+        // on a small shape the dots bunch up; a label yields to one already placed within reach, the hot dot always wins.
+        vec3.transformMat4(_projected, handle.world, _viewProjection);
+        const px = ((_projected[0] + 1) * width) / 2;
+        const py = ((1 - _projected[1]) * height) / 2;
+        const crowded = !hot && _placedLabels.some((p) => Math.hypot(p.x - px, p.y - py) < LABEL_MIN_PX);
+        if (crowded) continue;
+        _placedLabels.push({ x: px, y: py });
+        Text.labelLeft(text, x, y, z, handleLabel(handle), HANDLE_LABEL_SCALE, size / 2 + HANDLE_LABEL_GAP_PX, 0, r, g, b, a);
     }
 }
 
