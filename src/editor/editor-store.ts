@@ -74,6 +74,9 @@ export type EditorStore = {
     netSimBurstChance: number;
 
     showGrid: boolean;
+    /** trait ids whose live data view is open in the inspector; per trait, not per node. */
+    openDataTraits: ReadonlySet<string>;
+    toggleDataTrait: (traitId: string) => void;
     /** edit-lens overlays, each independently switchable from the options tab. */
     showMarkers: boolean;
     showOutlines: boolean;
@@ -170,6 +173,14 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     netSimBurstChance: 0.02,
 
     showGrid: false,
+    openDataTraits: new Set<string>(),
+    toggleDataTrait: (traitId) =>
+        set((s) => {
+            const next = new Set(s.openDataTraits);
+            if (next.has(traitId)) next.delete(traitId);
+            else next.add(traitId);
+            return { openDataTraits: next };
+        }),
     showMarkers: true,
     showOutlines: true,
     showHandles: true,

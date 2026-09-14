@@ -14,6 +14,7 @@ import { formatKey } from '../../core/voxels/block-registry';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { type ActiveFrame, activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { DataTree } from './data-tree';
 import { prefabSelectItems } from './prefab-items';
 import { PrefabThumb } from './prefab-thumb';
 import { SpriteIcon } from './sprite-icon';
@@ -766,6 +767,8 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const traitsBySlot = useTraitsBySlot();
     const removeTrait = useEditRoom((s) => s.removeTrait);
     const setTrait = useEditRoom((s) => s.setTrait);
+    const dataOpen = useEditor((s) => s.openDataTraits.has(traitsBySlot[traitSlot]?.def.id ?? ''));
+    const toggleDataTrait = useEditor((s) => s.toggleDataTrait);
     const handle = traitsBySlot[traitSlot];
     if (!handle) return null;
 
@@ -823,6 +826,17 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
                     ))}
                 </div>
             )}
+            {instance && (
+                <button
+                    type="button"
+                    className="flex items-center gap-1 w-full px-2 py-0.5 text-[10px] font-mono text-fg-muted hover:text-fg border-t border-border"
+                    onClick={() => toggleDataTrait(handle.def.id)}
+                >
+                    {dataOpen ? <Icons.ChevronDown size={12} /> : <Icons.ChevronRight size={12} />}
+                    data
+                </button>
+            )}
+            {instance && dataOpen && <DataTree root={instance} />}
         </div>
     );
 }
