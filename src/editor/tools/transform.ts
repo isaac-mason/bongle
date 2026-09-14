@@ -802,14 +802,14 @@ function _applyFrameDrag(state: TransformToolState, sceneTree: SceneTree, mode: 
         mat4.invert(_frameInvWorld, parent);
         vec3.transformMat4(_frameLocalPosition, state.proxy.position, _frameInvWorld);
         const step = state.translateStep;
-        next = {
-            ...next,
-            [drag.position]: [
-                snapAxis(_frameLocalPosition[0], step, 'corner', 0),
-                snapAxis(_frameLocalPosition[1], step, 'corner', 1),
-                snapAxis(_frameLocalPosition[2], step, 'corner', 2),
-            ],
-        };
+        const snapped: Vec3 = [
+            snapAxis(_frameLocalPosition[0], step, 'corner', 0),
+            snapAxis(_frameLocalPosition[1], step, 'corner', 1),
+            snapAxis(_frameLocalPosition[2], step, 'corner', 2),
+        ];
+        next = { ...next, [drag.position]: snapped };
+        // the gizmo sits on the snapped frame; the next pointer move re-derives from the drag start.
+        vec3.transformMat4(state.proxy.position, snapped, parent);
     } else if (mode === 'rotate' && drag.quaternion) {
         mat4.getRotation(_frameParentQuaternion, parent);
         quat.invert(_frameInvWorldQuaternion, _frameParentQuaternion);
