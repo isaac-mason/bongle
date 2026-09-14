@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import * as Icons from '../../../icons';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../../client/ui/components';
 import type { Node } from '../../core/scene/scene-tree';
@@ -210,6 +210,56 @@ function PrimitiveValue({ value, set }: { value: unknown; set: ((v: unknown) => 
     );
 }
 
+const RAD_TO_DEG = 180 / Math.PI;
+
+function isVector(value: unknown, kind: Kind): value is ArrayLike<number> {
+    if (kind !== 'array' && kind !== 'typed') return false;
+    const list = value as ArrayLike<unknown>;
+    if (list.length < 2 || list.length > 4) return false;
+    for (let i = 0; i < list.length; i++) if (typeof list[i] !== 'number') return false;
+    return true;
+}
+
+// 2 to 4 numbers edit as one row, each component in place; a quaternion-named row also reads as euler degrees.
+function VectorValue({ label, value }: { label: string; value: ArrayLike<number> & Record<number, number> }) {
+    const parts: ReactNode[] = [];
+    for (let i = 0; i < value.length; i++) {
+        parts.push(
+            <PrimitiveValue
+                key={String(i)}
+                value={value[i]}
+                set={(v) => {
+                    value[i] = v as number;
+                }}
+            />,
+        );
+    }
+    let euler: string | null = null;
+    if (value.length === 4 && /quat|rotation/i.test(label)) {
+        const [x, y, z, w] = [value[0]!, value[1]!, value[2]!, value[3]!];
+        const sinr = 2 * (w * x + y * z);
+        const cosr = 1 - 2 * (x * x + y * y);
+        const sinp = Math.max(-1, Math.min(1, 2 * (w * y - z * x)));
+        const siny = 2 * (w * z + x * y);
+        const cosy = 1 - 2 * (y * y + z * z);
+        const deg = (r: number) => (r * RAD_TO_DEG).toFixed(0);
+        euler = `${deg(Math.atan2(sinr, cosr))} ${deg(Math.asin(sinp))} ${deg(Math.atan2(siny, cosy))} deg`;
+    }
+    return (
+        <span className="flex items-center gap-1">
+            <span className="text-fg-muted">[</span>
+            {parts.map((part, i) => (
+                <span key={String(i)} className="flex items-center gap-1">
+                    {part}
+                    {i < parts.length - 1 && <span className="text-fg-muted">,</span>}
+                </span>
+            ))}
+            <span className="text-fg-muted">]</span>
+            {euler && <span className="text-fg-muted italic">{euler}</span>}
+        </span>
+    );
+}
+
 function Row({
     label,
     get,
@@ -226,7 +276,9 @@ function Row({
     const setCopyTarget = useContext(CopyTargetContext);
     const value = get();
     const kind = kindOf(value);
+    const vector = isVector(value, kind);
     const expandable =
+        !vector &&
         depth < MAX_DEPTH &&
         (kind === 'array' ||
             kind === 'object' ||
@@ -253,7 +305,9 @@ function Row({
                     <>
                         <span className="w-3" />
                         <span className="text-fg-muted shrink-0">{label}:</span>
-                        {kind === 'primitive' ? (
+                        {vector ? (
+                            <VectorValue label={label} value={value as ArrayLike<number> & Record<number, number>} />
+                        ) : kind === 'primitive' ? (
                             <PrimitiveValue value={value} set={set} />
                         ) : ref ? (
                             <button
