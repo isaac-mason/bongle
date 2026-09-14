@@ -3,6 +3,8 @@ import {
     abs,
     add,
     attribute,
+    cameraFar,
+    cameraPosition,
     cameraProjectionMatrix,
     cameraViewMatrix,
     clamp,
@@ -24,9 +26,12 @@ import {
     normalize,
     pow,
     sin,
+    smoothstep,
+    sqrt,
     storage,
     struct,
     sub,
+    u32,
     varying,
     vec3f,
     vec4f,
@@ -49,19 +54,33 @@ const FACE_SIDE_X = 0.75;
 
 // 14x14 simultaneously-considered slots the cull iterates per frame; visible ones get
 // appended to the shared compacted instance buffer.
-const GRID_DIM = 14;
+/** cells per side of the camera-centred cloud grid. Shared with `cloud-visuals`, which walks it. */
+export const GRID_DIM = 14;
 const M_CLOUD_INSTANCES = GRID_DIM * GRID_DIM;
+
+/** the outermost ring sits this fraction inside the far plane, so cloud AABBs never clip it. */
+export const SAFE_FAR_FRACTION = 0.9;
+/** radial dither fade band in cells. Clouds enter and leave the grid at roughly
+ *  `(GRID_DIM/2) * gridSpacing`, so fading out just inside that hides every slot swap. */
+export const FADE_START_CELLS = GRID_DIM / 2 - 2;
+export const FADE_END_CELLS = GRID_DIM / 2;
 
 type GpuBufferAny = GpuBuffer<any>;
 
 // per-visible-cloud data written by CPU cull each frame: the resolved shape index range
 // and a CPU-precomputed radial fade [0..1] (1 = fully dithered out).
+/** 20 B. Three loose floats rather than a `vec3f`: a vec3 member forces the struct to 16-byte
+ *  alignment and pads the stride to 32, and nothing here needs that - the VS reads position as a
+ *  `float32x3` vertex attribute, which only wants a 4-byte offset. */
 export const CompactedCloudInstance = struct('CompactedCloudInstance', {
-    worldPos: d.vec3f,
+    worldX: d.f32,
+    worldY: d.f32,
+    worldZ: d.f32,
     scale: d.f32,
-    indexStart: d.u32,
-    indexCount: d.u32,
-    fadeOut: d.f32,
+    /** index into the shape table; the VS looks up the index range. Carrying
+     *  `indexStart`/`indexCount` per instance copied two values out of a table every instance
+     *  already had to agree with. */
+    shapeId: d.u32,
 });
 export const COMPACTED_CLOUD_INSTANCE_STRIDE = layoutStrideOf(CompactedCloudInstance);
 
@@ -109,6 +128,14 @@ export function init(envResources: EnvironmentResources): CloudResources {
     const positionStorageBuf = new GpuBuffer(d.array(d.vec4f), { data: positionsVec4, usage: 'storage' });
     const normalStorageBuf = new GpuBuffer(d.array(d.vec4f), { data: normalsVec4, usage: 'storage' });
     const indexStorageBuf = new GpuBuffer(d.array(d.u32), { data: indices, usage: 'storage' });
+    // [start, count] per shape. Uploaded once; every instance references a row instead of
+    // carrying a copy of one.
+    const shapeTableData = new Uint32Array(shapes.length * 2);
+    for (let i = 0; i < shapes.length; i++) {
+        shapeTableData[i * 2] = shapes[i]!.indexStart;
+        shapeTableData[i * 2 + 1] = shapes[i]!.indexCount;
+    }
+    const shapeTableBuf = new GpuBuffer(d.array(d.u32), { data: shapeTableData, usage: 'storage' });
 
     // compactedInstances is a per-instance vertex attribute; position/normal/index are
     // read-only storage (native SSBO on WebGPU, auto-lowered to buffer-texture reads on
@@ -117,6 +144,7 @@ export function init(envResources: EnvironmentResources): CloudResources {
     geometry.setBuffer('positionStorage', positionStorageBuf);
     geometry.setBuffer('normalStorage', normalStorageBuf);
     geometry.setBuffer('indexStorage', indexStorageBuf);
+    geometry.setBuffer('shapeTable', shapeTableBuf);
 
     return {
         material,
@@ -156,26 +184,27 @@ function createCloudMaterial(env: EnvironmentResources): Material {
     const cfg = env.cfgNode;
 
     // single draw with firstInstance 0, so the divisor'd attributes index the buffer
-    // densely from 0. std430 offsets: worldPos@0, scale@12, indexStart@16, indexCount@20,
-    // fadeOut@24.
+    // densely from 0. offsets: worldPos@0, scale@12, shapeId@16.
     const S = COMPACTED_CLOUD_INSTANCE_STRIDE;
     const instWorldPos = attribute('compactedInstances', d.vec3f, { instanced: true, stride: S, offset: 0 }).toVar(
         'cloudInstWorldPos',
     );
     const instScale = attribute('compactedInstances', d.f32, { instanced: true, stride: S, offset: 12 }).toVar('cloudInstScale');
-    const instIndexStart = attribute('compactedInstances', d.u32, { instanced: true, stride: S, offset: 16 }).toVar(
-        'cloudInstIdxStart',
+    const instShapeId = attribute('compactedInstances', d.u32, { instanced: true, stride: S, offset: 16 }).toVar(
+        'cloudInstShape',
     );
-    const instIndexCount = attribute('compactedInstances', d.u32, { instanced: true, stride: S, offset: 20 }).toVar(
-        'cloudInstIdxCount',
-    );
-    const instFadeOut = attribute('compactedInstances', d.f32, { instanced: true, stride: S, offset: 24 }).toVar('cloudInstFade');
 
     // read-only `storage()`, so gpucat serves them as native SSBO reads on WebGPU and
     // auto-lowers them to rgba32uint buffer-texture fetches on WebGL2.
     const positions = storage('positionStorage', d.array(d.vec4f), 'read');
     const normals = storage('normalStorage', d.array(d.vec4f), 'read');
     const indices = storage('indexStorage', d.array(d.u32), 'read');
+    // [start, count] per shape, uploaded once; the instance carries only which row it wants.
+    const shapeTable = storage('shapeTable', d.array(d.u32), 'read');
+
+    const shapeRow = instShapeId.mul(u32(2)).toVar('cloudShapeRow');
+    const instIndexStart = shapeTable.element(shapeRow).toVar('cloudInstIdxStart');
+    const instIndexCount = shapeTable.element(shapeRow.add(u32(1))).toVar('cloudInstIdxCount');
 
     const vid = vertexIndex.toVar('cloudVid');
     const inRange = vid.lessThan(instIndexCount).toVar('cloudInRange');
@@ -199,8 +228,20 @@ function createCloudMaterial(env: EnvironmentResources): Material {
     const degenClip = vec4f(f32(2), f32(2), f32(2), f32(1));
     const clipPos = inRange.select(realClip, degenClip);
 
-    // CPU-precomputed fade, flat across the instance; needed per-fragment for the dither below.
-    const vFadeOut = varying(instFadeOut, 'cloudFadeOut').setInterpolation('flat');
+    // Derived, not packed: the fade is a horizontal distance from the camera, and the grid
+    // spacing it is measured against comes from `camera.far` - all of which the shader has.
+    // `flat` keeps it per-instance, so this stays per-instance work despite living in the VS.
+    const gridSpacing = cameraFar
+        .mul(f32(SAFE_FAR_FRACTION))
+        .div(f32(GRID_DIM / 2))
+        .toVar('cloudGridSpacing');
+    const camDx = instWorldPos.x.sub(cameraPosition.x);
+    const camDz = instWorldPos.z.sub(cameraPosition.z);
+    const horizDist = sqrt(camDx.mul(camDx).add(camDz.mul(camDz))).toVar('cloudHorizDist');
+    const fadeOut = smoothstep(gridSpacing.mul(f32(FADE_START_CELLS)), gridSpacing.mul(f32(FADE_END_CELLS)), horizDist).toVar(
+        'cloudFadeOut',
+    );
+    const vFadeOut = varying<d.f32>(fadeOut, 'cloudFadeOutV').setInterpolation('flat');
 
     // matches the voxel-mesh material so clouds catch the same lighting as the world.
     const tNode = env.timeNode.time;

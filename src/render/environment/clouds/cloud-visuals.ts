@@ -1,11 +1,9 @@
 import { type Camera, frustum, Mesh, type NonIndexedMeshDraw, type Scene } from 'gpucat';
 import type { Environment } from '../../../client/environment';
 import type { TimeResources } from '../../time';
-import { type CloudResources, COMPACTED_CLOUD_INSTANCE_STRIDE } from './cloud-resources';
+import { type CloudResources, COMPACTED_CLOUD_INSTANCE_STRIDE, GRID_DIM, SAFE_FAR_FRACTION } from './cloud-resources';
 import { N_CLOUD_SHAPES } from './cloud-shapes';
 
-// matches CloudResources.instanceCapacity.
-const GRID_DIM = 14;
 // fraction of GRID_SPACING.
 const POS_JITTER = 0.48;
 // world units around cloudsAltitude.
@@ -18,15 +16,6 @@ const CLUSTER_CELLS = 5;
 const CLUSTER_PASS_THRESHOLD = 0.35;
 // world units of cloud drift per second of windTime.
 const WIND_SCALE = 2.5;
-// radial dither fade band, in cells: clouds enter/leave the grid near the camera at
-// horizontal distance ~(GRID_DIM/2) * gridSpacing, so fading to invisible just inside
-// that boundary hides every slot swap.
-const FADE_START_CELLS = GRID_DIM / 2 - 2;
-const FADE_END_CELLS = GRID_DIM / 2;
-
-// derived per-frame from `camera.far` so the outermost ring sits comfortably inside the
-// far plane and cloud AABBs don't clip against it.
-const SAFE_FAR_FRACTION = 0.9;
 
 export type CloudVisuals = {
     mesh: Mesh;
@@ -91,8 +80,6 @@ export function update(
     const gridSpacingJitter = gridSpacing * POS_JITTER;
     const gridSpacingJitter2 = gridSpacingJitter * 2;
     const halfGrid = (GRID_DIM / 2) | 0;
-    const fadeStart = gridSpacing * FADE_START_CELLS;
-    const fadeEnd = gridSpacing * FADE_END_CELLS;
 
     const windOffX = windDirX * windTime * WIND_SCALE;
     const windOffZ = windDirY * windTime * WIND_SCALE;
@@ -146,23 +133,19 @@ export function update(
 
             if (!aabbInFrustum(aabbMinX, aabbMinY, aabbMinZ, aabbMaxX, aabbMaxY, aabbMaxZ)) continue;
 
-            const cloudDx = worldX - cp[0];
-            const cloudDz = worldZ - cp[2];
-            const horizDist = Math.sqrt(cloudDx * cloudDx + cloudDz * cloudDz);
-            const fadeOut = smoothstep(fadeStart, fadeEnd, horizDist);
-
             const o = count * STRIDE4;
             arr[o + 0] = worldX;
             arr[o + 1] = worldY;
             arr[o + 2] = worldZ;
             arr[o + 3] = scale;
-            arrU32[o + 4] = shape.indexStart;
-            arrU32[o + 5] = shape.indexCount;
-            arr[o + 6] = fadeOut;
+            arrU32[o + 4] = shapeId;
             count++;
         }
     }
 
+    // upload only the dense [0, count) prefix, not the whole instanceCapacity allocation:
+    // `needsUpdate` alone takes the full-write branch and re-sends every slot, live or not.
+    resources.compactedInstanceBuf.addUpdateRange(0, count * STRIDE4);
     resources.compactedInstanceBuf.needsUpdate = true;
     visuals.draw.instanceCount = count;
 }
@@ -170,11 +153,6 @@ export function update(
 export function dispose(visuals: CloudVisuals): void {
     visuals.scene.remove(visuals.mesh);
     // material/geometry/buffers are engine-global, owned by CloudResources.
-}
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3 - 2 * t);
 }
 
 function aabbInFrustum(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): boolean {
