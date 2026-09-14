@@ -176,7 +176,9 @@ function harness(schema: Schema, initial: unknown, nodePosition: Vec3 = [0, 0, 0
     const transform = addTrait(node, TransformTrait);
     vec3.copy(transform.position, nodePosition);
     const instance = addTrait(node, Trait);
-    instance.value = initial;
+    // the trait body types nested objects as sub-instances; the harness holds arbitrary values
+    const slot = instance as unknown as { value: unknown };
+    slot.value = initial;
     computeWorldTransforms(sceneTree);
 
     const camera = new PerspectiveCamera(Math.PI / 3, WIDTH / HEIGHT, 0.1, 100);
@@ -213,7 +215,7 @@ function harness(schema: Schema, initial: unknown, nodePosition: Vec3 = [0, 0, 0
         mk._cursor.ndcX = ndcX;
         mk._cursor.ndcY = ndcY;
     };
-    return { sceneTree, node, instance, camera, state, actions, handles, mk, tick, aim };
+    return { sceneTree, node, value: () => slot.value, camera, state, actions, handles, mk, tick, aim };
 }
 let harnessCount = 0;
 
@@ -231,13 +233,13 @@ describe('shape handles: drags and spaces', () => {
         h.mk._gestures.left.pressed = false;
         h.aim([2.6, 0, 0]);
         h.tick();
-        expect((h.instance.value as unknown as { halfExtents: number[] }).halfExtents).toEqual([3, 1, 1]);
+        expect((h.value() as { halfExtents: number[] }).halfExtents).toEqual([3, 1, 1]);
         h.mk._buttons.left = false;
         h.tick();
         expect(h.handles.armed).toBeNull();
         expect(h.actions).toHaveLength(1);
         h.actions[0]!.undo();
-        expect((h.instance.value as unknown as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
+        expect((h.value() as { halfExtents: number[] }).halfExtents).toEqual([1, 1, 1]);
     });
 
     it('a world-space shape ignores the node transform', () => {
