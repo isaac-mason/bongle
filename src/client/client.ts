@@ -1,7 +1,8 @@
 import type { Channel, ClientApp, ClientDriver, JsonValue } from 'bongle/interface';
 import { registerFlushHandler, requestFlush } from '../core/capture/flush';
 import * as Clock from '../core/clock';
-import { isStandalone } from '../core/config';
+import { CLIENT_TICK_HZ } from '../core/clock';
+import { isStandalone, serverTickRate } from '../core/config';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
@@ -109,6 +110,11 @@ export function init(opts: InitOptions) {
         domElement: uiRoot,
         deviceLost: false,
         accumulator: 0,
+        // owner-authority uploads are gated to the SERVER's cadence, which the client
+        // reads from the same config the server does. The sim stays at 60 (a 30Hz
+        // character would feel like one), but sending twice per server tick just means
+        // the server's inbox applies both and keeps the second.
+        uploadAccumulator: 0,
         renderer,
         net,
         rpc,
@@ -282,7 +288,7 @@ export function receive(state: EngineClient, channel: Channel, bytes: Uint8Array
     state.net.inbox[channel].push(bytes);
 }
 
-function processInbox(state: EngineClient): void {
+function processInbox(state: EngineClient, frameSeconds: number): void {
     for (let channel = 0; channel < state.net.inbox.length; channel++) {
         const frames = state.net.inbox[channel];
         for (const frame of frames) {
@@ -321,7 +327,7 @@ function processInbox(state: EngineClient): void {
         frames.length = 0;
     }
 
-    VoxelNet.flushAcks(state.voxelNet, state.net);
+    VoxelNet.flushAcks(state.voxelNet, state.net, frameSeconds);
 }
 
 function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMessage): void {
@@ -486,7 +492,7 @@ export function update(state: EngineClient, delta: number) {
     // advance each render clock up front so inbox receipt + the reads below share one `now`
     for (const room of state.rooms.rooms.values()) Clock.advanceWall(room.clock, wallDelta);
 
-    processInbox(state);
+    processInbox(state, delta);
 
     Manifest.sync(state.manifest, state.net);
 
@@ -517,7 +523,12 @@ export function update(state: EngineClient, delta: number) {
 
     // one global accumulator drives lockstep across rooms
     state.accumulator += delta;
-    const timestep = 1 / 60;
+    const timestep = 1 / CLIENT_TICK_HZ;
+
+    // the server's cadence, resolved from the game's own config (same bundle, same
+    // registry), so owner uploads land at most one per server tick. A standalone game
+    // has no server to send to; the interval is unused there.
+    const uploadInterval = 1 / (serverTickRate(resolveConfig(registry)) ?? CLIENT_TICK_HZ);
 
     while (state.accumulator >= timestep) {
         for (const room of state.rooms.rooms.values()) {
@@ -541,9 +552,19 @@ export function update(state: EngineClient, delta: number) {
             Physics.flush(room.physics);
             Debug.end(state.profiler, 'physics/post');
 
-            Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
-
             Debug.end(state.profiler, 'room');
+        }
+
+        // gated separately from the sim: the sim runs at 60 on every client, the upload
+        // at the rate the server actually consumes.
+        state.uploadAccumulator += timestep;
+        if (state.uploadAccumulator >= uploadInterval) {
+            // carry the remainder rather than zeroing, so a rate that doesn't divide the
+            // timestep still averages out instead of drifting slow.
+            state.uploadAccumulator -= uploadInterval * Math.floor(state.uploadAccumulator / uploadInterval);
+            for (const room of state.rooms.rooms.values()) {
+                Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
+            }
         }
 
         state.accumulator -= timestep;
@@ -596,6 +617,10 @@ export function update(state: EngineClient, delta: number) {
         Debug.begin(state.profiler, 'concatenate');
         Interpolation.concatenate(room.scene);
         Debug.end(state.profiler, 'concatenate');
+
+        Debug.begin(state.profiler, 'on-pre-render');
+        SceneTree.runOnPreRender(room.scene, { delta }, state.profiler);
+        Debug.end(state.profiler, 'on-pre-render');
 
         // same view radius as the chunk mesher, so rigs fade with chunks
         Debug.begin(state.profiler, 'visibility');

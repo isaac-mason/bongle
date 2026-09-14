@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Scene } from 'gpucat';
+import { PerspectiveCamera } from 'gpucat';
 import { type Vec3, vec3 } from 'math';
 import { describe, expect, it } from 'vitest';
 import { RigidBodyTrait } from '../../../../src/builtins/rigid-body';
@@ -11,8 +11,6 @@ import { addChild, addTrait, createNode, createSceneTree } from '../../../../src
 import * as Selection from '../../../../src/core/scene/selection';
 import type { EditRoomStoreApi } from '../../../../src/editor/edit-room-store';
 import * as Handles from '../../../../src/editor/tools/handles';
-import * as Quads from '../../../../src/render/overlay/quads';
-import * as Text from '../../../../src/render/overlay/text';
 
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -59,9 +57,6 @@ describe('shape handles', () => {
             },
         } as unknown as EditRoomStoreApi;
 
-        const scene = new Scene();
-        const quads = Quads.init(scene, 64);
-        const text = Text.init(quads);
         const handles = Handles.init();
         const mk = createMouseKeyboardInput();
 
@@ -69,7 +64,7 @@ describe('shape handles', () => {
         const { ndcX, ndcY } = project(camera, [2, 0, 0]);
         mk._cursor.ndcX = ndcX;
         mk._cursor.ndcY = ndcY;
-        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store);
         const kinds = handles.handles.map((h) => h.kind);
         expect(kinds).toContain('frame');
         expect(kinds).toContain('radius');
@@ -78,7 +73,7 @@ describe('shape handles', () => {
 
         // frame 2: press
         mk._gestures.left.pressed = true;
-        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store);
         expect(state.activeFrame).toEqual({ nodeId: node.id, traitId: 'rigidbody', controlId: 'def', path: ['shape'] });
         expect(state.activeTool).toBe('transform');
     });
@@ -127,23 +122,20 @@ describe('shape handles on a list of posed spheres', () => {
             getState: () => state,
             setState: (patch: Record<string, unknown>) => Object.assign(state, patch),
         } as unknown as EditRoomStoreApi;
-        const scene = new Scene();
-        const quads = Quads.init(scene, 64);
-        const text = Text.init(quads);
         const handles = Handles.init();
         const mk = createMouseKeyboardInput();
 
         const { ndcX, ndcY } = project(camera, [-3, 0, 0]);
         mk._cursor.ndcX = ndcX;
         mk._cursor.ndcY = ndcY;
-        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store);
         expect(handles.handles.filter((h) => h.kind === 'frame')).toHaveLength(2);
         expect(handles.handles.filter((h) => h.kind === 'radius')).toHaveLength(2);
         expect(handles.hovered).not.toBe(-1);
         expect(handles.handles[handles.hovered]!.kind).toBe('frame');
 
         mk._gestures.left.pressed = true;
-        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+        Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store);
         expect(state.activeFrame).toMatchObject({ traitId: 'test-zones', controlId: 'zones', path: [1] });
         expect(state.activeTool).toBe('transform');
     });
@@ -196,12 +188,9 @@ function harness(schema: Schema, initial: unknown, nodePosition: Vec3 = [0, 0, 0
         getState: () => state,
         setState: (patch: Record<string, unknown>) => Object.assign(state, patch),
     } as unknown as EditRoomStoreApi;
-    const scene = new Scene();
-    const quads = Quads.init(scene, 64);
-    const text = Text.init(quads);
     const handles = Handles.init();
     const mk = createMouseKeyboardInput();
-    const tick = () => Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store, quads, text);
+    const tick = () => Handles.update(handles, true, mk, camera, WIDTH, HEIGHT, sceneTree, {} as never, store);
     const aim = (world: Vec3) => {
         const { ndcX, ndcY } = project(camera, world);
         mk._cursor.ndcX = ndcX;

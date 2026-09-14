@@ -1003,6 +1003,11 @@ export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, profiler:
     runHook(sceneTree, args, profiler, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
+/** the last hook of the frame: after animation, post-animate and concatenation, before visibility and draw. */
+export function runOnPreRender(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
+    runHook(sceneTree, args, profiler, 'onPreRender', (i) => i.onPreRender);
+}
+
 /** frame all scripts in the scene tree, calling onFrame on each script instance; client-side render frame updates. */
 export function runOnFrame(sceneTree: SceneTree, args: FrameArgs, profiler: Debug.Profiler): void {
     runHook(sceneTree, args, profiler, 'onFrame', (i) => i.onFrame);

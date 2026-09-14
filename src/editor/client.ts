@@ -37,6 +37,7 @@ import {
     onInput,
     onPostPhysicsStep,
     onPrePhysicsStep,
+    onPreRender,
     onTick,
     type ScriptContext,
 } from '../core/scene/scripts';
@@ -176,13 +177,12 @@ script(
 
             NodeBodies.update(s.nodeBodies, room.visibility, room.scene, store);
             Actions.drainPendingShapeFits(store.getState(), ctx);
-            updateWorldVisuals(s.visuals, s);
             // shape handles take the pointer first, then the gizmo: a press either claims sets
             // its drag state before the tools below read it, so neither click also selects.
             const canvas = client.state!.renderer.canvas;
             Handles.update(
                 s.handles,
-                useEditor.getState().showHandles && store.getState().activeTool === 'inspect',
+                handlesEnabled(store),
                 client.input.mouseKeyboard,
                 camera,
                 canvas.clientWidth,
@@ -190,8 +190,6 @@ script(
                 room.scene,
                 ctx,
                 store,
-                s.visuals.quads,
-                s.visuals.text,
             );
             if (!Handles.isEngaged(s.handles)) TransformTool.feedPointer(transform, client.input.mouseKeyboard);
             updateHover(client.input.mouseKeyboard, camera, ctx, store, s.nodeBodies, room);
@@ -221,9 +219,6 @@ script(
                     s.visuals.selection,
                     camera,
                 );
-                TransformTool.layoutGizmo(transform);
-                redrawInspectMesh(s.visuals, s, time);
-                endOverlays(s.visuals);
                 return;
             }
 
@@ -231,6 +226,28 @@ script(
             updateSelectionKeys(s, camera);
             updateBrushPreview(s.brushPreview, store, activeTool);
             updateSelectionMeshes(s.visuals.selection, store.getState(), time);
+        });
+
+        // everything drawn from node poses waits for the last writer of the frame: a script posing a
+        // character in its own onFrame or onPostAnimate runs before this, so the overlays never trail it.
+        onPreRender(ctx, () => {
+            if (!editorViewActive(room)) return;
+            const camera = povCamera(s);
+            if (!camera) return;
+            const time = client.state!.renderer.time;
+            const canvas = client.state!.renderer.canvas;
+            updateWorldVisuals(s.visuals, s);
+            Handles.draw(
+                s.handles,
+                handlesEnabled(store),
+                camera,
+                canvas.clientWidth,
+                canvas.clientHeight,
+                room.scene,
+                store,
+                s.visuals.quads,
+                s.visuals.text,
+            );
             TransformTool.layoutGizmo(transform);
             redrawInspectMesh(s.visuals, s, time);
             endOverlays(s.visuals);
@@ -440,6 +457,10 @@ function showVisuals(v: Visuals, transform: TransformTool.TransformToolState): v
 /** the world-space overlays that follow the scene rather than the tool: prefab
  *  ghost voxels, and the debug / grid / chunk-boundary toggles (global, shared
  *  across rooms via useEditor). */
+function handlesEnabled(store: EditRoomStoreApi): boolean {
+    return useEditor.getState().showHandles && store.getState().activeTool === 'inspect';
+}
+
 function updateWorldVisuals(v: Visuals, s: Session): void {
     const { room, ctx } = s;
     Lines.begin(v.lines);

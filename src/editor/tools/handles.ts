@@ -109,12 +109,8 @@ export function update(
     sceneTree: SceneTree,
     ctx: ScriptContext,
     store: EditRoomStoreApi,
-    quads: Quads.QuadBatch,
-    text: Text.TextBatch,
 ): void {
-    const storeState = store.getState();
-    const activeId = enabled ? Selection.activeNode(storeState.selection) : null;
-    const node = activeId !== null ? getNodeById(sceneTree, activeId) : undefined;
+    const node = activeNode(state, enabled, sceneTree, store);
     const cursor = isMouseLocked(mk) ? CROSSHAIR : getCursor(mk);
 
     if (state.armed) {
@@ -125,7 +121,37 @@ export function update(
         }
     }
 
-    collect(state, node, camera.position);
+    refresh(state, node, camera.position);
+    if (!state.armed) {
+        state.hovered = nearest(state, cursor, camera, viewportWidth, viewportHeight);
+        if (state.hovered !== -1 && isMouseJustDown(mk, 'left')) arm(state, state.handles[state.hovered]!, sceneTree, store);
+    }
+}
+
+/** draws the handles; collects again first, so the dots sit on this frame's final poses. call from `onPreRender`. */
+export function draw(
+    state: HandlesState,
+    enabled: boolean,
+    camera: PerspectiveCamera,
+    viewportWidth: number,
+    viewportHeight: number,
+    sceneTree: SceneTree,
+    store: EditRoomStoreApi,
+    quads: Quads.QuadBatch,
+    text: Text.TextBatch,
+): void {
+    refresh(state, activeNode(state, enabled, sceneTree, store), camera.position);
+    drawHandles(state, camera, viewportWidth, viewportHeight, quads, text);
+}
+
+function activeNode(state: HandlesState, enabled: boolean, sceneTree: SceneTree, store: EditRoomStoreApi): Node | undefined {
+    const activeId = enabled ? Selection.activeNode(store.getState().selection) : null;
+    return activeId !== null ? getNodeById(sceneTree, activeId) : undefined;
+}
+
+// the collection is deterministic, so `hovered` from the input pass indexes a re-collection the same way.
+function refresh(state: HandlesState, node: Node | undefined, eye: Vec3): void {
+    collect(state, node, eye);
     if (state.armed) {
         // the live handle carries this frame's matrix and world point (a box face moves as its extent changes).
         const live = state.handles.find((handle) => sameHandle(handle, state.armed!));
@@ -134,11 +160,6 @@ export function update(
             vec3.copy(state.armed.world, live.world);
         }
     }
-    if (!state.armed) {
-        state.hovered = nearest(state, cursor, camera, viewportWidth, viewportHeight);
-        if (state.hovered !== -1 && isMouseJustDown(mk, 'left')) arm(state, state.handles[state.hovered]!, sceneTree, store);
-    }
-    draw(state, camera, viewportWidth, viewportHeight, quads, text);
 }
 
 function handleLabel(handle: Handle): string {
@@ -358,7 +379,7 @@ function nearest(state: HandlesState, cursor: Cursor, camera: PerspectiveCamera,
 const LABEL_MIN_PX = 28;
 const _placedLabels: { x: number; y: number }[] = [];
 
-function draw(
+function drawHandles(
     state: HandlesState,
     camera: PerspectiveCamera,
     width: number,

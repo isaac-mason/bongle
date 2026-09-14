@@ -1,9 +1,9 @@
 import type { Client, JsonValue, User } from 'bongle/interface';
 import type { ContactManifold, ContactSettings, RigidBody } from 'crashcat';
-import type { Dashboard } from '../../client/debug';
 import type { Scene } from 'gpucat';
 import type * as Scripts from 'packcat';
 import type { EngineClient } from '../../client/client';
+import type { Dashboard } from '../../client/debug';
 import type { Input } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
 import { env } from '../../env';
@@ -208,6 +208,9 @@ export type ScriptInstance = {
 
     /** fired after animator sampling, before world-matrix recompute. */
     onPostAnimate: Set<(args: TickArgs) => void>;
+
+    /** fired after every pose writer this frame, right before visibility and draw. */
+    onPreRender: Set<(args: FrameArgs) => void>;
 
     onPhysicsContactAdded: Set<(args: PhysicsContactArgs) => void>;
 
@@ -564,6 +567,15 @@ export function onPostAnimate(ctx: ScriptContext, fn: (args: TickArgs) => void):
     return () => instance.onPostAnimate.delete(fn);
 }
 
+/** fires after onFrame, animation, onPostAnimate and world-matrix concatenation, before visibility and draw: the last point in the frame, for anything that reads final poses. client-only. */
+export function onPreRender(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsubscribe {
+    const instance = ctx._instance;
+    if (!instance) return noop;
+    if (ctx.mode === 'edit' && !instance.def.editor) return noop;
+    instance.onPreRender.add(fn);
+    return () => instance.onPreRender.delete(fn);
+}
+
 /** args passed to onPhysicsContact callbacks, raw crashcat types */
 export type PhysicsContactArgs = {
     bodyA: RigidBody;
@@ -682,6 +694,7 @@ export function createScriptInstance(
         onPrePhysicsStep: new Set(),
         onPostPhysicsStep: new Set(),
         onPostAnimate: new Set(),
+        onPreRender: new Set(),
         onPhysicsContactAdded: new Set(),
         onPhysicsContactPersisted: new Set(),
         onPhysicsBodyPairValidate: new Set(),
