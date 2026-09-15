@@ -399,8 +399,9 @@ export function sampleVoxelAlbedo(
         let sum: Node<d.vec4f> | null = null;
         for (let i = 0; i < ANISO_TAPS; i++) {
             const offset = (i + 0.5) / ANISO_TAPS - 0.5;
-            const tap = tex.sample(uv.add(majorAxis.mul(f32(offset)))).level(lod);
-            sum = sum ? sum.add(tap) : tap;
+            const tapUv = uv.add(majorAxis.mul(f32(offset))).toVar(`${name}TapUv${i}`);
+            const tap = tex.sample(tapUv).level(lod).toVar(`${name}Tap${i}`);
+            sum = sum ? (sum.add(tap) as Node<d.vec4f>) : tap;
         }
         return sum!.mul(f32(1 / ANISO_TAPS)).toVar(`${name}Aniso`);
     };
@@ -410,8 +411,11 @@ export function sampleVoxelAlbedo(
     const maxTexelSize = max(texelScreen.x, texelScreen.y).toVar('vmMaxTexelSize');
     const anisoBlend = smoothstep(minPixelSize, minPixelSize.mul(f32(2)), maxTexelSize).toVar('vmAnisoBlend');
 
-    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> =>
-        (mix(sampleNearest(uv, name), sampleAniso(uv, name), anisoBlend) as Node<d.vec4f>).toVar(name);
+    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+        const nearest = sampleNearest(uv, name);
+        const aniso = sampleAniso(uv, name);
+        return (mix(nearest, aniso, anisoBlend) as Node<d.vec4f>).toVar(name);
+    };
 
     const colorA = sampleAtlas(uvA, 'colorA');
     const colorB = sampleAtlas(uvB, 'colorB');
