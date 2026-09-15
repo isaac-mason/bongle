@@ -27,6 +27,7 @@ import {
     spawnParticle,
     sprite,
     system,
+    TextTrait,
     TransformTrait,
     trait,
 } from 'bongle';
@@ -196,3 +197,18 @@ system('glyph-demo', (ctx) => {
     });
 });
 /* SNIPPET_END: glyphs */
+
+/* SNIPPET_START: text */
+// a nametag over a character: one sprite instance per character, drawn over the world
+system('nametag', (ctx) => {
+    onInit(ctx, () => {
+        const label = createNode({ name: 'nametag' });
+        setPosition(addTrait(label, TransformTrait), [0, 2.2, 0]);
+        const text = addTrait(label, TextTrait);
+        text.text = 'isaac';
+        text.occlusion = 'none'; // ignores what is in front of it; 'world' is depth-tested like any solid
+        text.worldScale = 1 / 32; // world units per font pixel
+        addChild(ctx.node, label);
+    });
+});
+/* SNIPPET_END: text */

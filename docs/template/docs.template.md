@@ -1422,16 +1422,36 @@ characters.
 of `depth`, the chunky paper-craft look (think Crossy Road) that reads from any
 angle rather than only head-on.
 
-#### Text from glyphs
+Both take an `occlusion`: `'world'`, the default, is depth-tested like any solid, so
+the world hides it. `'none'` draws over the world, which is what a nametag or a
+waypoint marker wants.
 
-`bongle/kit` ships a 5x7 pixel font cut into ordinary sprites, one per printable
-ASCII character. `glyphs(text)` hands back a handle per character, `glyph(char)` one
-at a time (anything unprintable comes back as `?`), and `glyphMetrics` gives the
-`width`, `height`, and per-character `advance` in font pixels to step a run by.
-Because they are just sprites, anything that draws a sprite can draw text: a
-`SpriteTrait` per character for a world-space label, or a particle per character for
-numbers that fly off a hit. A particle takes its sprite at the spawn call, so
-flinging a character is a single `spawnParticle` with the glyph handle.
+### Text
+
+`TextTrait` draws a run of the kit's pixel font in the world. Set `text` and you have
+a label; newlines start a new line, and anything outside printable ASCII draws as `?`.
+`worldScale` is world units per font pixel, `align` puts the left edge, centre, or
+right edge on the node, and `mode` orients the quad exactly like a sprite, billboard
+by default. It carries the sprite render knobs too, `tint`, `glow`, `unlit`, `litMin`,
+`dither`, `visible`, and the same `occlusion`, so a nametag that reads through walls
+is one field.
+
+<Snippet source="visuals.snippet.ts" select="text" />
+
+Under the hood a run is one sprite instance per character, sharing the batch with
+every other sprite, so labels are cheap in bulk: nametags, floating damage, signs,
+debug readouts in the world. For rich text, any font, wrapping, or colour per run,
+reach for a `CanvasTrait` (see [UI](#ui)) and pay a texture per node instead.
+
+#### Glyphs directly
+
+The font is ordinary sprites, one per printable ASCII character, and `bongle/kit`
+hands them out: `glyphs(text)` returns a handle per character, `glyph(char)` one at a
+time, and `glyphMetrics` gives the `width`, `height`, and per-character `advance` in
+font pixels to step a run by. Reach for these when a `TextTrait` is the wrong shape,
+because you want the characters to be separate nodes, or to fly apart. A particle
+takes its sprite at the spawn call, so flinging a character is a single
+`spawnParticle` with the glyph handle.
 
 <Snippet source="visuals.snippet.ts" select="glyphs" />
 
@@ -1468,10 +1488,12 @@ fields, a `ParticleOptions` carries `velocity`, `lifetime`, `size`, `tint`, `glo
 moving in lockstep. The per-particle `seed` is also readable inside the update for
 stable per-particle noise.
 
-Every field is copied eagerly into the pool and nothing is retained after the call,
-so emitting in volume means hoisting one `ParticleOptions` and mutating it per
-particle rather than building a fresh object each time. The pool never refuses a
-spawn: once it is full, a new particle evicts a live one rather than being dropped.
+`spawnParticle` reads `options` in full before it returns, the `position` and
+`velocity` vectors included, and retains nothing. So one object can drive a whole
+burst: declare it once, overwrite what varies, call again. Occasional effects are
+fine written as a plain object literal; reuse is for the emitters that run every
+frame. The pool never refuses a spawn either: once it is full, a new particle
+evicts a live one rather than being dropped.
 
 <Snippet source="visuals.snippet.ts" select="varied" />
 
