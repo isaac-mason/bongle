@@ -25,7 +25,7 @@ import {
     type VoxelArenaBudget,
 } from './voxel-arena';
 import { lightVolumeConfigOf, routeLightVolumeBuffers } from './voxel-light-sample';
-import { createLightVolume, evictChunkLightByKey, type LightVolume } from './voxel-light-volume';
+import { createLightVolume, evictChunkLightByKey, type LightVolume, resetLightVolume } from './voxel-light-volume';
 import { createCpuQuadMaterial, type VoxelPass } from './voxel-material';
 import {
     createVoxelTextures,
@@ -723,4 +723,7 @@ export function unmountRoom(res: VoxelResources, mesher: Mesher | null): void {
     packerClearAll(res.arenas);
     // The mesh worker holds one world at a time; drop its cache and queued results.
     if (mesher !== null) resetMeshCaches(mesher);
+    // The light volume is shared across rooms and keyed by chunk coord alone; drop residency
+    // so the next room's chunks don't alias onto this room's still-"resident" baked tiles.
+    resetLightVolume(res.lightVolume);
 }

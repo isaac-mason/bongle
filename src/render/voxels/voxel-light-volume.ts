@@ -333,6 +333,18 @@ function bakeOne(v: LightVolume, voxels: Voxels, chunk: Chunk, frame: number): n
     return 1;
 }
 
+/** clear every residency entry, for a room swap. The grid is keyed by chunk coord alone with
+ *  no room/epoch tag, so a leftover entry would let the next room's chunk at the same coord
+ *  alias onto a still-"resident" slot and inherit the departed room's baked light instead of
+ *  rebaking; per-key eviction on unmount would work too but is O(chunks) vs this O(grid). */
+export function resetLightVolume(v: LightVolume): void {
+    v.grid.fill(PAYLOAD_ABSENT);
+    v.gridBuffer.addUpdateRange(0, v.grid.length);
+    v.gridBuffer.needsUpdate = true;
+    v.head = 0;
+    v.freeList.length = 0;
+}
+
 /** release whatever a chunk holds and unpublish it. Called from each backend's
  *  eviction path, AFTER its mesh is gone (light is the root residency fact). */
 export function evictChunkLight(v: LightVolume, cx: number, cy: number, cz: number): void {

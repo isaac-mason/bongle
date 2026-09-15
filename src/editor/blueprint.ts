@@ -9,6 +9,7 @@ import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import type { Blocks } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
+import { propagateAllLight } from '../core/voxels/light';
 import { loadVoxels, type SavedVoxels, saveVoxels } from '../core/voxels/voxel-savefile';
 import type { Voxels } from '../core/voxels/voxels';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, getBlock, setBlock } from '../core/voxels/voxels';
@@ -189,6 +190,10 @@ export function selectionToScenePayload(
 ): ScenePayload | null {
     const bp = copySelection(worldVoxels, sceneTree, selection);
     if (!bp.hasVoxels && !bp.hasNodes) return null;
+
+    // a captured blueprint's voxels are a fresh, disconnected Voxels with never-flooded (all-zero)
+    // light: bake it before saving so opening the blueprint room isn't dark until /relight.
+    if (bp.voxels) propagateAllLight(bp.voxels);
 
     const root: SerializedNode = {
         realm: 'shared',
