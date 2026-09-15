@@ -38,11 +38,25 @@ export type CardBatches = {
  * the pixel font even, and a whole CSS scale is already whole at every integer display ratio, so the label is
  * the same size on a 1x panel as on a 2x one instead of stepping when a window moves between them.
  */
-export const LABEL_SCALE = 2;
+export const LABEL_SCALE = 1;
 export const LABEL_LIFT_PX = 16;
-const MARKER_ICON_PX = 20;
-const LABEL_GAP_PX = 6;
-const LABEL_PAD_PX = 4;
+const MARKER_ICON_PX = 14;
+const LABEL_GAP_PX = 4;
+const LABEL_PAD_PX = 3;
+
+/** past `CARD_FADE_NEAR` a card thins out, and past `CARD_FADE_FAR` it is not drawn; the selection ignores both. */
+const CARD_FADE_NEAR = 20;
+const CARD_FADE_FAR = 30;
+
+const _toEye: Vec3 = [0, 0, 0];
+
+/** 1 up close, ramping to 0 at the far threshold. */
+function distanceFade(origin: Vec3, eye: Vec3): number {
+    const distance = vec3.length(vec3.subtract(_toEye, origin, eye));
+    if (distance <= CARD_FADE_NEAR) return 1;
+    if (distance >= CARD_FADE_FAR) return 0;
+    return (CARD_FADE_FAR - distance) / (CARD_FADE_FAR - CARD_FADE_NEAR);
+}
 const LABEL_BACKING: [number, number, number, number] = [0.08, 0.08, 0.1, 0.6];
 const DEFAULT_MARKER_ICON = 'kit:marker';
 const WHITE: [number, number, number, number] = [1, 1, 1, 1];
@@ -124,8 +138,9 @@ export function cardFor(node: Node): NodeCard {
 }
 
 /**
- * everything sits in pixels around the node's projected origin: the marker icon centred on it, the label above
+ * everything sits in CSS pixels around the node's projected origin: the marker icon centred on it, the label above
  * on a backing. hover: a faint outline. pinned: icon, figure, label, always. selected and active: label and outline.
+ * a card that is not part of the selection fades out with distance and stops drawing past `CARD_FADE_FAR`.
  */
 export function drawCard(
     batches: CardBatches,
@@ -141,8 +156,13 @@ export function drawCard(
         if (toggles.outlines) ShapeOutlines.drawNode(batches.lines, node, SHAPE_OUTLINE_HOVER, eye);
         return;
     }
+    // what you have selected stays legible from anywhere; everything else thins out with distance.
+    const selected = emphasis === 'selected' || emphasis === 'active';
+    const fade = selected ? 1 : distanceFade(origin, eye);
+    if (fade <= 0) return;
     const [x, y, z] = origin;
-    const [r, g, b, a] = card.tint;
+    const [r, g, b, tintAlpha] = card.tint;
+    const a = tintAlpha * fade;
     let lift = 0;
 
     if (card.pinned) {
@@ -175,7 +195,8 @@ export function drawCard(
         const hw = Text.measure(batches.text, card.label, LABEL_SCALE) / 2;
         const hh = Text.height(batches.text, LABEL_SCALE) / 2;
         const dy = lift + LABEL_GAP_PX + hh + LABEL_PAD_PX;
-        Quads.rect(batches.quads, x, y, z, 0, dy, hw + LABEL_PAD_PX, hh + LABEL_PAD_PX, ...LABEL_BACKING);
+        const [br, bg, bb, ba] = LABEL_BACKING;
+        Quads.rect(batches.quads, x, y, z, 0, dy, hw + LABEL_PAD_PX, hh + LABEL_PAD_PX, br, bg, bb, ba * fade);
         Text.label(batches.text, x, y, z, card.label, LABEL_SCALE, dy, r, g, b, a);
         lift = dy + hh + LABEL_PAD_PX;
     }
