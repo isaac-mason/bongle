@@ -181,7 +181,9 @@ function InventoryTab() {
             </div>
 
             {tagChips.length > 0 && (
-                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle overflow-x-auto">
+                // overflow-y-hidden is load-bearing: naming only one axis makes the other compute to auto,
+                // which gave the row its own vertical scrollbar. shrink-0 keeps the flex column off its height.
+                <div className="flex shrink-0 items-center gap-1 px-3 py-1.5 border-b border-border-subtle overflow-x-auto overflow-y-hidden [scrollbar-width:thin]">
                     {tags.length > 0 && (
                         <button
                             type="button"
