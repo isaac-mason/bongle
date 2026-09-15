@@ -54,7 +54,7 @@ import type { EditRoomState, ElevationMode } from './edit-room-store';
 import { useEditor } from './editor-store';
 import { type Mask, testMask } from './scene/mask';
 import { type Pattern, samplePattern } from './scene/pattern';
-import { playBulkEdit } from './sounds';
+import { playBulkEdit, playStructuralEdit } from './sounds';
 import { runSmooth } from './tools/smooth';
 import { commitVoxelOps } from './voxel-edit';
 
@@ -235,6 +235,7 @@ export function pickBlock(state: EditRoomState, ctx: ScriptContext): void {
 
     const { activeSlotIndex } = state;
     useEditor.getState().setHotbarSlot(activeSlotIndex, { kind: 'block', blockKey: key });
+    playStructuralEdit(ctx, 'copy');
 }
 
 /** mirrors WorldEdit's //overlay; the overlay row may sit one block outside the selection AABB. */
@@ -483,6 +484,7 @@ export function createNodeAction(ctx: ScriptContext, parentId: number, index: nu
         children: undefined,
         prefab: undefined,
     });
+    playStructuralEdit(ctx, 'create');
 }
 
 /** returns the id the node lands with, allocated up front the way placement does. */
@@ -501,6 +503,7 @@ export function createNodeAtAction(ctx: ScriptContext, position: Vec3, name = 'N
         children: undefined,
         prefab: undefined,
     });
+    playStructuralEdit(ctx, 'create');
     return id;
 }
 
@@ -517,6 +520,7 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
             if (!n) return;
             destroyNode(ctx.scene, n);
             send(ctx, DestroyNodeCommand, { id: nodeId });
+            playStructuralEdit(ctx, 'delete');
         },
         undo() {
             for (const args of createArgs) {
@@ -540,6 +544,7 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
                     prefab: args.prefab ? JSON.stringify(args.prefab) : undefined,
                 });
             }
+            playStructuralEdit(ctx, 'create');
         },
     });
 }
@@ -564,6 +569,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                 destroyNode(ctx.scene, n);
                 send(ctx, DestroyNodeCommand, { id });
             }
+            playStructuralEdit(ctx, 'delete');
         },
         undo() {
             for (const args of createArgs) {
@@ -589,6 +595,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                     });
                 }
             }
+            playStructuralEdit(ctx, 'create');
         },
     });
 }
@@ -664,6 +671,7 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             reorderChild(np, n, index);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId, index });
+            playStructuralEdit(ctx, 'reparent');
         },
         undo() {
             const n = getNodeById(ctx.scene, nodeId);
@@ -673,6 +681,7 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             reorderChild(pp, n, prevIndex);
             bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId: prevParentId, index: prevIndex });
+            playStructuralEdit(ctx, 'reparent');
         },
     });
 }
@@ -1196,7 +1205,10 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
             if (!n) return;
             const childIds = n.children.map((c) => c.id);
 
-            if (forwardOps.length > 0) sendVoxelOps(ctx, forwardOps);
+            if (forwardOps.length > 0) {
+                sendVoxelOps(ctx, forwardOps);
+                playBulkEdit(ctx, forwardOps, reverseOps);
+            }
             for (const id of childIds) {
                 send(ctx, SetNodePersistCommand, { id, persist: true });
             }
@@ -1212,7 +1224,10 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
                 send(ctx, SetNodePersistCommand, { id, persist: false });
             }
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(prevPrefab) });
-            if (reverseOps.length > 0) sendVoxelOps(ctx, reverseOps);
+            if (reverseOps.length > 0) {
+                sendVoxelOps(ctx, reverseOps);
+                playBulkEdit(ctx, reverseOps, forwardOps);
+            }
         },
     });
 }

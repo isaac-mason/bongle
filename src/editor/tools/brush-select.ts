@@ -1,5 +1,5 @@
 import type { Input } from '../../client/input';
-import { isKeyDown } from '../../client/input';
+import { isKeyDown, isModDown } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -23,8 +23,9 @@ export function updateBrushSelect(
     advanceBrushStroke(state.brush, store, input, store.getState().brushSelectOptions, (accumulated) => {
         const s = store.getState();
         const mk = input.mouseKeyboard;
-        const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
-        const behavior = shiftHeld ? 'add' : s.selectionBehavior;
+        // cmd/ctrl is an alternate add-to-selection modifier, same as shift.
+        const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
+        const behavior = addHeld ? 'add' : s.selectionBehavior;
         const mask = s.brushSelectOptions.mask;
 
         const next = behavior === 'add' ? Selection.clone(s.selection) : Selection.create();

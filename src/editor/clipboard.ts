@@ -4,6 +4,7 @@ import * as Selection from '../core/scene/selection';
 import * as Blueprint from './blueprint';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { isInputFocused } from './input';
+import { playPasteStart, playStructuralEdit } from './sounds';
 import type { PlacementTool } from './tools/placement';
 import * as Placement from './tools/placement';
 
@@ -32,6 +33,7 @@ export function copySelectionToSystemClipboard(api: EditRoomStoreApi, ctx: Scrip
         () => console.log(`[bongle] copied blueprint: ${blueprint.label}`),
         (err) => console.warn('[bongle] clipboard write failed:', err),
     );
+    playStructuralEdit(ctx, 'copy');
 }
 
 export function createClipboardHandlers(
@@ -61,6 +63,7 @@ export function createClipboardHandlers(
         e.clipboardData?.setData('text/plain', clipText);
         api.setState({ activeBlueprint: blueprint });
         console.log(`[bongle] copied blueprint: ${blueprint.label}`);
+        playStructuralEdit(ctx, 'copy');
     };
 
     const onPaste = (e: ClipboardEvent) => {
@@ -80,6 +83,7 @@ export function createClipboardHandlers(
             blueprint.origin[2] = hv[2];
         }
 
+        playPasteStart(ctx);
         api.setState({ activeBlueprint: blueprint, placementContinuous: shiftHeldAtTrigger });
         console.log(`[bongle] pasted blueprint from clipboard: ${blueprint.label}${shiftHeldAtTrigger ? ' (continuous)' : ''}`);
         Placement.enterPlacement(placement, blueprint, false, null, room.scene, ctx);

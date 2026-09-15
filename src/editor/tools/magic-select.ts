@@ -1,5 +1,5 @@
 import type { Input } from '../../client/input';
-import { isKeyDown, isMouseJustDown } from '../../client/input';
+import { isKeyDown, isModDown, isMouseJustDown } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Blocks } from '../../core/voxels/block-registry';
@@ -153,8 +153,9 @@ export function updateMagicSelect(
     const bfsResult = runBFS(seed, voxels, blocks, magicSelectOptions);
 
     const mk = input.mouseKeyboard;
-    const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
-    const effectiveBehavior = shiftHeld ? 'add' : selectionBehavior;
+    // cmd/ctrl is an alternate add-to-selection modifier, same as shift.
+    const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
+    const effectiveBehavior = addHeld ? 'add' : selectionBehavior;
 
     let next: Selection.Selection;
     if (effectiveBehavior === 'add') {

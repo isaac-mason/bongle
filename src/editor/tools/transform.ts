@@ -1,5 +1,5 @@
 import type { PerspectiveCamera } from 'gpucat';
-import { Object3D, type Scene } from 'gpucat';
+import { Object3D } from 'gpucat';
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { type Box3, box3 } from 'math/shapes';
 import {
@@ -44,6 +44,7 @@ import type { ActiveFrame, EditRoomStoreApi, SnapTo } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { unionSubtreeWorldAabb } from '../node-aabb';
+import { playBulkEdit } from '../sounds';
 import * as TransformControls from '../transform-controls';
 import { commitVoxelOps } from '../voxel-edit';
 
@@ -74,7 +75,6 @@ export type TransformToolState = {
     sceneTree: SceneTree;
     gizmo: TransformControls.TransformControls;
     proxy: Object3D;
-    scene: Scene;
 
     gizmoAttached: boolean;
     snapshots: TransformSnapshot[];
@@ -108,23 +108,22 @@ export type TransformToolState = {
 // callers must keep `state.gizmo.camera` pointed at the active POV camera each frame.
 export function createTransformTool(
     camera: PerspectiveCamera,
-    scene: Scene,
+    parent: Object3D,
     sceneTree: SceneTree,
     ctx: ScriptContext,
 ): TransformToolState {
     const proxy = new Object3D();
-    // proxy must be in the scene so gizmo can read parent world matrix
-    scene.add(proxy);
+    // proxy must be in the graph so gizmo can read parent world matrix
+    parent.add(proxy);
 
     const gizmo = TransformControls.init(camera);
-    scene.add(gizmo.root);
+    parent.add(gizmo.root);
 
     const state: TransformToolState = {
         store: null as unknown as EditRoomStoreApi,
         sceneTree,
         gizmo,
         proxy,
-        scene,
         gizmoAttached: false,
         snapshots: [],
         proxyStartPosition: vec3.create(),
@@ -513,9 +512,9 @@ export function disposeTransformTool(state: TransformToolState): void {
         TransformControls.detach(state.gizmo);
         state.gizmoAttached = false;
     }
-    state.scene.remove(state.gizmo.root);
+    state.gizmo.root.removeFromParent();
     TransformControls.dispose(state.gizmo);
-    state.scene.remove(state.proxy);
+    state.proxy.removeFromParent();
 }
 
 const _centroid: Vec3 = [0, 0, 0];
@@ -1006,9 +1005,11 @@ export function nudgeVoxelsFromSelection(
         label: 'nudge voxels',
         do() {
             commitVoxelOps(ctx, forwardOps);
+            playBulkEdit(ctx, forwardOps, reverseOps);
         },
         undo() {
             commitVoxelOps(ctx, reverseOps);
+            playBulkEdit(ctx, reverseOps, forwardOps);
         },
     });
 }

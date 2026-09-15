@@ -1,5 +1,5 @@
 import type { Input } from '../../client/input';
-import { isKeyDown, isMouseJustDown } from '../../client/input';
+import { isKeyDown, isModDown, isMouseJustDown } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { EditRoomStoreApi, SelectionBehavior, SelectTarget } from '../edit-room-store';
@@ -61,8 +61,9 @@ export function updateBoxSelect(
             playAnchored(ctx);
         } else if (after.boxSelect.previewB) {
             const mk = input.mouseKeyboard;
-            const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
-            const effective = shiftHeld ? 'add' : after.selectionBehavior;
+            // cmd/ctrl is an alternate add-to-selection modifier, same as shift.
+            const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
+            const effective = addHeld ? 'add' : after.selectionBehavior;
             commitBoxSelect(store, ctx, after.cursor, nodeBodies, effective, after.selectTarget);
             store.setState({ cursor: null });
         }
@@ -98,8 +99,9 @@ export function updateBoxSelect(
         const cornerB = after.boxSelect.locked && after.boxSelect.previewB ? after.boxSelect.previewB : hv;
         if (!cornerB) return;
         const mk = input.mouseKeyboard;
-        const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
-        const effective = shiftHeld ? 'add' : after.selectionBehavior;
+        // cmd/ctrl is an alternate add-to-selection modifier, same as shift.
+        const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
+        const effective = addHeld ? 'add' : after.selectionBehavior;
         commitBoxSelect(store, ctx, cornerB, nodeBodies, effective, after.selectTarget);
     }
 }

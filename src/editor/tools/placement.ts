@@ -24,6 +24,7 @@ import { readNudgeDelta, snapCardinal, yawFromQuat } from '../camera';
 import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand } from '../commands';
 import type { EditRoomStoreApi, SnapTo } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';
+import { playBulkEdit, playStructuralEdit } from '../sounds';
 import { commitVoxelOps } from '../voxel-edit';
 import type { TransformSnapshot, TransformToolState } from './transform';
 import * as TransformTool from './transform';
@@ -627,10 +628,14 @@ export function commitPlacement(state: PlacementTool, sceneTree: SceneTree, worl
                     children: JSON.stringify([]),
                     prefab: JSON.stringify(sourcePrefab),
                 });
+                playStructuralEdit(ctx, 'create');
                 return;
             }
             if (voxelForward.length > 0) {
                 commitVoxelOps(ctx, voxelForward);
+                playBulkEdit(ctx, voxelForward, voxelReverse);
+            } else if (nodePasteEntries.length > 0) {
+                playStructuralEdit(ctx, 'create');
             }
             // buildNodePaste already re-anchored each entry's top-level transform to world space.
             for (let i = 0; i < nodePasteEntries.length; i++) {
@@ -650,6 +655,9 @@ export function commitPlacement(state: PlacementTool, sceneTree: SceneTree, worl
         undo() {
             if (voxelReverse.length > 0) {
                 commitVoxelOps(ctx, voxelReverse);
+                playBulkEdit(ctx, voxelReverse, voxelForward);
+            } else {
+                playStructuralEdit(ctx, 'delete');
             }
             if (isCut && cutReverseOps && cutReverseOps.length > 0) {
                 commitVoxelOps(ctx, cutReverseOps);
@@ -671,12 +679,11 @@ export function commitPlacement(state: PlacementTool, sceneTree: SceneTree, worl
         return;
     }
 
-    // what landed is the selection: the created nodes, or the pasted cells.
-    const landed = Selection.withNodes(Selection.create(), createdIds);
-    if (!sourcePrefab) {
-        for (const op of voxelForward) if (op.key !== BLOCK_AIR) Selection.set(landed, op.wx, op.wy, op.wz);
-    }
-    state.store.setState({ activeTool: 'inspect', selection: landed });
+    // building a prefab from the hotbar keeps the new instance selected, ready to nudge into
+    // place; a paste or cut-paste lands with no selection instead of pinning one to whatever
+    // just dropped.
+    const selection = sourcePrefab ? Selection.withNodes(Selection.create(), createdIds) : Selection.create();
+    state.store.setState({ activeTool: 'inspect', selection });
 }
 
 /** cancels placement: destroys ghosts and restores cut content if applicable. */
