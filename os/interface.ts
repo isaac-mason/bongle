@@ -82,6 +82,10 @@ export type AppInit = {
     user: { id: string; username: string };
     /** `file:///<path>` reads the project vfs; http(s) is fetched. */
     avatarUrl?: string;
+    /** platform avatars for dressing OTHER joining clients (extra windows / guests)
+     *  that have no account avatar of their own. Host-resolved — the realm never
+     *  talks to the platform itself. Absent/empty → the engine's builtin fallback. */
+    sampleAvatars?: { modelId: string; clientUrl: string; rigType?: string }[];
     /** the game entry module (project-root-relative); default 'src/index.ts'. */
     entry?: string;
     /** the host's chosen render backend, from its device-wide GPU probe. Windowed

@@ -21,25 +21,22 @@ import { importEngine } from './engine';
 type EngineServerModule = typeof import('bongle/engine-server');
 type EngineServerEditorApi = typeof import('bongle/engine-server-editor');
 
-// The editor server's `ServerDriver.avatars`, the artifact counterpart to the node
-// sample-avatars driver. The engine's example avatars ship raw in the package
-// (avatars/), so in the editor they sit in the project vfs at
-// node_modules/bongle/avatars/ (seeded), referenced as `file://` URLs both engine
-// loaders resolve through the project fs. Same runtime-avatar path as prod: plain
-// `.glb`, fetched + gltfUnpack'd. Excludes `base` (the builtin fallback, not a
-// sample to dress NPCs in).
-const AVATAR_SAMPLES: Record<string, string> = {
-    boy: 'avatar:boy',
-    girl: 'avatar:girl',
-    blindfoldedpenguin: 'avatar:penguin',
-    pigeon: 'avatar:pigeon',
-};
-
-function createEditorAvatarsDriver(): ServerDriver['avatars'] {
-    const batch: ResolvedAvatar[] = Object.entries(AVATAR_SAMPLES).map(([dir, modelId]) => {
-        const url = `file:///node_modules/bongle/avatars/${dir}/${dir}.glb`;
-        return { source: 'runtime', modelId, clientUrl: url, serverUrl: url, rigType: RIG_TYPE_6BONE };
-    });
+// The editor server's `ServerDriver.avatars`. Unlike the node CLI's fallback driver
+// (which has no platform to ask and ships 4 bundled example glbs), the editor runs
+// inside the website shell: the host resolves a batch of published avatars from the
+// platform's own catalog and hands them down through `AppInit.sampleAvatars` (see
+// apps/website/-editor-host.tsx resolveSampleAvatars + apps/editor/main.tsx). Plain
+// http(s) `.glb`s, same runtime-avatar path as an account avatar. Absent/empty (no
+// host, signed out, fetch failed) → an empty pool, same as the CLI's empty-batch
+// degrade: joins get the engine's builtin.
+function createEditorAvatarsDriver(sampleAvatars: AppInit['sampleAvatars']): ServerDriver['avatars'] {
+    const batch: ResolvedAvatar[] = (sampleAvatars ?? []).map((a) => ({
+        source: 'runtime',
+        modelId: a.modelId,
+        clientUrl: a.clientUrl,
+        serverUrl: a.clientUrl,
+        rigType: a.rigType ?? RIG_TYPE_6BONE,
+    }));
     return { sample: async () => batch };
 }
 
@@ -79,7 +76,7 @@ const server: App<AppInit> = async (env) => {
     // (Cross-origin http avatar fetches need CORS on the avatar CDN under the
     // realm's COEP.) The client table exists before the engine: the engine's
     // `send` closes over it.
-    const avatars = createEditorAvatarsDriver();
+    const avatars = createEditorAvatarsDriver(cfg.sampleAvatars);
     const clients = createClientTable();
     const state = EngineServer.init({
         mode: 'edit',
