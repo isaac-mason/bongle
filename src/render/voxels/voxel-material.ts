@@ -11,6 +11,7 @@ import {
     dpdx,
     dpdy,
     equal,
+    exp2,
     Fn,
     f32,
     floor,
@@ -392,14 +393,27 @@ export function sampleVoxelAlbedo(
     const lodCover = log2(majorLen.div(minPixelSize.mul(f32(ANISO_TAPS)))).toVar('vmLodCover');
     const lod = clamp(max(lodMinor, lodCover), f32(0), f32(ATLAS_MIP_LEVELS)).toVar('vmLod');
 
-    // taps spread across the whole footprint, so each lands in a different texel once the
-    // surface is minified. Sodium's rotated grid is fixed at a fraction of a level-0 texel,
-    // which collapses to a single sample at exactly the distances that shimmer.
-    const sampleAniso = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+    /** one texel at the level being sampled, in atlas uv. */
+    const texelAtLod = pixelSize.mul(exp2(lod)).toVar('vmTexelAtLod');
+
+    // Taps spread across the footprint so each lands in a different texel once the surface
+    // is minified, then clamp to their own tile. The clamp is the load-bearing part: at a
+    // grazing angle `majorAxis` is a whole screen pixel of uv, which can be several tiles
+    // wide, so an unclamped tap reads a neighbouring block. Clamp-to-tile is what a texture
+    // array would give for free and what Sodium buys by never offsetting more than a
+    // fraction of a texel. Once the footprint outgrows the tile, `lodCover` has already
+    // driven the level to where the whole tile is one texel, so the pile-up at the edge is
+    // the tile average rather than a lost detail.
+    const sampleAniso = (uv: Node<d.vec2f>, rect: typeof vRectA, name: string): Node<d.vec4f> => {
+        const half = texelAtLod.mul(f32(0.5));
+        // a tile narrower than a texel at this level collapses to its centre, keeping lo <= hi.
+        const centre = rect.xy.add(rect.zw.mul(f32(0.5))).toVar(`${name}Centre`) as Node<d.vec2f>;
+        const lo = min(rect.xy.add(half), centre).toVar(`${name}Lo`) as Node<d.vec2f>;
+        const hi = max(rect.xy.add(rect.zw).sub(half), centre).toVar(`${name}Hi`) as Node<d.vec2f>;
         let sum: Node<d.vec4f> | null = null;
         for (let i = 0; i < ANISO_TAPS; i++) {
             const offset = (i + 0.5) / ANISO_TAPS - 0.5;
-            const tapUv = uv.add(majorAxis.mul(f32(offset))).toVar(`${name}TapUv${i}`);
+            const tapUv = clamp(uv.add(majorAxis.mul(f32(offset))), lo, hi).toVar(`${name}TapUv${i}`);
             const tap = tex.sample(tapUv).level(lod).toVar(`${name}Tap${i}`);
             sum = sum ? (sum.add(tap) as Node<d.vec4f>) : tap;
         }
@@ -411,14 +425,14 @@ export function sampleVoxelAlbedo(
     const maxTexelSize = max(texelScreen.x, texelScreen.y).toVar('vmMaxTexelSize');
     const anisoBlend = smoothstep(minPixelSize, minPixelSize.mul(f32(2)), maxTexelSize).toVar('vmAnisoBlend');
 
-    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+    const sampleAtlas = (uv: Node<d.vec2f>, rect: typeof vRectA, name: string): Node<d.vec4f> => {
         const nearest = sampleNearest(uv, name);
-        const aniso = sampleAniso(uv, name);
+        const aniso = sampleAniso(uv, rect, name);
         return (mix(nearest, aniso, anisoBlend) as Node<d.vec4f>).toVar(name);
     };
 
-    const colorA = sampleAtlas(uvA, 'colorA');
-    const colorB = sampleAtlas(uvB, 'colorB');
+    const colorA = sampleAtlas(uvA, vRectA, 'colorA');
+    const colorB = sampleAtlas(uvB, vRectB, 'colorB');
     return (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
 }
 
