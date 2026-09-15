@@ -4,6 +4,7 @@ import * as Icons from '../../../icons';
 import type { EngineClient } from '../../client/client';
 import { extendDebugDashboard } from '../../client/ui/dashboard';
 import { useClient } from '../../client/ui/stores/client-store';
+import * as Selection from '../../core/scene/selection';
 import '../../client/ui/editor.css';
 import { ChatPanel, useChatPanel } from '../../client/ui/chat/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
@@ -169,6 +170,12 @@ function EditUI() {
                         if (key === 'y' || e.shiftKey) store.getState().redo();
                         else store.getState().undo();
                     }
+                } else if (key === 'a' && e.shiftKey) {
+                    // Select None, the mirror of Select All; the deselect that is discoverable from a menu.
+                    e.preventDefault();
+                    const { room, playerEditStores } = useEditor.getState();
+                    const store = room ? playerEditStores[room.playerId] : null;
+                    if (store && !Selection.isEmpty(store.getState().selection)) store.getState().clearSelection();
                 } else if (key === 's') {
                     const { room, roomMode, playerEditStores } = useEditor.getState();
                     if (roomMode === 'edit' && room) {

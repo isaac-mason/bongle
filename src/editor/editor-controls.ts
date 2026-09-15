@@ -23,6 +23,8 @@ export const SELECTION_KEYS = {
     delete: 'Backspace',
     pick: 'KeyP',
     clearAll: 'KeyR',
+    /** works in every tool, unlike `clearAll`, and unlike Escape it survives pointer lock, which the browser eats. */
+    deselect: 'KeyQ',
 } as const;
 
 export const NUDGE_KEYS = {
@@ -87,6 +89,7 @@ export function formatKeyLabel(code: string): string {
         KeyM: 'M',
         KeyB: 'B',
         KeyC: 'C',
+        KeyA: 'A',
         Backspace: '⌫',
         Enter: '↵',
         Escape: 'esc',
@@ -127,6 +130,8 @@ export const EDITOR_KEYBINDINGS: Record<string, KeybindGroup[]> = {
         { key: TRANSFORM_OTHER_KEYS.toggleSpace, label: 'world/local' },
     ],
     selection: [
+        { key: SELECTION_KEYS.deselect, label: 'deselect (any tool)' },
+        { key: 'Mod+Shift+KeyA', label: 'deselect' },
         { key: SELECTION_KEYS.fill, label: 'fill' },
         { key: SELECTION_KEYS.replace, label: 'replace' },
         { key: SELECTION_KEYS.delete, label: 'delete' },

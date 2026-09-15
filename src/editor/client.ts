@@ -58,7 +58,7 @@ import { installEditorChatCommands } from './chat-commands';
 import { installSelectionChatCommands } from './chat-selection';
 import { createClipboardHandlers } from './clipboard';
 import { type ControlMode, createEditRoomStore, type EditRoomStoreApi } from './edit-room-store';
-import { HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, type ToolCategoryId } from './editor-controls';
+import { HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, SELECTION_KEYS, type ToolCategoryId } from './editor-controls';
 import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
 import { isInputFocused } from './input';
@@ -150,6 +150,7 @@ script(
         // the same mouse delta or wheel.
         onInput(ctx, () => updateGrabRotate(s));
         onInput(ctx, () => updateShortcuts(s.shortcuts, client.input.mouseKeyboard, store, s.grab));
+        onInput(ctx, () => updateDeselectKey(s));
 
         onFrame(ctx, () => {
             mirrorRuntimeState(s);
@@ -872,6 +873,25 @@ function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
 /** R resets / cancels, Escape cascades, F / Shift+F fill / replace with the
  *  active block, Backspace deletes, P picks, arrows + [ ] nudge the committed
  *  selection. all skipped while an input field holds focus. */
+/** the one deselect that works in every tool and under pointer lock, where the browser takes Escape for itself. */
+function updateDeselectKey(s: Session): void {
+    const mk = s.client.input.mouseKeyboard;
+    if (isInputFocused() || isModDown(mk)) return;
+    if (!isKeyJustDown(mk, SELECTION_KEYS.deselect)) return;
+    clearSelectionEverywhere(s);
+}
+
+/** drops an in-progress box or lasso stroke first, then the selection itself; silent when there was nothing. */
+function clearSelectionEverywhere(s: Session): void {
+    const { store } = s;
+    const hadSelection = !Selection.isEmpty(store.getState().selection);
+    clearBoxSelect(store);
+    clearLassoStroke(store);
+    if (!hadSelection) return;
+    store.getState().clearSelection();
+    playDeselected(s.ctx);
+}
+
 function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
     const { store, client } = s;
     const mk = client.input.mouseKeyboard;
