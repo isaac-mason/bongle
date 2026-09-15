@@ -580,8 +580,13 @@ function drawDragReadout(v: Visuals, s: Session): void {
     const proxy = transform.proxy;
     let text: string;
     if (transform.gizmo.mode === 'rotate') {
-        euler.fromQuat(_readoutEuler, proxy.quaternion, 'xyz');
-        text = `${(_readoutEuler[0] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[1] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[2] * RAD_TO_DEG).toFixed(0)} deg`;
+        const steps = TransformTool.cardinalRotationSteps(transform);
+        if (steps) {
+            text = `${steps[0] * 90} ${steps[1] * 90} ${steps[2] * 90} deg`;
+        } else {
+            euler.fromQuat(_readoutEuler, proxy.quaternion, 'xyz');
+            text = `${(_readoutEuler[0] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[1] * RAD_TO_DEG).toFixed(0)} ${(_readoutEuler[2] * RAD_TO_DEG).toFixed(0)} deg`;
+        }
     } else if (transform.gizmo.mode === 'scale') {
         text = `x${proxy.scale[0].toFixed(2)} x${proxy.scale[1].toFixed(2)} x${proxy.scale[2].toFixed(2)}`;
     } else {

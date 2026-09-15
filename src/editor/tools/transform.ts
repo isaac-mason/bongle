@@ -803,6 +803,15 @@ function _commitFrameDrag(state: TransformToolState, sceneTree: SceneTree, ctx: 
     });
 }
 
+/**
+ * whole 90 degree steps applied per axis by the current drag, or null when the drag rotates freely. cardinal drags
+ * hold the gizmo at its starting orientation while the content snaps under it, so the proxy cannot be read for this.
+ */
+export function cardinalRotationSteps(state: TransformToolState): readonly [number, number, number] | null {
+    if (!state.dragging || state.gizmo.mode !== 'rotate' || !state.target.cardinalRotate()) return null;
+    return state.dragRotSteps;
+}
+
 /** nudges selected nodes by (dx, dy, dz), wrapped in an undo action. */
 export function nudgeNodes(
     state: TransformToolState,
