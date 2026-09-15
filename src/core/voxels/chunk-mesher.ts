@@ -999,23 +999,15 @@ function packUV(u: number, v: number): number {
     return ui | (vi << 16);
 }
 
-/** how far each corner's UV moves toward the quad's centroid (a quarter texel on a 16-texel tile) so edge sampling doesn't bleed into the atlas's neighbouring tile. */
-const UV_SHRINK = 1 / 64;
-
-function shrinkToward(u: number, centre: number): number {
-    const d = centre - u;
-    return d > UV_SHRINK ? u + UV_SHRINK : d < -UV_SHRINK ? u - UV_SHRINK : centre;
-}
-
-/** packUV of four corners after the shrink, into `_uvPacked[0..3]`. */
+/** packUV of four corners into `_uvPacked[0..3]`. The UVs run edge to edge: the atlas
+ *  bake extrudes a border around every tile, so a filtered tap at the edge blends with
+ *  the tile's own colour instead of its neighbour's. */
 const _uvPacked = new Uint32Array(4);
 function packQuadUVs(u0: number, v0: number, u1: number, v1: number, u2: number, v2: number, u3: number, v3: number): void {
-    const cu = (u0 + u1 + u2 + u3) * 0.25;
-    const cv = (v0 + v1 + v2 + v3) * 0.25;
-    _uvPacked[0] = packUV(shrinkToward(u0, cu), shrinkToward(v0, cv));
-    _uvPacked[1] = packUV(shrinkToward(u1, cu), shrinkToward(v1, cv));
-    _uvPacked[2] = packUV(shrinkToward(u2, cu), shrinkToward(v2, cv));
-    _uvPacked[3] = packUV(shrinkToward(u3, cu), shrinkToward(v3, cv));
+    _uvPacked[0] = packUV(u0, v0);
+    _uvPacked[1] = packUV(u1, v1);
+    _uvPacked[2] = packUV(u2, v2);
+    _uvPacked[3] = packUV(u3, v3);
 }
 
 // scratch shared by the liquid corner loop and its diag-flip heuristic; stores brightness floats in [0.5, 1.0], 4-bit quantize happens at bake.

@@ -19,8 +19,6 @@ import {
     i32,
     index,
     instanceIndex,
-    length,
-    log2,
     Material,
     max,
     min,
@@ -49,7 +47,7 @@ import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { ChunkInfo, VisibleQuad } from './voxel-arena';
 import { bindLightVolume, brightnessCurve, combineVoxelLight, lightAtFaceCorner } from './voxel-light-sample';
-import { ATLAS_MIP_LEVELS, type VoxelTextures } from './voxel-textures';
+import type { VoxelTextures } from './voxel-textures';
 
 const AMBIENT_MINIMUM: [number, number, number] = [0.04, 0.04, 0.06];
 
@@ -299,27 +297,13 @@ export function decodeQuadCentroid(quadBuf: Node<d.array<d.u32>>, realQuadId: No
 export const POS_DECODE_SCALE = 1 / 2048;
 export const POS_DECODE_ORIGIN = 8;
 
-// rotated grid supersampling (RGSS), on by default.
-const USE_RGSS = true;
-
-// discard on the sharp nearest-tap alpha, not the blended one, so a solid block can't disintegrate.
-const ALPHA_FROM_NEAREST_TAP = false;
-
 // alpha cutoff for the translucent layer.
 const TRANSLUCENT_ALPHA_MIN = 0.0001;
-
-// RGSS tap offsets in texels.
-const RGSS_OFFSETS: [number, number][] = [
-    [0.125, 0.375],
-    [-0.125, -0.375],
-    [0.375, -0.125],
-    [-0.375, 0.125],
-];
 
 const round = (x: Node<d.vec2f>) => floor(x.add(vec2f(f32(0.5), f32(0.5))));
 
 // frame resolution runs in the vertex stage: the current and next frame's rects, and the mix between them.
-// atlas albedo at `vUv` for `texIndex`: frames resolved in the vertex stage, nearest-snapped and RGSS-blended in the fragment.
+// atlas albedo at `vUv` for `texIndex`: frames resolved in the vertex stage, texel-snapped in the fragment.
 export function sampleVoxelAlbedo(
     textures: VoxelTextures,
     texIndex: Node<d.f32>,
@@ -362,7 +346,9 @@ export function sampleVoxelAlbedo(
 
     const tex = texture(textures.atlas);
 
-    // snaps toward the texel centre by the texel's screen size; the hardware picks the mip level.
+    // snaps toward the texel centre by the texel's screen size, so the bilinear sampler
+    // resolves the boundary as a one-pixel ramp: crisp texels up close, no stairstep. The
+    // gradients are the unsnapped ones, so LOD and the anisotropy axis stay correct.
     const sampleNearest = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
         const uvTexel = uv.div(pixelSize).toVar(`${name}Texel`);
         const texelCenter = round(uvTexel)
@@ -382,31 +368,8 @@ export function sampleVoxelAlbedo(
         return tex.sample(snappedUv).grad(du, dv).toVar(`${name}Nearest`);
     };
 
-    // blends four rotated-grid taps in between one and two texels per pixel, where minification starts to alias.
-    const maxTexelSize = max(texelScreen.x, texelScreen.y).toVar('vmMaxTexelSize');
-    const minPixelSize = min(pixelSize.x, pixelSize.y).toVar('vmMinPixelSize');
-    const rgssBlend = smoothstep(minPixelSize, minPixelSize.mul(f32(2)), maxTexelSize).toVar('vmRgssBlend');
-    const duLen = length(du).toVar('vmDuLen');
-    const dvLen = length(dv).toVar('vmDvLen');
-    const effectiveDerivative = sqrt(min(duLen, dvLen).mul(max(duLen, dvLen))).toVar('vmEffectiveDerivative');
-    // clamped explicitly: a mip level past the chain reads as black with zero alpha.
-    const mipLevel = clamp(log2(effectiveDerivative.div(minPixelSize)), f32(0), f32(ATLAS_MIP_LEVELS)).toVar('vmMipLevel');
-
-    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
-        const nearest = sampleNearest(uv, name);
-        if (!USE_RGSS) return nearest;
-        let rgss: Node<d.vec4f> | null = null;
-        for (const [ox, oy] of RGSS_OFFSETS) {
-            const tap = tex.sample(uv.add(vec2f(f32(ox), f32(oy)).mul(pixelSize))).level(mipLevel);
-            rgss = rgss ? rgss.add(tap) : tap;
-        }
-        const averaged = rgss!.mul(f32(0.25)).toVar(`${name}Rgss`);
-        const blended = mix(nearest, averaged, rgssBlend) as Node<d.vec4f>;
-        return (ALPHA_FROM_NEAREST_TAP ? vec4f(blended.rgb, nearest.a) : blended).toVar(name);
-    };
-
-    const colorA = sampleAtlas(uvA, 'colorA');
-    const colorB = sampleAtlas(uvB, 'colorB');
+    const colorA = sampleNearest(uvA, 'colorA');
+    const colorB = sampleNearest(uvB, 'colorB');
     return (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
 }
 

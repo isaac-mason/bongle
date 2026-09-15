@@ -12,13 +12,20 @@ import { sha256HexParts } from './raster';
 
 /** cell alignment; every tile side is a multiple of this. */
 const TILE_ALIGN = 16;
-/** levels beyond 0. 2^MIP_LEVELS = TILE_ALIGN, so the smallest tile's last
- *  level is one texel and every level of every tile is whole texels. */
-const MIP_LEVELS = Math.log2(TILE_ALIGN);
+/** edge-extruded border reserved around every tile, in level-0 texels. A bilinear
+ *  tap reaches half a texel past the interior, so the border must stay >= 1 texel at
+ *  the deepest level; it halves per level, which is what caps MIP_LEVELS below.
+ *  The packer aligns `w + 2 * TILE_PADDING` up to TILE_ALIGN, so for a 16x16 tile any
+ *  padding from 1 to 8 costs the same 32x32 cell. */
+const TILE_PADDING = 8;
+/** levels beyond 0, capped so TILE_PADDING >> MIP_LEVELS stays >= 1. Both the cell
+ *  origin (a TILE_ALIGN multiple) and TILE_PADDING divide by 2^MIP_LEVELS, so a tile's
+ *  normalised rect is the same at every level and one manifest rect serves them all. */
+const MIP_LEVELS = Math.log2(TILE_PADDING);
 const PLACEHOLDER_SIZE = TILE_ALIGN;
 const INITIAL_ATLAS_SIZE = 256;
 const MAX_ATLAS_SIZE = 8192;
-const ATLAS_VERSION = 3;
+const ATLAS_VERSION = 4;
 const ATLAS_PNG = 'resources/client/voxels-atlas.png';
 const ATLAS_JSON = 'resources/client/voxels-atlas.json';
 const atlasLevelPng = (level: number) => `resources/client/voxels-atlas.${level}.png`;
@@ -152,7 +159,7 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
     );
 
     const packed = packAtlas(
-        images.map(({ w, h }) => ({ w, h, padding: 0 })),
+        images.map(({ w, h }) => ({ w, h, padding: TILE_PADDING })),
         TILE_ALIGN,
         INITIAL_ATLAS_SIZE,
         MAX_ATLAS_SIZE,
@@ -170,23 +177,37 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
         else drawMagenta(ctx, rect);
         (source as RasterImage | null)?.close?.();
     }
-    await fs.write(ATLAS_PNG, await raster.encodePng(atlas));
 
-    // each tile's own mip chain, blitted into the atlas level at the tile's rect halved per level.
+    const base = raster.canvasPixels(atlas);
+    for (const rect of rects) extrudeBorder(base, atlasSize, rect);
+    await fs.write(ATLAS_PNG, await raster.encodePng(raster.putPixels(base, atlasSize, atlasSize)));
+
+    // each tile's own mip chain, built over the padded cell so the border survives the
+    // downsample, and blitted into the atlas level at the cell's rect halved per level.
     const levelPixels: Uint8Array[] = [];
     for (let level = 1; level <= MIP_LEVELS; level++) {
         const size = atlasSize >> level;
         levelPixels.push(new Uint8Array(size * size * BPP));
     }
-    const base = raster.canvasPixels(atlas);
     const cutout = module.blocks.textureCutout;
     for (let i = 0; i < rects.length; i++) {
         const { x, y, w, h } = rects[i]!;
+        const cellX = x - TILE_PADDING;
+        const cellY = y - TILE_PADDING;
+        const cellW = w + TILE_PADDING * 2;
+        const cellH = h + TILE_PADDING * 2;
         const isCutout = i < cutout.length && cutout[i] === 1;
-        const levels = buildMipLevels(sliceRect(base, atlasSize, x, y, w, h), 1, w, h, MIP_LEVELS, () => isCutout);
+        const levels = buildMipLevels(
+            sliceRect(base, atlasSize, cellX, cellY, cellW, cellH),
+            1,
+            cellW,
+            cellH,
+            MIP_LEVELS,
+            () => isCutout,
+        );
         for (let level = 1; level <= MIP_LEVELS; level++) {
             const { data, width, height } = levels[level - 1]!;
-            blitRect(levelPixels[level - 1]!, atlasSize >> level, x >> level, y >> level, data, width, height);
+            blitRect(levelPixels[level - 1]!, atlasSize >> level, cellX >> level, cellY >> level, data, width, height);
         }
     }
     for (let level = 1; level <= MIP_LEVELS; level++) {
@@ -209,6 +230,35 @@ export async function buildTileAtlas(module: ModuleVersion, opts: BuildTileAtlas
         `[bongle] texture atlas built: ${atlasSize}x${atlasSize} (${textures.length} tiles) in ${(performance.now() - buildStart).toFixed(0)}ms`,
     );
     return true;
+}
+
+/** Replicates a tile's edge texels outward into its TILE_PADDING border, so a bilinear
+ *  tap near the edge blends with the tile's own colour rather than its atlas neighbour. */
+function extrudeBorder(pixels: Uint8Array | Uint8ClampedArray, atlasSize: number, rect: Region): void {
+    const { x, y, w, h } = rect;
+    const stride = atlasSize * BPP;
+    const copy = (dstX: number, dstY: number, srcX: number, srcY: number): void => {
+        const dst = dstY * stride + dstX * BPP;
+        const src = srcY * stride + srcX * BPP;
+        pixels[dst] = pixels[src]!;
+        pixels[dst + 1] = pixels[src + 1]!;
+        pixels[dst + 2] = pixels[src + 2]!;
+        pixels[dst + 3] = pixels[src + 3]!;
+    };
+    // left and right bands first, then top and bottom over the full padded width so
+    // the corners come along with them.
+    for (let row = 0; row < h; row++) {
+        for (let i = 1; i <= TILE_PADDING; i++) {
+            copy(x - i, y + row, x, y + row);
+            copy(x + w - 1 + i, y + row, x + w - 1, y + row);
+        }
+    }
+    for (let col = x - TILE_PADDING; col < x + w + TILE_PADDING; col++) {
+        for (let i = 1; i <= TILE_PADDING; i++) {
+            copy(col, y - i, col, y);
+            copy(col, y + h - 1 + i, col, y + h - 1);
+        }
+    }
 }
 
 /** the same rule `tile()` applies to computed frames at declaration; file frames are only sized here. */
