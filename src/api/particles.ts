@@ -11,8 +11,9 @@ export type { ParticleOptions } from '../render/particles/particles';
  * and bright it is. no-ops when there's no client room.
  *
  * the pool never refuses a spawn: once full it evicts a live particle, so a fresh burst
- * always shows. every field is copied eagerly, so a hoisted `ParticleOptions` you mutate
- * per particle is the intended way to emit in volume.
+ * always shows. `options` is read in full before returning, the `position` and `velocity`
+ * vectors included, and nothing in it is retained, so one reused object can drive a whole
+ * burst: overwrite what varies, call again.
  */
 export function spawnParticle(ctx: ScriptContext, options: ParticleOptions): void {
     const room = ctx.client?.room;
