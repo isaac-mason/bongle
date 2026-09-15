@@ -14,6 +14,8 @@ function isTextInputElement(el: Element | EventTarget | null): boolean {
 
 export type MouseButton = 'left' | 'middle' | 'right';
 
+const MOUSE_BUTTONS = ['left', 'middle', 'right'] as const;
+
 /** cursor movement beyond this distance from the down-point (px) promotes the gesture to a drag; a release before that is a tap. */
 const DRAG_THRESHOLD_PX = 4;
 
@@ -27,10 +29,25 @@ type MouseButtonGesture = {
     /** latches like `_keyJustPressed` so a press and release inside one frame still reads as a press. */
     pressed: boolean;
     released: boolean;
+    /** press withheld because it was spent on a pointer-lock request: the click that recaptures the cursor must not
+     *  also reach the game, so it stays here until the request settles, and lands only if the browser refused it. */
+    heldForLock: boolean;
+    /** the release arrived while the press was still withheld, so promoting it has to read as a whole tap. */
+    heldRelease: boolean;
 };
 
 function createGesture(): MouseButtonGesture {
-    return { downX: 0, downY: 0, drag: false, dragJustStarted: false, tapped: false, pressed: false, released: false };
+    return {
+        downX: 0,
+        downY: 0,
+        drag: false,
+        dragJustStarted: false,
+        tapped: false,
+        pressed: false,
+        released: false,
+        heldForLock: false,
+        heldRelease: false,
+    };
 }
 
 /** position of the primary pointer over the shared display canvas; ndc is pinned to (0, 0) while pointer-locked. */
@@ -557,8 +574,12 @@ export type InputManager = {
     _lockTargetEl: HTMLElement | null;
     /** stable element to pointer-lock instead of a per-room canvas, since the canvas gets display:none'd on a room swap. */
     _lockEl: HTMLElement | null;
-    /** tracked from window focus/blur; document.hasFocus() is unreliable in the embed iframe. */
+    /** tracked from window focus/blur, and repaired by any key/pointer event, since the embed iframe does not
+     *  reliably get a window `focus` when focus returns to it and a stale `false` wedges the lock off for good. */
     _focused: boolean;
+    /** a promise-backed lock request is in flight and will settle the withheld press itself, so the document-level
+     *  `pointerlockerror` must keep its hands off: it has no request identity and would settle a retry prematurely. */
+    _lockRequestPending: boolean;
     _handlers: {
         keydown: (e: KeyboardEvent) => void;
         keyup: (e: KeyboardEvent) => void;
@@ -570,6 +591,7 @@ export type InputManager = {
         focus: () => void;
         blur: () => void;
         modality: (e: PointerEvent) => void;
+        pointerlockchange: () => void;
         pointerlockerror: () => void;
     };
     /** set by installCanvasListeners, run in disposeInputManager. */
@@ -584,12 +606,14 @@ export function createInputManager(): InputManager {
         _lockTargetEl: null,
         _lockEl: typeof document === 'undefined' ? null : document.documentElement,
         _focused: typeof document === 'undefined' ? true : document.hasFocus(),
+        _lockRequestPending: false,
         _handlers: null as any,
         _disposeCanvas: null,
     };
 
     const handlers = {
         keydown: (e: KeyboardEvent) => {
+            m._focused = true;
             const mouseKeyboard = m.target?.mouseKeyboard;
             if (!mouseKeyboard) return;
             // check both e.target (stable even if a portal moves focus before this bubble-phase listener fires) and current focus.
@@ -635,6 +659,8 @@ export function createInputManager(): InputManager {
         // pointer events (not mouse events) so the first finger drives buttons/drag/look too; `isPrimary` keeps a second finger from reading as a button.
         pointerdown: (e: PointerEvent) => {
             if (!e.isPrimary) return;
+            // an event delivered here proves this document holds focus, whether or not `focus` ever fired on its window.
+            m._focused = true;
             const mouseKeyboard = m.target?.mouseKeyboard;
             if (!mouseKeyboard) return;
             mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
@@ -647,17 +673,21 @@ export function createInputManager(): InputManager {
             if (isTextInputFocused()) (document.activeElement as HTMLElement).blur();
             // remember the canvas so `releasePointer().restore()` can re-lock later.
             if (onCanvas) m._lockTargetEl = e.target;
-            // the press that RE-acquires the lock is spent recapturing the cursor: swallow it, testing the lock before tryAcquire.
-            const acquiresLock = computeShouldBeLocked(m) && !document.pointerLockElement;
-            tryAcquirePointerLock(m);
+            const acquiresLock = tryAcquirePointerLock(m);
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
-            if (!name || acquiresLock) return;
-            mouseKeyboard._buttons[name] = true;
+            if (!name) return;
             const g = mouseKeyboard._gestures[name];
             g.downX = e.clientX;
             g.downY = e.clientY;
             g.drag = false;
+            g.heldRelease = false;
+            // the press that RE-acquires the lock is spent recapturing the cursor, so withhold it rather than swallow
+            // it: a request the browser refuses (Chrome locks pointer lock out for ~1.25s after an Esc exit) gives it
+            // back, instead of the click vanishing and every retry vanishing with it.
+            g.heldForLock = acquiresLock;
+            if (acquiresLock) return;
+            mouseKeyboard._buttons[name] = true;
             g.pressed = true;
         },
         pointerup: (e: PointerEvent) => {
@@ -670,7 +700,12 @@ export function createInputManager(): InputManager {
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
-            // no matching registered press: covers the swallowed lock-acquire click and presses begun off the game surface.
+            // the press is still withheld pending its lock request; remember the release so promoting it reads as a tap.
+            if (mouseKeyboard._gestures[name].heldForLock) {
+                mouseKeyboard._gestures[name].heldRelease = true;
+                return;
+            }
+            // no matching registered press: covers presses begun off the game surface.
             if (!mouseKeyboard._buttons[name]) return;
             mouseKeyboard._buttons[name] = false;
             const g = mouseKeyboard._gestures[name];
@@ -683,7 +718,9 @@ export function createInputManager(): InputManager {
             if (!e.isPrimary) return;
             const mouseKeyboard = m.target?.mouseKeyboard;
             if (!mouseKeyboard) return;
-            for (const name of ['left', 'middle', 'right'] as const) {
+            for (const name of MOUSE_BUTTONS) {
+                // the gesture is gone, so a press withheld for a lock request must not surface later.
+                mouseKeyboard._gestures[name].heldForLock = false;
                 if (!mouseKeyboard._buttons[name]) continue;
                 mouseKeyboard._buttons[name] = false;
                 mouseKeyboard._gestures[name].released = true;
@@ -696,7 +733,7 @@ export function createInputManager(): InputManager {
             mouseKeyboard._dx += e.movementX;
             mouseKeyboard._dy += e.movementY;
             const t2 = DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX;
-            for (const name of ['left', 'middle', 'right'] as const) {
+            for (const name of MOUSE_BUTTONS) {
                 if (!mouseKeyboard._buttons[name]) continue;
                 const g = mouseKeyboard._gestures[name];
                 if (g.drag) continue;
@@ -728,14 +765,25 @@ export function createInputManager(): InputManager {
         blur: () => {
             // the browser already drops pointer lock on blur; mirror it so we don't try to re-acquire while unfocused.
             m._focused = false;
+            releaseHeldInput(m.target?.mouseKeyboard);
             reconcilePointerLock(m);
         },
         // capture phase, so it lands before the bubbling pointerdown handler for the same interaction.
         modality: (e: PointerEvent) => {
             m.inputMode = e.pointerType === 'touch' ? 'touch' : 'mouse';
         },
+        // the authority on a request landing: `requestPointerLock` returns no promise in older browsers, so this is
+        // the only signal there that the withheld click actually bought the lock.
+        pointerlockchange: () => {
+            if (!document.pointerLockElement) return;
+            m._lockRequestPending = false;
+            settleLockPress(m, true);
+        },
         // fires on `document` in browsers that report pointer-lock failure via the event instead of a rejected promise.
-        pointerlockerror: warnPointerLockBlocked,
+        pointerlockerror: () => {
+            warnPointerLockBlocked();
+            if (!m._lockRequestPending) settleLockPress(m, false);
+        },
     };
 
     m._handlers = handlers;
@@ -751,6 +799,7 @@ export function createInputManager(): InputManager {
     window.addEventListener('blur', handlers.blur);
     // capture + passive: see the modality of every interaction, even ones a target stops from bubbling, without blocking it.
     window.addEventListener('pointerdown', handlers.modality, { capture: true, passive: true });
+    document.addEventListener('pointerlockchange', handlers.pointerlockchange);
     document.addEventListener('pointerlockerror', handlers.pointerlockerror);
 
     return m;
@@ -762,6 +811,8 @@ function syncPointerCapture(m: InputManager): void {
 }
 
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
+    // a press the outgoing room withheld for a lock request must not surface in the incoming one.
+    if (m.target) for (const button of MOUSE_BUTTONS) m.target.mouseKeyboard._gestures[button].heldForLock = false;
     m.target = target;
     syncPointerCapture(m);
     // a room swap changes whose intent we read; reconcile holds the lock until the new room's controller declares its intent.
@@ -780,6 +831,7 @@ export function disposeInputManager(m: InputManager): void {
     window.removeEventListener('focus', h.focus);
     window.removeEventListener('blur', h.blur);
     window.removeEventListener('pointerdown', h.modality, { capture: true } as EventListenerOptions);
+    document.removeEventListener('pointerlockchange', h.pointerlockchange);
     document.removeEventListener('pointerlockerror', h.pointerlockerror);
     m._disposeCanvas?.();
     m._disposeCanvas = null;
@@ -813,16 +865,72 @@ function warnPointerLockBlocked(): void {
     );
 }
 
-/** acquire, call only from a real user gesture; `unadjustedMovement` gives raw deltas, older Safari rejects it so retry plain. */
-export function tryAcquirePointerLock(m: InputManager): void {
-    if (!computeShouldBeLocked(m) || document.pointerLockElement) return;
+/** acquire, call only from a real user gesture; `unadjustedMovement` gives raw deltas, older Safari rejects it so retry
+ *  plain. Returns whether a request actually went out, i.e. whether this gesture was spent recapturing the cursor. */
+export function tryAcquirePointerLock(m: InputManager): boolean {
+    if (!computeShouldBeLocked(m) || document.pointerLockElement) return false;
     // prefer the stable container so the lock survives room swaps.
     const el = m._lockEl ?? m._lockTargetEl;
-    if (!el) return;
+    if (!el) return false;
     const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
         unadjustedMovement: true,
     });
-    if (p?.catch) p.catch(() => (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(warnPointerLockBlocked));
+    if (!p?.catch) return true;
+    m._lockRequestPending = true;
+    p.catch(() => {
+        // the rejection lands a task later, so re-check: a UI surface may have taken the cursor in the meantime, and
+        // re-requesting then would hand the lock back under an open panel and race the next frame's exit.
+        if (!computeShouldBeLocked(m) || document.pointerLockElement) {
+            m._lockRequestPending = false;
+            return settleLockPress(m, false);
+        }
+        const plain = el.requestPointerLock() as Promise<void> | undefined;
+        if (!plain?.catch) return;
+        plain.catch(() => {
+            warnPointerLockBlocked();
+            m._lockRequestPending = false;
+            settleLockPress(m, false);
+        });
+    });
+    return true;
+}
+
+/** the lock request the click was spent on resolved: a granted lock consumes the withheld press, a refused one hands
+ *  it back rather than eating the click. Idempotent, since both the promise and `pointerlockerror` can report. */
+function settleLockPress(m: InputManager, acquired: boolean): void {
+    const mouseKeyboard = m.target?.mouseKeyboard;
+    if (!mouseKeyboard) return;
+    for (const button of MOUSE_BUTTONS) {
+        const g = mouseKeyboard._gestures[button];
+        if (!g.heldForLock) continue;
+        g.heldForLock = false;
+        if (acquired) continue;
+        g.pressed = true;
+        // the release already came and went; `pressed`/`released` latch, so one frame still reads the whole tap.
+        if (g.heldRelease) {
+            g.released = true;
+            g.tapped = true;
+        } else {
+            mouseKeyboard._buttons[button] = true;
+        }
+    }
+}
+
+/** focus left the document, so the keyup and pointerup for anything held land in whatever took it and never reach us.
+ *  Drop the held state instead of letting a key the user has physically released read as down until they press it
+ *  again, and report the buttons as released so a hold-to-charge action still completes. */
+function releaseHeldInput(mouseKeyboard: MouseKeyboardInput | undefined): void {
+    if (!mouseKeyboard) return;
+    for (const code of mouseKeyboard._keyState.keys()) mouseKeyboard._keyState.set(code, false);
+    mouseKeyboard._mods.mod = false;
+    mouseKeyboard._mods.shift = false;
+    mouseKeyboard._mods.alt = false;
+    for (const button of MOUSE_BUTTONS) {
+        mouseKeyboard._gestures[button].heldForLock = false;
+        if (!mouseKeyboard._buttons[button]) continue;
+        mouseKeyboard._buttons[button] = false;
+        mouseKeyboard._gestures[button].released = true;
+    }
 }
 
 /** UI/ad/host surface asks to free the cursor while shown; releases immediately, no waiting a frame. */

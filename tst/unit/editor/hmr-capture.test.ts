@@ -1,5 +1,5 @@
 import type { Fs } from 'shakeup';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createShakeupBundlerHost } from '../../../build/dev/shakeup-host';
 import { connectRealmPort, type RealmPort } from '../../../build/dev/shakeup-port';
 import { browserEvaluator, makeImportMeta } from '../../../build/dev/shakeup-runner-host';
@@ -36,6 +36,12 @@ type Probe = {
     env: ReturnType<typeof connectRealmPort>;
     log: string[];
     flushes: number;
+    /** ids shakeup gave up on: no accept boundary absorbed the edit. In the editor a realm
+     *  can only warn about these (it cannot reload itself), so they are the signal that a
+     *  save silently did nothing. */
+    fullReloads: string[];
+    /** errors `handleChange` rejected with — a module body that throws lands here. */
+    editErrors: unknown[];
     take(): string[];
     /** write an edit and drive it through the host exactly as the editor's fs watcher would. */
     edit(path: string, code: string): Promise<void>;
@@ -59,10 +65,13 @@ function probe(files: Record<string, string>): Probe {
             return browserEvaluator.runExternalModule(spec);
         },
     };
+    const fullReloads: string[] = [];
+    const editErrors: unknown[] = [];
     const env = connectRealmPort(runnerPort, {
         name: 'client',
         evaluator,
         createImportMeta: makeImportMeta((p) => `${PROJECT}${p}`),
+        onFullReload: (id) => fullReloads.push(id),
     });
 
     registerFlushHandler(() => {
@@ -74,6 +83,8 @@ function probe(files: Record<string, string>): Probe {
         host,
         env,
         log,
+        fullReloads,
+        editErrors,
         get flushes() {
             return state.flushes;
         },
@@ -82,7 +93,12 @@ function probe(files: Record<string, string>): Probe {
             files[path] = code;
             // onFsChange is fire-and-forget in the editor, so await the underlying change to keep
             // the test deterministic, then drain the flush microtask the POSTLUDE schedules.
-            await host.server.handleChange(path);
+            // the editor's watcher is fire-and-forget with a .catch, so a broken edit rejects
+            // there rather than propagating; mirror that so a throwing body is observable
+            // instead of failing the test outright.
+            await host.server.handleChange(path).catch((err: unknown) => {
+                editErrors.push(err);
+            });
             await new Promise((r) => setTimeout(r, 0));
         },
     } as Probe;
@@ -217,5 +233,114 @@ script(T, 'c', (ctx) => { log.push('c'); });`,
         // three script re-registrations in one module body, one coalesced flush.
         expect(p.flushes - before).toBe(1);
         p.host.close();
+    });
+});
+
+// ── a module body that throws ─────────────────────────────────────────
+//
+// The capture POSTLUDE carries `__popModule` AND the `hot.accept` registration, and a body that
+// throws reaches neither. `module-scope.ts` already guards two consequences of that (the owning
+// stack via `resetOwnerStack`, the signature baseline via `beginRun`'s `completed` check); these
+// pin down the third, the one a user actually feels: what it takes to get a bake out of the far
+// side of a broken edit.
+//
+// Shaped like the real thing rather than a bare `throw`: a removed engine export called at module
+// scope, which is what an API rename looks like to a project that has not caught up yet.
+const brokenModule = (traitId: string): string =>
+    `import { trait, gone } from 'bongle';
+export const T = trait('${traitId}');
+gone();`;
+
+describe('a module body that throws', () => {
+    // `handleChange` does not propagate the re-eval failure, so it surfaces as an unhandled
+    // rejection instead. Captured here so the suite stays green while the tests below pin down
+    // what that costs.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => {
+        unhandled.push(err);
+    };
+    beforeAll(() => process.on('unhandledRejection', onUnhandled));
+    afterAll(() => {
+        process.off('unhandledRejection', onUnhandled);
+    });
+
+    it('never reaches the host error reporting, so the build log stays silent', async () => {
+        const p = probe({ '/game.ts': scriptModule('hmr/throw-report', 'v1') });
+        await p.env.import('/game.ts');
+
+        await p.edit('/game.ts', brokenModule('hmr/throw-report'));
+
+        // `shakeup-host.ts` reports via `handleChange(path).catch(reportError)`; a body that throws
+        // rejects out of `applyEdit` WITHOUT that promise seeing it, so nothing reaches the editor.
+        expect(p.editErrors).toEqual([]);
+    });
+
+    it('leaves the last-good registration in place', async () => {
+        const p = probe({ '/game.ts': scriptModule('hmr/throw-keep', 'v1') });
+        await p.env.import('/game.ts');
+        expect(registry.traits.byId.has('hmr/throw-keep')).toBe(true);
+
+        await p.edit('/game.ts', brokenModule('hmr/throw-keep'));
+
+        // the runner restores the last-good instance, so the registry keeps what v1 declared.
+        expect(registry.traits.byId.has('hmr/throw-keep')).toBe(true);
+    });
+
+    it('fires no flush, so nothing downstream of the registry is told to re-run', async () => {
+        const p = probe({ '/game.ts': scriptModule('hmr/throw-flush', 'v1') });
+        await p.env.import('/game.ts');
+        const before = p.flushes;
+
+        await p.edit('/game.ts', brokenModule('hmr/throw-flush'));
+
+        expect(p.flushes).toBe(before);
+    });
+
+    // The shape a real project actually has: the broken file is a DEPENDENCY of the entry, and it
+    // exports a plain function alongside its handles — so __decideReload invalidates and the update
+    // has to bubble to the importer rather than patching in place. Both halves matter: a throw
+    // leaves the importer linked to a module instance that never finished evaluating.
+    it('recovers when the broken module is an imported dependency with a non-handle export', async () => {
+        const dep = (tag: string) => `import { trait, log } from 'bongle';
+export const T = trait('hmr/dep-recover');
+export const help = () => '${tag}';
+log.push('dep:${tag}');`;
+        const brokenDep = `import { trait, gone, log } from 'bongle';
+export const T = trait('hmr/dep-recover');
+export const help = () => 'broken';
+gone();
+log.push('dep:unreachable');`;
+        const p = probe({
+            '/dep.ts': dep('v1'),
+            '/main.ts': `import { log } from 'bongle';\nimport { help } from './dep';\nlog.push('main:' + help());`,
+        });
+        await p.env.import('/main.ts');
+        expect(p.take()).toEqual(['dep:v1', 'main:v1']);
+
+        await p.edit('/dep.ts', brokenDep);
+        const afterBreak = p.flushes;
+        p.take();
+
+        await p.edit('/dep.ts', dep('v2'));
+
+        expect(p.take()).toContain('main:v2'); // the importer re-linked to the fixed module
+        expect(p.flushes).toBeGreaterThan(afterBreak);
+        expect(p.fullReloads).toEqual([]);
+        p.host.close();
+    });
+
+    it('recovers on the next good edit: the fix re-registers AND flushes', async () => {
+        const p = probe({ '/game.ts': scriptModule('hmr/throw-recover', 'v1') });
+        await p.env.import('/game.ts');
+        await p.edit('/game.ts', brokenModule('hmr/throw-recover'));
+        const afterBreak = p.flushes;
+        p.take();
+
+        await p.edit('/game.ts', scriptModule('hmr/throw-recover', 'v2'));
+
+        // this is the whole question: does fixing a broken module get the pipeline a flush on its
+        // own, or does the edit land on a path only a service restart can absorb?
+        expect(p.flushes).toBeGreaterThan(afterBreak);
+        expect(p.fullReloads).toEqual([]);
     });
 });

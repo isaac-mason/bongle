@@ -8,8 +8,11 @@ import * as Environment from '../render/environment/environment';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
-/** icon tile size; part of the icon bake's cache key (see asset-pipeline/icons). */
-export const ICON_PX = 128;
+/** icon tile size; part of the icon bake's cache key (see asset-pipeline/icons).
+ *  64 is 1:1 at 2x dpr for the largest icon the ui draws (32 css px): the whole
+ *  atlas has to be decoded to paint any one tile, so oversampling costs 4x the
+ *  decode for pixels nothing shows. */
+export const ICON_PX = 64;
 const CAM_DIST = 64;
 // half-extent of the ortho frustum; a unit cube projects to ~1.4 units wide at
 // 45 degrees azimuth, so 1.0 gives a snug fit with a small margin.

@@ -1,6 +1,8 @@
-import { LineMaterial, LineSegments, LineSegmentsGeometry, type Scene, vec4f } from 'gpucat';
+import { LineMaterial, LineSegments, LineSegmentsGeometry, Object3D, vec4f } from 'gpucat';
 
 export type GridVisualsState = {
+    /** this module's own group; the caller parents it and never touches what's inside. */
+    root: Object3D;
     minorLines: LineSegments;
     majorLines: LineSegments;
     xAxisLines: LineSegments;
@@ -18,7 +20,11 @@ function buildGridPoints(halfSize: number, spacing: number, skip?: number): numb
     return points;
 }
 
-export function init(scene: Scene): GridVisualsState {
+export function init(parent: Object3D): GridVisualsState {
+    const root = new Object3D();
+    root.name = 'editor-grid';
+    parent.add(root);
+
     const halfSize = 500;
     const minorHalfSize = 50; // minor lines only near origin
 
@@ -33,7 +39,7 @@ export function init(scene: Scene): GridVisualsState {
     minorLines.name = 'editor-grid-minor';
     minorLines.frustumCulled = false;
     minorLines.visible = false;
-    scene.add(minorLines);
+    root.add(minorLines);
 
     const majorPts: number[] = [];
     for (let i = -halfSize; i <= halfSize; i += 10) {
@@ -51,7 +57,7 @@ export function init(scene: Scene): GridVisualsState {
     majorLines.name = 'editor-grid-major';
     majorLines.frustumCulled = false;
     majorLines.visible = false;
-    scene.add(majorLines);
+    root.add(majorLines);
 
     const xAxisGeo = new LineSegmentsGeometry([-halfSize, 0, 0, halfSize, 0, 0]);
     const xAxisMat = new LineMaterial({
@@ -63,7 +69,7 @@ export function init(scene: Scene): GridVisualsState {
     xAxisLines.name = 'editor-grid-axis-x';
     xAxisLines.frustumCulled = false;
     xAxisLines.visible = false;
-    scene.add(xAxisLines);
+    root.add(xAxisLines);
 
     const zAxisGeo = new LineSegmentsGeometry([0, 0, -halfSize, 0, 0, halfSize]);
     const zAxisMat = new LineMaterial({
@@ -75,9 +81,9 @@ export function init(scene: Scene): GridVisualsState {
     zAxisLines.name = 'editor-grid-axis-z';
     zAxisLines.frustumCulled = false;
     zAxisLines.visible = false;
-    scene.add(zAxisLines);
+    root.add(zAxisLines);
 
-    return { minorLines, majorLines, xAxisLines, zAxisLines };
+    return { root, minorLines, majorLines, xAxisLines, zAxisLines };
 }
 
 export function update(state: GridVisualsState, enabled: boolean): void {
@@ -87,9 +93,6 @@ export function update(state: GridVisualsState, enabled: boolean): void {
     state.zAxisLines.visible = enabled;
 }
 
-export function dispose(state: GridVisualsState, scene: Scene): void {
-    scene.remove(state.minorLines);
-    scene.remove(state.majorLines);
-    scene.remove(state.xAxisLines);
-    scene.remove(state.zAxisLines);
+export function dispose(state: GridVisualsState): void {
+    state.root.removeFromParent();
 }

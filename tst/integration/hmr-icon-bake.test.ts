@@ -135,3 +135,97 @@ describe('hmr block add → icon bake (integration)', () => {
         }
     });
 });
+
+// ── HMR break → fix → does the bake gate see it? ────────────────────────
+//
+// `runAssetPipelinePass` gates every builder on registry revisions: `atlasDirty` is
+// `blocksRev !== state.blocks || tilesRev !== state.tiles || texturesRev !== state.textures`,
+// where `state.*` is what the last COMPLETED pass banked. `tst/unit/editor/hmr-capture` proves
+// the flush itself survives a broken edit; this asks the question that actually decides whether
+// a user sees a stale atlas — after a module throws and is then fixed, have the revisions moved
+// far enough for that gate to fire, or does the fix land looking unchanged?
+//
+// Shaped like a real API migration: the fix renames a declaration, so one id enters and another
+// is orphaned. The orphan only gets pruned by `endModuleRun`, which runs from `__popModule` —
+// the postlude a throwing body never reaches.
+
+/** a blocks module whose tile id is a parameter, so a "migration" can rename it. */
+const blocksWithTile = (tileId: string, blockId: string) =>
+    `import { block, tile } from 'bongle';
+const t = tile('${tileId}', { src: 'stone.png' });
+export const B = block('${blockId}', { model: () => ({ type: 'cube', tiles: { all: t } }) });`;
+
+/** the same module mid-migration: the engine export it reaches for is gone. */
+const blocksBroken = (blockId: string) =>
+    `import { block, tile, removedApi } from 'bongle';
+const t = removedApi('hmr-gate/old', { src: 'stone.png' });
+export const B = block('${blockId}', { model: () => ({ type: 'cube', tiles: { all: t } }) });`;
+
+describe('hmr broken edit → fix → bake gate (integration)', () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => {
+        unhandled.push(err);
+    };
+
+    it('a fix after a throwing edit still moves the revisions the gate reads', async () => {
+        registerAllShapes();
+        process.on('unhandledRejection', onUnhandled);
+        const files: Record<string, string> = {
+            '/index.ts': `import './blocks';`,
+            '/blocks.ts': blocksWithTile('hmr-gate/old', 'hmr-gate/block'),
+        };
+        const fsAdapter: Fs = { read: async (id) => files[id] ?? null, exists: async (id) => id in files };
+        const host = createShakeupBundlerHost({ fs: fsAdapter, jsx: false, isUserModule: () => true });
+        const [bundlerPort, runnerPort] = portPair();
+        host.connectRealm('pipeline', bundlerPort);
+        const realm = connectRealmPort(runnerPort, {
+            name: 'pipeline',
+            evaluator: {
+                ...browserEvaluator,
+                async runExternalModule(spec: string): Promise<unknown> {
+                    if (spec === 'bongle/internal') return { __bongle };
+                    if (spec === 'bongle') return bongleApi;
+                    return browserEvaluator.runExternalModule(spec);
+                },
+            },
+            createImportMeta: (p) => makeImportMeta((m) => `https://app.test/@project${m}`)(p),
+        });
+        await realm.import('/index.ts');
+        expect(registry.tiles.byId.has('hmr-gate/old')).toBe(true);
+
+        // what a completed pass banks: the revisions it gated on.
+        const banked = { blocks: registry.blocks.revision, tiles: registry.tiles.revision };
+
+        const gates: Array<{ blocks: number; tiles: number }> = [];
+        const unregister = registerFlushHandler(() => {
+            gates.push({ blocks: registry.blocks.revision, tiles: registry.tiles.revision });
+        });
+        const settle = () => new Promise((r) => setTimeout(r, 50));
+
+        try {
+            files['/blocks.ts'] = blocksBroken('hmr-gate/block');
+            await host.server.handleChange('/blocks.ts').catch(() => {});
+            await settle();
+            expect(gates).toHaveLength(0); // a throwing body flushes nothing
+
+            // the migration lands: a new tile id in, the old one orphaned.
+            files['/blocks.ts'] = blocksWithTile('hmr-gate/new', 'hmr-gate/block');
+            await host.server.handleChange('/blocks.ts');
+            await settle();
+
+            expect(registry.tiles.byId.has('hmr-gate/new')).toBe(true);
+            // more than one: `/blocks.ts` invalidates and the cascade re-evaluates `/index.ts`
+            // too, and the two land in separate microtasks so `requestFlush` cannot coalesce
+            // them. The count is incidental; the gate only cares about the settled revisions.
+            expect(gates.length).toBeGreaterThanOrEqual(1);
+            // the whole question: `tilesRev !== state.tiles` is what makes the atlas re-bake.
+            expect(gates.at(-1)?.tiles).not.toBe(banked.tiles);
+            // and the orphan is pruned, which is itself a revision bump (endModuleRun).
+            expect(registry.tiles.byId.has('hmr-gate/old')).toBe(false);
+        } finally {
+            unregister();
+            host.close();
+            process.off('unhandledRejection', onUnhandled);
+        }
+    });
+});

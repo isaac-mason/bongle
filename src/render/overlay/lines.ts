@@ -15,7 +15,7 @@ import {
     mul,
     type Node,
     normalize,
-    type Scene,
+    type Object3D,
     screenSize,
     sub,
     type UniformNode,
@@ -63,7 +63,7 @@ function lineVertex(widthPx: Node<d.f32>): Node<d.vec4f> {
     return vec4f(finalXY, clipPos.zw) as unknown as Node<d.vec4f>;
 }
 
-export function init(scene: Scene, capacity: number, widthPx: number): LineBatch {
+export function init(parent: Object3D, capacity: number, widthPx: number): LineBatch {
     const vertexCount = capacity * 4;
     const start = new Float32Array(vertexCount * 3);
     const end = new Float32Array(vertexCount * 3);
@@ -115,13 +115,13 @@ export function init(scene: Scene, capacity: number, widthPx: number): LineBatch
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.renderOrder = Infinity;
-    scene.add(mesh);
+    parent.add(mesh);
 
     return { mesh, geometry, capacity, count: 0, start, end, color, widthUniform, widthCssPx: widthPx };
 }
 
-export function dispose(batch: LineBatch, scene: Scene): void {
-    scene.remove(batch.mesh);
+export function dispose(batch: LineBatch): void {
+    batch.mesh.removeFromParent();
     batch.geometry.dispose();
     batch.mesh.material.dispose();
 }

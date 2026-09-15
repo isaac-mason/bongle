@@ -14,7 +14,7 @@ import {
     modelWorldMatrix,
     mul,
     type Node,
-    type Scene,
+    type Object3D,
     screenSize,
     Texture,
     texture,
@@ -57,7 +57,7 @@ function quadVertex(): Node<d.vec4f> {
     return vec4f(finalXY, clip.zw) as unknown as Node<d.vec4f>;
 }
 
-export function init(scene: Scene, capacity: number): QuadBatch {
+export function init(parent: Object3D, capacity: number): QuadBatch {
     const vertexCount = capacity * 4;
     const center = new Float32Array(vertexCount * 3);
     const offset = new Float32Array(vertexCount * 2);
@@ -112,7 +112,7 @@ export function init(scene: Scene, capacity: number): QuadBatch {
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.renderOrder = Infinity;
-    scene.add(mesh);
+    parent.add(mesh);
 
     return {
         mesh,
@@ -145,8 +145,8 @@ export function bindAtlas(batch: QuadBatch, sprite: SpriteResources): boolean {
     return true;
 }
 
-export function dispose(batch: QuadBatch, scene: Scene): void {
-    scene.remove(batch.mesh);
+export function dispose(batch: QuadBatch): void {
+    batch.mesh.removeFromParent();
     batch.geometry.dispose();
     batch.mesh.material.dispose();
     batch.placeholder.dispose();

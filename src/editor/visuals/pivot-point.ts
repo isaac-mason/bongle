@@ -1,4 +1,4 @@
-import { createSphereGeometry, Material, Mesh, positionClip, type Scene, vec4f } from 'gpucat';
+import { createSphereGeometry, Material, Mesh, type Object3D, positionClip, vec4f } from 'gpucat';
 import type { Vec3 } from 'math';
 import { PIVOT_DOT } from './editor-colors';
 
@@ -18,28 +18,27 @@ function getMaterial(): Material {
 }
 
 export type State = {
-    scene: Scene;
     mesh: Mesh;
     visible: boolean;
 };
 
 const RADIUS = 0.08;
 
-export function create(scene: Scene): State {
+export function create(parent: Object3D): State {
     const geo = createSphereGeometry(RADIUS, 8, 6);
     const mesh = new Mesh(geo, getMaterial());
     mesh.name = 'editor-pivot-point';
     mesh.frustumCulled = false;
     mesh.visible = false;
-    scene.add(mesh);
-    return { scene, mesh, visible: false };
+    parent.add(mesh);
+    return { mesh, visible: false };
 }
 
 export function dispose(state: State): void {
-    state.scene.remove(state.mesh);
+    state.mesh.removeFromParent();
 }
 
-/** show / hide the point, for callers that gate the whole editor view. */
+/** show / hide the point; driven only by `update`, never by a view gate. */
 export function setVisible(state: State, visible: boolean): void {
     if (visible === state.visible) return;
     state.mesh.visible = visible;

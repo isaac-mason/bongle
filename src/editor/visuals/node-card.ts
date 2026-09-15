@@ -9,7 +9,7 @@ import * as Quads from '../../render/overlay/quads';
 import * as Text from '../../render/overlay/text';
 import type { SpriteResources } from '../../render/sprites/sprite-resources';
 import { isOwnershipBoundary } from '../node-bodies';
-import { SHAPE_OUTLINE_ACTIVE, SHAPE_OUTLINE_HOVER, SHAPE_OUTLINE_SELECTED } from './editor-colors';
+import { AXIS_COLORS, SHAPE_OUTLINE_ACTIVE, SHAPE_OUTLINE_HOVER, SHAPE_OUTLINE_SELECTED } from './editor-colors';
 import * as ShapeOutlines from './shape-outlines';
 
 /** what a node shows at its origin; a marker pins it on and may override the parts, every other node gets it while selected. */
@@ -142,6 +142,27 @@ export function cardFor(node: Node): NodeCard {
  * on a backing. hover: a faint outline. pinned: icon, figure, label, always. selected and active: label and outline.
  * a card that is not part of the selection fades out with distance and stops drawing past `CARD_FADE_FAR`.
  */
+/** a line of text on a padded backing plate, centred on the world point and `dyPx` pixels above it. */
+export function drawBackedLabel(
+    batches: { quads: Quads.QuadBatch; text: Text.TextBatch },
+    x: number,
+    y: number,
+    z: number,
+    text: string,
+    dyPx: number,
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+    backingFade = 1,
+): void {
+    const hw = Text.measure(batches.text, text, LABEL_SCALE) / 2;
+    const hh = Text.height(batches.text, LABEL_SCALE) / 2;
+    const [br, bg, bb, ba] = LABEL_BACKING;
+    Quads.rect(batches.quads, x, y, z, 0, dyPx, hw + LABEL_PAD_PX, hh + LABEL_PAD_PX, br, bg, bb, ba * backingFade);
+    Text.label(batches.text, x, y, z, text, LABEL_SCALE, dyPx, r, g, b, a);
+}
+
 export function drawCard(
     batches: CardBatches,
     node: Node,
@@ -192,12 +213,9 @@ export function drawCard(
         }
     }
     if (toggles.names && card.label !== '') {
-        const hw = Text.measure(batches.text, card.label, LABEL_SCALE) / 2;
         const hh = Text.height(batches.text, LABEL_SCALE) / 2;
         const dy = lift + LABEL_GAP_PX + hh + LABEL_PAD_PX;
-        const [br, bg, bb, ba] = LABEL_BACKING;
-        Quads.rect(batches.quads, x, y, z, 0, dy, hw + LABEL_PAD_PX, hh + LABEL_PAD_PX, br, bg, bb, ba * fade);
-        Text.label(batches.text, x, y, z, card.label, LABEL_SCALE, dy, r, g, b, a);
+        drawBackedLabel(batches, x, y, z, card.label, dy, r, g, b, a, fade);
         lift = dy + hh + LABEL_PAD_PX;
     }
     if (emphasis === 'pinned') return;
@@ -207,11 +225,6 @@ export function drawCard(
     }
 }
 
-const AXIS_COLORS: [number, number, number][] = [
-    [1, 0.3, 0.3],
-    [0.3, 1, 0.3],
-    [0.3, 0.5, 1],
-];
 const _from: Vec3 = [0, 0, 0];
 const _to: Vec3 = [0, 0, 0];
 

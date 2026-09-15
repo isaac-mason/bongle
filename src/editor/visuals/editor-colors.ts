@@ -29,6 +29,11 @@ export const BRUSH_TINTS = {
 export const BRUSH_FILL_DEFAULT: Rgba = BRUSH_TINTS.cyan.fill;
 export const BRUSH_EDGES_DEFAULT: Rgba = BRUSH_TINTS.cyan.edges;
 
+/** the alpha the occluded half of an overlay draws at, replacing the colour's own. flat values
+ *  rather than a scale of it: the fills already sit at 0.05 / 0.1, so scaling leaves nothing. */
+export const OCCLUDED_FILL_ALPHA = 0.02;
+export const OCCLUDED_LINE_ALPHA = 0.08;
+
 /** single-block hover outline (white aabb around the hovered voxel). */
 export const HOVER_OUTLINE: Rgba = [1.0, 1.0, 1.0, 0.9];
 
@@ -39,6 +44,18 @@ export const INSPECT_OUTLINE: [number, number, number, number] = [0.3, 0.6, 1.0,
 export const SHAPE_OUTLINE_SELECTED: Rgba = [0.3, 0.6, 1.0, 0.7];
 export const SHAPE_OUTLINE_ACTIVE: Rgba = [1.0, 0.85, 0.1, 1.0];
 export const SHAPE_OUTLINE_HOVER: Rgba = [1.0, 1.0, 1.0, 0.35];
+
+/** per-axis X / Y / Z, lifted off the pure primaries: full-strength blue has the lowest
+ *  luminance of the three and reads nearly black on the editor's dark ground. shared by the
+ *  node-card axis lines and the transform gizmo so the viewport speaks one language. */
+export const AXIS_COLORS: [number, number, number][] = [
+    [1, 0.15, 0.15],
+    [0.15, 1, 0.15],
+    [0.15, 0.25, 1],
+];
+
+/** the handle under the cursor or being dragged; matches SHAPE_OUTLINE_ACTIVE and PIVOT_DOT. */
+export const GIZMO_ACTIVE: [number, number, number] = [1, 0.85, 0.1];
 
 /** color of the pivot point sphere shown when the transform tool is active */
 export const PIVOT_DOT: [number, number, number, number] = [1.0, 0.85, 0.1, 1.0];

@@ -2,6 +2,7 @@ import {
     createIndexBuffer,
     createVertexBuffer,
     d,
+    f32,
     Geometry,
     LineMaterial,
     LineSegmentsGeometry,
@@ -9,13 +10,14 @@ import {
     Mesh,
     mix,
     type Node,
+    Object3D,
     positionClip,
-    type Scene,
     Uniform,
     uniform,
+    vec4f,
 } from 'gpucat';
 import * as Selection from '../../core/scene/selection';
-import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
+import { type GreedyMesh, meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
 import { CHUNK_BITS, CHUNK_VOLUME } from '../../core/voxels/voxels';
 import type { TimeResources } from '../../render/time';
 import type { EditRoomState } from '../edit-room-store';
@@ -23,115 +25,128 @@ import {
     BRUSH_EDGES_DEFAULT,
     BRUSH_FILL_DEFAULT,
     HOVER_OUTLINE,
+    OCCLUDED_FILL_ALPHA,
+    OCCLUDED_LINE_ALPHA,
     SELECTION_EDGES,
     SELECTION_FILL,
     SELECTION_OUTLINE,
 } from './editor-colors';
 import { rainbowFillColor, rainbowLineColor } from './rainbow';
 
-let _selectionMaterial: Material | null = null;
-let _brushMaterial: Material | null = null;
+/** an overlay is drawn twice: the half in front of the world, and the ghosted half behind it.
+ *  the two depth compares are mutually exclusive per pixel, so the halves never blend against
+ *  each other and their draw order relative to one another does not matter. */
+type MaterialPair<M extends Material> = { visible: M; occluded: M };
+
+let _selectionMaterials: MaterialPair<Material> | null = null;
+let _brushMaterials: MaterialPair<Material> | null = null;
 let _brushFillUniform: Uniform<d.vec4f> | null = null;
-let _selectionOutlineMaterial: LineMaterial | null = null;
-let _selectionEdgesMaterial: LineMaterial | null = null;
-let _brushEdgesMaterial: LineMaterial | null = null;
+let _selectionOutlineMaterials: MaterialPair<LineMaterial> | null = null;
+let _selectionEdgesMaterials: MaterialPair<LineMaterial> | null = null;
+let _brushEdgesMaterials: MaterialPair<LineMaterial> | null = null;
 let _brushEdgesUniform: Uniform<d.vec4f> | null = null;
-let _hoverOutlineMaterial: LineMaterial | null = null;
+let _hoverOutlineMaterials: MaterialPair<LineMaterial> | null = null;
 
 // brush tint blend: 0 = flowing rainbow, 1 = solid semantic tint. shared by
 // the brush fill + edges materials.
 const _brushTintStrength = new Uniform(d.f32, 0);
 
-function getSelectionMaterial(elapsedTime: Node<d.f32>): Material {
-    if (!_selectionMaterial) {
-        _selectionMaterial = new Material({
-            name: 'editor-selection-fill',
-            vertex: positionClip,
-            fragment: rainbowFillColor(elapsedTime, SELECTION_FILL[3]),
-            transparent: true,
-            cullMode: 'none',
-            depthTest: false,
-            depthWrite: false,
-        });
-    }
-    return _selectionMaterial;
+/** world-space clearance between the selection fill and the block faces it covers; matches OUTLINE_EXPAND.
+ *  the fill's faces ARE the block faces, so a depth bias can only guess at the offset; this is exact. */
+const SURFACE_LIFT = 0.005;
+
+// lines get a depth bias instead: their quads are screen-space expanded, so there is no single world
+// direction to lift them in. BOTH halves take the same bias, so they stay exactly complementary and a
+// pixel draws one or the other, never both. biasing only the visible half lets a coplanar pixel pass
+// `less-equal` at the biased depth and `greater` at the unbiased one, double-drawing the line.
+const LINE_DEPTH_BIAS = -4;
+
+/** the same colour graph at a flat ghost alpha; sharing the graph keeps the brush uniforms single-sourced. */
+function ghost(color: Node<d.vec4f>, alpha: number): Node<d.vec4f> {
+    return vec4f(color.rgb, f32(alpha));
 }
 
-function getBrushMaterial(elapsedTime: Node<d.f32>): Material {
-    if (!_brushMaterial) {
+function fillPair(name: string, color: Node<d.vec4f>): MaterialPair<Material> {
+    const make = (half: string, depthCompare: GPUCompareFunction, fragment: Node<d.vec4f>) =>
+        new Material({
+            name: `${name}-${half}`,
+            vertex: positionClip,
+            fragment,
+            transparent: true,
+            cullMode: 'none',
+            depthTest: true,
+            depthCompare,
+            depthWrite: false,
+        });
+    return {
+        visible: make('visible', 'less-equal', color),
+        occluded: make('occluded', 'greater', ghost(color, OCCLUDED_FILL_ALPHA)),
+    };
+}
+
+function linePair(color: Node<d.vec4f>, lineWidth: number): MaterialPair<LineMaterial> {
+    const make = (depthCompare: GPUCompareFunction, c: Node<d.vec4f>, bias: number) => {
+        const material = new LineMaterial({ color: c, lineWidth, transparent: true });
+        material.depthTest = true;
+        material.depthCompare = depthCompare;
+        material.depthWrite = false;
+        material.depthBias = bias;
+        return material;
+    };
+    return {
+        visible: make('less-equal', color, LINE_DEPTH_BIAS),
+        occluded: make('greater', ghost(color, OCCLUDED_LINE_ALPHA), LINE_DEPTH_BIAS),
+    };
+}
+
+function getSelectionMaterials(elapsedTime: Node<d.f32>): MaterialPair<Material> {
+    if (!_selectionMaterials) {
+        _selectionMaterials = fillPair('editor-selection-fill', rainbowFillColor(elapsedTime, SELECTION_FILL[3]));
+    }
+    return _selectionMaterials;
+}
+
+function getBrushMaterials(elapsedTime: Node<d.f32>): MaterialPair<Material> {
+    if (!_brushMaterials) {
         _brushFillUniform = new Uniform(d.vec4f, BRUSH_FILL_DEFAULT);
-        _brushMaterial = new Material({
-            name: 'editor-brush-fill',
-            vertex: positionClip,
-            fragment: mix(
-                rainbowFillColor(elapsedTime, BRUSH_FILL_DEFAULT[3]),
-                uniform(_brushFillUniform),
-                uniform(_brushTintStrength),
-            ),
-            transparent: true,
-            cullMode: 'none',
-            depthTest: false,
-            depthWrite: false,
-        });
+        _brushMaterials = fillPair(
+            'editor-brush-fill',
+            mix(rainbowFillColor(elapsedTime, BRUSH_FILL_DEFAULT[3]), uniform(_brushFillUniform), uniform(_brushTintStrength)),
+        );
     }
-    return _brushMaterial;
+    return _brushMaterials;
 }
 
-function getSelectionOutlineMaterial(elapsedTime: Node<d.f32>): LineMaterial {
-    if (!_selectionOutlineMaterial) {
-        _selectionOutlineMaterial = new LineMaterial({
-            color: rainbowLineColor(elapsedTime, SELECTION_OUTLINE[3]),
-            lineWidth: 4,
-            transparent: false,
-        });
-        _selectionOutlineMaterial.depthTest = false;
-        _selectionOutlineMaterial.depthWrite = false;
+function getSelectionOutlineMaterials(elapsedTime: Node<d.f32>): MaterialPair<LineMaterial> {
+    if (!_selectionOutlineMaterials) {
+        _selectionOutlineMaterials = linePair(rainbowLineColor(elapsedTime, SELECTION_OUTLINE[3]), 4);
     }
-    return _selectionOutlineMaterial;
+    return _selectionOutlineMaterials;
 }
 
-function getSelectionEdgesMaterial(elapsedTime: Node<d.f32>): LineMaterial {
-    if (!_selectionEdgesMaterial) {
-        _selectionEdgesMaterial = new LineMaterial({
-            color: rainbowLineColor(elapsedTime, SELECTION_EDGES[3]),
-            lineWidth: 4,
-            transparent: false,
-        });
-        _selectionEdgesMaterial.depthTest = false;
-        _selectionEdgesMaterial.depthWrite = false;
+function getSelectionEdgesMaterials(elapsedTime: Node<d.f32>): MaterialPair<LineMaterial> {
+    if (!_selectionEdgesMaterials) {
+        _selectionEdgesMaterials = linePair(rainbowLineColor(elapsedTime, SELECTION_EDGES[3]), 4);
     }
-    return _selectionEdgesMaterial;
+    return _selectionEdgesMaterials;
 }
 
-function getBrushEdgesMaterial(elapsedTime: Node<d.f32>): LineMaterial {
-    if (!_brushEdgesMaterial) {
+function getBrushEdgesMaterials(elapsedTime: Node<d.f32>): MaterialPair<LineMaterial> {
+    if (!_brushEdgesMaterials) {
         _brushEdgesUniform = new Uniform(d.vec4f, BRUSH_EDGES_DEFAULT);
-        _brushEdgesMaterial = new LineMaterial({
-            color: mix(
-                rainbowLineColor(elapsedTime, BRUSH_EDGES_DEFAULT[3]),
-                uniform(_brushEdgesUniform),
-                uniform(_brushTintStrength),
-            ),
-            lineWidth: 4,
-            transparent: false,
-        });
-        _brushEdgesMaterial.depthTest = false;
-        _brushEdgesMaterial.depthWrite = false;
+        _brushEdgesMaterials = linePair(
+            mix(rainbowLineColor(elapsedTime, BRUSH_EDGES_DEFAULT[3]), uniform(_brushEdgesUniform), uniform(_brushTintStrength)),
+            4,
+        );
     }
-    return _brushEdgesMaterial;
+    return _brushEdgesMaterials;
 }
 
-function getHoverOutlineMaterial(elapsedTime: Node<d.f32>): LineMaterial {
-    if (!_hoverOutlineMaterial) {
-        _hoverOutlineMaterial = new LineMaterial({
-            color: rainbowLineColor(elapsedTime, HOVER_OUTLINE[3]),
-            lineWidth: 3,
-            transparent: false,
-        });
-        _hoverOutlineMaterial.depthTest = false;
-        _hoverOutlineMaterial.depthWrite = false;
+function getHoverOutlineMaterials(elapsedTime: Node<d.f32>): MaterialPair<LineMaterial> {
+    if (!_hoverOutlineMaterials) {
+        _hoverOutlineMaterials = linePair(rainbowLineColor(elapsedTime, HOVER_OUTLINE[3]), 3);
     }
-    return _hoverOutlineMaterial;
+    return _hoverOutlineMaterials;
 }
 
 // dense selection buffer: copies each chunk's 128-word bit grid into a
@@ -236,7 +251,9 @@ function buildDenseSelection(sel: Selection.Selection): DenseSelection | null {
     };
 }
 
-export function buildSelectionGeometry(sel: Selection.Selection): Geometry | null {
+/** `lift` nudges each face out along its own normal, clearing the block faces the fill sits on.
+ *  0 leaves the geometry exactly voxel-aligned. */
+export function buildSelectionGeometry(sel: Selection.Selection, lift = 0): Geometry | null {
     const dense = buildDenseSelection(sel);
     if (!dense || dense.empty) return null;
 
@@ -260,10 +277,19 @@ export function buildSelectionGeometry(sel: Selection.Selection): Geometry | nul
         occ: denseHas,
         min: tight.min,
         max: tight.max,
-        emitNormals: false,
+        emitNormals: lift !== 0,
     });
     if (!mesh) return null;
+    if (lift !== 0) liftAlongNormals(mesh, lift);
     return meshToGeometry(mesh);
+}
+
+/** normals are dropped afterwards, the flat-colour fill never reads them. */
+function liftAlongNormals(mesh: GreedyMesh, lift: number): void {
+    const { positions, normals } = mesh;
+    if (!normals) return;
+    for (let i = 0; i < positions.length; i++) positions[i]! += normals[i]! * lift;
+    mesh.normals = null;
 }
 
 // emits surface boundary + crease edges of the voxel selection, computed
@@ -679,19 +705,21 @@ export function buildAabbBoxGeometry(x0: number, y0: number, z0: number, x1: num
     return geo;
 }
 
+/** one overlay's two draws over a single shared geometry. */
+type OverlayMeshes = { visible: Mesh; occluded: Mesh; geometry: Geometry };
+
 export type SelectionMeshState = {
-    selectionMesh: Mesh | null;
-    selectionOutline: Mesh | null;
-    selectionEdges: Mesh | null;
+    selectionMesh: OverlayMeshes | null;
+    selectionOutline: OverlayMeshes | null;
+    selectionEdges: OverlayMeshes | null;
     // any-shape selection (hovered block idle, box-select region, brush shapes).
-    brushMesh: Mesh | null;
-    brushEdges: Mesh | null;
+    brushMesh: OverlayMeshes | null;
+    brushEdges: OverlayMeshes | null;
     // tight aabb outline around the exact hovered voxel.
-    hoverOutline: Mesh | null;
-    scene: Scene;
-    // editor-view gate; re-applied every frame since setMesh/setOutlineMesh reuse their Mesh across geometry swaps.
-    visible: boolean;
-    // second gate, stacked on `visible`, for the hover outline alone.
+    hoverOutline: OverlayMeshes | null;
+    /** this module's own group; the caller parents it and never touches what's inside. */
+    root: Object3D;
+    // re-applied every frame since setOutlineMesh reuses its Mesh across geometry swaps.
     hoverOutlineWanted: boolean;
     _lastSelection: Selection.Selection | null;
     // a Selection ref when the brush is cell-based, or a string key
@@ -700,7 +728,10 @@ export type SelectionMeshState = {
     _lastHoverKey: string; // serialised "x,y,z" or ""
 };
 
-export function createSelectionMeshState(scene: Scene): SelectionMeshState {
+export function createSelectionMeshState(parent: Object3D): SelectionMeshState {
+    const root = new Object3D();
+    root.name = 'editor-selection';
+    parent.add(root);
     return {
         selectionMesh: null,
         selectionOutline: null,
@@ -708,8 +739,7 @@ export function createSelectionMeshState(scene: Scene): SelectionMeshState {
         brushMesh: null,
         brushEdges: null,
         hoverOutline: null,
-        scene,
-        visible: true,
+        root,
         hoverOutlineWanted: false,
         _lastSelection: null,
         _lastBrushSig: null,
@@ -718,111 +748,92 @@ export function createSelectionMeshState(scene: Scene): SelectionMeshState {
 }
 
 export function disposeSelectionMeshState(state: SelectionMeshState): void {
-    if (state.selectionMesh) {
-        state.scene.remove(state.selectionMesh);
-        state.selectionMesh.geometry.dispose();
-        state.selectionMesh = null;
-    }
-    if (state.selectionOutline) {
-        state.scene.remove(state.selectionOutline);
-        state.selectionOutline.geometry.dispose();
-        state.selectionOutline = null;
-    }
-    if (state.selectionEdges) {
-        state.scene.remove(state.selectionEdges);
-        state.selectionEdges.geometry.dispose();
-        state.selectionEdges = null;
-    }
-    if (state.brushMesh) {
-        state.scene.remove(state.brushMesh);
-        state.brushMesh.geometry.dispose();
-        state.brushMesh = null;
-    }
-    if (state.brushEdges) {
-        state.scene.remove(state.brushEdges);
-        state.brushEdges.geometry.dispose();
-        state.brushEdges = null;
-    }
-    if (state.hoverOutline) {
-        state.scene.remove(state.hoverOutline);
-        state.hoverOutline.geometry.dispose();
-        state.hoverOutline = null;
-    }
+    state.root.removeFromParent();
+    state.selectionMesh?.geometry.dispose();
+    state.selectionOutline?.geometry.dispose();
+    state.selectionEdges?.geometry.dispose();
+    state.brushMesh?.geometry.dispose();
+    state.brushEdges?.geometry.dispose();
+    state.hoverOutline?.geometry.dispose();
+}
+
+/** both halves over one geometry; `renderOrder` keeps the whole overlay above the world's transparents. */
+function addOverlayMeshes(
+    state: SelectionMeshState,
+    name: string,
+    geometry: Geometry,
+    materials: MaterialPair<Material>,
+): OverlayMeshes {
+    const make = (half: string, material: Material): Mesh => {
+        const mesh = new Mesh(geometry, material);
+        mesh.name = `${name}-${half}`;
+        mesh.frustumCulled = false;
+        mesh.renderOrder = Infinity;
+        state.root.add(mesh);
+        return mesh;
+    };
+    return { visible: make('visible', materials.visible), occluded: make('occluded', materials.occluded), geometry };
+}
+
+function removeOverlayMeshes(meshes: OverlayMeshes): void {
+    meshes.visible.removeFromParent();
+    meshes.occluded.removeFromParent();
+    meshes.geometry.dispose();
+}
+
+function swapOverlayGeometry(meshes: OverlayMeshes, geometry: Geometry): void {
+    meshes.geometry.dispose();
+    meshes.geometry = geometry;
+    meshes.visible.geometry = geometry;
+    meshes.occluded.geometry = geometry;
 }
 
 function setMesh(
     state: SelectionMeshState,
     which: 'selectionMesh' | 'brushMesh',
     geo: Geometry | null,
-    material: Material,
+    materials: MaterialPair<Material>,
 ): void {
     const current = state[which];
 
     if (!geo) {
         if (current) {
-            state.scene.remove(current);
-            current.geometry.dispose();
+            removeOverlayMeshes(current);
             state[which] = null;
         }
         return;
     }
 
-    if (current) {
-        current.geometry.dispose();
-        current.geometry = geo;
-    } else {
-        const mesh = new Mesh(geo, material);
-        mesh.name = `editor-selection-${which}`;
-        mesh.frustumCulled = false;
-        state.scene.add(mesh);
-        state[which] = mesh;
-    }
+    if (current) swapOverlayGeometry(current, geo);
+    else state[which] = addOverlayMeshes(state, `editor-selection-${which}`, geo, materials);
 }
 
 function setOutlineMesh(
     state: SelectionMeshState,
     which: 'selectionOutline' | 'selectionEdges' | 'brushEdges' | 'hoverOutline',
     pts: number[] | null,
-    material: LineMaterial,
+    materials: MaterialPair<LineMaterial>,
 ): void {
     const current = state[which];
 
     if (!pts) {
         if (current) {
-            state.scene.remove(current);
-            current.geometry.dispose();
+            removeOverlayMeshes(current);
             state[which] = null;
         }
         return;
     }
 
-    if (current) {
-        current.geometry.dispose();
-        current.geometry = new LineSegmentsGeometry(pts);
-    } else {
-        const mesh = new Mesh(new LineSegmentsGeometry(pts), material);
-        mesh.name = `editor-selection-${which}`;
-        mesh.frustumCulled = false;
-        state.scene.add(mesh);
-        state[which] = mesh;
-    }
+    if (current) swapOverlayGeometry(current, new LineSegmentsGeometry(pts));
+    else state[which] = addOverlayMeshes(state, `editor-selection-${which}`, new LineSegmentsGeometry(pts), materials);
 }
 
-// `visible` gates all six meshes; the hover outline carries a second gate on top of it.
+/** the hover outline is the only overlay here with a show condition of its own. */
 function applyVisibility(state: SelectionMeshState): void {
-    const show = state.visible;
-    if (state.selectionMesh) state.selectionMesh.visible = show;
-    if (state.selectionOutline) state.selectionOutline.visible = show;
-    if (state.selectionEdges) state.selectionEdges.visible = show;
-    if (state.brushMesh) state.brushMesh.visible = show;
-    if (state.brushEdges) state.brushEdges.visible = show;
-    if (state.hoverOutline) state.hoverOutline.visible = show && state.hoverOutlineWanted;
-}
-
-/** show / hide every selection + brush overlay, for callers that gate the whole editor view. */
-export function setSelectionMeshesVisible(state: SelectionMeshState, visible: boolean): void {
-    state.visible = visible;
-    applyVisibility(state);
+    const hover = state.hoverOutline;
+    if (!hover) return;
+    hover.visible.visible = state.hoverOutlineWanted;
+    hover.occluded.visible = state.hoverOutlineWanted;
 }
 
 export function updateSelectionMeshes(meshState: SelectionMeshState, state: EditRoomState, time: TimeResources): void {
@@ -832,20 +843,20 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         setMesh(
             meshState,
             'selectionMesh',
-            state.selection ? buildSelectionGeometry(state.selection) : null,
-            getSelectionMaterial(elapsedTime),
+            state.selection ? buildSelectionGeometry(state.selection, SURFACE_LIFT) : null,
+            getSelectionMaterials(elapsedTime),
         );
         setOutlineMesh(
             meshState,
             'selectionOutline',
             state.selection ? buildOutlineSegments(state.selection) : null,
-            getSelectionOutlineMaterial(elapsedTime),
+            getSelectionOutlineMaterials(elapsedTime),
         );
         setOutlineMesh(
             meshState,
             'selectionEdges',
             state.selection ? buildMeshEdgeSegments(state.selection) : null,
-            getSelectionEdgesMaterial(elapsedTime),
+            getSelectionEdgesMaterials(elapsedTime),
         );
     }
 
@@ -868,11 +879,21 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         meshState._lastBrushSig = brushSig;
         if (useAabbBrush && hoverAabb) {
             const e = OUTLINE_EXPAND;
+            // lifted like the greedy-meshed fill is: a sub-unit collider's faces sit exactly on the
+            // block's own, so the box needs the same world-space clearance.
+            const lift = SURFACE_LIFT;
             setMesh(
                 meshState,
                 'brushMesh',
-                buildAabbBoxGeometry(hoverAabb[0], hoverAabb[1], hoverAabb[2], hoverAabb[3], hoverAabb[4], hoverAabb[5]),
-                getBrushMaterial(elapsedTime),
+                buildAabbBoxGeometry(
+                    hoverAabb[0] - lift,
+                    hoverAabb[1] - lift,
+                    hoverAabb[2] - lift,
+                    hoverAabb[3] + lift,
+                    hoverAabb[4] + lift,
+                    hoverAabb[5] + lift,
+                ),
+                getBrushMaterials(elapsedTime),
             );
             setOutlineMesh(
                 meshState,
@@ -885,20 +906,20 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                     hoverAabb[4] + e,
                     hoverAabb[5] + e,
                 ),
-                getBrushEdgesMaterial(elapsedTime),
+                getBrushEdgesMaterials(elapsedTime),
             );
         } else {
             setMesh(
                 meshState,
                 'brushMesh',
-                state.brush ? buildSelectionGeometry(state.brush) : null,
-                getBrushMaterial(elapsedTime),
+                state.brush ? buildSelectionGeometry(state.brush, SURFACE_LIFT) : null,
+                getBrushMaterials(elapsedTime),
             );
             setOutlineMesh(
                 meshState,
                 'brushEdges',
                 state.brush ? buildMeshEdgeSegments(state.brush) : null,
-                getBrushEdgesMaterial(elapsedTime),
+                getBrushEdgesMaterials(elapsedTime),
             );
         }
     }
@@ -928,7 +949,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                   hoverAabb[5] + e,
               )
             : null;
-        setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterial(elapsedTime));
+        setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterials(elapsedTime));
     }
 
     // only shown for multi-cell brushes; single-cell brushes already show

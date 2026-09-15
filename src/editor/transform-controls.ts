@@ -22,6 +22,7 @@ import {
 } from 'gpucat';
 import { euler, type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { type Topic, topic } from '../core/utils/topic';
+import { AXIS_COLORS, GIZMO_ACTIVE } from './visuals/editor-colors';
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 export type TransformSpace = 'world' | 'local';
@@ -262,7 +263,7 @@ function buildHandleSet(map: HandleMap, visible: boolean): HandleSet {
 }
 
 function circleGeometry(radius: number, arc: number): Geometry {
-    const geometry = createTorusGeometry(radius, 0.0075, 3, 64, arc * Math.PI * 2);
+    const geometry = createTorusGeometry(radius, 0.0075, 8, 64, arc * Math.PI * 2);
     const m = mat4.create();
     mat4.rotateX(m, m, Math.PI / 2);
     mat4.rotateY(m, m, Math.PI / 2);
@@ -271,12 +272,12 @@ function circleGeometry(radius: number, arc: number): Geometry {
 }
 
 function buildGizmo(): { gizmo: Record<TransformMode, HandleSet>; picker: Record<TransformMode, HandleSet> } {
-    const red = createGizmoMaterial([1, 0, 0]);
-    const green = createGizmoMaterial([0, 1, 0]);
-    const blue = createGizmoMaterial([0, 0, 1]);
-    const redTransparent = createGizmoMaterial([1, 0, 0], 0.5);
-    const greenTransparent = createGizmoMaterial([0, 1, 0], 0.5);
-    const blueTransparent = createGizmoMaterial([0, 0, 1], 0.5);
+    const red = createGizmoMaterial(AXIS_COLORS[0]!);
+    const green = createGizmoMaterial(AXIS_COLORS[1]!);
+    const blue = createGizmoMaterial(AXIS_COLORS[2]!);
+    const redTransparent = createGizmoMaterial(AXIS_COLORS[0]!, 0.5);
+    const greenTransparent = createGizmoMaterial(AXIS_COLORS[1]!, 0.5);
+    const blueTransparent = createGizmoMaterial(AXIS_COLORS[2]!, 0.5);
     const whiteTransparent = createGizmoMaterial([1, 1, 1], 0.25);
     const yellowTransparent = createGizmoMaterial([1, 1, 0], 0.25);
     const gray = createGizmoMaterial([0.47, 0.47, 0.47]);
@@ -286,7 +287,7 @@ function buildGizmo(): { gizmo: Record<TransformMode, HandleSet>; picker: Record
     applyMatrix4ToGeometry(arrow, mat4.fromTranslation(mat4.create(), [0, 0.05, 0]));
     const scaleHandle = createBoxGeometry(0.08, 0.08, 0.08);
     applyMatrix4ToGeometry(scaleHandle, mat4.fromTranslation(mat4.create(), [0, 0.04, 0]));
-    const line = createCylinderGeometry(0.0075, 0.0075, 0.5, 3);
+    const line = createCylinderGeometry(0.0075, 0.0075, 0.5, 8);
     applyMatrix4ToGeometry(line, mat4.fromTranslation(mat4.create(), [0, 0.25, 0]));
     const planeSquare = (): Geometry => createBoxGeometry(0.15, 0.15, 0.01);
     const pickerCone = (): Geometry => createCylinderGeometry(0.2, 0, 0.6, 4);
@@ -435,7 +436,7 @@ const _v1: Vec3 = [0, 0, 0];
 const _v2: Vec3 = [0, 0, 0];
 const _v3: Vec3 = [0, 0, 0];
 
-const ACTIVE_COLOR: [number, number, number] = [1, 1, 0];
+const ACTIVE_COLOR: [number, number, number] = GIZMO_ACTIVE;
 const AXIS_HIDE_THRESHOLD = 0.99;
 const PLANE_HIDE_THRESHOLD = 0.2;
 

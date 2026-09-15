@@ -1,4 +1,4 @@
-import { LineMaterial, LineSegments, LineSegmentsGeometry, type Scene, vec4f } from 'gpucat';
+import { LineMaterial, LineSegments, LineSegmentsGeometry, type Object3D, vec4f } from 'gpucat';
 
 import { CHUNK_SIZE, type Voxels } from '../../core/voxels/voxels';
 
@@ -38,7 +38,7 @@ function buildPoints(voxels: Voxels): number[] {
     return pts;
 }
 
-export function init(scene: Scene): ChunkBoundsVisualsState {
+export function init(parent: Object3D): ChunkBoundsVisualsState {
     // degenerate placeholder segment, replaced by update() once the toggle goes on
     const placeholder = [0, 0, 0, 0, 0, 0];
     const geometry = new LineSegmentsGeometry(placeholder);
@@ -50,7 +50,7 @@ export function init(scene: Scene): ChunkBoundsVisualsState {
     lines.name = 'editor-chunk-bounds';
     lines.frustumCulled = false;
     lines.visible = false;
-    scene.add(lines);
+    parent.add(lines);
 
     return { lines, geometry, lastChunkCount: -1, lastEnabled: false };
 }
@@ -83,6 +83,6 @@ export function update(state: ChunkBoundsVisualsState, voxels: Voxels, enabled: 
     state.lastEnabled = true;
 }
 
-export function dispose(state: ChunkBoundsVisualsState, scene: Scene): void {
-    scene.remove(state.lines);
+export function dispose(state: ChunkBoundsVisualsState): void {
+    state.lines.removeFromParent();
 }
