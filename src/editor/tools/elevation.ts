@@ -10,14 +10,7 @@ import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { testMask } from '../scene/mask';
 import { samplePattern } from '../scene/pattern';
-import {
-    createDiggingLoop,
-    type DiggingLoop,
-    playBulkEdit,
-    startDiggingLoop,
-    stopDiggingLoop,
-    updateDiggingLoop,
-} from '../sounds';
+import { createStrokeLoop, playBulkEdit, type StrokeLoop, startDiggingLoop, stopStrokeLoop, updateDiggingLoop } from '../sounds';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
 import { commitVoxelOps } from '../voxel-edit';
 
@@ -102,7 +95,7 @@ export type ElevationState = {
      *  preview key so the brush mesh rebuilds as the delta grows. */
     version: number;
     /** the continuous stroke's sound bed. */
-    digging: DiggingLoop;
+    digging: StrokeLoop;
     /** fractional blocks accumulated this frame across live columns, drives the bed's level. */
     flow: number;
 };
@@ -121,9 +114,23 @@ export function createElevationState(): ElevationState {
         lastFrameMs: 0,
         previewKey: '',
         version: 0,
-        digging: createDiggingLoop(),
+        digging: createStrokeLoop(),
         flow: 0,
     };
+}
+
+/** Same backstop as releaseBrushStroke: a stroke abandoned without a release (tool switch, POV
+ *  swap) would otherwise leave its bed looping and its projected ops half-armed. Idempotent. */
+export function releaseElevationStroke(state: ElevationState, store: EditRoomStoreApi): void {
+    if (!state.active) return;
+    state.active = false;
+    state.opts = null;
+    state.forward = [];
+    state.reverse = [];
+    state.accum.clear();
+    state.previewKey = '';
+    stopStrokeLoop(state.digging);
+    store.setState({ brush: null, brushFill: null, brushEdges: null });
 }
 
 export function updateElevation(
@@ -152,7 +159,7 @@ export function updateElevation(
         state.reverse = [];
         state.accum.clear();
         state.previewKey = '';
-        stopDiggingLoop(state.digging);
+        stopStrokeLoop(state.digging);
         store.setState({ brush: null, brushFill: null, brushEdges: null });
         return;
     }
@@ -217,7 +224,7 @@ export function updateElevation(
         state.accum.clear();
         state.forward = [];
         state.reverse = [];
-        stopDiggingLoop(state.digging);
+        stopStrokeLoop(state.digging);
     }
 
     // Idle shows the disc footprint at hover; mid-stroke shows the projected

@@ -1,8 +1,10 @@
 import type { Input } from '../../../client/input';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../../../client/input';
+import type { ScriptContext } from '../../../core/scene/scripts';
 import * as Selection from '../../../core/scene/selection';
 import type { EditRoomStoreApi } from '../../edit-room-store';
 import { type BrushShape, buildShape } from '../../scene/shapes';
+import { createStrokeLoop, type StrokeLoop, startBrushLoop, stopStrokeLoop, updateBrushLoop } from '../../sounds';
 
 /** Created once per edit room in EditorScript onInit and threaded into the tool's update fn, never module-scoped, so two joined rooms can't share one stroke flag. */
 export type BrushStrokeState = {
@@ -11,10 +13,26 @@ export type BrushStrokeState = {
     lastCenter: [number, number, number] | null;
     /** Content-key for the idle preview. A fresh Selection ref is pushed to the store only when this changes, so the selection-mesh rebuilder only repaints on real changes. */
     previewKey: string;
+    /** the rolling bed under the stroke; every tool built on this harness gets it for free. */
+    loop: StrokeLoop;
+    /** clock + travel accumulator driving the bed's level, reset each frame once consumed. */
+    lastFrameMs: number;
+    sweep: number;
 };
 
 export function createBrushStrokeState(): BrushStrokeState {
-    return { active: false, lastCenter: null, previewKey: '' };
+    return { active: false, lastCenter: null, previewKey: '', loop: createStrokeLoop(), lastFrameMs: 0, sweep: 0 };
+}
+
+/** Stops a stroke abandoned without a release: a tool switch or POV swap mid-drag never reaches
+ *  the release branch, and the bed would otherwise loop for the rest of the session. Idempotent. */
+export function releaseBrushStroke(state: BrushStrokeState): void {
+    if (!state.active) return;
+    state.active = false;
+    state.lastCenter = null;
+    state.previewKey = '';
+    state.sweep = 0;
+    stopStrokeLoop(state.loop);
 }
 
 /** The subset of a tool's options the harness needs to rasterise the stamp. */
@@ -27,6 +45,7 @@ const STAMP_SCRATCH: Selection.Selection = Selection.create();
 export function advanceBrushStroke(
     state: BrushStrokeState,
     store: EditRoomStoreApi,
+    ctx: ScriptContext,
     input: Input,
     opts: BrushShapeOpts,
     onCommit: (accumulated: Selection.Selection) => void,
@@ -44,6 +63,7 @@ export function advanceBrushStroke(
         state.active = false;
         state.lastCenter = null;
         state.previewKey = '';
+        stopStrokeLoop(state.loop);
         store.setState({ brush: null });
         return;
     }
@@ -58,6 +78,9 @@ export function advanceBrushStroke(
         }
         store.setState({ brush: sel });
         state.previewKey = '';
+        state.sweep = 0;
+        state.lastFrameMs = performance.now();
+        startBrushLoop(state.loop, ctx);
     }
 
     if (state.active && held && hv) {
@@ -67,6 +90,9 @@ export function advanceBrushStroke(
             state.lastCenter[1] === hv[1] &&
             state.lastCenter[2] === hv[2];
         if (!sameAsLast) {
+            if (state.lastCenter) {
+                state.sweep += Math.hypot(hv[0] - state.lastCenter[0], hv[1] - state.lastCenter[1], hv[2] - state.lastCenter[2]);
+            }
             state.lastCenter = [hv[0], hv[1], hv[2]];
             const prev = store.getState().brush;
             const next = prev ? Selection.clone(prev) : Selection.create();
@@ -78,12 +104,24 @@ export function advanceBrushStroke(
         }
     }
 
+    // the bed tracks how fast the cursor is sweeping new ground: swells while you drag, settles
+    // to silence if you hold still, and is claimed here rather than per-tool so brush-build,
+    // brush-select and smooth all sound the same without repeating any of it.
+    if (state.active) {
+        const now = performance.now();
+        const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
+        state.lastFrameMs = now;
+        if (dt > 0) updateBrushLoop(state.loop, state.sweep / dt, dt);
+        state.sweep = 0;
+    }
+
     if (state.active && (justUp || !held)) {
         const accumulated = store.getState().brush;
         if (accumulated && !Selection.isEmpty(accumulated)) onCommit(accumulated);
         state.active = false;
         state.lastCenter = null;
         state.previewKey = '';
+        stopStrokeLoop(state.loop);
         // Falls through to the idle branch so the cursor immediately picks up the next preview.
     }
 

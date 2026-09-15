@@ -20,7 +20,7 @@ export function updateBrushSelect(
     input: Input,
     voxels: Voxels,
 ): void {
-    advanceBrushStroke(state.brush, store, input, store.getState().brushSelectOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, ctx, input, store.getState().brushSelectOptions, (accumulated) => {
         const s = store.getState();
         const mk = input.mouseKeyboard;
         // cmd/ctrl is an alternate add-to-selection modifier, same as shift.

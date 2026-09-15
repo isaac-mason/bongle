@@ -41,6 +41,12 @@ scroll-wheel cycle) got tried and pulled back out, too much noise for something 
 fires that often. Its content was "litupsubway-ui-equip-sfx-513361.mp3", in case hotbar
 sfx comes back and that clip is still the right call.
 
+editor-brush.ogg: PROVENANCE UNCONFIRMED — cut from "soft_rock_rolling_co_#2-1789462415450.mp3",
+handed over without a stated source or licence. Fill this entry in (or swap the clip) before
+shipping; every other clip in here has its terms written down and this one shouldn't be the
+exception. Cut to a 1.24s seamless loop (its last 0.26s crossfaded over the head), mono,
+loudness-normalised to -20 LUFS, for the brush-build / brush-select / smooth stroke bed.
+
 editor-digging.ogg: "digging" by freesound_community on Pixabay (pixabay id 6691),
 Creative Commons / Pixabay Content License, no attribution required. Cut to a 7s seamless
 loop (its last 0.68s crossfaded over the head), mono, loudness-normalised to -18 LUFS,

@@ -29,7 +29,7 @@ function activeBlockKey(store: EditRoomStoreApi): string {
 
 export function updateBrush(state: BrushState, store: EditRoomStoreApi, ctx: ScriptContext, input: Input, voxels: Voxels): void {
     const { pattern, mask } = store.getState().brushOptions;
-    advanceBrushStroke(state.brush, store, input, store.getState().brushOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, ctx, input, store.getState().brushOptions, (accumulated) => {
         const active = activeBlockKey(store);
         const forward: VoxelOp[] = [];
         const reverse: VoxelOp[] = [];

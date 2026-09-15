@@ -57,7 +57,7 @@ import { readNudgeDelta } from './camera';
 import { installEditorChatCommands } from './chat-commands';
 import { installSelectionChatCommands } from './chat-selection';
 import { createClipboardHandlers } from './clipboard';
-import { type ControlMode, createEditRoomStore, type EditRoomStoreApi } from './edit-room-store';
+import { type ControlMode, createEditRoomStore, type EditorTool, type EditRoomStoreApi } from './edit-room-store';
 import { CONTROL_MODE_KEYS, HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, SELECTION_KEYS, type ToolCategoryId } from './editor-controls';
 import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
@@ -73,7 +73,7 @@ import { clearBoxSelect, updateBoxSelect } from './tools/box-select';
 import { createBrushState, updateBrush } from './tools/brush-build';
 import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
 import { updateBuild } from './tools/build';
-import { createElevationState, updateElevation } from './tools/elevation';
+import { createElevationState, releaseElevationStroke, updateElevation } from './tools/elevation';
 import * as Grab from './tools/grab';
 import * as Handles from './tools/handles';
 import {
@@ -90,6 +90,7 @@ import { createPainterState, updatePainter } from './tools/painter';
 import * as Placement from './tools/placement';
 import { createSmoothState, updateSmooth } from './tools/smooth';
 import * as TransformTool from './tools/transform';
+import { releaseBrushStroke } from './tools/utils/brush';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';
 import * as DebugVisuals from './visuals/debug-visuals';
 import * as GridVisuals from './visuals/grid-visuals';
@@ -170,6 +171,9 @@ script(
             }
             // backstop for any path that dropped the placement without a clean teardown.
             Placement.reconcilePlacementGhosts(s.placement);
+            // same for a drag-stroke: only the owning tool's update fn reaches its release branch,
+            // so a tool switch or POV swap mid-drag would strand its looping bed.
+            releaseAbandonedStrokes(s, active ? store.getState().activeTool : null);
             setEditorViewActive(s, active);
             if (!active) return;
 
@@ -923,6 +927,15 @@ function updateRadialMenuForActiveTool(s: Session): void {
     const camera = povCamera(s);
     if (!camera) return;
     updateRadialMenu(s.radialMenu, s.store, s.client, s.room, s.ctx, s.nodeBodies, camera);
+}
+
+/** stops any stroke bed whose tool is no longer the active one (null = editor view is off). */
+function releaseAbandonedStrokes(s: Session, activeTool: EditorTool | null): void {
+    const { strokes, store } = s;
+    if (activeTool !== 'brush') releaseBrushStroke(strokes.brush.brush);
+    if (activeTool !== 'brush-select') releaseBrushStroke(strokes.brushSelect.brush);
+    if (activeTool !== 'smooth') releaseBrushStroke(strokes.smooth.brush);
+    if (activeTool !== 'elevation') releaseElevationStroke(strokes.elevation, store);
 }
 
 function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {

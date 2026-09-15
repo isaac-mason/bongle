@@ -2,6 +2,7 @@ import { asset } from '../api/asset';
 import { type PlaybackHandle, playAt, playMono } from '../api/audio';
 import { sound } from '../core/registry';
 import type { ScriptContext } from '../core/scene/scripts';
+import type { SoundHandle } from '../core/sounds/sounds';
 import { resolveKey } from '../core/voxels/block-registry';
 import type { BlockSoundConfig } from '../core/voxels/blocks';
 import { BLOCK_AIR } from '../core/voxels/voxels';
@@ -137,65 +138,102 @@ function emit(
     });
 }
 
+/** one looping bed under a drag-stroke: starts silent, chases a 0..1 intensity while the stroke
+ *  runs (quick to swell, slower to settle), and fades rather than cuts when it ends. the elevation
+ *  tool's digging bed and the brush tools' rolling bed are both this, with their own clip, ceiling
+ *  and pitch — see the wrappers below, which own that per-tool knowledge. */
+export type StrokeLoop = {
+    handle: PlaybackHandle | null;
+    /** smoothed gain, updated every frame. */
+    level: number;
+    /** last gain written to the node; a settled level schedules no automation. */
+    written: number;
+    /** ceiling for whichever clip this loop was started with. */
+    gainMax: number;
+};
+
+export function createStrokeLoop(): StrokeLoop {
+    return { handle: null, level: 0, written: 0, gainMax: 1 };
+}
+
+/** the level swells quickly with the stroke and settles more slowly after it. */
+const STROKE_ATTACK_S = 0.06;
+const STROKE_RELEASE_S = 0.25;
+/** brief but clearly audible: the bed shouldn't just cut when the stroke ends. was cranked to
+ *  1s while a real bug in Audio.stop() (fixed now, see client/audio/audio.ts) silently cut every
+ *  faded stop to ~one frame regardless of this value; back to a properly brief fade now that the
+ *  fade actually plays out. */
+const STROKE_STOP_FADE_S = 0.4;
+/** skip a gain write smaller than this FRACTION of the bed's ceiling. relative, not absolute: the
+ *  ceilings are ~0.1-0.2, so a fixed 0.01 would quantise a whole bed into ~10 audible steps. */
+const STROKE_WRITE_EPSILON_FRACTION = 0.01;
+
+/** mono: the stroke is under the cursor and the listener is right behind it, so a panner has nothing to add. */
+export function startStrokeLoop(loop: StrokeLoop, ctx: ScriptContext, clip: SoundHandle, gainMax: number, detune: number): void {
+    stopStrokeLoop(loop);
+    loop.level = 0;
+    loop.written = 0;
+    loop.gainMax = gainMax;
+    loop.handle = playMono(ctx, clip, { loop: true, volume: 0, detune });
+}
+
+/** `intensity` is 0..1 (clamped); 0 settles the bed to silence without stopping it. */
+export function updateStrokeLoop(loop: StrokeLoop, intensity: number, dt: number): void {
+    if (!loop.handle) return;
+    const target = loop.gainMax * Math.max(0, Math.min(1, intensity));
+    const tau = target > loop.level ? STROKE_ATTACK_S : STROKE_RELEASE_S;
+    loop.level += (target - loop.level) * Math.min(1, dt / tau);
+    if (Math.abs(loop.level - loop.written) < loop.gainMax * STROKE_WRITE_EPSILON_FRACTION) return;
+    loop.written = loop.level;
+    loop.handle.setVolume(loop.level);
+}
+
+export function stopStrokeLoop(loop: StrokeLoop): void {
+    if (!loop.handle) return;
+    loop.handle.stop({ fade: STROKE_STOP_FADE_S });
+    loop.handle = null;
+}
+
 /** a seamless 7s bed of digging, looped under a continuous elevation stroke. */
 export const DiggingSound = sound('editor:digging', {
     name: 'editor digging',
     src: asset('./assets/sounds/editor-digging.ogg', import.meta.url),
 });
 
-/** one loop per stroke; its level chases the rate at which the stroke is accumulating blocks. */
-export type DiggingLoop = {
-    handle: PlaybackHandle | null;
-    /** smoothed gain, updated every frame. */
-    level: number;
-    /** last gain written to the node; a settled level schedules no automation. */
-    written: number;
-};
-
-export function createDiggingLoop(): DiggingLoop {
-    return { handle: null, level: 0, written: 0 };
-}
-
-const DIGGING_GAIN_MAX = 0.35;
+const DIGGING_GAIN_MAX = 0.175;
 /** full level at ~1000 blocks/s of accumulation, a large disc at default rate; a size-1 disc sits near 40%. */
 const DIGGING_RATE_CEILING_LOG2 = 10;
 /** lowering reads a shade deeper than raising; flatten sits between since its columns go both ways. */
 const DIGGING_LOWER_DETUNE_CENTS = -300;
 const DIGGING_FLATTEN_DETUNE_CENTS = -150;
-/** the level swells quickly with the stroke and settles more slowly after it. */
-const DIGGING_ATTACK_S = 0.06;
-const DIGGING_RELEASE_S = 0.25;
-/** brief but clearly audible: the loop shouldn't just cut when the stroke ends. was cranked to
- *  1s while a real bug in Audio.stop() (fixed now, see client/audio/audio.ts) silently cut every
- *  faded stop to ~one frame regardless of this value; back to a properly brief fade now that the
- *  fade actually plays out. */
-const DIGGING_STOP_FADE_S = 0.4;
-const DIGGING_WRITE_EPSILON = 0.01;
 
-/** mono: the stroke is under the cursor and the listener is right behind it, so a panner has nothing to add. */
-export function startDiggingLoop(loop: DiggingLoop, ctx: ScriptContext, mode: 'raise' | 'lower' | 'flatten'): void {
-    stopDiggingLoop(loop);
-    loop.level = 0;
-    loop.written = 0;
+export function startDiggingLoop(loop: StrokeLoop, ctx: ScriptContext, mode: 'raise' | 'lower' | 'flatten'): void {
     const detune = mode === 'lower' ? DIGGING_LOWER_DETUNE_CENTS : mode === 'flatten' ? DIGGING_FLATTEN_DETUNE_CENTS : 0;
-    loop.handle = playMono(ctx, DiggingSound, { loop: true, volume: 0, detune });
+    startStrokeLoop(loop, ctx, DiggingSound, DIGGING_GAIN_MAX, detune);
 }
 
-/** `rate` is fractional blocks per second accumulated this frame across the live columns; 0 settles the bed to silence. */
-export function updateDiggingLoop(loop: DiggingLoop, rate: number, dt: number): void {
-    if (!loop.handle) return;
-    const target = DIGGING_GAIN_MAX * Math.min(1, Math.log2(1 + rate) / DIGGING_RATE_CEILING_LOG2);
-    const tau = target > loop.level ? DIGGING_ATTACK_S : DIGGING_RELEASE_S;
-    loop.level += (target - loop.level) * Math.min(1, dt / tau);
-    if (Math.abs(loop.level - loop.written) < DIGGING_WRITE_EPSILON) return;
-    loop.written = loop.level;
-    loop.handle.setVolume(loop.level);
+/** `rate` is fractional blocks per second accumulated this frame across the live columns. */
+export function updateDiggingLoop(loop: StrokeLoop, rate: number, dt: number): void {
+    updateStrokeLoop(loop, Math.log2(1 + rate) / DIGGING_RATE_CEILING_LOG2, dt);
 }
 
-export function stopDiggingLoop(loop: DiggingLoop): void {
-    if (!loop.handle) return;
-    loop.handle.stop({ fade: DIGGING_STOP_FADE_S });
-    loop.handle = null;
+/** a seamless bed of rolling rock, looped under a brush-build / brush-select / smooth stroke. */
+export const BrushSound = sound('editor:brush', {
+    name: 'editor brush',
+    src: asset('./assets/sounds/editor-brush.ogg', import.meta.url),
+});
+
+const BRUSH_GAIN_MAX = 0.1;
+/** full level at ~12 voxels/s of cursor travel, about a brisk drag; nudging along sits well under. */
+const BRUSH_SWEEP_CEILING = 12;
+
+export function startBrushLoop(loop: StrokeLoop, ctx: ScriptContext): void {
+    startStrokeLoop(loop, ctx, BrushSound, BRUSH_GAIN_MAX, 0);
+}
+
+/** `sweep` is voxels of cursor travel per second; a stroke held still settles to silence. */
+export function updateBrushLoop(loop: StrokeLoop, sweep: number, dt: number): void {
+    updateStrokeLoop(loop, sweep / BRUSH_SWEEP_CEILING, dt);
 }
 
 // select is the most frequent trigger in the editor, so it's a real mouse-click recording
@@ -304,8 +342,8 @@ export function playStructuralEdit(ctx: ScriptContext, kind: StructuralEditKind)
 /** paste reuses create's clip quieter and a shade down, the same "gesture started, not yet
  *  finished" trick `playAnchored` uses for box-select: a ghost just appeared under the cursor,
  *  nothing is in the scene until it's clicked down (`playStructuralEdit('create')` then). */
-const PASTE_START_GAIN = 0.1;
-const PASTE_START_DETUNE_CENTS = -300;
+const PASTE_START_GAIN = 0.085;
+const PASTE_START_DETUNE_CENTS = -450;
 
 export function playPasteStart(ctx: ScriptContext): void {
     playMono(ctx, CreateSound, {

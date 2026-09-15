@@ -37,7 +37,7 @@ export function updateSmooth(
     input: Input,
     voxels: Voxels,
 ): void {
-    advanceBrushStroke(state.brush, store, input, store.getState().smoothOptions, (accumulated) => {
+    advanceBrushStroke(state.brush, store, ctx, input, store.getState().smoothOptions, (accumulated) => {
         const { iterations, heightmapMask } = store.getState().smoothOptions;
         const { forward, reverse } = runSmooth(voxels, accumulated, iterations, heightmapMask);
         if (forward.length > 0) {
