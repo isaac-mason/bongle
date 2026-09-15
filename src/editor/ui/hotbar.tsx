@@ -1,6 +1,7 @@
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { HOTBAR_SIZE, type HotbarSlot, inventoryItemDisplay } from '../inventory';
+import { ClipboardIndicator } from './clipboard-indicator';
 import { InventoryItemIcon } from './inventory-icon';
 
 const SLOT_SIZE = 40;
@@ -16,8 +17,8 @@ export function Hotbar() {
 
     const room = useEditor((s) => s.room);
     return (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-            <div className="flex gap-1 bg-surface/90 border border-border shadow-md p-1 backdrop-blur-sm">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-stretch gap-1.5">
+            <div className="flex gap-1 bg-surface/90 border border-border shadow-md p-1 backdrop-blur-sm pointer-events-auto">
                 {hotbar.map((slot, i) => (
                     <Slot
                         // biome-ignore lint/suspicious/noArrayIndexKey: hotbar slots are positional (slot index is the identity)
@@ -39,6 +40,7 @@ export function Hotbar() {
                     />
                 ))}
             </div>
+            <ClipboardIndicator />
         </div>
     );
 }

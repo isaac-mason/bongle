@@ -14,14 +14,14 @@ import { env } from '../env';
 import * as Actions from './actions';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
-import { type ClipboardHandlers, copySelectionToSystemClipboard } from './clipboard';
+import { type ClipboardHandlers, copySelectionToSystemClipboard, writeBlueprintToSystemClipboard } from './clipboard';
 import { DeleteSceneCommand, OpenSceneCommand, RenameSceneCommand, SaveBlueprintCommand, SaveSceneCommand } from './commands';
 import { useEditor } from './editor-store';
 import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
 import type { Pattern } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
-import { playBulkEdit } from './sounds';
+import { playBulkEdit, playStructuralEdit } from './sounds';
 import type { PivotPreset, PlacementTool } from './tools/placement';
 import * as Placement from './tools/placement';
 import type { Rgba } from './visuals/editor-colors';
@@ -275,6 +275,9 @@ export type EditRoomState = {
     traitPicker: { nodeId: number; clientX: number; clientY: number } | null;
 
     activeBlueprint: Blueprint.Blueprint | null;
+    /** last few copies/cuts, most recent first, capped at CLIPBOARD_HISTORY_CAP. paste (Ctrl+V)
+     *  doesn't add to this — only capturing something new does. */
+    clipboardHistory: readonly Blueprint.Blueprint[];
 
     // hotbar contents stay global
     activeSlotIndex: number;
@@ -352,6 +355,12 @@ export type EditRoomState = {
     pick: () => void;
     /** cuts the selection into a placement ghost; returns the blueprint (for the clipboard) or null when nothing is selected. */
     cutMove: (continuous?: boolean) => Blueprint.Blueprint | null;
+    /** re-arms a past clipboard-history entry as `activeBlueprint` and starts placing it, exactly
+     *  like Ctrl+V does for the current one. no-ops if a placement is already in progress. */
+    pasteFromHistory: (id: number) => void;
+    /** puts a past clipboard-history entry back on the system clipboard (so Ctrl+V, here or
+     *  anywhere else, picks it up) and arms it, without reordering the history itself. */
+    copyHistoryToClipboard: (id: number) => void;
     /** positive = CW looking down the positive axis. not undoable, clipboard ops don't touch the world. */
     rotate: (yawTurns: number, pitchTurns: number, rollTurns: number) => boolean;
     /** mirrors the active blueprint (and live placement preview) across the plane perpendicular to `axis`. not undoable. */
@@ -407,6 +416,9 @@ export type EditRoomStoreRefs = {
 };
 
 const HOTBAR_SIZE = 9;
+
+/** how many past copies/cuts the clipboard indicator's history keeps, most recent first. */
+export const CLIPBOARD_HISTORY_CAP = 8;
 
 function initialFields() {
     return {
@@ -520,6 +532,7 @@ function initialFields() {
         traitPicker: null as EditRoomState['traitPicker'],
 
         activeBlueprint: null as EditRoomState['activeBlueprint'],
+        clipboardHistory: [] as Blueprint.Blueprint[],
 
         activeSlotIndex: 0,
         libraryOpen: false,
@@ -700,7 +713,11 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const sel = s.selection;
             if (Selection.isEmpty(sel)) return null;
             const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, sel);
-            set({ activeBlueprint: blueprint, placementContinuous: continuous });
+            set((cur) => ({
+                activeBlueprint: blueprint,
+                placementContinuous: continuous,
+                clipboardHistory: [blueprint, ...cur.clipboardHistory].slice(0, CLIPBOARD_HISTORY_CAP),
+            }));
 
             const { forward: cutSourceOps, reverse: cutReverseOps } = Blueprint.buildPasteOps(
                 blueprint,
@@ -715,6 +732,19 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
 
             Placement.enterPlacement(placement, blueprint, true, cutReverseOps, room.scene, ctx);
             return blueprint;
+        },
+        pasteFromHistory: (id) => {
+            const entry = get().clipboardHistory.find((bp) => bp.id === id);
+            if (!entry) return;
+            set({ activeBlueprint: entry });
+            Placement.enterPlacement(placement, entry, false, null, room.scene, ctx);
+        },
+        copyHistoryToClipboard: (id) => {
+            const entry = get().clipboardHistory.find((bp) => bp.id === id);
+            if (!entry) return;
+            set({ activeBlueprint: entry });
+            writeBlueprintToSystemClipboard(entry);
+            playStructuralEdit(ctx, 'copy');
         },
         rotate: (yawTurns, pitchTurns, rollTurns) => {
             const bp = get().activeBlueprint;
@@ -878,6 +908,8 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     overlay: () => 0,
     pick: () => {},
     cutMove: () => null,
+    pasteFromHistory: () => {},
+    copyHistoryToClipboard: () => {},
     rotate: () => false,
     flip: () => false,
     setBlock: () => {},

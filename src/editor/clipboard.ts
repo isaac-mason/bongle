@@ -19,6 +19,24 @@ function buildCurrentSelection(api: EditRoomStoreApi): Selection.Selection {
     return Selection.clone(api.getState().selection);
 }
 
+// mirrors CLIPBOARD_HISTORY_CAP in edit-room-store.ts; kept as a literal here rather than an
+// import to avoid a value-level import cycle between the two modules (edit-room-store.ts already
+// imports copySelectionToSystemClipboard from this file).
+const CLIPBOARD_HISTORY_CAP = 8;
+
+function pushClipboardHistory(api: EditRoomStoreApi, blueprint: Blueprint.Blueprint): void {
+    api.setState((s) => ({ clipboardHistory: [blueprint, ...s.clipboardHistory].slice(0, CLIPBOARD_HISTORY_CAP) }));
+}
+
+/** async write, so callers inside a native ClipboardEvent should use `setData` instead — this is
+ *  for ui paths (context menus, the clipboard-history dropdown) with no event to write through. */
+export function writeBlueprintToSystemClipboard(blueprint: Blueprint.Blueprint): void {
+    navigator.clipboard.writeText(Blueprint.toClipboardString(blueprint)).then(
+        () => console.log(`[bongle] copied blueprint: ${blueprint.label}`),
+        (err) => console.warn('[bongle] clipboard write failed:', err),
+    );
+}
+
 /** for ui paths outside a native ClipboardEvent (context menus); ctrl+c uses the native handler
  *  below so it can preventDefault and write synchronously. */
 export function copySelectionToSystemClipboard(api: EditRoomStoreApi, ctx: ScriptContext): void {
@@ -26,13 +44,10 @@ export function copySelectionToSystemClipboard(api: EditRoomStoreApi, ctx: Scrip
     if (Selection.isEmpty(selection)) return;
 
     const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, selection);
-    const clipText = Blueprint.toClipboardString(blueprint);
 
     api.setState({ activeBlueprint: blueprint });
-    navigator.clipboard.writeText(clipText).then(
-        () => console.log(`[bongle] copied blueprint: ${blueprint.label}`),
-        (err) => console.warn('[bongle] clipboard write failed:', err),
-    );
+    pushClipboardHistory(api, blueprint);
+    writeBlueprintToSystemClipboard(blueprint);
     playStructuralEdit(ctx, 'copy');
 }
 
@@ -62,6 +77,7 @@ export function createClipboardHandlers(
         e.preventDefault();
         e.clipboardData?.setData('text/plain', clipText);
         api.setState({ activeBlueprint: blueprint });
+        pushClipboardHistory(api, blueprint);
         console.log(`[bongle] copied blueprint: ${blueprint.label}`);
         playStructuralEdit(ctx, 'copy');
     };
