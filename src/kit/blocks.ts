@@ -311,11 +311,11 @@ export const oakDoor = blockPreset.door('kit:oak_door', {
     sounds: soundPreset.wood,
 });
 
-// fluff is on for oak only, as a spike. the cube self-culls as usual, so an
-// interior leaf block still emits nothing for its faces, but the 4 fluff quads
-// are uncullable and every leaf block pays them. worth watching a dense forest
-// for the silent-truncation signature (leaves gone from one consistent side)
-// before turning it on for anything else.
+// fluff is on for oak only, as a spike. the cube self-culls, so an interior
+// leaf block emits nothing for its faces, but the 4 fluff planes are uncullable
+// and every leaf block pays their 8 quads. worth watching a dense forest for the
+// silent-truncation signature (leaves gone from one consistent side) before
+// turning it on for anything else.
 export const oakLeaves = blockPreset.leaves('kit:oak_leaves', {
     name: 'Oak Leaves',
     tags: ['tree', 'oak', 'foliage', 'plant', 'nature'],

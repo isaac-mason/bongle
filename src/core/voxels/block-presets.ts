@@ -522,7 +522,7 @@ export function cross(id: string, { tiles, height, tileBlocks, shape, ...options
     });
 }
 
-// a cutout cube, optionally with overhanging foliage planes. PARTIAL draws the faces between two adjacent leaf blocks for canopy depth behind the cutout holes. `fluff` adds four crossed, unshaded, leaning planes per block; light opacity defaults to 1 (PARTIAL would otherwise default it to 0) so a canopy filters light like a real one.
+// a cutout cube, optionally with overhanging foliage planes. SELF drops the cube faces shared by two adjacent leaf blocks, so only the canopy shell draws; `fluff` adds four crossed, unshaded, leaning planes per block, uncullable because they overhang their cell in both directions.
 
 /*#__NO_SIDE_EFFECTS__*/
 export function leaves(id: string, { tiles: tilesInput, fluff, varyRotation, ...options }: LeavesPresetOptions) {
@@ -541,8 +541,7 @@ export function leaves(id: string, { tiles: tilesInput, fluff, varyRotation, ...
             });
             return models.length === 1 ? models[0]! : models;
         },
-        cull: CullType.PARTIAL,
-        lightOpacity: options.lightOpacity ?? 1,
+        cull: CullType.SELF,
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.WAVE,
     });
