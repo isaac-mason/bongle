@@ -21,6 +21,7 @@ import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
 import type { Pattern } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
+import { playBulkEdit } from './sounds';
 import type { PivotPreset, PlacementTool } from './tools/placement';
 import * as Placement from './tools/placement';
 import type { Rgba } from './visuals/editor-colors';
@@ -170,7 +171,10 @@ export type BoxSelectState = {
     locked: boolean;
 };
 
-/** in-progress lasso freeform stroke (ndc points). */
+/** in-progress lasso freeform stroke: continuously-unwrapped `[theta, phi]` aim-angle pairs (see
+ *  lasso-select.ts) rather than screen or world points, so a stroke traced while turning your
+ *  view — even past a full turn — stays one coherent shape instead of breaking at any single
+ *  camera's edge. */
 export type LassoState = {
     points: ReadonlyArray<readonly [number, number]>;
 };
@@ -230,8 +234,11 @@ export type EditRoomState = {
     cursor: [number, number, number] | null;
     /** last hovered voxel, persists after clear, for paste placement origin. */
     lastHoverVoxel: [number, number, number] | null;
-    /** last-clicked voxel info shown in the inspector. */
-    /** the selection's one voxel when it holds exactly one; derived from the selection, the panel reads the block live. */
+    /** last-clicked voxel info shown in the inspector. two independent writers, deliberately: the
+     *  subscription below derives it from `selection` (so a single-voxel selection from any tool
+     *  still shows its properties), and the inspect tool's plain click sets it directly, WITHOUT
+     *  touching `selection` — inspecting a block is not the same action as selecting one, and
+     *  shouldn't disturb whatever's actually selected. */
     inspectedVoxel: { wx: number; wy: number; wz: number } | null;
     /** the inspected voxel's chunk version, mirrored per frame so the panel re-reads after any edit, local or remote. */
     voxelRevision: number;
@@ -254,7 +261,16 @@ export type EditRoomState = {
 
     /** when non-null, the ViewportContextMenu opens anchored at these canvas-pixel coords. */
     /** `world` is the surface point under the cursor when the menu opened on a block. */
-    viewportContextMenu: { x: number; y: number; world: Vec3 | null; block: InspectedBlock | null } | null;
+    /** `radial` distinguishes the hold-RMB pointer-locked radial menu (x/y is the viewport centre)
+     *  from the click-triggered dropdown (x/y is the cursor); same entries either way. */
+    /** `viewportContextMenu.radial` is the single source of truth for whether the radial menu is
+     *  open — both the input side (`updateRadialMenu`, tools/inspect.ts) and the render side
+     *  (`RadialMenu`, ui/radial-menu.tsx) key off it directly rather than each tracking their own
+     *  "is it open" flag, so the two can't drift out of lockstep. */
+    viewportContextMenu: { x: number; y: number; world: Vec3 | null; block: InspectedBlock | null; radial: boolean } | null;
+    /** the radial menu's virtual stick: `dirX`/`dirY` a unit vector (0,0 at rest), `mag` 0..1 how
+     *  far it's been pushed (clamped), `hover` the wedge that resolves to, null in the dead zone. */
+    radialPointer: { hover: number | null; dirX: number; dirY: number; mag: number } | null;
     /** the add-trait picker, at client coordinates so it opens at either the viewport or hierarchy menu. */
     traitPicker: { nodeId: number; clientX: number; clientY: number } | null;
 
@@ -320,8 +336,11 @@ export type EditRoomState = {
     /** saves the current selection as a persistent blueprint scene; omitted name allocates `blueprint-NNN`. */
     saveBlueprint: (name?: string) => void;
     destroySelectedNodes: () => void;
-    openViewportContextMenu: (x: number, y: number, world?: Vec3 | null, block?: InspectedBlock | null) => void;
+    openViewportContextMenu: (x: number, y: number, world?: Vec3 | null, block?: InspectedBlock | null, radial?: boolean) => void;
+    setRadialPointer: (pointer: EditRoomState['radialPointer']) => void;
     setTraitPicker: (picker: { nodeId: number; clientX: number; clientY: number } | null) => void;
+    /** the inspect tool's own writer; see the field's own doc comment for how this coexists with the selection-derived subscription. */
+    setInspectedVoxel: (voxel: EditRoomState['inspectedVoxel']) => void;
     /** a bare transform node at a world position under the scene root. */
     createNodeAt: (position: Vec3, name?: string) => void;
     closeViewportContextMenu: () => void;
@@ -497,6 +516,7 @@ function initialFields() {
         } as ElevationOptions,
 
         viewportContextMenu: null as EditRoomState['viewportContextMenu'],
+        radialPointer: null as EditRoomState['radialPointer'],
         traitPicker: null as EditRoomState['traitPicker'],
 
         activeBlueprint: null as EditRoomState['activeBlueprint'],
@@ -507,7 +527,10 @@ function initialFields() {
         hoveredInventoryItem: null as HotbarSlot,
         placementContinuous: false,
 
-        controlMode: 'fly' as ControlMode,
+        // character is the default: it's the mode a new/keyboard-and-mouse-unfamiliar user
+        // already understands (walk with WASD, look with the mouse), and it also just works on
+        // touch, unlike fly which is pointer-lock-only and inert there.
+        controlMode: 'character' as ControlMode,
         flySpeed: null as number | null,
         flySpeedShownAt: 0,
         clipboard: null,
@@ -654,13 +677,16 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             Actions.destroyNodesAction(s, ctx, ids);
             set({ selection: Selection.voxelsOnly(s.selection) });
         },
-        openViewportContextMenu: (x, y, world = null, block = null) => set({ viewportContextMenu: { x, y, world, block } }),
+        openViewportContextMenu: (x, y, world = null, block = null, radial = false) =>
+            set({ viewportContextMenu: { x, y, world, block, radial }, radialPointer: null }),
+        setRadialPointer: (pointer) => set({ radialPointer: pointer }),
         setTraitPicker: (traitPicker) => set({ traitPicker }),
+        setInspectedVoxel: (inspectedVoxel) => set({ inspectedVoxel }),
         createNodeAt: (position, name) => {
             const id = Actions.createNodeAtAction(ctx, position, name);
             get().selectNode(id);
         },
-        closeViewportContextMenu: () => set({ viewportContextMenu: null }),
+        closeViewportContextMenu: () => set({ viewportContextMenu: null, radialPointer: null }),
 
         fill: (pattern, mask) => Actions.fill(get(), ctx, pattern, mask),
         delete: () => Actions.del(get(), ctx),
@@ -683,6 +709,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             );
             const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
             commitVoxelOps(ctx, airOps);
+            playBulkEdit(ctx, airOps, cutSourceOps);
 
             set({ selection: Selection.create() });
 
@@ -840,7 +867,9 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     saveBlueprint: () => {},
     destroySelectedNodes: () => {},
     openViewportContextMenu: () => {},
+    setRadialPointer: () => {},
     setTraitPicker: () => {},
+    setInspectedVoxel: () => {},
     createNodeAt: () => {},
     closeViewportContextMenu: () => {},
     fill: () => 0,

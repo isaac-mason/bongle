@@ -46,6 +46,11 @@ export const LIBRARY_KEYS = {
     toggleLibrary: 'KeyE',
 } as const;
 
+/** cycles the camera control mode: fly -> orbit -> character -> fly. */
+export const CONTROL_MODE_KEYS = {
+    cycle: 'KeyM',
+} as const;
+
 // hold a category key + tap digit 1..9 to jump to a slot in that category; tap-alone cycles through tools.
 export const TOOL_CATEGORY_KEYS = {
     inspect: 'KeyV',
@@ -155,4 +160,5 @@ export const EDITOR_KEYBINDINGS: Record<string, KeybindGroup[]> = {
         { key: '1-9', label: 'hotbar slot' },
         { key: 'wheel', label: 'cycle slots (build tool)' },
     ],
+    camera: [{ key: CONTROL_MODE_KEYS.cycle, label: 'cycle control mode (fly/orbit/character)' }],
 };

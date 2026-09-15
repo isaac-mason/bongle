@@ -22,7 +22,7 @@ import { InventoryItemIcon } from './inventory-icon';
 import { LeftToolbar } from './left-toolbar';
 import { LibraryOverlay } from './library';
 import { OrientationCube } from './orientation-cube';
-import { PromotePicker } from './promote-picker';
+import { RadialMenu } from './radial-menu';
 import { RightPanel } from './right-panel';
 import { ToolActions } from './tool-actions';
 import { TopToolbar } from './top-toolbar';
@@ -36,66 +36,37 @@ function isInputFocused(): boolean {
     return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable;
 }
 
-// the viewBox maps NDC (-1..1) to 0..100 so the polyline stays pixel-aligned with the
-// lasso tool's hit-test, which is also done in NDC.
-function LassoOverlay() {
-    const points = useEditRoom((s) => s.lasso?.points ?? null);
-    if (!points || points.length < 2) return null;
-    const path = points.map(([x, y]) => `${50 + x * 50},${50 - y * 50}`).join(' ');
-    return (
-        <svg
-            className="absolute inset-0 pointer-events-none z-20"
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-        >
-            <title>lasso selection</title>
-            <polyline
-                points={path}
-                fill="rgba(96, 165, 250, 0.12)"
-                stroke="rgb(96, 165, 250)"
-                strokeWidth={1.5}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-            />
-        </svg>
-    );
-}
-
+/** unpositioned: the caller places it (currently to the right of the control hints). */
 function ControlModeWidget() {
     const controlMode = useEditRoom((s) => s.controlMode);
     const setControlMode = useEditRoom((s) => s.setControlMode);
 
     return (
-        <div className="absolute top-2 right-2 z-10 pointer-events-auto">
-            <div className="flex bg-surface border border-border shadow-sm text-xs overflow-hidden">
-                <button
-                    type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'fly' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
-                    onClick={() => setControlMode('fly')}
-                    title="fly"
-                >
-                    <Icons.Send size={24} />
-                </button>
-                <button
-                    type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'orbit' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
-                    onClick={() => setControlMode('orbit')}
-                    title="orbit"
-                >
-                    <Icons.Orbit size={24} />
-                </button>
-                <button
-                    type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'character' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
-                    onClick={() => setControlMode('character')}
-                    title="character"
-                >
-                    <Icons.PersonStanding size={24} />
-                </button>
-            </div>
+        <div className="flex bg-surface border border-border shadow-sm text-xs overflow-hidden pointer-events-auto">
+            <button
+                type="button"
+                className={`px-2 py-1.5 ${controlMode === 'fly' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
+                onClick={() => setControlMode('fly')}
+                title="fly"
+            >
+                <Icons.Send size={24} />
+            </button>
+            <button
+                type="button"
+                className={`px-2 py-1.5 ${controlMode === 'orbit' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
+                onClick={() => setControlMode('orbit')}
+                title="orbit"
+            >
+                <Icons.Orbit size={24} />
+            </button>
+            <button
+                type="button"
+                className={`px-2 py-1.5 ${controlMode === 'character' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
+                onClick={() => setControlMode('character')}
+                title="character"
+            >
+                <Icons.PersonStanding size={24} />
+            </button>
         </div>
     );
 }
@@ -148,8 +119,9 @@ function EditUI() {
         if (inputMode !== 'touch' || adaptedForTouch.current) return;
         adaptedForTouch.current = true;
         setRightPanelCollapsed(true);
-        // fly is pointer-lock-only and inert on touch; only override the untouched 'fly'
-        // default so a hybrid user who already picked orbit/character keeps their choice.
+        // fly is pointer-lock-only and inert on touch; only override an explicit 'fly' pick
+        // (character is the default now, so this mostly guards a hybrid user who switched to
+        // fly on desktop and then picked the session back up on a touch device).
         const store = activeEditRoomStore();
         if (store.getState().controlMode === 'fly') store.getState().setControlMode('character');
     }, [inputMode]);
@@ -244,14 +216,15 @@ function EditUI() {
 
                     {editorEnabled && (
                         <>
-                            <LassoOverlay />
                             <ViewportContextMenu />
-                            <PromotePicker />
+                            <RadialMenu />
                             <TraitPicker />
                             <ToolActions />
-                            <ControlModeWidget />
+                            <div className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-2">
+                                <ControlHints />
+                                <ControlModeWidget />
+                            </div>
                             <FlySpeedIndicator />
-                            <ControlHints />
                             {showOrientationCube && <OrientationCube />}
                             <Hotbar />
                             <LibraryOverlay />

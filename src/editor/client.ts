@@ -1,4 +1,4 @@
-import { type PerspectiveCamera, type Scene, unproject } from 'gpucat';
+import { Object3D, type PerspectiveCamera, unproject } from 'gpucat';
 import type { EulerOrder, Quat, Spherical, Vec3 } from 'math';
 import { euler, spherical, vec3 } from 'math';
 import { CharacterControllerTrait } from '../builtins/character-controller';
@@ -58,7 +58,7 @@ import { installEditorChatCommands } from './chat-commands';
 import { installSelectionChatCommands } from './chat-selection';
 import { createClipboardHandlers } from './clipboard';
 import { type ControlMode, createEditRoomStore, type EditRoomStoreApi } from './edit-room-store';
-import { HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, SELECTION_KEYS, type ToolCategoryId } from './editor-controls';
+import { CONTROL_MODE_KEYS, HOTBAR_NUMBER_KEYS, LIBRARY_KEYS, SELECTION_KEYS, type ToolCategoryId } from './editor-controls';
 import { useEditor } from './editor-store';
 import { EditorTrait } from './editor-trait';
 import { isInputFocused } from './input';
@@ -76,8 +76,15 @@ import { updateBuild } from './tools/build';
 import { createElevationState, updateElevation } from './tools/elevation';
 import * as Grab from './tools/grab';
 import * as Handles from './tools/handles';
-import { openViewportContextMenu, resolveSelectionTarget, updateInspect } from './tools/inspect';
-import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
+import {
+    createRadialMenuState,
+    openViewportContextMenu,
+    type RadialMenuState,
+    resolveSelectionTarget,
+    updateInspect,
+    updateRadialMenu,
+} from './tools/inspect';
+import { clearLassoStroke, lassoStrokeToWorldPoints, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
 import { createPainterState, updatePainter } from './tools/painter';
 import * as Placement from './tools/placement';
@@ -86,6 +93,7 @@ import * as TransformTool from './tools/transform';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';
 import * as DebugVisuals from './visuals/debug-visuals';
 import * as GridVisuals from './visuals/grid-visuals';
+import * as LassoVisuals from './visuals/lasso-visuals';
 import * as NodeCard from './visuals/node-card';
 import { LABEL_LIFT_PX, LABEL_SCALE } from './visuals/node-card';
 import * as PivotPoint from './visuals/pivot-point';
@@ -95,7 +103,6 @@ import {
     createSelectionMeshState,
     disposeSelectionMeshState,
     type SelectionMeshState,
-    setSelectionMeshesVisible,
     updateSelectionMeshes,
 } from './visuals/selection-mesh';
 
@@ -151,6 +158,7 @@ script(
         onInput(ctx, () => updateGrabRotate(s));
         onInput(ctx, () => updateShortcuts(s.shortcuts, client.input.mouseKeyboard, store, s.grab));
         onInput(ctx, () => updateDeselectKey(s));
+        onInput(ctx, () => updateRadialMenuForActiveTool(s));
 
         onFrame(ctx, () => {
             mirrorRuntimeState(s);
@@ -162,12 +170,8 @@ script(
             }
             // backstop for any path that dropped the placement without a clean teardown.
             Placement.reconcilePlacementGhosts(s.placement);
-            if (!active) {
-                MarkerVisuals.clear(s.markers, room.visibility);
-                hideVisuals(s.visuals, transform);
-                return;
-            }
-            showVisuals(s.visuals, transform);
+            setEditorViewActive(s, active);
+            if (!active) return;
 
             // gizmo is patched with the resolved camera each frame so a POV swap shows without a rebuild.
             const camera = povCamera(s);
@@ -227,12 +231,19 @@ script(
             updateSelectionKeys(s, camera);
             updateBrushPreview(s.brushPreview, store, activeTool);
             updateSelectionMeshes(s.visuals.selection, store.getState(), time);
+            const lassoState = store.getState().lasso;
+            LassoVisuals.update(
+                s.visuals.lasso,
+                lassoState
+                    ? lassoStrokeToWorldPoints(lassoState.points, camera.position, store.getState().lassoOptions.maxDistance)
+                    : null,
+            );
         });
 
         // everything drawn from node poses waits for the last writer of the frame: a script posing a
         // character in its own onFrame or onPostAnimate runs before this, so the overlays never trail it.
         onPreRender(ctx, () => {
-            if (!editorViewActive(room)) return;
+            if (!s.viewActive) return;
             const camera = povCamera(s);
             if (!camera) return;
             const time = client.state!.renderer.time;
@@ -251,6 +262,7 @@ script(
             );
             TransformTool.layoutGizmo(transform);
             redrawInspectMesh(s.visuals, s, time);
+            drawBrushBounds(s.visuals, s);
             endOverlays(s.visuals);
         });
 
@@ -280,7 +292,13 @@ type Session = {
     markers: MarkerVisuals.MarkerVisuals;
     strokes: Strokes;
     shortcuts: Shortcuts;
+    radialMenu: RadialMenuState;
     brushPreview: BrushPreview;
+    /** `editorViewActive` for this frame, computed once in onFrame and read again in onPreRender. */
+    viewActive: boolean;
+    /** the brush `brushBounds` was measured from; the store hands out a fresh ref on every mutation. */
+    brushBoundsOf: Selection.Selection | null;
+    brushBounds: Selection.Bounds | null;
     /** teardowns for resources that don't live in the script (chat command
      *  registry, room-scoped state); on* hooks auto-clean with the script. */
     unsubs: Array<() => void>;
@@ -295,7 +313,11 @@ function openSession(ctx: ScriptContext): Session {
     // store, then the store, then patch transform.store. the initial POV camera
     // seeds the gizmo; the per-frame sync keeps it on the active POV.
     const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
-    const transform = TransformTool.createTransformTool(initialCamera, client.render.scene, room.scene, ctx);
+    // created detached, and every editor overlay hangs off it; `setEditorViewActive` is the only
+    // thing that puts it in the scene or takes it out. the gizmo goes under it like the rest.
+    const overlayRoot = new Object3D();
+    overlayRoot.name = 'editor-overlays';
+    const transform = TransformTool.createTransformTool(initialCamera, overlayRoot, room.scene, ctx);
     const placement = Placement.init(transform);
     const store = createEditRoomStore({ ctx, room, placement });
     transform.store = store;
@@ -330,11 +352,15 @@ function openSession(ctx: ScriptContext): Session {
         grab: Grab.init(store),
         handles: Handles.init(),
         nodeBodies,
-        visuals: initVisuals(client.render.scene),
+        visuals: initVisuals(overlayRoot),
         markers: MarkerVisuals.init(room.scene),
         strokes: initStrokes(),
         shortcuts: initShortcuts(),
+        radialMenu: createRadialMenuState(),
         brushPreview: initBrushPreview(),
+        viewActive: false,
+        brushBoundsOf: null,
+        brushBounds: null,
         unsubs,
     };
 }
@@ -345,12 +371,18 @@ function closeSession(s: Session): void {
     NodeBodies.dispose(s.nodeBodies);
     TransformTool.disposeTransformTool(s.transform);
     MarkerVisuals.dispose(s.markers, s.room.visibility);
-    disposeVisuals(s.visuals, s.client.render.scene);
+    disposeVisuals(s.visuals);
 }
 
 /** the active POV camera, or null when the room has no active POV. */
 function povCamera(s: Session): PerspectiveCamera | null {
     return resolveRoomCamera(s.client.state!.renderer.camera, s.room) as PerspectiveCamera | null;
+}
+
+/** the sprite atlas and batch, absent until the renderer has loaded resources. */
+function withSpriteResources(s: Session, fn: (sprite: SpriteResources) => void): void {
+    const sprite = s.client.state!.renderer.atlases().sprite;
+    if (sprite) fn(sprite);
 }
 
 /** editor visuals + tools only run when this room is the active room AND the POV
@@ -361,12 +393,6 @@ function povCamera(s: Session): PerspectiveCamera | null {
  *  an inactive room's Input reads zero structurally (the engine routes DOM
  *  events only into the active room), so the active-room check here is about
  *  visuals and the gizmo, not about clicks leaking across rooms. */
-/** the sprite atlas and batch, absent until the renderer has loaded resources. */
-function withSpriteResources(s: Session, fn: (sprite: SpriteResources) => void): void {
-    const sprite = s.client.state!.renderer.atlases().sprite;
-    if (sprite) fn(sprite);
-}
-
 function editorViewActive(room: ClientRoom): boolean {
     if (room.client.state!.rooms.activePlayerId !== room.playerId) return false;
     const lens = lensOf(room);
@@ -398,7 +424,10 @@ function mirrorRuntimeState(s: Session): void {
 }
 
 type Visuals = {
+    /** every editor overlay hangs off this; the view gate attaches and detaches it, nothing else. */
+    root: Object3D;
     selection: SelectionMeshState;
+    lasso: LassoVisuals.LassoVisualsState;
     pivot: PivotPoint.State;
     debug: DebugVisuals.DebugVisualsState;
     grid: GridVisuals.GridVisualsState;
@@ -415,44 +444,36 @@ const LINE_WIDTH_PX = 5;
 const QUAD_CAPACITY = 4096;
 const TOUCH_PICKER_SCALE = 1.6;
 
-function initVisuals(scene: Scene): Visuals {
-    const quads = Quads.init(scene, QUAD_CAPACITY);
+/** `root` is the session's overlay root, already holding the transform gizmo. */
+function initVisuals(root: Object3D): Visuals {
+    const quads = Quads.init(root, QUAD_CAPACITY);
     return {
-        selection: createSelectionMeshState(scene),
-        pivot: PivotPoint.create(scene),
+        root,
+        selection: createSelectionMeshState(root),
+        lasso: LassoVisuals.init(root),
+        pivot: PivotPoint.create(root),
         debug: DebugVisuals.init(),
-        grid: GridVisuals.init(scene),
-        chunkBounds: ChunkBoundsVisuals.init(scene),
+        grid: GridVisuals.init(root),
+        chunkBounds: ChunkBoundsVisuals.init(root),
         prefabs: PrefabVisuals.init(),
-        lines: Lines.init(scene, LINE_CAPACITY, LINE_WIDTH_PX),
+        lines: Lines.init(root, LINE_CAPACITY, LINE_WIDTH_PX),
         quads,
         text: Text.init(quads),
     };
 }
 
-/** the editor view is not the POV: force-hide every overlay so none leaks into
- *  the player view. through each visual's own visibility, not by writing
- *  `mesh.visible` behind its back, or the two go out of sync and the overlay
- *  stays hidden once the view comes back. */
-function hideVisuals(v: Visuals, transform: TransformTool.TransformToolState): void {
-    v.grid.minorLines.visible = false;
-    v.grid.majorLines.visible = false;
-    v.grid.xAxisLines.visible = false;
-    v.grid.zAxisLines.visible = false;
-    v.chunkBounds.lines.visible = false;
-    PivotPoint.setVisible(v.pivot, false);
-    setSelectionMeshesVisible(v.selection, false);
-    v.lines.mesh.visible = false;
-    v.quads.mesh.visible = false;
-    transform.gizmo.root.visible = false;
+/** the single gate on the editor view. the overlay root carries every gpucat overlay, so
+ *  detaching it hides all of them and drops the subtree out of the matrix walk too; the
+ *  calls below it are the visuals that live in the node tree instead, which the root can't reach. */
+function setEditorViewActive(s: Session, active: boolean): void {
+    if (s.viewActive === active) return;
+    s.viewActive = active;
+    if (active) s.client.render.scene.add(s.visuals.root);
+    else s.visuals.root.removeFromParent();
     // the gizmo only sees pointer input through `feedPointer`, which the inactive frame
     // never reaches; `enabled` is belt and braces for any path that still hit-tests.
-    transform.gizmo.enabled = false;
-}
-
-function showVisuals(v: Visuals, transform: TransformTool.TransformToolState): void {
-    setSelectionMeshesVisible(v.selection, true);
-    transform.gizmo.enabled = true;
+    s.transform.gizmo.enabled = active;
+    if (!active) MarkerVisuals.clear(s.markers, s.room.visibility);
 }
 
 /** the world-space overlays that follow the scene rather than the tool: prefab
@@ -604,20 +625,61 @@ function drawDragReadout(v: Visuals, s: Session): void {
     );
 }
 
-/** last call of the frame in every tool branch. */
+const BOUNDS_READOUT_COLOR: [number, number, number, number] = [0.4, 1, 1, 1];
+
+/** the brush's extent, one number per axis, each centred on the box edge that runs along it.
+ *  the three edges chosen are the ones meeting at the corner nearest the eye, so the numbers
+ *  stay on the silhouette rather than behind the shape. skipped for a single cell, where the
+ *  brush outline already says everything and every hovered block would carry a "1 x 1 x 1".
+ *  `Selection.bounds` walks every set bit, so it is memoised on the brush ref the store hands out. */
+function drawBrushBounds(v: Visuals, s: Session): void {
+    const brush = s.store.getState().brush;
+    if (!brush || Selection.count(brush) < 2) return;
+    if (s.brushBoundsOf !== brush) {
+        s.brushBoundsOf = brush;
+        s.brushBounds = Selection.bounds(brush);
+    }
+    const bounds = s.brushBounds;
+    if (!bounds) return;
+
+    // bounds are inclusive voxel coords; the box they describe spans min .. max + 1.
+    const minX = bounds.min[0];
+    const minY = bounds.min[1];
+    const minZ = bounds.min[2];
+    const maxX = bounds.max[0] + 1;
+    const maxY = bounds.max[1] + 1;
+    const maxZ = bounds.max[2] + 1;
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const midZ = (minZ + maxZ) / 2;
+
+    const eye = povCamera(s)?.position ?? _noEye;
+    const nearX = eye[0] < midX ? minX : maxX;
+    const nearY = eye[1] < midY ? minY : maxY;
+    const nearZ = eye[2] < midZ ? minZ : maxZ;
+
+    const [spanX, spanY, spanZ] = bounds.dimensions;
+    NodeCard.drawBackedLabel(v, midX, nearY, nearZ, `${spanX}`, 0, ...BOUNDS_READOUT_COLOR);
+    NodeCard.drawBackedLabel(v, nearX, midY, nearZ, `${spanY}`, 0, ...BOUNDS_READOUT_COLOR);
+    NodeCard.drawBackedLabel(v, nearX, nearY, midZ, `${spanZ}`, 0, ...BOUNDS_READOUT_COLOR);
+}
+
+/** uploads what the frame batched; last call of the onPreRender pass. */
 function endOverlays(v: Visuals): void {
     Lines.end(v.lines);
     Quads.end(v.quads);
 }
 
-function disposeVisuals(v: Visuals, scene: Scene): void {
+function disposeVisuals(v: Visuals): void {
     PivotPoint.dispose(v.pivot);
     disposeSelectionMeshState(v.selection);
-    Lines.dispose(v.lines, scene);
-    Quads.dispose(v.quads, scene);
-    GridVisuals.dispose(v.grid, scene);
-    ChunkBoundsVisuals.dispose(v.chunkBounds, scene);
+    LassoVisuals.dispose(v.lasso);
+    Lines.dispose(v.lines);
+    Quads.dispose(v.quads);
+    GridVisuals.dispose(v.grid);
+    ChunkBoundsVisuals.dispose(v.chunkBounds);
     PrefabVisuals.dispose(v.prefabs);
+    v.root.removeFromParent();
 }
 
 // per room so two joined edit rooms keep independent strokes.
@@ -726,6 +788,8 @@ function updateHover(
     }));
 }
 
+const CONTROL_MODE_CYCLE: readonly ControlMode[] = ['fly', 'orbit', 'character'];
+
 // chord-prefix pattern (V/M/B categories): tap-alone commits on keyup; hold + digit jumps to a
 // slot and suppresses the keyup commit via `consumed`.
 type Shortcuts = {
@@ -785,6 +849,13 @@ function updateShortcuts(sc: Shortcuts, mk: MouseKeyboardInput, store: EditRoomS
     // library toggle (E)
     if (isKeyJustDown(mk, LIBRARY_KEYS.toggleLibrary)) store.getState().toggleLibrary();
 
+    // camera control mode cycle (M): fly -> orbit -> character -> fly
+    if (isKeyJustDown(mk, CONTROL_MODE_KEYS.cycle)) {
+        const s = store.getState();
+        const idx = CONTROL_MODE_CYCLE.indexOf(s.controlMode);
+        s.setControlMode(CONTROL_MODE_CYCLE[(idx + 1) % CONTROL_MODE_CYCLE.length]!);
+    }
+
     // suppressed while a chord prefix is held; library.tsx stops the event before it reaches
     // here when binding a hovered tile to a slot, so a digit read here is always a plain select.
     if (sc.heldCategory === null) {
@@ -833,6 +904,25 @@ function updateGrabRotate(s: Session): void {
         mk._dx = 0;
         mk._dy = 0;
     }
+}
+
+/** same tool gating as the tap-triggered `openViewportContextMenu` (see updateVoxelTools /
+ *  updateInspect below), but run as an input pre-pass — see updateRadialMenu's docs for why it
+ *  can't just live alongside those onFrame-time calls. */
+function updateRadialMenuForActiveTool(s: Session): void {
+    const { activeTool } = s.store.getState();
+    const gated =
+        activeTool === 'inspect' || activeTool === 'box-select' || activeTool === 'magic-select' || activeTool === 'lasso-select';
+    if (!gated) {
+        // a tool switch mid-hold (a keyboard tool-category shortcut, say) shouldn't leave the
+        // menu stuck open with nothing left driving its release. `viewportContextMenu.radial` is
+        // the one place "is the radial menu open" lives — see updateRadialMenu's doc comment.
+        if (s.store.getState().viewportContextMenu?.radial) s.store.getState().closeViewportContextMenu();
+        return;
+    }
+    const camera = povCamera(s);
+    if (!camera) return;
+    updateRadialMenu(s.radialMenu, s.store, s.client, s.room, s.ctx, s.nodeBodies, camera);
 }
 
 function updateVoxelTools(s: Session, camera: PerspectiveCamera): void {
@@ -905,10 +995,20 @@ function updateSelectionKeys(s: Session, camera: PerspectiveCamera): void {
     const sBefore = store.getState();
     const hasSelection = !Selection.isEmpty(sBefore.selection);
     const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
-    if ((hasSelection || hasInProgressTool) && !isInputFocused() && isKeyJustDown(mk, 'KeyR') && !Grab.isInGrab(s.grab)) {
+    if (
+        (hasSelection || hasInProgressTool) &&
+        !isInputFocused() &&
+        isKeyJustDown(mk, SELECTION_KEYS.clearAll) &&
+        !Grab.isInGrab(s.grab)
+    ) {
         clearBoxSelect(store);
         clearLassoStroke(store);
-        if (hasSelection) store.getState().clearSelection();
+        // same rule as deselect and Escape: the sound marks a committed selection going away,
+        // not an in-progress stroke being dropped.
+        if (hasSelection) {
+            store.getState().clearSelection();
+            playDeselected(s.ctx);
+        }
     }
 
     if (!isInputFocused() && isKeyJustDown(mk, 'Escape')) {
@@ -965,8 +1065,8 @@ function resetBrushPreview(p: BrushPreview): void {
 }
 
 function updateBrushPreview(p: BrushPreview, store: EditRoomStoreApi, activeTool: string): void {
-    // lasso has its own screen-space overlay; suppress the world-space hover
-    // brush so it doesn't add visual noise.
+    // lasso draws its own stroke overlay (LassoVisuals); suppress the hover-voxel
+    // brush box so it doesn't add visual noise next to it.
     if (activeTool === 'lasso-select') {
         if (store.getState().brush !== null) {
             store.setState({ brush: null });

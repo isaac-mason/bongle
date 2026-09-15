@@ -6,6 +6,7 @@ import {
     getCursor,
     isKeyDown,
     isKeyJustDown,
+    isModDown,
     isMouseDown,
     isMouseJustDown,
     isMouseJustUp,
@@ -24,6 +25,9 @@ import { isInputFocused } from '../input';
 import { lensOf } from '../lens';
 import { isOwnershipBoundary, type NodeBodies } from '../node-bodies';
 import * as Selector from '../selector';
+import { playDeselected, playSelected } from '../sounds';
+import type { NodeMenuItem } from '../ui/node-menu';
+import { buildViewportMenuEntries } from '../ui/viewport-menu-entries';
 import type { State as PivotPoint } from '../visuals/pivot-point';
 import * as PivotPointMod from '../visuals/pivot-point';
 import type { SelectionMeshState } from '../visuals/selection-mesh';
@@ -66,32 +70,23 @@ const _farWorld: [number, number, number] = [0, 0, 0];
 const _rayDir: [number, number, number] = [0, 0, 0];
 const MAX_RAY_DIST = 1024;
 
-// Right-click tap: raycast, refine selection, open the viewport context menu at
-// the cursor. Callers gate by activeTool. Drags are filtered out, only fires on
-// release if the press never crossed the input layer's drag threshold.
-export function openViewportContextMenu(
+export type ContextMenuTarget = { world: Vec3 | null; block: { wx: number; wy: number; wz: number; key: string } | null };
+
+/** raycasts along (ndcX, ndcY), refines the selection the same way a right-click always has
+ *  (selects a not-yet-selected node hit, or the voxel under the cursor), and reports whether a
+ *  menu should open there. shared by `openViewportContextMenu` (cursor visible, tap-triggered)
+ *  and `updateRadialMenu` (pointer-locked, hold-triggered) so both open on identical criteria. */
+function resolveContextMenuTarget(
     store: EditRoomStoreApi,
-    client: ClientContext,
     room: ClientRoom,
     ctx: ScriptContext,
     nodeBodies: NodeBodies,
     camera: PerspectiveCamera,
-): void {
-    // Touch has no second button, so a long-press stands in for a right-click tap;
-    // the cursor already tracks the pressing finger.
-    const cursor = getCursor(client.input.mouseKeyboard);
-    let longPress = false;
-    for (const finger of getCanvasTouches(client.input.touch).values()) {
-        if (finger.longPressed) {
-            longPress = true;
-            break;
-        }
-    }
-    if (!longPress && !isMouseTap(client.input.mouseKeyboard, 'right')) return;
-    if (document.pointerLockElement) return;
-
-    unproject(_nearWorld, [cursor.ndcX, cursor.ndcY, 0], camera);
-    unproject(_farWorld, [cursor.ndcX, cursor.ndcY, 1], camera);
+    ndcX: number,
+    ndcY: number,
+): ContextMenuTarget | null {
+    unproject(_nearWorld, [ndcX, ndcY, 0], camera);
+    unproject(_farWorld, [ndcX, ndcY, 1], camera);
     vec3.subtract(_rayDir, _farWorld, _nearWorld);
     vec3.normalize(_rayDir, _rayDir);
 
@@ -138,27 +133,174 @@ export function openViewportContextMenu(
         shouldOpen = true;
     }
 
-    if (shouldOpen) {
-        const world: Vec3 | null =
-            voxelWins && voxelHit
-                ? Placement.placePointOnFace(
-                      [voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ],
-                      [voxelHit.nx, voxelHit.ny, voxelHit.nz],
-                      [voxelHit.px, voxelHit.py, voxelHit.pz],
-                      s.snapTo,
-                  )
-                : null;
-        const block =
-            voxelWins && voxelHit
-                ? {
-                      wx: voxelHit.voxelX,
-                      wy: voxelHit.voxelY,
-                      wz: voxelHit.voxelZ,
-                      key: getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ),
-                  }
-                : null;
-        s.openViewportContextMenu(cursor.x, cursor.y, world, block);
+    if (!shouldOpen) return null;
+
+    const world: Vec3 | null =
+        voxelWins && voxelHit
+            ? Placement.placePointOnFace(
+                  [voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ],
+                  [voxelHit.nx, voxelHit.ny, voxelHit.nz],
+                  [voxelHit.px, voxelHit.py, voxelHit.pz],
+                  s.snapTo,
+              )
+            : null;
+    const block =
+        voxelWins && voxelHit
+            ? {
+                  wx: voxelHit.voxelX,
+                  wy: voxelHit.voxelY,
+                  wz: voxelHit.voxelZ,
+                  key: getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ),
+              }
+            : null;
+    return { world, block };
+}
+
+// Right-click tap: raycast, refine selection, open the viewport context menu at
+// the cursor. Callers gate by activeTool. Drags are filtered out, only fires on
+// release if the press never crossed the input layer's drag threshold.
+export function openViewportContextMenu(
+    store: EditRoomStoreApi,
+    client: ClientContext,
+    room: ClientRoom,
+    ctx: ScriptContext,
+    nodeBodies: NodeBodies,
+    camera: PerspectiveCamera,
+): void {
+    // Touch has no second button, so a long-press stands in for a right-click tap;
+    // the cursor already tracks the pressing finger.
+    const cursor = getCursor(client.input.mouseKeyboard);
+    let longPress = false;
+    for (const finger of getCanvasTouches(client.input.touch).values()) {
+        if (finger.longPressed) {
+            longPress = true;
+            break;
+        }
     }
+    if (!longPress && !isMouseTap(client.input.mouseKeyboard, 'right')) return;
+    // pointer-locked has no OS cursor to anchor a dropdown at; see updateRadialMenu instead.
+    if (document.pointerLockElement) return;
+
+    const resolved = resolveContextMenuTarget(store, room, ctx, nodeBodies, camera, cursor.ndcX, cursor.ndcY);
+    if (!resolved) return;
+    store.getState().openViewportContextMenu(cursor.x, cursor.y, resolved.world, resolved.block, false);
+}
+
+/** just the raw stick accumulator — NOT "is the menu open"; that's `store.viewportContextMenu.radial`
+ *  alone (see updateRadialMenu's doc comment). keeping only non-authoritative, purely-local state
+ *  here is what makes the store the one thing to check when tying anything else to this menu's
+ *  lifetime — a second `active` flag here would be a second thing that could disagree with it. */
+export type RadialMenuState = {
+    /** accumulated look-delta since the hold started, in the same pixel-ish units as `mk._dx/_dy`. */
+    stickX: number;
+    stickY: number;
+};
+
+export function createRadialMenuState(): RadialMenuState {
+    return { stickX: 0, stickY: 0 };
+}
+
+/** below this accumulated distance, no wedge is picked — small movements (or none at all,
+ *  right after opening) read as "still deciding", not "top wedge". */
+const RADIAL_DEAD_ZONE_PX = 18;
+/** stick deflection beyond this reads as fully pushed (`radialPointer.mag` maxes at 1); the
+ *  cursor stops moving further out but the wedge keeps tracking angle alone. */
+const RADIAL_MAX_DRAG_PX = 120;
+
+/** hold-RMB counterpart to `openViewportContextMenu` for while the pointer is locked (fly-cam
+ *  free-look, character mode): there's no OS cursor to place a dropdown at or move to pick an
+ *  item, so this reuses the screen-centre aim ray (same convention the lasso tool uses while
+ *  locked) to open, and accumulated mouse delta — which pointer lock keeps delivering via
+ *  `movementX/Y` even though the cursor itself never moves — to pick a wedge. Release confirms
+ *  whatever's highlighted; Escape or releasing outside every wedge (the dead zone) cancels.
+ *
+ *  Open/closed lives ONLY in `store.viewportContextMenu` (null = closed, `.radial` distinguishes
+ *  this from the dropdown) — not in `state` here, and not duplicated anywhere else. Anything that
+ *  needs to react to this menu's lifetime (the `RadialMenu` UI, `updateRadialMenuForActiveTool`'s
+ *  tool-switch guard in client.ts) reads that same field, so input and rendering can be edited
+ *  independently without a second "is it open" flag to keep in sync by hand.
+ *
+ *  Callers gate by activeTool exactly like `openViewportContextMenu` (this doesn't duplicate that
+ *  guard, or the existing tap-triggered function's own pointer-lock early-return — the two are
+ *  independent, both self-consistent to call unconditionally). MUST run from an `onInput` hook
+ *  registered before the fly/character controller's own `onInput` look handler consumes the same
+ *  frame's `mk._dx/_dy` (see EditorTrait's "input pre-passes" block in client.ts) — called from
+ *  `onFrame` instead, the controller would already have spent the delta and every wedge pick
+ *  would read as the dead zone. */
+export function updateRadialMenu(
+    state: RadialMenuState,
+    store: EditRoomStoreApi,
+    client: ClientContext,
+    room: ClientRoom,
+    ctx: ScriptContext,
+    nodeBodies: NodeBodies,
+    camera: PerspectiveCamera,
+): void {
+    const mk = client.input.mouseKeyboard;
+    const isOpen = store.getState().viewportContextMenu?.radial === true;
+
+    if (!document.pointerLockElement) {
+        if (isOpen) store.getState().closeViewportContextMenu();
+        return;
+    }
+
+    if (!isOpen) {
+        if (!isMouseJustDown(mk, 'right')) return;
+        const resolved = resolveContextMenuTarget(store, room, ctx, nodeBodies, camera, 0, 0);
+        if (!resolved) return;
+        state.stickX = 0;
+        state.stickY = 0;
+        // x/y become the viewport centre: nothing to anchor a dropdown at, but a followup
+        // picker (add-trait, promote) still wants somewhere on-screen to open near.
+        store
+            .getState()
+            .openViewportContextMenu(window.innerWidth / 2, window.innerHeight / 2, resolved.world, resolved.block, true);
+        return;
+    }
+
+    const released = !isMouseDown(mk, 'right');
+    const cancelled = isKeyJustDown(mk, 'Escape');
+    if (released || cancelled) {
+        if (released && !cancelled) {
+            const hover = store.getState().radialPointer?.hover ?? null;
+            if (hover !== null) {
+                const items = buildViewportMenuEntries(store).filter((e): e is NodeMenuItem => e.kind === 'item');
+                items[hover]?.onSelect();
+            }
+        }
+        store.getState().closeViewportContextMenu();
+        return;
+    }
+
+    // claims the delta (zeroing it) so the fly/character controller's own look doesn't also spin
+    // the camera while this reads it for wedge selection; mirrors updateGrabRotate's same trick.
+    state.stickX += mk._dx;
+    state.stickY += mk._dy;
+    mk._dx = 0;
+    mk._dy = 0;
+    const mag = Math.hypot(state.stickX, state.stickY);
+    if (mag < RADIAL_DEAD_ZONE_PX) {
+        store.getState().setRadialPointer({ hover: null, dirX: 0, dirY: 0, mag: 0 });
+        return;
+    }
+
+    // direction is plain screen-space (x right, y down) — the same convention the SVG cursor in
+    // ui/radial-menu.tsx draws in, so it composes with no sign flips.
+    const dirX = state.stickX / mag;
+    const dirY = state.stickY / mag;
+    const clampedMag = Math.min(1, mag / RADIAL_MAX_DRAG_PX);
+
+    const items = buildViewportMenuEntries(store).filter((e) => e.kind === 'item');
+    if (items.length === 0) {
+        store.getState().setRadialPointer({ hover: null, dirX, dirY, mag: clampedMag });
+        return;
+    }
+    // screen space is y-down; wedge 0 sits at the top (angle -90deg) and wedges go clockwise.
+    const angle = Math.atan2(state.stickY, state.stickX) + Math.PI / 2;
+    const wedge = (2 * Math.PI) / items.length;
+    const normalized = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const hover = Math.floor(normalized / wedge) % items.length;
+    store.getState().setRadialPointer({ hover, dirX, dirY, mag: clampedMag });
 }
 
 export function updateInspect(
@@ -348,6 +490,10 @@ export function updateInspect(
         const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
 
         const voxelWins = voxelHit !== undefined && (nodeHit === undefined || voxelHit.distance < nodeHit.distance);
+        // a plain (non-shift) click that lands on the other category picks that up instead of
+        // clearing this one, so losing this category isn't its own event worth a deselect blip.
+        const willSelectVoxel = selectTarget !== 'nodes' && voxelHit !== undefined && (voxelWins || selectTarget === 'voxels');
+        let selectedNodeThisClick = false;
 
         if (selectTarget !== 'voxels') {
             const rawHit = voxelWins ? null : (nodeHit ?? null);
@@ -355,35 +501,56 @@ export function updateInspect(
                 ? resolveSelectionTarget(rawHit.node, store.getState().selection.nodes, room.scene.root)
                 : null;
             const mk = client.input.mouseKeyboard;
-            const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
+            // cmd/ctrl is an alternate add-to-selection modifier, same as shift.
+            const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
             const s = store.getState();
-            if (shiftHeld && selectedNode) {
+            if (addHeld && selectedNode) {
                 if (s.selection.nodes.has(selectedNode.id)) {
                     s.removeFromSelection(selectedNode.id);
+                    playDeselected(ctx);
                 } else {
                     s.addToSelection(selectedNode.id);
+                    playSelected(ctx, true);
                 }
             } else {
+                const hadNodeSelection = s.selection.nodes.size > 0;
                 s.selectNode(selectedNode ? selectedNode.id : null);
+                if (selectedNode) {
+                    selectedNodeThisClick = true;
+                    playSelected(ctx, false);
+                } else if (hadNodeSelection && !willSelectVoxel) {
+                    playDeselected(ctx);
+                }
             }
         }
 
-        // a block click is a voxel selection: shift toggles the voxel, plain replaces; a miss clears.
+        // a block click inspects it — sets `inspectedVoxel` directly, deliberately NOT the shared
+        // voxel `selection` (see that field's doc comment): looking at a block's properties
+        // shouldn't disturb whatever a select tool actually has selected. no shift-toggle here;
+        // there's only ever one inspected voxel at a time.
         if (activeTool === 'inspect' && selectTarget !== 'nodes') {
             const mk = client.input.mouseKeyboard;
-            const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
+            // cmd/ctrl is an alternate add-to-selection modifier, same as shift — kept in sync
+            // here even though inspect no longer has anything to "add" a voxel to, since it still
+            // gates whether a miss clears a stale voxel selection from another tool.
+            const addHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') || isModDown(mk);
             const cur = store.getState().selection;
             if (voxelHit && (voxelWins || selectTarget === 'voxels')) {
                 const { voxelX, voxelY, voxelZ } = voxelHit;
-                store
-                    .getState()
-                    .replaceSelection(
-                        shiftHeld
-                            ? Selection.withVoxelToggled(cur, voxelX, voxelY, voxelZ)
-                            : Selection.ofVoxel(voxelX, voxelY, voxelZ),
-                    );
-            } else if (!shiftHeld && cur.chunks.size > 0) {
-                store.getState().replaceSelection(Selection.nodesOnly(cur));
+                store.getState().setInspectedVoxel({ wx: voxelX, wy: voxelY, wz: voxelZ });
+                playSelected(ctx, false);
+            } else {
+                if (store.getState().inspectedVoxel) {
+                    store.getState().setInspectedVoxel(null);
+                    playDeselected(ctx);
+                }
+                // a miss still clears a stale voxel SELECTION left over from box/brush/lasso/magic
+                // select — a separate, deliberate "click away to deselect" gesture, not the thing
+                // that got reverted here.
+                if (!addHeld && cur.chunks.size > 0 && !selectedNodeThisClick) {
+                    store.getState().replaceSelection(Selection.nodesOnly(cur));
+                    playDeselected(ctx);
+                }
             }
         }
     }
@@ -412,8 +579,13 @@ export function updateInspect(
 
             // Escape clears the node selection first, then the voxel selection.
             if (isKeyJustDown(mk, 'Escape')) {
-                if (hasNodeSelection) store.getState().clearNodeSelection();
-                else if (Selection.countVoxels(store.getState().selection) > 0) store.getState().clearSelection();
+                if (hasNodeSelection) {
+                    store.getState().clearNodeSelection();
+                    playDeselected(ctx);
+                } else if (Selection.countVoxels(store.getState().selection) > 0) {
+                    store.getState().clearSelection();
+                    playDeselected(ctx);
+                }
             }
         } else if (activeTool === 'transform') {
             if (Placement.isInPlacement(placement)) {

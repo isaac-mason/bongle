@@ -806,10 +806,21 @@ export function ElevationOptions() {
 }
 
 export function InspectOptions() {
+    // inspecting a block is separate from selecting one (see `inspectedVoxel`'s doc comment in
+    // edit-room-store.ts) — plain SelectionSummary would otherwise show the idle text while the
+    // full block-property panel is up.
+    const inspectedVoxel = useEditRoom((s) => s.inspectedVoxel);
+    const hasSelection = useEditRoom((s) => !Selection.isEmpty(s.selection));
     return (
         <div className="flex flex-col gap-1">
             <div className="flex flex-col gap-1 px-2 py-1.5">
-                <SelectionSummary idle="click a node or voxel to select" />
+                {!hasSelection && inspectedVoxel ? (
+                    <div className="text-[10px] font-mono text-fg-muted">
+                        inspecting ({inspectedVoxel.wx}, {inspectedVoxel.wy}, {inspectedVoxel.wz})
+                    </div>
+                ) : (
+                    <SelectionSummary idle="click a node or voxel to select" />
+                )}
                 <SelectTargetRow />
             </div>
         </div>
