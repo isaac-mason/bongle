@@ -8,7 +8,7 @@
  *  commit date (YYYYMMDD) the dist was built from. */
 export const BONGLE_BUILD = {
     version: '0.0.0-alpha.1',
-    sha: '4cd12206',
+    sha: 'd5fe5dc0',
     date: '20260915',
 } as const;
 
