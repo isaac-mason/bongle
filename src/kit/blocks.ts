@@ -143,7 +143,7 @@ export const stoneSlab = blockPreset.slab('kit:stone_slab', {
 });
 export const stonePlate = blockPreset.plate('kit:stone_plate', {
     name: 'Stone Pressure Plate',
-    tags: ['stone', 'plate', 'redstone'],
+    tags: ['stone', 'plate'],
     tiles: tex.stone,
     sounds: soundPreset.stone,
 });
@@ -184,7 +184,7 @@ export const mossyStoneBricks = blockPreset.cube('kit:mossy_stone_bricks', {
 });
 export const crackedStoneBricks = blockPreset.cube('kit:cracked_stone_bricks', {
     name: 'Cracked Stone Bricks',
-    tags: ['stone', 'brick', 'building', 'ruin'],
+    tags: ['stone', 'brick', 'building'],
     tiles: tex.crackedStoneBricks,
     sounds: soundPreset.stone,
 });
