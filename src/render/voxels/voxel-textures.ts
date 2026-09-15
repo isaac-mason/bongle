@@ -17,15 +17,11 @@ import type { Blocks } from '../../core/voxels/block-registry';
 const BPP = 4;
 
 /** the artifact format this loader reads; anything else is treated as missing. */
-const ATLAS_VERSION = 4;
+const ATLAS_VERSION = 3;
 
-/** mip levels beyond 0 the bake ships; must match tile-atlas's MIP_LEVELS. The
- *  sampler's lodMaxClamp says the same thing to the hardware. */
-export const ATLAS_MIP_LEVELS = 3;
-
-/** anisotropic taps for the block atlas, the knob Sodium and VulkanMod expose for
- *  grazing-angle shimmer. Backends clamp it to what the device reports. */
-const ATLAS_ANISOTROPY = 8;
+/** mip levels beyond 0 the bake ships. The material clamps its explicit LOD
+ *  here; the sampler's lodMaxClamp says the same thing to the hardware. */
+export const ATLAS_MIP_LEVELS = 4;
 
 /** what a texture index means: where the tile is, and how it animates.
  *  `rect` is the normalised atlas rect `(u, v, w, h)`; `anim` is
@@ -90,14 +86,9 @@ export function createVoxelTextures(registry: Blocks): VoxelTextures {
         { data: new Uint8Array([255, 255, 255, 255]), width: 1, height: 1 },
         {
             format: 'rgba8unorm-srgb',
-            // all three linear is what lets the sampler honour maxAnisotropy at all, and
-            // what makes the material's texel snap resolve to a crisp one-pixel ramp
-            // instead of quantising straight back to nearest. Safe against neighbouring
-            // tiles because the bake extrudes a TILE_PADDING border around every tile.
-            magFilter: 'linear',
-            minFilter: 'linear',
+            magFilter: 'nearest',
+            minFilter: 'nearest',
             mipmapFilter: 'linear',
-            anisotropy: ATLAS_ANISOTROPY,
             wrapS: 'clamp-to-edge',
             wrapT: 'clamp-to-edge',
             generateMipmaps: false,

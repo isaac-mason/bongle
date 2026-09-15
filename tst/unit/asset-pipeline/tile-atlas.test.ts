@@ -103,7 +103,7 @@ beforeEach(() => {
 });
 
 describe('buildTileAtlas', () => {
-    it('packs tiles into padded 16-aligned cells, one per texture index, and ships three levels', async () => {
+    it('packs tiles into 16-aligned rects, one per texture index, and ships four levels', async () => {
         tile('stone', { frames: [texture('stone', { src: 'stone.png' })] });
         tile('leaf', { frames: [texture('leaf', { src: 'leaf.png' })] });
         tile('sand', { frames: [texture('sand', { src: 'sand.png' })] });
@@ -115,24 +115,22 @@ describe('buildTileAtlas', () => {
 
         expect(built).toBe(true);
         const meta = sidecar(written);
-        expect(meta).toMatchObject({ version: 4, mipLevels: 3, atlasWidth: 256, atlasHeight: 256 });
+        expect(meta).toMatchObject({ version: 3, mipLevels: 4, atlasWidth: 256, atlasHeight: 256 });
         expect(meta.textures).toEqual(['stone', 'leaf', 'sand']);
         expect(meta.rects).toHaveLength(3);
         expect(meta.rects[1]).toMatchObject({ w: 32, h: 32 });
-        // cells are 16-aligned and each rect is the interior, inset by the 8-texel border.
         for (const r of meta.rects) {
-            expect(r.x % 16).toBe(8);
-            expect(r.y % 16).toBe(8);
+            expect(r.x % 16).toBe(0);
+            expect(r.y % 16).toBe(0);
         }
-        // level L is the atlas at 256 >> L, plus the extruded level 0 put back as pixels.
+        // level L is the atlas at 256 >> L.
         expect(raster.put).toEqual([
-            [256, 256],
             [128, 128],
             [64, 64],
             [32, 32],
+            [16, 16],
         ]);
-        for (let level = 1; level <= 3; level++) expect(written.has(`resources/client/voxels-atlas.${level}.png`)).toBe(true);
-        expect(written.has('resources/client/voxels-atlas.4.png')).toBe(false);
+        for (let level = 1; level <= 4; level++) expect(written.has(`resources/client/voxels-atlas.${level}.png`)).toBe(true);
     });
 
     it('gives an animated tile one consecutive rect per frame', async () => {
@@ -189,7 +187,7 @@ describe('buildTileAtlas', () => {
         const { fs, written } = fakeFs();
         const built = await buildTileAtlas(moduleWith([], []), baseOpts(fs, fakeRaster(), loaderWithSizes({})));
         expect(built).toBe(false);
-        expect(sidecar(written)).toMatchObject({ version: 4, mipLevels: 0, textures: [], rects: [] });
+        expect(sidecar(written)).toMatchObject({ version: 3, mipLevels: 0, textures: [], rects: [] });
         expect([...written.keys()]).toEqual(['resources/client/voxels-atlas.json']);
     });
 });

@@ -19,6 +19,8 @@ import {
     i32,
     index,
     instanceIndex,
+    length,
+    log2,
     Material,
     max,
     min,
@@ -47,7 +49,7 @@ import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { ChunkInfo, VisibleQuad } from './voxel-arena';
 import { bindLightVolume, brightnessCurve, combineVoxelLight, lightAtFaceCorner } from './voxel-light-sample';
-import type { VoxelTextures } from './voxel-textures';
+import { ATLAS_MIP_LEVELS, type VoxelTextures } from './voxel-textures';
 
 const AMBIENT_MINIMUM: [number, number, number] = [0.04, 0.04, 0.06];
 
@@ -300,10 +302,14 @@ export const POS_DECODE_ORIGIN = 8;
 // alpha cutoff for the translucent layer.
 const TRANSLUCENT_ALPHA_MIN = 0.0001;
 
+/** taps along the derivative ellipse's major axis. This is also the anisotropy cap: N taps
+ *  can cover a footprint N times longer than it is wide before the LOD has to blur. */
+const ANISO_TAPS = 4;
+
 const round = (x: Node<d.vec2f>) => floor(x.add(vec2f(f32(0.5), f32(0.5))));
 
 // frame resolution runs in the vertex stage: the current and next frame's rects, and the mix between them.
-// atlas albedo at `vUv` for `texIndex`: frames resolved in the vertex stage, texel-snapped in the fragment.
+// atlas albedo at `vUv` for `texIndex`: frames resolved in the vertex stage, texel-snapped up close and anisotropically averaged under minification.
 export function sampleVoxelAlbedo(
     textures: VoxelTextures,
     texIndex: Node<d.f32>,
@@ -346,9 +352,7 @@ export function sampleVoxelAlbedo(
 
     const tex = texture(textures.atlas);
 
-    // snaps toward the texel centre by the texel's screen size, so the bilinear sampler
-    // resolves the boundary as a one-pixel ramp: crisp texels up close, no stairstep. The
-    // gradients are the unsnapped ones, so LOD and the anisotropy axis stay correct.
+    // snaps toward the texel centre by the texel's screen size; the hardware picks the mip level.
     const sampleNearest = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
         const uvTexel = uv.div(pixelSize).toVar(`${name}Texel`);
         const texelCenter = round(uvTexel)
@@ -368,8 +372,49 @@ export function sampleVoxelAlbedo(
         return tex.sample(snappedUv).grad(du, dv).toVar(`${name}Nearest`);
     };
 
-    const colorA = sampleNearest(uvA, 'colorA');
-    const colorB = sampleNearest(uvB, 'colorB');
+    // Anisotropic averaging, done here rather than by the sampler: WebGPU only honours
+    // maxAnisotropy with linear filters, and linear filtering an atlas with no gutters
+    // bleeds across tiles. Nearest never leaves its own texel, so this stays bleed-free
+    // and the atlas stays tight, the same trade MC's Stitcher makes.
+    const duLen = max(length(du), f32(1e-8)).toVar('vmDuLen');
+    const dvLen = max(length(dv), f32(1e-8)).toVar('vmDvLen');
+    const minorLen = min(duLen, dvLen).toVar('vmMinorLen');
+    const majorLen = max(duLen, dvLen).toVar('vmMajorLen');
+    const minPixelSize = min(pixelSize.x, pixelSize.y).toVar('vmMinPixelSize');
+
+    // the major axis as a uv-space vector; its length is already the footprint's long side.
+    const majorAxis = select(dv, du, duLen.greaterThanEqual(dvLen)).toVar('vmMajorAxis');
+
+    // LOD is the minor axis's level, raised only as far as ANISO_TAPS taps cannot cover the
+    // major axis. Head-on the second term loses and this is the plain isotropic level; at a
+    // grazing angle it holds the level ANISO_TAPS times sharper than an isotropic pick.
+    const lodMinor = log2(minorLen.div(minPixelSize)).toVar('vmLodMinor');
+    const lodCover = log2(majorLen.div(minPixelSize.mul(f32(ANISO_TAPS)))).toVar('vmLodCover');
+    const lod = clamp(max(lodMinor, lodCover), f32(0), f32(ATLAS_MIP_LEVELS)).toVar('vmLod');
+
+    // taps spread across the whole footprint, so each lands in a different texel once the
+    // surface is minified. Sodium's rotated grid is fixed at a fraction of a level-0 texel,
+    // which collapses to a single sample at exactly the distances that shimmer.
+    const sampleAniso = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> => {
+        let sum: Node<d.vec4f> | null = null;
+        for (let i = 0; i < ANISO_TAPS; i++) {
+            const offset = (i + 0.5) / ANISO_TAPS - 0.5;
+            const tap = tex.sample(uv.add(majorAxis.mul(f32(offset)))).level(lod);
+            sum = sum ? sum.add(tap) : tap;
+        }
+        return sum!.mul(f32(1 / ANISO_TAPS)).toVar(`${name}Aniso`);
+    };
+
+    // hand over to the averaged taps across the same one-to-two texels per pixel window
+    // Sodium uses, where minification starts to alias.
+    const maxTexelSize = max(texelScreen.x, texelScreen.y).toVar('vmMaxTexelSize');
+    const anisoBlend = smoothstep(minPixelSize, minPixelSize.mul(f32(2)), maxTexelSize).toVar('vmAnisoBlend');
+
+    const sampleAtlas = (uv: Node<d.vec2f>, name: string): Node<d.vec4f> =>
+        (mix(sampleNearest(uv, name), sampleAniso(uv, name), anisoBlend) as Node<d.vec4f>).toVar(name);
+
+    const colorA = sampleAtlas(uvA, 'colorA');
+    const colorB = sampleAtlas(uvB, 'colorB');
     return (mix(colorA, colorB, vMixFactor) as Node<d.vec4f>).toVar('texColor');
 }
 
