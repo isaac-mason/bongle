@@ -160,12 +160,11 @@ function InventoryTab() {
         setTags((current) => (current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]));
     }, []);
 
-    // a mouse wheel only ever reports deltaY, so a strip that scrolls sideways has to translate it itself.
-    // native and non-passive because React's own wheel listener is passive, where preventDefault is a no-op.
-    const tagRowRef = useRef<HTMLDivElement>(null);
     const hasTags = tagChips.length > 0;
-    useEffect(() => {
-        const row = tagRowRef.current;
+
+    // a mouse wheel only ever reports deltaY, so a strip that scrolls sideways has to translate it itself.
+    // the listener is native and non-passive because React's own is passive, where preventDefault does nothing.
+    const tagRowRef = useCallback((row: HTMLDivElement | null) => {
         if (!row) return;
         const onWheel = (e: WheelEvent) => {
             if (row.scrollWidth <= row.clientWidth) return;
@@ -176,7 +175,7 @@ function InventoryTab() {
         };
         row.addEventListener('wheel', onWheel, { passive: false });
         return () => row.removeEventListener('wheel', onWheel);
-    }, [hasTags]);
+    }, []);
 
     return (
         <>
