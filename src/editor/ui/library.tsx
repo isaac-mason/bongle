@@ -160,6 +160,24 @@ function InventoryTab() {
         setTags((current) => (current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]));
     }, []);
 
+    // a mouse wheel only ever reports deltaY, so a strip that scrolls sideways has to translate it itself.
+    // native and non-passive because React's own wheel listener is passive, where preventDefault is a no-op.
+    const tagRowRef = useRef<HTMLDivElement>(null);
+    const hasTags = tagChips.length > 0;
+    useEffect(() => {
+        const row = tagRowRef.current;
+        if (!row) return;
+        const onWheel = (e: WheelEvent) => {
+            if (row.scrollWidth <= row.clientWidth) return;
+            const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+            if (delta === 0) return;
+            e.preventDefault();
+            row.scrollLeft += delta;
+        };
+        row.addEventListener('wheel', onWheel, { passive: false });
+        return () => row.removeEventListener('wheel', onWheel);
+    }, [hasTags]);
+
     return (
         <>
             <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
@@ -176,10 +194,13 @@ function InventoryTab() {
                 />
             </div>
 
-            {tagChips.length > 0 && (
+            {hasTags && (
                 // overflow-y-hidden is load-bearing: naming only one axis makes the other compute to auto,
                 // which gave the row its own vertical scrollbar. shrink-0 keeps the flex column off its height.
-                <div className="flex shrink-0 items-center gap-1 px-3 py-1.5 border-b border-border-subtle overflow-x-auto overflow-y-hidden [scrollbar-width:thin]">
+                <div
+                    ref={tagRowRef}
+                    className="flex shrink-0 items-center gap-1 px-3 py-1.5 border-b border-border-subtle overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+                >
                     {tags.length > 0 && (
                         <button
                             type="button"
