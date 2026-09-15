@@ -261,14 +261,8 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
 
     // move, keyboard + joystick additive, clamp to [-1, 1].
     const stick = getJoystick(t, PlayerControllerTouchIds.moveJoystick);
-    const mx =
-        (isKeyDown(mk, 'KeyA') || isKeyDown(mk, 'ArrowLeft') ? -1 : 0) +
-        (isKeyDown(mk, 'KeyD') || isKeyDown(mk, 'ArrowRight') ? 1 : 0) +
-        stick.x;
-    const mz =
-        (isKeyDown(mk, 'KeyW') || isKeyDown(mk, 'ArrowUp') ? 1 : 0) +
-        (isKeyDown(mk, 'KeyS') || isKeyDown(mk, 'ArrowDown') ? -1 : 0) +
-        -stick.y;
+    const mx = (isKeyDown(mk, 'KeyA') ? -1 : 0) + (isKeyDown(mk, 'KeyD') ? 1 : 0) + stick.x;
+    const mz = (isKeyDown(mk, 'KeyW') ? 1 : 0) + (isKeyDown(mk, 'KeyS') ? -1 : 0) + -stick.y;
     cc.input.move[0] = Math.max(-1, Math.min(1, mx));
     cc.input.move[1] = Math.max(-1, Math.min(1, mz));
 
@@ -293,7 +287,7 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
             }
             pc.state.lastWDownTime = pc.state.elapsed;
         }
-        if (!isKeyDown(mk, 'KeyW') && !isKeyDown(mk, 'ArrowUp')) {
+        if (!isKeyDown(mk, 'KeyW')) {
             pc.state.sprintActive = false;
         }
         if (pc.state.wantsCrouch) pc.state.sprintActive = false;
