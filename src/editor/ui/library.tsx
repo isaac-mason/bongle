@@ -104,6 +104,7 @@ function InventoryTab() {
     const sceneList = useEditor((s) => s.sceneList);
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<Filter>('all');
+    const [tags, setTags] = useState<readonly string[]>([]);
 
     // handled at the DOM layer (not the per-frame shortcut loop) so 1-9 binds a hovered tile to
     // that hotbar slot even while the search box has focus, which the engine's own loop ignores.
@@ -123,17 +124,45 @@ function InventoryTab() {
     }, [hovered]);
 
     const catalog = useMemo(() => (room ? buildCatalog(room, sceneList) : []), [room, sceneList]);
-    const filtered = useMemo(() => {
+
+    // kind and search only; the tag row is built from what survives here, so a chip always has a hit.
+    const byKind = useMemo(() => {
         const q = search.trim();
         return catalog.filter((item) => {
             if (filter === 'bongle' && item.kind !== 'block') return false;
             if (filter === 'prefabs' && item.kind !== 'prefab') return false;
             if (filter === 'blueprints' && item.kind !== 'blueprint') return false;
             if (!q) return true;
-            const { name, id, tags } = inventoryItemDisplay(item, room);
-            return assetMatches({ id, name, tags }, q);
+            const display = inventoryItemDisplay(item, room);
+            return assetMatches({ id: display.id, name: display.name, tags: display.tags }, q);
         });
     }, [catalog, filter, search, room]);
+
+    const filtered = useMemo(() => {
+        if (tags.length === 0) return byKind;
+        return byKind.filter((item) => {
+            const itemTags = inventoryItemDisplay(item, room).tags;
+            return tags.every((tag) => itemTags.includes(tag));
+        });
+    }, [byKind, tags, room]);
+
+    // drawn from what is still showing, most-used first, so picking one narrows rather than empties the grid.
+    // the picked ones lead regardless of that, otherwise a combination with no hits would hide its own way out.
+    const tagChips = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const item of filtered) {
+            for (const tag of inventoryItemDisplay(item, room).tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        }
+        const rest = [...counts.entries()]
+            .filter(([tag]) => !tags.includes(tag))
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([tag]) => tag);
+        return [...tags, ...rest];
+    }, [filtered, tags, room]);
+
+    const toggleTag = useCallback((tag: string) => {
+        setTags((current) => (current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]));
+    }, []);
 
     return (
         <>
@@ -150,6 +179,24 @@ function InventoryTab() {
                     className="flex-1 text-[12px] font-mono text-fg bg-surface-muted border border-border px-2 py-1 outline-none focus:border-fg-muted placeholder:text-fg-muted"
                 />
             </div>
+
+            {tagChips.length > 0 && (
+                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle overflow-x-auto">
+                    {tags.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setTags([])}
+                            title="clear tags"
+                            className="shrink-0 flex items-center text-[11px] font-mono px-1 py-1 cursor-pointer bg-surface-muted text-fg-muted hover:text-fg"
+                        >
+                            <Icons.X size={12} />
+                        </button>
+                    )}
+                    {tagChips.map((tag) => (
+                        <TagChip key={tag} tag={tag} active={tags.includes(tag)} onClick={() => toggleTag(tag)} />
+                    ))}
+                </div>
+            )}
 
             <div className="overflow-y-auto p-2 flex-1">
                 {filtered.length === 0 ? (
@@ -393,6 +440,20 @@ function FilterTab({ label, active, onClick }: { label: string; active: boolean;
             }`}
         >
             {label}
+        </button>
+    );
+}
+
+function TagChip({ tag, active, onClick }: { tag: string; active: boolean; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`shrink-0 text-[11px] font-mono px-2 py-1 cursor-pointer ${
+                active ? 'bg-accent text-on-accent' : 'bg-surface-muted text-fg-muted hover:text-fg'
+            }`}
+        >
+            {tag}
         </button>
     );
 }
