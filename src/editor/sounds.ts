@@ -137,64 +137,6 @@ function emit(
     });
 }
 
-// selecting changes no blocks and an elevation stroke hasn't changed any yet, so these clips are
-// the editor's own (registration is import-driven, so a game that never pulls the editor in never
-// bakes them). see NOTICE.txt in ./assets/sounds for their provenance.
-
-/** "I selected a thing", whatever the thing is: a voxel region from any of the four select tools, or a scene node. */
-export const SelectSound = sound('editor:select', {
-    name: 'editor select',
-    src: asset('./assets/sounds/editor-select.ogg', import.meta.url),
-});
-
-export const DeselectSound = sound('editor:deselect', {
-    name: 'editor deselect',
-    src: asset('./assets/sounds/editor-deselect.ogg', import.meta.url),
-});
-
-// mono: selecting happens in the ui, not at a place in the world, so there's nothing for a panner to be right about.
-const SELECT_GAIN = 0.5;
-const DESELECT_GAIN = 0.45;
-const SELECT_DETUNE_CENTS = 40;
-/** shift-add reuses the select clip a fifth up rather than a third file. */
-const ADD_DETUNE_CENTS = 700;
-/** an anchor reuses the select clip a fourth down, quieter: the same gesture, not yet finished. */
-const ANCHOR_GAIN = 0.35;
-const ANCHOR_DETUNE_CENTS = -500;
-/** box, magic and lasso commit once per click, but a brush-select drag commits for as long as it's held. */
-const SELECT_MIN_GAP_MS = 60;
-
-let lastSelectAt = 0;
-
-/** `added` is the shift-held merge onto an existing selection, which answers a fifth higher. */
-export function playSelected(ctx: ScriptContext, added: boolean): void {
-    const now = performance.now();
-    if (now - lastSelectAt < SELECT_MIN_GAP_MS) return;
-    lastSelectAt = now;
-
-    playMono(ctx, SelectSound, {
-        volume: SELECT_GAIN,
-        detune: (added ? ADD_DETUNE_CENTS : 0) + (Math.random() * 2 - 1) * SELECT_DETUNE_CENTS,
-    });
-}
-
-/** for an explicit user deselect (`clearSelection`) only, not `clearVoxelSelection`'s post-commit tidy-up. */
-export function playDeselected(ctx: ScriptContext): void {
-    playMono(ctx, DeselectSound, {
-        volume: DESELECT_GAIN,
-        detune: (Math.random() * 2 - 1) * SELECT_DETUNE_CENTS,
-    });
-}
-
-/** first click of a two-click box-select. deliberately outside the select rate limit (that floor
- *  tames a brush-select drag; an anchor is always one discrete click). */
-export function playAnchored(ctx: ScriptContext): void {
-    playMono(ctx, SelectSound, {
-        volume: ANCHOR_GAIN,
-        detune: ANCHOR_DETUNE_CENTS + (Math.random() * 2 - 1) * SELECT_DETUNE_CENTS,
-    });
-}
-
 /** a seamless 7s bed of digging, looped under a continuous elevation stroke. */
 export const DiggingSound = sound('editor:digging', {
     name: 'editor digging',
@@ -214,7 +156,7 @@ export function createDiggingLoop(): DiggingLoop {
     return { handle: null, level: 0, written: 0 };
 }
 
-const DIGGING_GAIN_MAX = 0.7;
+const DIGGING_GAIN_MAX = 0.35;
 /** full level at ~1000 blocks/s of accumulation, a large disc at default rate; a size-1 disc sits near 40%. */
 const DIGGING_RATE_CEILING_LOG2 = 10;
 /** lowering reads a shade deeper than raising; flatten sits between since its columns go both ways. */
@@ -223,7 +165,11 @@ const DIGGING_FLATTEN_DETUNE_CENTS = -150;
 /** the level swells quickly with the stroke and settles more slowly after it. */
 const DIGGING_ATTACK_S = 0.06;
 const DIGGING_RELEASE_S = 0.25;
-const DIGGING_STOP_FADE_S = 0.18;
+/** brief but clearly audible: the loop shouldn't just cut when the stroke ends. was cranked to
+ *  1s while a real bug in Audio.stop() (fixed now, see client/audio/audio.ts) silently cut every
+ *  faded stop to ~one frame regardless of this value; back to a properly brief fade now that the
+ *  fade actually plays out. */
+const DIGGING_STOP_FADE_S = 0.4;
 const DIGGING_WRITE_EPSILON = 0.01;
 
 /** mono: the stroke is under the cursor and the listener is right behind it, so a panner has nothing to add. */
@@ -250,4 +196,120 @@ export function stopDiggingLoop(loop: DiggingLoop): void {
     if (!loop.handle) return;
     loop.handle.stop({ fade: DIGGING_STOP_FADE_S });
     loop.handle = null;
+}
+
+// select is the most frequent trigger in the editor, so it's a real mouse-click recording
+// (lowered and pitch-varied so repeated clicks in a drag don't read as one stuck sample) rather
+// than a textured litupsubway clip; deselect keeps the longer litupsubway clip since it's rare
+// enough that a bit more character doesn't read as noise. see NOTICE.txt in ./assets/sounds.
+
+/** "I selected a thing", whatever the thing is: a voxel region from any of the four select tools. */
+export const SelectSound = sound('editor:select', {
+    name: 'editor select',
+    src: asset('./assets/sounds/editor-select.ogg', import.meta.url),
+});
+
+export const DeselectSound = sound('editor:deselect', {
+    name: 'editor deselect',
+    src: asset('./assets/sounds/editor-deselect.ogg', import.meta.url),
+});
+
+// mono: selecting happens in the ui, not at a place in the world, so there's nothing for a panner to be right about.
+const SELECT_GAIN = 0.16;
+const DESELECT_GAIN = 0.14;
+/** the raw click recording reads bright; pitched down for a duller, less clacky click. */
+const SELECT_BASE_DETUNE_CENTS = -400;
+/** wider than deselect's spread: a click retriggers often (a brush-select drag), so it needs to
+ *  vary noticeably rather than sound like one stuck sample looping. */
+const SELECT_PITCH_VARIANCE_CENTS = 90;
+const DESELECT_DETUNE_CENTS = 30;
+/** shift-add reuses the select clip a fifth up rather than a third file. */
+const ADD_DETUNE_CENTS = 700;
+/** an anchor reuses the select clip a fourth down, quieter: the same gesture, not yet finished. */
+const ANCHOR_GAIN = 0.11;
+const ANCHOR_DETUNE_CENTS = -500;
+/** the select clip is short (~0.3s), so a brush-select drag can retrigger it often without mush. */
+const SELECT_MIN_GAP_MS = 70;
+/** the deselect clip runs ~0.8s (litupsubway), so its floor stays wide. */
+const DESELECT_MIN_GAP_MS = 220;
+
+let lastSelectAt = 0;
+let lastDeselectAt = 0;
+
+/** `added` is the shift-held merge onto an existing selection, which answers a fifth higher. */
+export function playSelected(ctx: ScriptContext, added: boolean): void {
+    const now = performance.now();
+    if (now - lastSelectAt < SELECT_MIN_GAP_MS) return;
+    lastSelectAt = now;
+
+    playMono(ctx, SelectSound, {
+        volume: SELECT_GAIN,
+        detune: SELECT_BASE_DETUNE_CENTS + (added ? ADD_DETUNE_CENTS : 0) + (Math.random() * 2 - 1) * SELECT_PITCH_VARIANCE_CENTS,
+    });
+}
+
+/** for an explicit user deselect (`clearSelection`) only, not `clearVoxelSelection`'s post-commit
+ *  tidy-up. */
+export function playDeselected(ctx: ScriptContext): void {
+    const now = performance.now();
+    if (now - lastDeselectAt < DESELECT_MIN_GAP_MS) return;
+    lastDeselectAt = now;
+
+    playMono(ctx, DeselectSound, {
+        volume: DESELECT_GAIN,
+        detune: (Math.random() * 2 - 1) * DESELECT_DETUNE_CENTS,
+    });
+}
+
+/** first click of a two-click box-select. deliberately outside the select rate limit (that floor
+ *  tames a brush-select drag; an anchor is always one discrete click). */
+export function playAnchored(ctx: ScriptContext): void {
+    playMono(ctx, SelectSound, {
+        volume: ANCHOR_GAIN,
+        detune: SELECT_BASE_DETUNE_CENTS + ANCHOR_DETUNE_CENTS + (Math.random() * 2 - 1) * SELECT_PITCH_VARIANCE_CENTS,
+    });
+}
+
+/** node-graph edits with no voxel content to sample a material from. each kind has its own real
+ *  clip; reparent has none of its own (it's the same node, just filed elsewhere) so it reuses
+ *  create's clip at a neutral, undetuned pitch. */
+export type StructuralEditKind = 'create' | 'delete' | 'copy' | 'reparent';
+
+export const CreateSound = sound('editor:create', {
+    name: 'editor create',
+    src: asset('./assets/sounds/editor-create.ogg', import.meta.url),
+});
+
+export const DeleteSound = sound('editor:delete', {
+    name: 'editor delete',
+    src: asset('./assets/sounds/editor-delete.ogg', import.meta.url),
+});
+
+export const CopySound = sound('editor:copy', {
+    name: 'editor copy',
+    src: asset('./assets/sounds/editor-copy.ogg', import.meta.url),
+});
+
+const STRUCTURAL_GAIN = 0.15;
+const STRUCTURAL_DETUNE_CENTS = 20;
+
+export function playStructuralEdit(ctx: ScriptContext, kind: StructuralEditKind): void {
+    const clip = kind === 'delete' ? DeleteSound : kind === 'copy' ? CopySound : CreateSound;
+    playMono(ctx, clip, {
+        volume: STRUCTURAL_GAIN,
+        detune: (Math.random() * 2 - 1) * STRUCTURAL_DETUNE_CENTS,
+    });
+}
+
+/** paste reuses create's clip quieter and a shade down, the same "gesture started, not yet
+ *  finished" trick `playAnchored` uses for box-select: a ghost just appeared under the cursor,
+ *  nothing is in the scene until it's clicked down (`playStructuralEdit('create')` then). */
+const PASTE_START_GAIN = 0.1;
+const PASTE_START_DETUNE_CENTS = -300;
+
+export function playPasteStart(ctx: ScriptContext): void {
+    playMono(ctx, CreateSound, {
+        volume: PASTE_START_GAIN,
+        detune: PASTE_START_DETUNE_CENTS + (Math.random() * 2 - 1) * STRUCTURAL_DETUNE_CENTS,
+    });
 }

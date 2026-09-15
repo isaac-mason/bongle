@@ -417,21 +417,25 @@ function startPlayback(
             playback._cancelled = true;
             const fade = stopOpts?.fade ?? 0;
             const now = ctx.currentTime;
-            if (fade > 0) {
+            if (fade > 0 && playback.source) {
                 gain.gain.cancelScheduledValues(now);
                 gain.gain.setValueAtTime(gain.gain.value, now);
                 gain.gain.linearRampToValueAtTime(0, now + fade);
                 try {
-                    playback.source?.stop(now + fade);
+                    playback.source.stop(now + fade);
+                    // `_ended` flips when this scheduled stop actually fires (the source's own
+                    // `onended`, wired in startSource) — NOT here. updateForFrame reaps anything
+                    // `_ended` by disconnecting its gain node outright, which would otherwise cut
+                    // the ramp off within a frame (~16ms) no matter how long `fade` is.
+                    return;
                 } catch {
-                    /* may not have started yet */
+                    /* already stopped; fall through to the immediate-stop path below */
                 }
-            } else {
-                try {
-                    playback.source?.stop();
-                } catch {
-                    /* */
-                }
+            }
+            try {
+                playback.source?.stop();
+            } catch {
+                /* may not have started yet */
             }
             playback._ended = true;
         },

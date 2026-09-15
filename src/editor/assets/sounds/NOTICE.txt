@@ -1,29 +1,58 @@
-PLACEHOLDERS (the two blips). Replace before this ships.
+All the clips src/editor/sounds.ts registers are real recordings, only re-encoded (mono,
+48kHz, loudness-normalised) to match this directory's convention. None are synthesised
+placeholders — do not add one with ffmpeg; pull a real clip (Pixabay, Kenney's packs at
+kenney.nl/assets, etc) and re-encode it instead.
 
-editor-select.ogg and editor-deselect.ogg are decaying sine blips generated with ffmpeg
-for this repo. They are ours, under the same terms as the rest of the
-engine source, and carry no third-party obligation. They exist so the
-editor's selection sfx path is wired and testable, not because they sound
-good.
+editor-deselect.ogg, editor-create.ogg, editor-delete.ogg and editor-copy.ogg are from
+"litupsubway" on Pixabay, Creative Commons / Pixabay Content License, no attribution
+required. Longer and more textured than a typical UI blip (0.7-2s), so they're mixed
+quiet and the retrigger floor on deselect is wide (overlapping itself reads as mush, not
+feedback):
 
-The intended replacements are from Kenney's UI / interface audio packs,
-which are CC0 (https://kenney.nl/assets - "Interface Sounds"). CC0 needs
-no attribution and no share-alike, which is why they were picked over the
-Minetest-derived clips in src/kit/assets/sounds (CC BY-SA 3.0). Keep it
-that way: do NOT copy a kit clip in here to stand in, or this directory
-inherits an obligation the NOTICE next door describes.
+    litupsubway-ui-close-sfx-513359.mp3     -> editor-deselect.ogg  (deselect/clear)
+    litupsubway-ui-open-sfx-513358.mp3      -> editor-create.ogg    (node created; reparent reuses this at neutral pitch)
+    litupsubway-ui-trash-518621.mp3         -> editor-delete.ogg    (node deleted)
+    litupsubway-key-collect-sfx-522219.mp3  -> editor-copy.ogg      (clipboard copy; also the "pick block" P-key action)
 
-The `editor-` prefix is not decoration: scripts/bongle-asset-rewrite.ts
-flattens every asset dir to dist/assets/<path-after-last-/assets/>, so
-these land in the same dist/assets/sounds/ as all 89 kit clips. Keep the
-prefix, or a name that collides with one fails the build.
+editor-select.ogg is "Mouse click.wav" by xtrgamr on freesound.org
+(freesound.org/people/xtrgamr/sounds/257786/), Creative Commons Attribution 4.0 (CC BY
+4.0) — UNLIKE everything else in this directory, this one DOES require attribution; keep
+the credit above (or link the freesound page) wherever the game's/editor's credits live.
+A real mouse-click recording, pitched down (SELECT_BASE_DETUNE_CENTS in sounds.ts) so it
+reads duller and less clacky, with a wider random pitch spread than deselect's
+(SELECT_PITCH_VARIANCE_CENTS) so repeated clicks in a drag don't sound like one stuck
+sample. Select is the single most frequent trigger in the editor (fires on every click
+across all four select tools, inspect's click-to-pick, and box-select's anchor), so it
+stays short rather than a litupsubway clip — those read as intrusive at that frequency.
+Its retrigger floor (SELECT_MIN_GAP_MS) is correspondingly much tighter than deselect's.
+Went through two earlier tries here (a synthesised placeholder, then a CC0 floraphonic
+pop) — this is the one that stuck; if the attribution requirement is unwanted, swap back
+to a CC0/Kenney clip instead.
 
-Swapping them is a file drop. The ids, the play sites, and the mix live in
-src/editor/sounds.ts and neither depends on the clip's contents; only keep
-them short (roughly under 120ms), since a brush-select drag retriggers
-`editor:select` for as long as it lasts.
+editor-transform.ogg is ORPHANED: a leftover from a transform-commit sfx pass (drag
+release, nudge/rotate/scale) that got ripped back out — no clip in the litupsubway set
+fit it, and it was one of the noisiest offenders (fires on every drag release). Nothing
+in sounds.ts references it; dead weight on disk, safe to delete whenever someone gets to
+it. Its previous content was a Kenney "pluck_001" clip, in case transform-commit sfx
+comes back and that's still the right feel.
 
-editor-digging.ogg is NOT a placeholder: "digging" by freesound_community on Pixabay
-(pixabay id 6691), Creative Commons / Pixabay Content License, no attribution
-required. Cut to a 7s seamless loop (its last 0.68s crossfaded over the head),
-mono, loudness-normalised to -18 LUFS, for the elevation tool's stroke bed.
+editor-hotbar.ogg is ALSO ORPHANED, same story: hotbar slot-switch sfx (number keys,
+scroll-wheel cycle) got tried and pulled back out, too much noise for something that
+fires that often. Its content was "litupsubway-ui-equip-sfx-513361.mp3", in case hotbar
+sfx comes back and that clip is still the right call.
+
+editor-digging.ogg: "digging" by freesound_community on Pixabay (pixabay id 6691),
+Creative Commons / Pixabay Content License, no attribution required. Cut to a 7s seamless
+loop (its last 0.68s crossfaded over the head), mono, loudness-normalised to -18 LUFS,
+for the elevation tool's stroke bed while it's still only projected ops, before the grid
+is touched on release; its release fade (DIGGING_STOP_FADE_S in sounds.ts) is deliberately
+longer than a UI clip's, so the loop winds down rather than cutting when the stroke ends.
+
+Swapping any of these is a file drop: keep the filename, replace the bytes. The ids, the
+play sites, and the mix live in src/editor/sounds.ts and don't depend on the clip's
+contents.
+
+The `editor-` prefix is not decoration: scripts/bongle-asset-rewrite.ts flattens every
+asset dir to dist/assets/<path-after-last-/assets/>, so these land in the same
+dist/assets/sounds/ as all 89 kit clips. Keep the prefix, or a name that collides with
+one fails the build.
