@@ -33,7 +33,8 @@ export type CardBatches = {
     sprite: SpriteResources | null;
 };
 
-export const LABEL_SCALE = 3;
+/** glyph multiples; rounded to whole device pixels when drawn, so a 1x panel lands a notch larger than a 2x one. */
+export const LABEL_SCALE = 1.5;
 export const LABEL_LIFT_PX = 16;
 const MARKER_ICON_PX = 20;
 const LABEL_GAP_PX = 6;
@@ -168,7 +169,7 @@ export function drawCard(
     }
     if (toggles.names && card.label !== '') {
         const hw = Text.measure(batches.text, card.label, LABEL_SCALE) / 2;
-        const hh = (batches.text.glyphHeight * LABEL_SCALE) / 2;
+        const hh = Text.height(batches.text, LABEL_SCALE) / 2;
         const dy = lift + LABEL_GAP_PX + hh + LABEL_PAD_PX;
         Quads.rect(batches.quads, x, y, z, 0, dy, hw + LABEL_PAD_PX, hh + LABEL_PAD_PX, ...LABEL_BACKING);
         Text.label(batches.text, x, y, z, card.label, LABEL_SCALE, dy, r, g, b, a);

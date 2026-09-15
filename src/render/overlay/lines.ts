@@ -18,6 +18,7 @@ import {
     type Scene,
     screenSize,
     sub,
+    type UniformNode,
     uniform,
     varying,
     vec2f,
@@ -33,6 +34,9 @@ export type LineBatch = {
     start: Float32Array;
     end: Float32Array;
     color: Float32Array;
+    /** the shader's line width, in device pixels; `begin` rescales it from the CSS width for the current display. */
+    widthUniform: UniformNode<d.f32>;
+    widthCssPx: number;
 };
 
 function lineVertex(widthPx: Node<d.f32>): Node<d.vec4f> {
@@ -96,8 +100,9 @@ export function init(scene: Scene, capacity: number, widthPx: number): LineBatch
     geometry.drawRange = { start: 0, count: 0 };
 
     const colorVarying = varying(attribute('color', d.vec4f), 'ovLineColor');
+    const widthUniform = uniform(f32(widthPx), 'ovLineWidth');
     const material = new Material({
-        vertex: lineVertex(uniform(f32(widthPx), 'ovLineWidth')),
+        vertex: lineVertex(widthUniform),
         fragment: colorVarying,
         cullMode: 'none',
         transparent: true,
@@ -112,7 +117,7 @@ export function init(scene: Scene, capacity: number, widthPx: number): LineBatch
     mesh.renderOrder = Infinity;
     scene.add(mesh);
 
-    return { mesh, geometry, capacity, count: 0, start, end, color };
+    return { mesh, geometry, capacity, count: 0, start, end, color, widthUniform, widthCssPx: widthPx };
 }
 
 export function dispose(batch: LineBatch, scene: Scene): void {
@@ -121,8 +126,10 @@ export function dispose(batch: LineBatch, scene: Scene): void {
     batch.mesh.material.dispose();
 }
 
-export function begin(batch: LineBatch): void {
+/** `pixelRatio` is the display's device pixels per CSS pixel; the line keeps its CSS width whatever the panel. */
+export function begin(batch: LineBatch, pixelRatio: number): void {
     batch.count = 0;
+    batch.widthUniform.value = batch.widthCssPx * pixelRatio;
 }
 
 /** dropped past capacity. */

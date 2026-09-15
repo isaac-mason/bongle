@@ -463,8 +463,12 @@ function handlesEnabled(store: EditRoomStoreApi): boolean {
 
 function updateWorldVisuals(v: Visuals, s: Session): void {
     const { room, ctx } = s;
-    Lines.begin(v.lines);
-    Quads.begin(v.quads);
+    // overlay sizes are authored in CSS pixels; taken from the canvas itself, so a backend that clamps the
+    // device ratio is followed rather than second-guessed.
+    const canvas = s.client.state!.renderer.canvas;
+    const pixelRatio = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : 1;
+    Lines.begin(v.lines, pixelRatio);
+    Quads.begin(v.quads, pixelRatio);
     withSpriteResources(s, (sprite) => {
         Quads.bindAtlas(v.quads, sprite);
         Text.bind(v.text, sprite);

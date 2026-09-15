@@ -86,7 +86,7 @@ describe('overlay probe', () => {
 
         const ours = new Scene();
         const lines = Lines.init(ours, 16, 5);
-        Lines.begin(lines);
+        Lines.begin(lines, 1);
         Lines.line(lines, -1, 0, 0, 1, 0, 0, 1, 0, 1, 1);
         Lines.end(lines);
         const linesLit = [
@@ -96,7 +96,7 @@ describe('overlay probe', () => {
 
         const quadScene = new Scene();
         const quads = Quads.init(quadScene, 16);
-        Quads.begin(quads);
+        Quads.begin(quads, 1);
         Quads.dot(quads, 0, 0, 0, 20, 1, 0, 1, 1);
         Quads.end(quads);
         const quadsLit = [

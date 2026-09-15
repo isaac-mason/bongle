@@ -40,8 +40,24 @@ function advance(batch: TextBatch): number {
     return batch.glyphWidth + 1;
 }
 
+/**
+ * the CSS scale to actually draw at: a pixel font only stays even when its glyphs land on whole device pixels,
+ * so the requested scale is rounded to a whole multiple of one and handed back in CSS units.
+ */
+function evenScale(batch: TextBatch, scale: number): number {
+    const pixelRatio = batch.quads.pixelRatio;
+    return Math.max(1, Math.round(scale * pixelRatio)) / pixelRatio;
+}
+
+/** height of one glyph in CSS pixels, at the scale it will actually be drawn. */
+export function height(batch: TextBatch, scale: number): number {
+    return batch.glyphHeight * evenScale(batch, scale);
+}
+
+/** width of the run in CSS pixels, at the scale it will actually be drawn. */
 export function measure(batch: TextBatch, text: string, scale: number): number {
-    return text.length === 0 ? 0 : (text.length * advance(batch) - 1) * scale;
+    const drawn = evenScale(batch, scale);
+    return text.length === 0 ? 0 : (text.length * advance(batch) - 1) * drawn;
 }
 
 /** left edge `dxPx` pixels right of a world point, vertically centred `dyPx` above it. */
@@ -59,8 +75,8 @@ export function labelLeft(
     b: number,
     a: number,
 ): void {
-    const hw = (batch.glyphWidth * scale) / 2;
-    run(batch, x, y, z, text, scale, dxPx + hw, dyPx, r, g, b, a);
+    const drawn = evenScale(batch, scale);
+    run(batch, x, y, z, text, drawn, dxPx + (batch.glyphWidth * drawn) / 2, dyPx, r, g, b, a);
 }
 
 /** centred on a world point, `dyPx` pixels above it. */
@@ -77,8 +93,8 @@ export function label(
     b: number,
     a: number,
 ): void {
-    const hw = (batch.glyphWidth * scale) / 2;
-    run(batch, x, y, z, text, scale, -measure(batch, text, scale) / 2 + hw, dyPx, r, g, b, a);
+    const drawn = evenScale(batch, scale);
+    run(batch, x, y, z, text, drawn, -measure(batch, text, scale) / 2 + (batch.glyphWidth * drawn) / 2, dyPx, r, g, b, a);
 }
 
 // glyphs from the first glyph's centre at `dx`, advancing right.

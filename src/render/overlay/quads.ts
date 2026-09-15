@@ -41,6 +41,8 @@ export type QuadBatch = {
     /** a texel inside `kit:white`. */
     whiteU: number;
     whiteV: number;
+    /** device pixels per CSS pixel; every size below is authored in CSS pixels and scaled by this on the way in. */
+    pixelRatio: number;
 };
 
 const WHITE_SPRITE = 'kit:white';
@@ -126,6 +128,7 @@ export function init(scene: Scene, capacity: number): QuadBatch {
         atlasHash: null,
         whiteU: 0.5,
         whiteV: 0.5,
+        pixelRatio: 1,
     };
 }
 
@@ -149,11 +152,13 @@ export function dispose(batch: QuadBatch, scene: Scene): void {
     batch.placeholder.dispose();
 }
 
-export function begin(batch: QuadBatch): void {
+/** `pixelRatio` is the display's device pixels per CSS pixel; sizes stay the same on screen whatever the panel. */
+export function begin(batch: QuadBatch, pixelRatio: number): void {
     batch.count = 0;
+    batch.pixelRatio = pixelRatio;
 }
 
-/** `dx dy` pixel offset from the anchor, `hw hh` half size in pixels, `u0 v0 u1 v1` atlas rect; dropped past capacity. */
+/** `dx dy` CSS-pixel offset from the anchor, `hw hh` half size in CSS pixels, `u0 v0 u1 v1` atlas rect; dropped past capacity. */
 export function quad(
     batch: QuadBatch,
     x: number,
@@ -174,7 +179,12 @@ export function quad(
 ): void {
     if (batch.count >= batch.capacity) return;
     const vi = batch.count * 4;
-    const { center, offset, uv, color } = batch;
+    const { center, offset, uv, color, pixelRatio } = batch;
+    // the shader divides by the drawing buffer, which is in device pixels, so convert here.
+    const dxPx = dx * pixelRatio;
+    const dyPx = dy * pixelRatio;
+    const hwPx = hw * pixelRatio;
+    const hhPx = hh * pixelRatio;
     for (let v = 0; v < 4; v++) {
         const p = (vi + v) * 3;
         center[p] = x;
@@ -188,14 +198,14 @@ export function quad(
     }
     // 0 bottom-left, 1 bottom-right, 2 top-left, 3 top-right
     const o = vi * 2;
-    offset[o] = dx - hw;
-    offset[o + 1] = dy - hh;
-    offset[o + 2] = dx + hw;
-    offset[o + 3] = dy - hh;
-    offset[o + 4] = dx - hw;
-    offset[o + 5] = dy + hh;
-    offset[o + 6] = dx + hw;
-    offset[o + 7] = dy + hh;
+    offset[o] = dxPx - hwPx;
+    offset[o + 1] = dyPx - hhPx;
+    offset[o + 2] = dxPx + hwPx;
+    offset[o + 3] = dyPx - hhPx;
+    offset[o + 4] = dxPx - hwPx;
+    offset[o + 5] = dyPx + hhPx;
+    offset[o + 6] = dxPx + hwPx;
+    offset[o + 7] = dyPx + hhPx;
     // atlas rows grow downward
     uv[o] = u0;
     uv[o + 1] = v1;
@@ -208,7 +218,7 @@ export function quad(
     batch.count++;
 }
 
-/** a solid rectangle, `dx dy` pixels from the anchor, `hw hh` half size in pixels. */
+/** a solid rectangle, `dx dy` CSS pixels from the anchor, `hw hh` half size in CSS pixels. */
 export function rect(
     batch: QuadBatch,
     x: number,
@@ -227,7 +237,7 @@ export function rect(
     quad(batch, x, y, z, dx, dy, hw, hh, whiteU, whiteV, whiteU, whiteV, r, g, b, a);
 }
 
-/** a solid square of `sizePx` centred on a world point. */
+/** a solid square of `sizePx` CSS pixels centred on a world point. */
 export function dot(
     batch: QuadBatch,
     x: number,
