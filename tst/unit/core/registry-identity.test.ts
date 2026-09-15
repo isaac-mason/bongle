@@ -22,7 +22,6 @@ import {
     command,
     model,
     modelStore,
-    particle,
     prefab,
     _registerModelDef as registerModel,
     registry,
@@ -145,14 +144,6 @@ describe('re-declaration preserves handle identity', () => {
         // sugar declared for it, which keeps the sprite's own identity untouched.
         expect(first.def.frames).toEqual([{ registry: 'textures', id: 's' }]);
         expect(registry.textures.byId.get('s')).toMatchObject({ from: 'file', src: 'b.png' });
-    });
-
-    it('particle', () => {
-        const s = sprite('p', { src: 'a.png' });
-        const first = particle('fx', { sprite: s, playback: 'loop', update: () => {}, glow: 0 });
-        const second = particle('fx', { sprite: s, playback: 'loop', update: () => {}, glow: 1 });
-        expect(second).toBe(first);
-        expect(first.def.glow).toBe(1);
     });
 
     it('trait', () => {

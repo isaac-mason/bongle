@@ -127,7 +127,6 @@ const STORE_NAMES = [
     'prefabs',
     'sounds',
     'sprites',
-    'particles',
     'config',
 ] as const;
 

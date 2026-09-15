@@ -26,7 +26,6 @@ export function resetVoxelRegistryStoresOnly(): void {
     clearStore(registry.blocks as unknown as AnyStore);
     clearStore(registry.tiles as unknown as AnyStore);
     clearStore(registry.sprites as unknown as AnyStore);
-    clearStore(registry.particles as unknown as AnyStore);
     // tiles hold frame references and dust derives computed textures, so the texture store is voxel-adjacent too.
     clearStore(registry.textures as unknown as AnyStore);
     reindexRegistry(registry);
@@ -37,7 +36,6 @@ export function resetVoxelRegistry(): void {
     clearStore(registry.blocks as unknown as AnyStore);
     clearStore(registry.tiles as unknown as AnyStore);
     clearStore(registry.sprites as unknown as AnyStore);
-    clearStore(registry.particles as unknown as AnyStore);
     clearStore(registry.textures as unknown as AnyStore);
     reindexRegistry(registry);
 }

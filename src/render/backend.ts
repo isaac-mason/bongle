@@ -17,8 +17,6 @@ export type RendererBackendKind = 'webgpu' | 'webgl' | 'none';
 export type FrameContext = {
     viewport: Viewport;
     resources: Resources;
-    /** Seconds, `performance.now() / 1000`, sampled once for the frame. */
-    now: number;
     /** The renderer's phases are spans inside the frame the client loop opened. */
     profiler: Debug.Profiler;
     /** The active room's POV camera, resolved by the client into `Renderer.camera`; null when the active room has no POV. */

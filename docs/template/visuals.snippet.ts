@@ -15,7 +15,8 @@ import {
     type Node,
     onFrame,
     onInit,
-    particle,
+    type ParticleOptions,
+    type ParticleUpdateFn,
     particleUpdate,
     type ScriptContext,
     SpriteTrait,
@@ -113,18 +114,13 @@ system('bulk-terrain-lighting', (ctx) => {
 /* SNIPPET_END: flood-fill */
 
 /* SNIPPET_START: particles */
-// a particle type pairs a sprite with a motion update
+// a particle is a sprite plus a motion update, both chosen at the spawn call
 const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
-const SmokeParticle = particle('smoke', {
-    sprite: SmokeSprite,
-    playback: 'stretch',
-    update: particleUpdate.smoke,
-});
 
 system('smoke-puffs', (ctx) => {
     onInit(ctx, () => {
         // emit one at a position; no-ops on the server
-        spawnParticle(ctx, SmokeParticle, [0, 2, 0]);
+        spawnParticle(ctx, { sprite: SmokeSprite, update: particleUpdate.smoke, position: [0, 2, 0] });
     });
 });
 /* SNIPPET_END: particles */
@@ -132,34 +128,39 @@ system('smoke-puffs', (ctx) => {
 /* SNIPPET_START: varied */
 // for effects past the presets, write your own update: it runs per live particle each
 // tick over a pooled buffer, composing the particleUpdate.* primitives and mutating
-// the particle's velocity, size, and tint directly.
+// the particle's velocity, size, and tint directly. hoist it, then hand it to any spawn.
 const SparkSprite = sprite('spark', { src: asset('./assets/spark.png', import.meta.url) });
-const SparkParticle = particle('spark', {
+const bouncySpark: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
+    particleUpdate.gravity(pool, i, dt, -14); // pull down
+    particleUpdate.drag(pool, i, dt, 0.98); // air resistance
+    particleUpdate.integrate(pool, i, dt); // advance position by velocity
+    particleUpdate.collideBounce(pool, i, dt, voxels, 0.3); // bounce off blocks
+    particleUpdate.fadeAlpha(pool, i, dt, 1.2); // fade the alpha out over time
+    pool.size[i]! *= 0.99; // shrink a little each tick
+};
+
+// emitting in volume? hoist the spawn and mutate it. every field is copied eagerly
+// into the pool, so one object can drive the whole burst.
+const sparkSpawn: ParticleOptions = {
     sprite: SparkSprite,
-    playback: 'stretch', // map age across the sprite's frames over the lifetime
+    update: bouncySpark,
+    position: [0, 3, 0],
+    velocity: [0, 0, 0],
     glow: 1, // self-lit, ignores world shadow
-    update: (pool, i, dt, voxels) => {
-        particleUpdate.gravity(pool, i, dt, -14); // pull down
-        particleUpdate.drag(pool, i, dt, 0.98); // air resistance
-        particleUpdate.integrate(pool, i, dt); // advance position by velocity
-        particleUpdate.collideBounce(pool, i, dt, voxels, 0.3); // bounce off blocks
-        particleUpdate.fadeAlpha(pool, i, dt, 1.2); // fade the alpha out over time
-        pool.size[i]! *= 0.99; // shrink a little each tick
-    },
-});
+};
 
 system('sparks', (ctx) => {
     onInit(ctx, () => {
         // a scattered burst: randomize each particle's velocity, lifetime, and size at
         // spawn so no two move alike.
+        const velocity = sparkSpawn.velocity!;
         for (let n = 0; n < 24; n++) {
-            spawnParticle(ctx, SparkParticle, [0, 3, 0], {
-                velX: (Math.random() - 0.5) * 6,
-                velY: Math.random() * 8,
-                velZ: (Math.random() - 0.5) * 6,
-                lifetime: 0.6 + Math.random() * 0.6,
-                size: 0.2 + Math.random() * 0.2,
-            });
+            velocity[0] = (Math.random() - 0.5) * 6;
+            velocity[1] = Math.random() * 8;
+            velocity[2] = (Math.random() - 0.5) * 6;
+            sparkSpawn.lifetime = 0.6 + Math.random() * 0.6;
+            sparkSpawn.size = 0.2 + Math.random() * 0.2;
+            spawnParticle(ctx, sparkSpawn);
         }
     });
 });
@@ -181,20 +182,17 @@ function spellOut(parent: Node, text: string, worldScale = 1 / 16): void {
     });
 }
 
-// a particle's sprite is fixed at declaration, so a character you want to fling needs its own type
-const DamageDigits = Array.from({ length: 10 }, (_, digit) =>
-    particle(`damage-${digit}`, {
-        sprite: sprites.glyph(String(digit)),
-        playback: 'once',
-        glow: 1,
-        update: particleUpdate.spark,
-    }),
-);
-
+// the sprite is a spawn argument, so flinging a character is one call, no declaration
 system('glyph-demo', (ctx) => {
     onInit(ctx, () => {
         spellOut(ctx.node, 'HELLO');
-        spawnParticle(ctx, DamageDigits[7]!, [0, 2, 0], { lifetime: 0.8 });
+        spawnParticle(ctx, {
+            sprite: sprites.glyph('7'),
+            update: particleUpdate.spark,
+            position: [0, 2, 0],
+            lifetime: 0.8,
+            glow: 1,
+        });
     });
 });
 /* SNIPPET_END: glyphs */

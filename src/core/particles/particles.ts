@@ -1,27 +1,39 @@
-import type { AssetMeta } from '../asset-meta';
 import type { SpriteHandle } from '../sprites/sprites';
 import type { Voxels } from '../voxels/voxels';
 
+/** how a particle's sprite frame timeline maps onto its lifetime. */
+export type ParticlePlayback = 'stretch' | 'loop' | 'once';
+
+/** `ParticlePlayback` as the `pool.playback` column's scalar encoding. */
+export const PLAYBACK_STRETCH = 0;
+export const PLAYBACK_LOOP = 1;
+export const PLAYBACK_ONCE = 2;
+
+export function encodePlayback(playback: ParticlePlayback): number {
+    return playback === 'loop' ? PLAYBACK_LOOP : playback === 'once' ? PLAYBACK_ONCE : PLAYBACK_STRETCH;
+}
+
 /** Per-room SoA pool (impl lives in render/particles/particles.ts). Alive
- *  prefix is `[0, count)`; dead slots are compacted by `particleUpdate`
- *  (client). The type is declared here so `ParticleUpdateFn` (also here) can
- *  name its first param without forcing a core->client import; the runtime
- *  that allocates / mutates it lives in client. Both halves agree on the
- *  layout via this single declaration. */
+ *  prefix is `[0, count)`; dead slots are compacted by `update` (client). The
+ *  type is declared here so `ParticleUpdateFn` (also here) can name its first
+ *  param without forcing a core->client import. */
 export type ParticlePool = {
     /** max slots. */
     capacity: number;
     /** live slots, alive prefix is `[0, count)`. */
     count: number;
+    /** round-robin victim for `allocateSlot` once `count === capacity`; a
+     *  spawn evicts a live particle rather than failing. */
+    evictCursor: number;
 
-    /** particle handle per slot, renderer reads `.sprite` / `.playback`
-     *  / `.fps` to drive frame selection + atlas lookup. null on free slots. */
-    handle: Array<ParticleHandle | null>;
-    /** per-particle update fn resolved at spawn time. dispatch target,
-     *  redundant with `handle[i].update` but kept as a direct pointer so
-     *  the tick loop's inner indirect-call doesn't chase through the
-     *  handle struct. null on free slots. */
+    /** sprite per slot, the renderer resolves its atlas frames. null on free slots. */
+    sprite: Array<SpriteHandle | null>;
+    /** per-particle update fn, resolved at spawn. null on free slots. */
     updateFn: Array<ParticleUpdateFn | null>;
+    /** `PLAYBACK_*`, how `sprite[i]`'s frames map onto this particle's life. */
+    playback: Uint8Array;
+    /** frame rate for `PLAYBACK_LOOP` / `PLAYBACK_ONCE`; ignored by stretch. */
+    fps: Float32Array;
 
     posX: Float32Array;
     posY: Float32Array;
@@ -33,7 +45,7 @@ export type ParticlePool = {
     velY: Float32Array;
     velZ: Float32Array;
 
-    /** absolute clock anchor for `age = now - spawnTime[i]`. */
+    /** room-clock (`clock.wall`) anchor for `age = now - spawnTime[i]`. */
     spawnTime: Float32Array;
     /** absolute deadline. death = `expiresAt[i] <= now`. default
      *  `Infinity`. motion fns kill by writing `0`. */
@@ -44,13 +56,11 @@ export type ParticlePool = {
      *  lighting floor so the particle lights up in its own colour,
      *  0 = lit by world voxel light, 1 = fully lit / shadow-free,
      *  matching mesh/sprite `glow`. mutate from the update fn to
-     *  animate (e.g. fire embers fade 1 → 0 over lifetime). */
+     *  animate (e.g. fire embers fade 1 -> 0 over lifetime). */
     glow: Float32Array;
     /** per-particle RGBA tint multiplier. RGB multiplies the shaded
      *  color (so [0,0,0] fades to black), A multiplies the sprite alpha
-     *  (so 0 fades to transparent). default [1,1,1,1] = no tint. mutate
-     *  from the update fn to animate (e.g. fade RGB or A over lifetime).
-     *  decomposed per-channel to match the posX/Y/Z SoA convention. */
+     *  (so 0 fades to transparent). default [1,1,1,1] = no tint. */
     tintR: Float32Array;
     tintG: Float32Array;
     tintB: Float32Array;
@@ -59,74 +69,11 @@ export type ParticlePool = {
     seed: Uint32Array;
 };
 
-/** how a particle's sprite frame timeline maps onto its lifetime. */
-export type ParticlePlayback = 'stretch' | 'loop' | 'once';
-
 /** per-particle update fn, owns motion, collision, and death.
  *  invoked once per tick per alive slot. write `pool.expiresAt[i] = 0`
- *  to kill from inside the fn. `voxels` is the room's voxel world,
- *  threaded so `collide*` primitives can query `BLOCK_FLAG_COLLISION`
- *  without the pool carrying a back-ref. pure-motion fns ignore it. */
-export type ParticleUpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
-
-export type ParticleOptions = AssetMeta & {
-    /** the sprite handle whose frames drive the particle's visuals. */
-    sprite: SpriteHandle;
-    /** how `age / total` (or `age * fps`) maps to the sprite's frame
-     *  timeline. `'stretch'` requires spawn opts to pass `lifetime`. */
-    playback: ParticlePlayback;
-    /** required for `'loop'` / `'once'` on multi-frame sprites; ignored
-     *  for `'stretch'`. single-frame sprites degenerate to "show frame
-     *  0" in all modes. */
-    fps?: number;
-    /** per-particle update fn. one indirect call per alive slot per
-     *  tick. compose primitives from `particleUpdate.*` or write your
-     *  own. */
-    update: ParticleUpdateFn;
-    /** spawn-time default for the per-particle glow (self-illumination)
-     *  level [0,1]. 0 = fully sample world light (lit like models /
-     *  voxel-meshes), 1 = fully lit / shadow-free, matching mesh/sprite
-     *  `glow`. the update fn can mutate `pool.glow[i]` per-frame for
-     *  fades. default 0. */
-    glow?: number;
-    /** spawn-time default RGBA tint multiplier. RGB multiplies the
-     *  shaded color, A the sprite alpha. the update fn can mutate
-     *  `pool.tintR/G/B/A[i]` per-frame for fades. default [1,1,1,1]. */
-    tint?: [r: number, g: number, b: number, a: number];
-};
-
-/** The declared data for one particle type. Pure: hashed wholesale, swapped
- *  wholesale on re-declaration (see `declare`). */
-export type ParticleDef = {
-    /** particle type string id (e.g. 'smoke', '_block-dust/grass'). */
-    typeId: string;
-    /** human-readable display name for editor UIs. always set,
-     *  defaults to `typeId` when the author didn't supply one. */
-    name: string;
-    /** search words for editor UIs, normalised (see `AssetMeta`). */
-    tags: readonly string[];
-    /** DepGraph dependency, see SceneHandle.dependency. */
-    /** sprite ref (frame timeline source). */
-    sprite: SpriteHandle;
-    /** playback mode. */
-    playback: ParticlePlayback;
-    /** fps for `'loop'` / `'once'`. defaults to 0 (degenerate frame-0)
-     *  for `'stretch'` and single-frame sprites. */
-    fps: number;
-    /** per-particle update fn. */
-    update: ParticleUpdateFn;
-    /** resolved spawn-time default for glow [0,1]. */
-    glow: number;
-    /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */
-    tint: [r: number, g: number, b: number, a: number];
-};
-
-/** Stable wrapper around a `ParticleDef`; identity plus the live def. */
-export type ParticleHandle = {
-    /** the declared id (identity, never changes). */
-    readonly id: string;
-    /** DepGraph dependency + the brand `isHandle` tests. */
-    dependency: { registry: 'particles'; id: string };
-    /** the declared data. re-pointed on every re-declaration. */
-    def: ParticleDef;
-};
+ *  to kill from inside the fn. `now` is the same clock `spawnTime` /
+ *  `expiresAt` are anchored to, so lifetime fraction is
+ *  `(now - spawnTime[i]) / (expiresAt[i] - spawnTime[i])`. `voxels` is the
+ *  room's voxel world, threaded so `collide*` primitives can query
+ *  `BLOCK_FLAG_COLLISION` without the pool carrying a back-ref. */
+export type ParticleUpdateFn = (pool: ParticlePool, i: number, dt: number, now: number, voxels: Voxels) => void;

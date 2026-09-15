@@ -24,7 +24,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         registry.config,
         registry.sounds,
         registry.sprites,
-        registry.particles,
     ];
     logPendingChanges('client', allStores);
 
@@ -122,7 +121,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     registry.prefabs.pendingChanges.length = 0;
     registry.config.pendingChanges.length = 0;
     registry.sounds.pendingChanges.length = 0;
-    registry.particles.pendingChanges.length = 0;
 
     // image-file edits without a registry change ride the `bongle:sprite-atlas-updated`
     // HMR path into refreshSpriteResources directly

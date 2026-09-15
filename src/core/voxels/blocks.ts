@@ -2,11 +2,9 @@ import type { Vec2, Vec3 } from 'math';
 import { mulberry32 } from 'math/random';
 import type { AssetMeta } from '../asset-meta';
 import type { DepKey } from '../capture/dep-graph';
-import { particleUpdate } from '../particles/particle-update';
-import type { ParticleHandle } from '../particles/particles';
-import { particle, sprite, texture, textureStore } from '../registry';
+import { sprite, texture, textureStore } from '../registry';
 import type { SoundHandle } from '../sounds/sounds';
-import type { ImageSource } from '../sprites/sprites';
+import type { ImageSource, SpriteHandle } from '../sprites/sprites';
 import type { TextureHandle } from '../textures/textures';
 import type { BlockShape } from './block-collider';
 import type { BlockStateDef, PropsDef, PropsValues } from './block-state';
@@ -210,9 +208,9 @@ export type BlockSoundConfig = {
 
 /** Named particle slots on a block; slot names describe the particle's visual type, not the event that emits it. */
 export type BlockParticleConfig = {
-    dust?: readonly ParticleHandle[]; // small surface puffs: sprint footstep cadence, landing edge, liquid-entry splash
-    build?: readonly ParticleHandle[]; // future: emitted when a block of this type is placed by a player
-    break?: readonly ParticleHandle[]; // future: chunky debris on full break
+    dust?: readonly SpriteHandle[]; // small surface puffs: sprint footstep cadence, landing edge, liquid-entry splash
+    build?: readonly SpriteHandle[]; // future: emitted when a block of this type is placed by a player
+    break?: readonly SpriteHandle[]; // future: chunky debris on full break
 };
 
 export type BlockOptions<P extends PropsDef = PropsDef> = AssetMeta & {
@@ -297,8 +295,8 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
     _baseStateId: number; // first global state id, set by the registry builder at freeze time
     _hooks: number; // bitmask of hooks this block has (intrinsic + observer)
 
-    // per-block dust particles, derived from the default state's model, shared as the fallback for any unset particle slot.
-    _defaultDust: readonly ParticleHandle[] | null;
+    // per-block dust sprites, derived from the default state's model, shared as the fallback for any unset particle slot.
+    _defaultDust: readonly SpriteHandle[] | null;
 
     stateId(props: PropsValues<P>): number; // get the global state id for specific property values
 
@@ -312,7 +310,7 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
 
 export const EMPTY_STATES = blockState.create({});
 
-// `block()` registers 3 deterministic `<id>:particle{0,1,2}` dust variants (sprite + particle) per block with a cube model, sliced via one mulberry32 PRNG seeded by FNV-1a of the block id; source dims are hardcoded to 16x16.
+// `block()` registers 3 deterministic `<id>:particle{0,1,2}` dust sprites per block with a cube model, sliced via one mulberry32 PRNG seeded by FNV-1a of the block id; source dims are hardcoded to 16x16.
 
 const DUST_SIZE = 4;
 const DUST_SOURCE_SIZE = 16;
@@ -347,15 +345,15 @@ function pickDustSourceTile(model: BlockModel): TileHandle | null {
     return quads[0]!.tile;
 }
 
-/** Declare `<id>:particle{0..N-1}` sprite + particle entries from the block's top-face texture; null when no source tile resolves. */
-export function deriveBlockDust(id: string, model: BlockModel): readonly ParticleHandle[] | null {
+/** Declare `<id>:particle{0..N-1}` dust sprites from the block's top-face texture; null when no source tile resolves. */
+export function deriveBlockDust(id: string, model: BlockModel): readonly SpriteHandle[] | null {
     const topTile = pickDustSourceTile(model);
     if (!topTile) return null;
     const source = tileFrame(topTile); // frame 0: dust wants one static image out of an animated tile
     if (!source) return null;
 
     const baseSeed = hashStringFnv1a(id);
-    const handles: ParticleHandle[] = [];
+    const sprites: SpriteHandle[] = [];
 
     for (let i = 0; i < DUST_VARIANT_COUNT; i++) {
         const variantId = `${id}:particle${i}`;
@@ -385,14 +383,7 @@ export function deriveBlockDust(id: string, model: BlockModel): readonly Particl
                 );
             },
         });
-        const variantSprite = sprite(variantId, { frames: [variantTexture], mipmap: false });
-        handles.push(
-            particle(variantId, {
-                sprite: variantSprite,
-                playback: 'stretch',
-                update: particleUpdate.dust,
-            }),
-        );
+        sprites.push(sprite(variantId, { frames: [variantTexture], mipmap: false }));
     }
-    return handles;
+    return sprites;
 }

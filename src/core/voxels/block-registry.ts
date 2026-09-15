@@ -1,5 +1,5 @@
 import type { Shape } from 'crashcat';
-import type { ParticleHandle } from '../particles/particles';
+import type { SpriteHandle } from '../sprites/sprites';
 import { type AABB, type BlockShape, blockShapeToShape } from './block-collider';
 import type { PropsDef, PropsValues } from './block-state';
 import type {
@@ -1177,7 +1177,7 @@ function resolveBlockSounds<P extends PropsDef>(def: BlockDef<P>, props: PropsVa
 function resolveBlockParticles<P extends PropsDef>(
     def: BlockDef<P>,
     props: PropsValues<P>,
-    defaultDust: readonly ParticleHandle[] | null,
+    defaultDust: readonly SpriteHandle[] | null,
 ): BlockParticleConfig | undefined {
     const opt = def.particles;
     if (opt === false) return undefined;

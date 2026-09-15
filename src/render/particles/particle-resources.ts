@@ -32,6 +32,7 @@ import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
 import { applyFog, fogDistance } from '../environment/fog';
 import { bindLightVolume, sampleWorldLight } from '../voxels/voxel-light-sample';
+import { POOL_CAPACITY } from './particles';
 
 // Exported so per-room ParticleVisuals can pack into the matching layout.
 export const InstancePose = struct('ParticleInstancePose', {
@@ -60,9 +61,8 @@ const DISABLED_SKY_BRIGHTNESS = 1.0;
 // allocation (reset `mesh.count`, re-add the Mesh) instead of reallocating. Dense
 // `[0, count)`, drawn as a single `drawIndexed(6, count, 0)`, fixed capacity.
 
-/** Must match `POOL_CAPACITY` in particles.ts; kept separate so the pool module stays free
- *  of any GPU ref. A drift here leaves the pool's tail undrawn. */
-const INSTANCE_CAPACITY = 8192;
+/** One instance per pool slot; the pool is the authority so the two can't drift. */
+const INSTANCE_CAPACITY = POOL_CAPACITY;
 
 type GpuBufferType = GpuBuffer<any>;
 

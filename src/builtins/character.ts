@@ -65,7 +65,7 @@ import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_T
 import { Animation } from '../api/animation';
 import { playAt, playMono } from '../api/audio';
 import { ensureModel, getModel } from '../api/models';
-import { spawnParticle } from '../api/particles';
+import { particleUpdate, spawnParticle } from '../api/particles';
 import {
     addChild,
     addTrait,
@@ -941,16 +941,17 @@ function emitSplash(
 
 const SPLASH_DROPLET_COUNT = 6;
 
-/** small droplet burst on liquid entry, reusing the per-block `dust` variants with splashier tuning than the footstep puff. */
+/** small droplet burst on liquid entry: the per-block `dust` sprites, bouncing rather than
+ *  sliding, so droplets skip off the surface instead of settling like a footstep puff. */
 function spawnSplashDroplets(ctx: ScriptContext, particles: BlockParticleConfig, pos: Vec3): void {
     const variants = particles.dust;
     if (!variants || variants.length === 0) return;
     for (let i = 0; i < SPLASH_DROPLET_COUNT; i++) {
-        const handle = variants[Math.floor(Math.random() * variants.length)]!;
-        spawnParticle(ctx, handle, pos, {
-            velX: (Math.random() - 0.5) * 3,
-            velY: 4 + Math.random() * 2,
-            velZ: (Math.random() - 0.5) * 3,
+        spawnParticle(ctx, {
+            sprite: variants[Math.floor(Math.random() * variants.length)]!,
+            update: particleUpdate.spark,
+            position: pos,
+            velocity: [(Math.random() - 0.5) * 3, 4 + Math.random() * 2, (Math.random() - 0.5) * 3],
             lifetime: 0.5 + Math.random() * 0.3,
             size: 0.04 + Math.random() * 0.06,
         });
@@ -962,11 +963,11 @@ function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, p
     const variants = particles.dust;
     if (!variants || variants.length === 0) return;
     for (let i = 0; i < FOOTSTEP_DUST_COUNT; i++) {
-        const handle = variants[Math.floor(Math.random() * variants.length)]!;
-        spawnParticle(ctx, handle, pos, {
-            velX: (Math.random() - 0.5) * 1.2,
-            velY: 5 + Math.random() * 0.2,
-            velZ: (Math.random() - 0.5) * 1.2,
+        spawnParticle(ctx, {
+            sprite: variants[Math.floor(Math.random() * variants.length)]!,
+            update: particleUpdate.dust,
+            position: pos,
+            velocity: [(Math.random() - 0.5) * 1.2, 5 + Math.random() * 0.2, (Math.random() - 0.5) * 1.2],
             lifetime: 0.4 + Math.random() * 0.2,
             size: 0.05 + Math.random() * 0.1,
         });

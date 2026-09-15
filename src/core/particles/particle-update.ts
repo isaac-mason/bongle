@@ -318,12 +318,18 @@ function collideDestroy(pool: ParticlePool, i: number, _dt: number, voxels: Voxe
     pool.expiresAt[i] = 0;
 }
 
-// the `(pool, i, dt, voxels)` signature carries no `now`, so these decay
-// toward the target at a per-second `rate` (dt-correct, unlike `drag`'s
-// per-frame multiplier) rather than keying off lifetime fraction. to
-// reach the target exactly at death, pass `rate = 1 / lifetime`. for
-// anything fancier (pulsing, color ramps) mutate `pool.tintR/G/B/A[i]`
-// directly from a custom update fn.
+/** `0` at spawn, `1` at death. `0` for particles with no `lifetime`. */
+function lifeFraction(pool: ParticlePool, i: number, now: number): number {
+    const born = pool.spawnTime[i]!;
+    const span = pool.expiresAt[i]! - born;
+    if (span <= 0 || !Number.isFinite(span)) return 0;
+    const t = (now - born) / span;
+    return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+// these decay toward the target at a per-second `rate` (dt-correct, unlike
+// `drag`'s per-frame multiplier). for a fade pinned to death regardless of
+// lifetime, drive the tint from `lifeFraction` instead.
 
 /** linearly fade the RGB tint toward black at `rate` units/s, clamped at
  *  0. alpha untouched. pairs with a `lifetime` spawn opt: `rate =
@@ -343,7 +349,7 @@ function fadeAlpha(pool: ParticlePool, i: number, dt: number, rate: number): voi
 }
 
 /** drift + drag, falls under gravity, slides along geometry. */
-const dust: ParticleUpdateFn = (pool, i, dt, voxels) => {
+const dust: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
     gravity(pool, i, dt, -20);
     drag(pool, i, dt, 0.92);
     integrate(pool, i, dt);
@@ -351,7 +357,7 @@ const dust: ParticleUpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** rises with light buoyancy, drags hard, slides along geometry. */
-const smoke: ParticleUpdateFn = (pool, i, dt, voxels) => {
+const smoke: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
     gravity(pool, i, dt, 0.4);
     drag(pool, i, dt, 0.96);
     integrate(pool, i, dt);
@@ -359,7 +365,7 @@ const smoke: ParticleUpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** heavy fall + light drag, bounces off geometry with 40% retention. */
-const spark: ParticleUpdateFn = (pool, i, dt, voxels) => {
+const spark: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
     gravity(pool, i, dt, -8);
     drag(pool, i, dt, 0.98);
     integrate(pool, i, dt);
@@ -367,7 +373,7 @@ const spark: ParticleUpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** gentle fall + strong drag, lands on geometry (zero velocity on hit). */
-const snow: ParticleUpdateFn = (pool, i, dt, voxels) => {
+const snow: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
     gravity(pool, i, dt, -0.5);
     drag(pool, i, dt, 0.98);
     integrate(pool, i, dt);
@@ -375,15 +381,15 @@ const snow: ParticleUpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** fast fall, no drag, dies on impact. */
-const rain: ParticleUpdateFn = (pool, i, dt, voxels) => {
+const rain: ParticleUpdateFn = (pool, i, dt, _now, voxels) => {
     gravity(pool, i, dt, -12);
     integrate(pool, i, dt);
     collideDestroy(pool, i, dt, voxels);
 };
 
-/** the curated motion vocabulary. drop a `particleUpdate.X` straight
- *  into `particle({ ..., update: particleUpdate.X })`, or compose the
- *  primitives into a custom fn. all share the `(pool, i, dt, voxels)`
+/** the curated motion vocabulary. pass a `particleUpdate.X` straight to
+ *  `spawnParticle(ctx, pos, sprite, particleUpdate.X)`, or compose the
+ *  primitives into a custom fn with the `(pool, i, dt, now, voxels)`
  *  per-particle signature. */
 export const particleUpdate = {
     gravity,
@@ -393,6 +399,7 @@ export const particleUpdate = {
     collideLand,
     collideBounce,
     collideDestroy,
+    lifeFraction,
     fadeRgb,
     fadeAlpha,
 

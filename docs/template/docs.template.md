@@ -1430,24 +1430,24 @@ at a time (anything unprintable comes back as `?`), and `glyphMetrics` gives the
 `width`, `height`, and per-character `advance` in font pixels to step a run by.
 Because they are just sprites, anything that draws a sprite can draw text: a
 `SpriteTrait` per character for a world-space label, or a particle per character for
-numbers that fly off a hit. A particle's sprite is fixed when the type is declared,
-so each character you want to fling needs its own `particle()`.
+numbers that fly off a hit. A particle takes its sprite at the spawn call, so
+flinging a character is a single `spawnParticle` with the glyph handle.
 
 <Snippet source="visuals.snippet.ts" select="glyphs" />
 
 ### Particles
 
-Particles are short-lived sprites for effects like smoke, sparks, and dust.
-Declare a particle type with `particle(id, { sprite, playback, update })`, pairing
-a sprite with a motion `update`, then emit instances at a position with
-`spawnParticle`. The quickest path is a ready-made `update`: `particleUpdate` ships
-complete behaviours (`smoke`, `dust`, `spark`, `snow`, `rain`), and the kit pack
-bundles whole presets under `particlePresets` in `bongle/kit`.
+Particles are short-lived sprites for effects like smoke, sparks, and dust. There
+is no particle type to declare: `spawnParticle(ctx, spawn)` takes one object
+describing the whole particle, `sprite`, `update`, `position` and the rest, so the
+same sprite can be flung with different behaviour and the same behaviour can drive
+any sprite. The quickest path is a ready-made `update`: `particleUpdate` ships
+complete behaviours (`smoke`, `dust`, `spark`, `snow`, `rain`).
 
 <Snippet source="visuals.snippet.ts" select="particles" />
 
 For anything past the presets, write your own `update`. It runs once per live particle
-each tick with `(pool, i, dt, voxels)`, a structure-of-arrays pool where you mutate the
+each tick with `(pool, i, dt, now, voxels)`, a structure-of-arrays pool where you mutate the
 `i`-th particle directly: `velX/Y/Z` for motion, `posX/Y/Z` for position, `size`,
 `glow`, and the `tintR/G/B/A` multiplier (`A` is alpha). Kill one early by setting
 `pool.expiresAt[i] = 0`. Build the body from the composable `particleUpdate.*`
@@ -1460,11 +1460,18 @@ primitives, each taking a strength argument, rather than from scratch:
 | `integrate(pool, i, dt)` | advance position by velocity |
 | `collideSlide` / `collideBounce` / `collideLand` | resolve against voxels |
 | `fadeAlpha(pool, i, dt, rate)` / `fadeRgb(...)` | fade alpha or colour out |
+| `lifeFraction(pool, i, now)` | `0` at spawn, `1` at death |
 
-Variety comes from the spawn as much as the update. `spawnParticle`'s options
-randomize each instance, `velX/Y/Z`, `lifetime`, `size`, `tint`, `glow`, and an
-explicit `seed`, so a single burst scatters instead of moving in lockstep. The
-per-particle `seed` is also readable inside the update for stable per-particle noise.
+Variety comes from the spawn as much as the update. Beyond the three required
+fields, a `ParticleOptions` carries `velocity`, `lifetime`, `size`, `tint`, `glow`,
+`playback`, `fps`, and an explicit `seed`, so a single burst scatters instead of
+moving in lockstep. The per-particle `seed` is also readable inside the update for
+stable per-particle noise.
+
+Every field is copied eagerly into the pool and nothing is retained after the call,
+so emitting in volume means hoisting one `ParticleOptions` and mutating it per
+particle rather than building a fresh object each time. The pool never refuses a
+spawn: once it is full, a new particle evicts a live one rather than being dropped.
 
 <Snippet source="visuals.snippet.ts" select="varied" />
 

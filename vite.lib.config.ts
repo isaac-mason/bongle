@@ -60,7 +60,6 @@ export default defineConfig({
                 'kit-block-sound-presets': entry('src/kit/block-sound-presets.ts'),
                 'kit-blocks': entry('src/kit/blocks.ts'),
                 'kit-models': entry('src/kit/models.ts'),
-                'kit-particle-presets': entry('src/kit/particle-presets.ts'),
                 'kit-sounds': entry('src/kit/sounds.ts'),
                 'kit-sprites': entry('src/kit/sprites.ts'),
                 'kit-textures': entry('src/kit/textures.ts'),

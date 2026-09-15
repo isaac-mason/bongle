@@ -47,7 +47,7 @@ const NAMED: [file: string, names: string[]][] = [
     // `declare()` never leave that file. `texture()` is a REGISTERING factory now —
     // its predecessor `draw()` was an argument-position value constructor with no
     // store, which is exactly what the split removed.
-    ['core/registry.ts', ['block', 'tile', 'texture', 'sound', 'sprite', 'particle', 'model']],
+    ['core/registry.ts', ['block', 'tile', 'texture', 'sound', 'sprite', 'model']],
 ];
 
 describe('declaration APIs are annotated side-effect-free', () => {

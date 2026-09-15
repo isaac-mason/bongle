@@ -1,5 +1,7 @@
 import { packTo, type Scene } from 'gpucat';
-import type { ParticleHandle, ParticlePool } from '../../core/particles/particles';
+import type { ParticlePool } from '../../core/particles/particles';
+import { PLAYBACK_LOOP, PLAYBACK_ONCE } from '../../core/particles/particles';
+import type { SpriteHandle } from '../../core/sprites/sprites';
 import type { SpriteResources } from '../sprites/sprite-resources';
 import {
     INSTANCE_MATERIAL_STRIDE,
@@ -45,7 +47,9 @@ export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: Par
     const matArr = batch.instanceMaterialBuf.array as Float32Array;
     const poseFloatStride = INSTANCE_POSE_STRIDE / 4;
 
-    const handles = pool.handle;
+    const sprites = pool.sprite;
+    const playback = pool.playback;
+    const fps = pool.fps;
     const posX = pool.posX;
     const posY = pool.posY;
     const posZ = pool.posZ;
@@ -61,8 +65,14 @@ export function update(visuals: ParticleVisuals, batch: ParticleBatch, pool: Par
     let resolved: ResolvedFrame | null;
 
     for (let i = 0; i < count; i++) {
-        const handle = handles[i]!;
-        resolved = resolveFrame(visuals.spriteResources, handle, nowSec - spawnTime[i]!, expiresAt[i]! - spawnTime[i]!);
+        resolved = resolveFrame(
+            visuals.spriteResources,
+            sprites[i]!,
+            playback[i]!,
+            fps[i]!,
+            nowSec - spawnTime[i]!,
+            expiresAt[i]! - spawnTime[i]!,
+        );
         if (resolved === null) {
             poseArr[i * poseFloatStride + 3] = 0;
             poseArr[i * poseFloatStride + 7] = 0;
@@ -111,10 +121,17 @@ type ResolvedFrame = {
 
 const _resolved: ResolvedFrame = { u: 0, v: 0, w: 0, h: 0, frameW: 1, frameH: 1 };
 
-/** Resolves atlas UV and world dims for slot `i` from the handle's playback mode. Returns
+/** Resolves atlas UV and world dims for one slot from its sprite and playback mode. Returns
  *  null when the sprite isn't in the atlas yet (lazy load or atlas swap mid-flight). */
-function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: number, lifetime: number): ResolvedFrame | null {
-    const entry = resources.frames.get(handle.def.sprite.def.spriteId);
+function resolveFrame(
+    resources: SpriteResources,
+    sprite: SpriteHandle,
+    playback: number,
+    fps: number,
+    age: number,
+    lifetime: number,
+): ResolvedFrame | null {
+    const entry = resources.frames.get(sprite.def.spriteId);
     if (!entry) return null;
 
     const frames = entry.frames;
@@ -123,24 +140,14 @@ function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: n
     let idx: number;
     if (n <= 1) {
         idx = 0;
+    } else if (playback === PLAYBACK_LOOP) {
+        idx = ((Math.floor(age * fps) % n) + n) % n;
+    } else if (playback === PLAYBACK_ONCE) {
+        idx = Math.min(n - 1, Math.max(0, Math.floor(age * fps)));
+    } else if (lifetime <= 0 || !Number.isFinite(lifetime)) {
+        idx = 0;
     } else {
-        switch (handle.def.playback) {
-            case 'stretch': {
-                if (lifetime <= 0 || !Number.isFinite(lifetime)) {
-                    idx = 0;
-                } else {
-                    const t = age / lifetime;
-                    idx = Math.min(n - 1, Math.max(0, Math.floor(t * n)));
-                }
-                break;
-            }
-            case 'loop':
-                idx = ((Math.floor(age * handle.def.fps) % n) + n) % n;
-                break;
-            case 'once':
-                idx = Math.min(n - 1, Math.max(0, Math.floor(age * handle.def.fps)));
-                break;
-        }
+        idx = Math.min(n - 1, Math.max(0, Math.floor((age / lifetime) * n)));
     }
 
     const f = frames[idx]!;

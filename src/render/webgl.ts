@@ -762,7 +762,7 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
 
     // Runs after Particles.update so freshly-stepped positions feed this frame's pose buffer.
     Debug.begin(ctx.profiler, 'particle');
-    ParticleVisuals.update(rv.particle, res.particle.batch, room.particles, ctx.now);
+    ParticleVisuals.update(rv.particle, res.particle.batch, room.particles, room.clock.wall);
     Debug.end(ctx.profiler, 'particle');
 }
 

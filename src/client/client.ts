@@ -517,7 +517,7 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(state.profiler, 'on-update');
 
         Debug.begin(state.profiler, 'particles-tick');
-        Particles.update(room.particles, delta, performance.now() / 1000, room.voxels);
+        Particles.update(room.particles, delta, room.clock.wall, room.voxels);
         Debug.end(state.profiler, 'particles-tick');
     }
 
@@ -642,7 +642,6 @@ export function update(state: EngineClient, delta: number) {
     state.renderer.updateFrame(activeRoom, {
         viewport: state.viewport,
         resources: state.resources,
-        now: performance.now() / 1000,
         povCamera: activeCamera,
         profiler: state.profiler,
     });

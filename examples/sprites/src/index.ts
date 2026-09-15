@@ -8,10 +8,9 @@
 //   middle (x=0)              a single ExtrudedSpriteMeshTrait slowly spinning
 //                             on Y so the per-pixel extrusion is unmistakable.
 //                             The back face vanishes when viewed edge-on.
-//   right  (x from 4 to 6)    a tick-rate particle emitter spawning Puffs
-//                             (particlePresets.smoke over kit:smoke) from a
-//                             fixed world point. Exercises spawnParticle and
-//                             the particleUpdate.smoke rise.
+//   right  (x from 4 to 6)    a tick-rate particle emitter spawning kit:smoke
+//                             puffs from a fixed world point. Exercises
+//                             spawnParticle and the particleUpdate.smoke rise.
 //
 // Everything uses bundled bongle/kit sprites, so the example ships no PNGs of
 // its own.
@@ -21,31 +20,31 @@ import {
     addTrait,
     BLOCK_AIR,
     CharacterControllerTrait,
-    setCharacterLook,
-    createNode,
-    env,
-    ExtrudedSpriteMeshTrait,
-    getTrait,
     config,
+    createNode,
+    ExtrudedSpriteMeshTrait,
+    env,
+    getTrait,
     onFrame,
     onInit,
     onJoin,
+    type ParticleOptions,
+    particleUpdate,
+    SpriteTrait,
     scene,
     script,
     setBlock,
+    setCharacterLook,
     setPosition,
     setQuaternion,
     spawnParticle,
-    SpriteTrait,
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks, particlePresets, sprites } from 'bongle/kit';
+import { blocks, sprites } from 'bongle/kit';
 import { quat } from 'math';
 
 config({ server: { maxPlayers: 1 } });
-
-const Puff = particlePresets.smoke('demo:puff', { sprite: sprites.smoke });
 
 const SpritesDemoTrait = trait('sprites-demo');
 
@@ -79,10 +78,21 @@ script(SpritesDemoTrait, 'spawn', (ctx) => {
 });
 
 // Client: zones and emitter.
-const SPIN_SPEED = 0.6;          // radians per second for the extruded mesh
+const SPIN_SPEED = 0.6; // radians per second for the extruded mesh
 const EMITTER_POS: [number, number, number] = [6, 1.5, 2];
-const SPAWNS_PER_SEC = 12;       // tick-rate emission, light enough to read
-const PUFF_LIFETIME = 1.8;       // seconds, long enough to see the rise
+
+const SPAWNS_PER_SEC = 12; // tick-rate emission, light enough to read
+const PUFF_LIFETIME = 1.8; // seconds, long enough to see the rise
+
+// one hoisted spawn drives every puff; spawnParticle copies each field eagerly.
+const _puffSpawn: ParticleOptions = {
+    sprite: sprites.smoke,
+    update: particleUpdate.smoke,
+    position: [0, 0, 0],
+    velocity: [0, 0, 0],
+    lifetime: PUFF_LIFETIME,
+    size: 0.1,
+};
 
 script(SpritesDemoTrait, 'demo', (ctx) => {
     if (!env.client) return;
@@ -157,18 +167,15 @@ script(SpritesDemoTrait, 'demo', (ctx) => {
             // Initial upward kick. particleUpdate.smoke only applies a gentle
             // buoyancy (g=0.4) under heavy drag (0.96), so without a launch
             // velocity puffs barely move. Tiny lateral spread for shape.
-            spawnParticle(
-                ctx,
-                Puff,
-                [EMITTER_POS[0] + jx, EMITTER_POS[1], EMITTER_POS[2] + jz],
-                {
-                    lifetime: PUFF_LIFETIME,
-                    size: 0.1,
-                    velX: (Math.random() - 0.5) * 1.2,
-                    velY: 2.8 + Math.random() * 0.8,
-                    velZ: (Math.random() - 0.5) * 1.2,
-                },
-            );
+            const position = _puffSpawn.position;
+            position[0] = EMITTER_POS[0] + jx;
+            position[1] = EMITTER_POS[1];
+            position[2] = EMITTER_POS[2] + jz;
+            const velocity = _puffSpawn.velocity!;
+            velocity[0] = (Math.random() - 0.5) * 1.2;
+            velocity[1] = 2.8 + Math.random() * 0.8;
+            velocity[2] = (Math.random() - 0.5) * 1.2;
+            spawnParticle(ctx, _puffSpawn);
         }
     });
 });

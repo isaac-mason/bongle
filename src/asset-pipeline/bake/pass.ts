@@ -149,8 +149,8 @@ export async function runAssetPipelinePass(
     if (!atlasDirty && !modelsDirty && !scenesDirty && !configDirty && !soundsDirty && !spritesDirty) return timings;
 
     // buildBlockRegistry's deriveBlockDust registers a computed `<id>:particle{0..N-1}` texture
-    // per cube-block variant; those must be in `registry.textures` before `bakeTextures` walks
-    // it, or the sprite atlas falls back to magenta placeholders.
+    // and sprite per cube-block variant; those must be in `registry.textures` before
+    // `bakeTextures` walks it, or the sprite atlas falls back to magenta placeholders.
     let moduleView: ModuleVersion | null = null;
     if (atlasDirty || modelsDirty || scenesDirty) {
         const defs = new Map<string, BlockDef>();

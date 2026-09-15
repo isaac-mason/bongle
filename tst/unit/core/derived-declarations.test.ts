@@ -1,6 +1,6 @@
 // Engine-DERIVED declarations are reclaimed with their source.
 //
-// `block()` derives dust textures, sprites and particles from the block's top face
+// `block()` derives dust textures and sprites from the block's top face
 // (`<id>:particle{0,1,2}`), so one block declaration silently produces several more
 // registry entries. Those are real declarations — they land in the texture, sprite
 // and particle stores, get packed into the atlas, and are shipped to every game.
@@ -40,7 +40,7 @@ function evaluate(body: () => void): void {
     __popModule(previous);
 }
 
-const dustIds = () => [...registry.particles.byId.keys()].filter((id) => id.startsWith('stone:particle'));
+const dustIds = () => [...registry.sprites.byId.keys()].filter((id) => id.startsWith('stone:particle'));
 
 describe('engine-derived declarations', () => {
     it('derives dust for a declared block', () => {
@@ -66,7 +66,7 @@ describe('engine-derived declarations', () => {
         // guard the loop below against passing vacuously on zero entries.
         expect(ids.length, 'declaring a block must derive dust').toBeGreaterThan(0);
         for (const id of ids) {
-            expect(registry.particles.meta.get(id)?.module, `particle ${id}`).toBe(MOD);
+            expect(registry.sprites.meta.get(id)?.module, `dust sprite ${id}`).toBe(MOD);
             expect(registry.sprites.meta.get(id)?.module, `sprite ${id}`).toBe(MOD);
             expect(registry.textures.meta.get(id)?.module, `texture ${id}`).toBe(MOD);
         }

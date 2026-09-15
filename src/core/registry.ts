@@ -7,7 +7,6 @@ import { CONFIG_ID, type Config, DEFAULT_CONFIG, HARD_MAX_PLAYERS_PER_ROOM, MAX_
 import type { ScenePayload } from './content/scene-store';
 import type { ModelDef, ModelHandle } from './models/handle';
 import { createModelPlaceholderDef, type ModelHandleMap, type ModelOptions } from './models/models';
-import type { ParticleDef, ParticleHandle, ParticleOptions } from './particles/particles';
 import type { CommandDef, CommandHandle, RpcDirection } from './rpc';
 import type { PrefabApplyContext } from './scene/prefab';
 import type { Schema, SchemaType } from './scene/prop/prop';
@@ -538,7 +537,6 @@ export type Registry = {
     sounds: RegistryStore<SoundDef, SoundHandle>;
     sprites: RegistryStore<SpriteDef, SpriteHandle>;
     textures: RegistryStore<TextureDef, TextureHandle>;
-    particles: RegistryStore<ParticleDef, ParticleHandle>;
     config: RegistryStore<Config>;
 
     blockRegistry: Blocks;
@@ -557,7 +555,6 @@ const textureHash = (t: TextureDef) => (t.from === 'computed' ? undefined : stru
 
 /** the voxel atlas packs tiles in cells of this size; every tile frame is a multiple of it per side. */
 export const BLOCK_TILE_SIZE = 16;
-const particleHash = (p: ParticleDef) => structuralHash(p);
 
 const blockHash = (d: BlockDef) => structuralHash(d);
 
@@ -757,12 +754,6 @@ export const textureStore = kind<TextureDef, TextureHandle>({
     handle: (id) => ({ id }),
 });
 
-export const particleStore = kind<ParticleDef, ParticleHandle>({
-    name: 'particles',
-    hash: particleHash,
-    handle: (id) => ({ id }),
-});
-
 export const configStore = kind<Config>({
     name: 'config',
     hash: configHash,
@@ -789,7 +780,6 @@ export function init(): Registry {
         sounds: soundStore,
         sprites: spriteStore,
         textures: textureStore,
-        particles: particleStore,
         config: configStore,
         slotToTrait: [] as Array<TraitHandle | undefined>,
         blockRegistry: createBlockRegistry(),
@@ -889,26 +879,6 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
             setSyncDirty(instance, index);
         },
     };
-}
-
-/*#__NO_SIDE_EFFECTS__*/
-/** declare a particle type; called at module scope, returns a pure-data handle resolved by id at spawn time. */
-export function particle(id: string, options: ParticleOptions): ParticleHandle {
-    const { name, tags } = resolveAssetMeta(id, options);
-    const fps = options.fps ?? 0;
-    const glow = options.glow ?? 0;
-    const tint = options.tint ?? ([1, 1, 1, 1] as [number, number, number, number]);
-    return declare(particleStore, id, {
-        typeId: id,
-        name,
-        tags,
-        sprite: options.sprite,
-        playback: options.playback,
-        fps,
-        update: options.update,
-        glow,
-        tint,
-    });
 }
 
 /*#__NO_SIDE_EFFECTS__*/
@@ -1129,13 +1099,13 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
     // methods read the schema off `this.def`, never a closure capture, so the handle outlives every re-declaration.
     const handle = declare(blockStore, id, def as BlockDef) as BlockHandle<P>;
 
-    // derived here, not at freeze, so the texture/sprite/particle entries it declares are owned by the declaring module.
+    // derived here, not at freeze, so the texture/sprite entries it declares are owned by the declaring module.
     handle._defaultDust = deriveDefaultDust(def as BlockDef);
     return handle;
 }
 
-/** the block's dust particles, from the default state's model, shared as the fallback for unset particle slots. */
-function deriveDefaultDust(def: BlockDef): readonly ParticleHandle[] | null {
+/** the block's dust sprites, from the default state's model, shared as the fallback for unset particle slots. */
+function deriveDefaultDust(def: BlockDef): readonly SpriteHandle[] | null {
     if (def.particles === false || !def.model) return null;
     const model = def.model(def.states.decode(0));
     const primary = Array.isArray(model) ? model[0] : model;

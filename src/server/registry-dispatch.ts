@@ -47,7 +47,6 @@ export function applyRegistryChanges(state: EngineServer): void {
         registry.config,
         registry.sounds,
         registry.sprites,
-        registry.particles,
     ];
     logPendingChanges('server', allStores);
 
@@ -156,11 +155,10 @@ export function applyRegistryChanges(state: EngineServer): void {
     registry.prefabs.pendingChanges.length = 0;
     registry.config.pendingChanges.length = 0;
 
-    // sounds/sprites/particles are client-only; drain so the queues don't grow
+    // sounds/sprites are client-only; drain so the queues don't grow
     // unbounded across HMR flushes.
     registry.sounds.pendingChanges.length = 0;
     registry.sprites.pendingChanges.length = 0;
-    registry.particles.pendingChanges.length = 0;
 
     // messages enqueued after this point encode against the new tables; the client
     // adopts the new inbound mapping (via wire_table) before decoding them, while
