@@ -146,19 +146,15 @@ function InventoryTab() {
         });
     }, [byKind, tags, room]);
 
-    // drawn from what is still showing, most-used first, so picking one narrows rather than empties the grid.
-    // the picked ones lead regardless of that, otherwise a combination with no hits would hide its own way out.
+    // every tag the kind and search leave on the table, most-used first. deliberately not narrowed by what is
+    // already picked: the row stays put as you click through it instead of reshuffling under the cursor.
     const tagChips = useMemo(() => {
         const counts = new Map<string, number>();
-        for (const item of filtered) {
+        for (const item of byKind) {
             for (const tag of inventoryItemDisplay(item, room).tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
         }
-        const rest = [...counts.entries()]
-            .filter(([tag]) => !tags.includes(tag))
-            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-            .map(([tag]) => tag);
-        return [...tags, ...rest];
-    }, [filtered, tags, room]);
+        return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag]) => tag);
+    }, [byKind, room]);
 
     const toggleTag = useCallback((tag: string) => {
         setTags((current) => (current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag]));
