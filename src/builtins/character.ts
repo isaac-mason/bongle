@@ -44,10 +44,6 @@ type CharacterState = {
     landingCooldownRemaining: number;
     /** screen-door dither while the target model hasn't hydrated; decays to 0 once it lands. */
     loadingDither: number;
-    /** last dither value stamped across the rig meshes; null skips the subtree walk when unchanged. */
-    appliedDither: number | null;
-    /** last visibility stamped across the rig meshes; null skips the subtree walk when unchanged. */
-    appliedVisible: boolean | null;
 
     /** the current model's mesh/visual nodes added by `mountRig`; `unmountRig` removes exactly these. */
     modelNodes: Set<Node>;
@@ -271,8 +267,6 @@ export const CharacterTrait = trait(
             headDriftPitch: 0,
             landingCooldownRemaining: 0,
             loadingDither: 0,
-            appliedDither: null,
-            appliedVisible: null,
             modelNodes: new Set(),
             nodes: emptyRigNodes(),
         }),
@@ -367,12 +361,10 @@ script(
                     }
                     finalDither = Math.max(proxDither, t.state.loadingDither, t.config.dither);
                 }
-                // both stamp every mesh under the rig, so only walk when one of them actually moves.
-                if (t.state.appliedDither !== finalDither || t.state.appliedVisible !== visible) {
-                    setCharacterSubtreeVisuals(node, finalDither, visible);
-                    t.state.appliedDither = finalDither;
-                    t.state.appliedVisible = visible;
-                }
+                // stamped every frame, not cached against the last value: a server-owned rig's meshes arrive by
+                // replication at no fixed time, and a mesh that lands after the last change would keep the
+                // MeshTrait defaults and show a hidden body.
+                setCharacterSubtreeVisuals(node, finalDither, visible);
             }
 
             // locomotion + footstep sfx are client-only and depend on the rig being mounted above.
@@ -634,13 +626,6 @@ function mountRig(playerNode: Node, def: ModelDef): void {
 
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
-
-    // freshly added meshes carry the MeshTrait defaults; drop the cache so the next presentation pass re-walks.
-    const character = getTrait(playerNode, CharacterTrait);
-    if (character) {
-        character.state.appliedDither = null;
-        character.state.appliedVisible = null;
-    }
 }
 
 /** resets each canonical bone's TRS to identity and removes exactly the nodes recorded in `state.modelNodes`. */
