@@ -33,8 +33,12 @@ export type CardBatches = {
     sprite: SpriteResources | null;
 };
 
-/** glyph multiples; rounded to whole device pixels when drawn, so a 1x panel lands a notch larger than a 2x one. */
-export const LABEL_SCALE = 1.5;
+/**
+ * glyph multiples in CSS pixels. Whole numbers only: the drawn scale is rounded to whole device pixels to keep
+ * the pixel font even, and a whole CSS scale is already whole at every integer display ratio, so the label is
+ * the same size on a 1x panel as on a 2x one instead of stepping when a window moves between them.
+ */
+export const LABEL_SCALE = 2;
 export const LABEL_LIFT_PX = 16;
 const MARKER_ICON_PX = 20;
 const LABEL_GAP_PX = 6;
