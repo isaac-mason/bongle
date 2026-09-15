@@ -176,6 +176,42 @@ export function HierarchyPanel() {
         [flattenedItems, virtualizer],
     );
 
+    // a single node picked from outside this panel (a world click via the inspect tool, a
+    // right-click, focus-from-elsewhere) should reveal itself here too — expand any collapsed
+    // ancestors so its row exists, then scroll to it once the flat list catches up. deliberately
+    // doesn't steal DOM focus the way `focusItem` does: the user is looking at the viewport, not
+    // about to type into this list.
+    const revealNodeId = useRef<number | null>(null);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: only the selection itself should retrigger this, not every collapsedIds/sceneTree change it also reads
+    useEffect(() => {
+        if (!sceneTree || selectedNodeIds.size !== 1) return;
+        const nodeId = selectedNodeIds.values().next().value as number;
+        const node = sceneTree.idToNode.get(nodeId);
+        if (!node) return;
+
+        const toExpand: number[] = [];
+        for (let p = node.parent; p && p.id !== sceneTree.root.id; p = p.parent) {
+            if (collapsedIds.has(p.id)) toExpand.push(p.id);
+        }
+        if (toExpand.length > 0) {
+            setCollapsedIds((prev) => {
+                const next = new Set(prev);
+                for (const id of toExpand) next.delete(id);
+                return next;
+            });
+        }
+        revealNodeId.current = nodeId;
+    }, [selectedNodeIds]);
+
+    useEffect(() => {
+        const nodeId = revealNodeId.current;
+        if (nodeId === null) return;
+        const idx = flattenedItems.findIndex((it) => it.nodeId === nodeId);
+        if (idx === -1) return; // ancestor expansion hasn't flowed through to flattenedItems yet
+        virtualizer.scrollToIndex(idx, { align: 'auto' });
+        revealNodeId.current = null;
+    }, [flattenedItems, virtualizer]);
+
     const handleListKeyDown = useCallback(
         (e: React.KeyboardEvent<HTMLUListElement>) => {
             if (flattenedItems.length === 0) return;
